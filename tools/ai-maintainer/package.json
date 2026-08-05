@@ -1,0 +1,14 @@
+{
+  "name": "ai-repo-maintainer",
+  "description": "Dependency-free CLI used by the AI Repo Maintainer reusable workflows",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/cli.mjs && node --test test/*.test.mjs"
+  }
+}
