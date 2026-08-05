@@ -2,7 +2,7 @@
 
 This directory is documentation only. Treebar is not a runtime default and this repository does not install anything into Treebar.
 
-To prepare a future Treebar adopter, start from the root `.github/ai-maintainer.json`, then tailor it in the Treebar repository:
+To prepare a future Treebar adopter, start from the root `.github/codekeeper.json`, then tailor it in the Treebar repository:
 
 - Set `repository.displayName` to `Treebar`, its actual default branch, and the approved maintainer logins.
 - Use an automation prefix such as `automation/treebar/`.

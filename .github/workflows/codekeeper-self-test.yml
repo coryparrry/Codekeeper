@@ -1,0 +1,47 @@
+name: Codekeeper checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/codekeeper-*.yml"
+      - ".github/codekeeper.json"
+      - "examples/workflows/**"
+      - "tools/codekeeper/**"
+  push:
+    paths:
+      - ".github/workflows/codekeeper-*.yml"
+      - ".github/codekeeper.json"
+      - "examples/workflows/**"
+      - "tools/codekeeper/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  maintainer-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Install pinned Agents SDK runtime
+        working-directory: tools/codekeeper
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run maintainer syntax and unit checks
+        working-directory: tools/codekeeper
+        run: npm run check
+      - name: Validate GitHub Actions workflow contracts
+        uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e # v1.73.0
+        with:
+          reporter: github-annotations
+          filter_mode: nofilter
+          fail_level: any
+      - name: Syntax-check workflow YAML
+        run: |
+          ruby -e 'require "yaml"; Dir[".github/workflows/codekeeper-*.yml"].each { |file| YAML.load_file(file); puts "parsed #{file}" }'

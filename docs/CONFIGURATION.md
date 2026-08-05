@@ -1,10 +1,10 @@
 # Configuration
 
-The adopter-owned `.github/ai-maintainer.json` is the only runtime policy file. It is read from the adopter default branch, validated before every coordinator run, copied into the sealed artifact, and hash-checked again before publication.
+The adopter-owned `.github/codekeeper.json` is the only runtime policy file. It is read from the adopter default branch, validated before every coordinator run, copied into the sealed artifact, and hash-checked again before publication.
 
 ## Provider and coordinator settings
 
-Each coordinator mode is independent under `ai.agents.review`, `audit`, `issue`, and `fix`. It selects a provider from `ai.providers`, a model, attempt/turn limits, JSON model settings, and an optional Codex workspace specialist. The JSON below is a partial excerpt; use the [starter policy](../.github/ai-maintainer.json) for the complete required four-mode `agents` object.
+Each coordinator mode is independent under `ai.agents.review`, `audit`, `issue`, and `fix`. It selects a provider from `ai.providers`, a model, attempt/turn limits, JSON model settings, and an optional Codex workspace specialist. The JSON below is a partial excerpt; use the [starter policy](../.github/codekeeper.json) for the complete required four-mode `agents` object.
 
 ```json
 {
@@ -56,10 +56,10 @@ The coordinator profile is versioned with the reusable workflow, not configured 
 
 | Mode | Profile path | Explicit output responsibility |
 |---|---|---|
-| review | `tools/ai-maintainer/agents/pr-reviewer.md` | PR summary and evidence-backed review findings. |
-| issue | `tools/ai-maintainer/agents/issue-triager.md` | Issue classification, actionability, and duplicate assessment. |
-| audit | `tools/ai-maintainer/agents/repository-auditor.md` | Audit category and priority classification. |
-| fix | `tools/ai-maintainer/agents/maintenance-planner.md` | Bounded maintenance planning and implementation/no-change result. |
+| review | `tools/codekeeper/agents/pr-reviewer.md` | PR summary and evidence-backed review findings. |
+| issue | `tools/codekeeper/agents/issue-triager.md` | Issue classification, actionability, and duplicate assessment. |
+| audit | `tools/codekeeper/agents/repository-auditor.md` | Audit category and priority classification. |
+| fix | `tools/codekeeper/agents/maintenance-planner.md` | Bounded maintenance planning and implementation/no-change result. |
 
 Repository-specific policy and dynamic event context stay in the frozen prompts and policy file; profile files do not replace them.
 
@@ -68,7 +68,7 @@ Repository-specific policy and dynamic event context stay in the frozen prompts 
 Reusable workflow callers expose two explicit booleans alongside `enabled`:
 
 - `auto_review` defaults to `true` and permits eligible pull-request events to run the review workflow. Setting it to `false` skips automatic review; the supplied required review gate then fails closed.
-- `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/ai-maintainer triage` comments from configured owners remain available.
+- `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/codekeeper triage` comments from configured owners remain available.
 
 Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
 

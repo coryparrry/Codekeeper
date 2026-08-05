@@ -1,6 +1,6 @@
-# AI Repo Maintainer
+# Codekeeper
 
-AI Repo Maintainer is a set of **versioned reusable GitHub Actions workflows** for one repository at a time. It uses four independently configured Agents SDK coordinators to review same-repository pull requests, triage bounded issue lifecycle events or maintainer commands, audit the default branch, and implement explicitly enabled, bounded fixes.
+Codekeeper is a set of **versioned reusable GitHub Actions workflows** for one repository at a time. It uses four independently configured Agents SDK coordinators to review same-repository pull requests, triage bounded issue lifecycle events or maintainer commands, audit the default branch, and implement explicitly enabled, bounded fixes.
 
 It is not a hosted service, webhook receiver, multi-tenant GitHub App, or npm package. Each adopter owns its GitHub App credentials and policy; caller workflows pin this repository to an immutable release commit.
 
@@ -8,12 +8,12 @@ It is not a hosted service, webhook receiver, multi-tenant GitHub App, or npm pa
 
 | Reusable workflow | Caller responsibility |
 |---|---|
-| `ai-maintainer-review.yml` | Review eligible pull requests and expose a fail-closed review gate. |
-| `ai-maintainer-maintain.yml` | Run scheduled or manually dispatched default-branch audits. |
-| `ai-maintainer-issues.yml` | Triage opened, reopened, or edited issues while `auto_triage=true`; configured-owner `/ai-maintainer triage` comments remain available when automatic triage is off. |
-| `ai-maintainer-fix.yml` | Implement an issue only after a configured owner requests `/ai-maintainer fix` or manual dispatch. |
+| `codekeeper-review.yml` | Review eligible pull requests and expose a fail-closed review gate. |
+| `codekeeper-maintain.yml` | Run scheduled or manually dispatched default-branch audits. |
+| `codekeeper-issues.yml` | Triage opened, reopened, or edited issues while `auto_triage=true`; configured-owner `/codekeeper triage` comments remain available when automatic triage is off. |
+| `codekeeper-fix.yml` | Implement an issue only after a configured owner requests `/codekeeper fix` or manual dispatch. |
 
-Copy the matching non-executable templates from [`examples/workflows`](examples/workflows) into the adopter repository, replace `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copy [`.github/ai-maintainer.json`](.github/ai-maintainer.json) into the adopter's default branch. The reusable workflows check out their own pinned tooling revision; adopters do not copy `tools/ai-maintainer` or the source workflow files.
+Copy the matching non-executable templates from [`examples/workflows`](examples/workflows) into the adopter repository, replace `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copy [`.github/codekeeper.json`](.github/codekeeper.json) into the adopter's default branch. The reusable workflows check out their own pinned tooling revision; adopters do not copy `tools/codekeeper` or the source workflow files.
 
 The root policy is a valid starter, not a safe default for every repository. Before enabling it, replace `repository.ownerLogins`, verify the default branch and automation prefix, and tailor repair, validation, and auto-merge paths. Each mode has its own `ai.agents.<mode>` provider, model, settings, and optional Codex workspace specialist. The runtime label names are intentionally namespaced and must remain defined exactly as supplied. See [configuration](docs/CONFIGURATION.md).
 
@@ -23,10 +23,10 @@ The four versioned Markdown profiles below are executable coordinator instructio
 
 | Coordinator | Profile | Explicit responsibilities |
 |---|---|---|
-| Pull request reviewer | [`tools/ai-maintainer/agents/pr-reviewer.md`](tools/ai-maintainer/agents/pr-reviewer.md) | PR review summary, evidence-backed findings, risk, tests, and merge recommendation. |
-| Issue triager | [`tools/ai-maintainer/agents/issue-triager.md`](tools/ai-maintainer/agents/issue-triager.md) | Issue classification, actionability, missing information, and duplicate assessment. |
-| Repository auditor | [`tools/ai-maintainer/agents/repository-auditor.md`](tools/ai-maintainer/agents/repository-auditor.md) | Audit category and priority classification with bounded remediation guidance. |
-| Maintenance planner | [`tools/ai-maintainer/agents/maintenance-planner.md`](tools/ai-maintainer/agents/maintenance-planner.md) | Bounded maintenance planning and no-change decisions within trusted repair limits. |
+| Pull request reviewer | [`tools/codekeeper/agents/pr-reviewer.md`](tools/codekeeper/agents/pr-reviewer.md) | PR review summary, evidence-backed findings, risk, tests, and merge recommendation. |
+| Issue triager | [`tools/codekeeper/agents/issue-triager.md`](tools/codekeeper/agents/issue-triager.md) | Issue classification, actionability, missing information, and duplicate assessment. |
+| Repository auditor | [`tools/codekeeper/agents/repository-auditor.md`](tools/codekeeper/agents/repository-auditor.md) | Audit category and priority classification with bounded remediation guidance. |
+| Maintenance planner | [`tools/codekeeper/agents/maintenance-planner.md`](tools/codekeeper/agents/maintenance-planner.md) | Bounded maintenance planning and no-change decisions within trusted repair limits. |
 
 ## Security model
 
@@ -51,15 +51,15 @@ This release is **GitHub.com only**. It relies on reusable-workflow identity fie
 - The supplied review caller does not subscribe to `merge_group`; do not make its gate required for merge queues.
 - The review caller controls automatic PR review with `auto_review` (default `true`); setting it to `false` skips review and causes the required review gate to fail closed.
 - The issue caller controls automatic issue triage with `auto_triage` (default `true`). Automatic triage is limited to opened, reopened, and edited issue events. It may publish labels, a sticky comment, and a duplicate candidate only; `issues.closeExactDuplicates` remains a separate default-`false` policy.
-- Configured-owner `/ai-maintainer triage` and `/ai-maintainer fix` comments require an `OWNER`, `MEMBER`, or `COLLABORATOR` association plus a GitHub login in `repository.ownerLogins`. Manual fix dispatch also requires a configured owner.
+- Configured-owner `/codekeeper triage` and `/codekeeper fix` comments require an `OWNER`, `MEMBER`, or `COLLABORATOR` association plus a GitHub login in `repository.ownerLogins`. Manual fix dispatch also requires a configured owner.
 
 Treebar-specific paths and policy are kept only as an optional [example](examples/treebar/README.md); they are not runtime defaults.
 
 ## Local verification
 
 ```bash
-node tools/ai-maintainer/src/cli.mjs check-config
-cd tools/ai-maintainer && npm ci --ignore-scripts --no-audit --no-fund && npm run check
+node tools/codekeeper/src/cli.mjs check-config
+cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
 
 The package pins its Agents SDK dependencies and requires Node.js 22 or newer locally. The reusable workflows pin Node.js, npm dependencies, and the optional Codex CLI themselves.

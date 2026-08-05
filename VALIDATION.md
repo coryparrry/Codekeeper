@@ -3,8 +3,8 @@
 Run these checks before publishing a source release or changing reusable workflows:
 
 ```bash
-node tools/ai-maintainer/src/cli.mjs check-config
-cd tools/ai-maintainer && npm ci --ignore-scripts --no-audit --no-fund && npm run check
+node tools/codekeeper/src/cli.mjs check-config
+cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
 
 The repository workflow also runs the Node test suite, Actionlint, and YAML parsing when maintainer workflows, caller templates, or tooling change.

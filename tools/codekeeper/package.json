@@ -1,0 +1,18 @@
+{
+  "name": "codekeeper",
+  "description": "Provider-configurable Agents SDK runtime and deterministic GitHub maintainer policy",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@openai/agents": "0.14.2",
+    "zod": "4.4.3"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs test/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs"
+  }
+}
