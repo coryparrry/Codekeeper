@@ -47,6 +47,16 @@ function managedIssueLabels(config) {
   return config.issues.managedLabels;
 }
 
+async function currentOpenIssue(github, frozenIssue, staleAction) {
+  const issue = await github.getIssue(frozenIssue.number);
+  if (issue.pull_request) throw new Error(`Issue #${issue.number} is no longer eligible`);
+  if (issue.state !== "open") throw new Error(`Issue #${issue.number} is not open`);
+  if (frozenIssue.updatedAt && issue.updated_at !== frozenIssue.updatedAt) {
+    throw new Error(`Issue #${issue.number} changed after ${staleAction}; stale action will not publish`);
+  }
+  return issue;
+}
+
 function branchSlug(value) {
   return String(value)
     .toLowerCase()
@@ -147,12 +157,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, t
 export async function publishIssue({ artifactDirectory, config, configSha256, token, dryRun = false }) {
   const { context, result } = await loadArtifact(artifactDirectory, "issue", configSha256);
   const github = new GitHubClient({ token, repository: context.repository });
-  const issue = await github.getIssue(context.issue.number);
-  if (issue.pull_request) throw new Error(`#${issue.number} is now a pull request`);
-  if (issue.state !== "open") throw new Error(`#${issue.number} is not open`);
-  if (context.issue.updatedAt && issue.updated_at !== context.issue.updatedAt) {
-    throw new Error(`#${issue.number} changed after analysis; stale triage will not publish`);
-  }
+  const currentIssue = () => currentOpenIssue(github, context.issue, "analysis");
+  const issue = await currentIssue();
 
   const desired = new Set([issueTypeLabel(result.type), `ai-maintainer:priority-${result.priority}`, ...result.labels]);
   if (result.implementationRecommendation === "ai-ready") desired.add("ai-maintainer:ready");
@@ -165,8 +171,13 @@ export async function publishIssue({ artifactDirectory, config, configSha256, to
     return { issue: issue.number, desiredLabels, dryRun: true };
   }
 
+  // GitHub does not expose an atomic compare-and-mutate for issue updates. These
+  // checks fail closed on observed drift immediately before each mutation boundary.
+  await currentIssue();
   await github.ensureLabels(config.labels, desiredLabels);
+  await currentIssue();
   await github.replaceManagedLabels(issue.number, desiredLabels, managedIssueLabels(config));
+  await currentIssue();
   await github.upsertMarkerComment(
     issue.number,
     ISSUE_TRIAGE_MARKER,
@@ -178,11 +189,13 @@ export async function publishIssue({ artifactDirectory, config, configSha256, to
     throw new Error(`Issue #${issue.number} cannot be its own duplicate`);
   }
   if (config.issues.closeExactDuplicates && result.duplicateOf && result.duplicateConfidence === "high") {
-    const duplicate = await github.getIssue(result.duplicateOf);
-    if (!duplicate.pull_request && duplicate.state === "open") {
-      await github.createComment(issue.number, `Closing as a duplicate of #${duplicate.number}.`);
-      await github.updateIssue(issue.number, { state: "closed", state_reason: "not_planned" });
-    }
+    const duplicateContext = { number: result.duplicateOf };
+    await currentIssue();
+    const duplicate = await currentOpenIssue(github, duplicateContext, "duplicate assessment");
+    await github.createComment(issue.number, `Closing as a duplicate of #${duplicate.number}.`);
+    await currentIssue();
+    await currentOpenIssue(github, duplicateContext, "duplicate assessment");
+    await github.updateIssue(issue.number, { state: "closed", state_reason: "not_planned" });
   }
   return { issue: issue.number, desiredLabels };
 }
@@ -319,6 +332,7 @@ async function publishPatchPullRequest({
   fingerprint,
   issueNumber = null,
   finding = null,
+  revalidateBeforeMutation = null,
   dryRun = false
 }) {
   if (!manifest.patch?.valid || !manifest.patch.fileName) {
@@ -386,9 +400,11 @@ async function publishPatchPullRequest({
   const automationIdentity = expectedAutomationIdentity();
   configureAutomationIdentity(automationIdentity);
   createBranchAndCommit({ branch, message: "chore: apply automated maintenance repair" });
+  if (revalidateBeforeMutation) await revalidateBeforeMutation();
   pushBranch(branch, github.token);
   let pull;
   try {
+    if (revalidateBeforeMutation) await revalidateBeforeMutation();
     pull = await github.createPull({
       title: normalizedTitle,
       body: prBody,
@@ -407,7 +423,9 @@ async function publishPatchPullRequest({
   }
   const labels = new Set(["ai-maintainer:maintenance", `ai-maintainer:risk-${risk}`, "ai-maintainer:manual-review"]);
   if (finding) findingLabels(finding).forEach((label) => labels.add(label));
+  if (revalidateBeforeMutation) await revalidateBeforeMutation();
   await github.ensureLabels(config.labels, [...labels]);
+  if (revalidateBeforeMutation) await revalidateBeforeMutation();
   await github.replaceManagedLabels(pull.number, [...labels], managedIssueLabels(config));
   return {
     created: true,
@@ -466,15 +484,13 @@ export async function publishAudit({ artifactDirectory, config, configSha256, to
 export async function publishFix({ artifactDirectory, config, configSha256, token, dryRun = false }) {
   const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", configSha256);
   const github = new GitHubClient({ token, repository: context.repository });
-  const issue = await github.getIssue(context.issue.number);
-  if (issue.state !== "open" || issue.pull_request) throw new Error(`Issue #${issue.number} is no longer eligible`);
-  if (context.issue.updatedAt && issue.updated_at !== context.issue.updatedAt) {
-    throw new Error(`Issue #${issue.number} changed after implementation started; stale patch will not publish`);
-  }
+  const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started");
+  const issue = await currentIssue();
 
   if (!manifest.patch?.valid) {
     const reason = result.noChangeReason || manifest.patch?.reasons?.join("; ") || "No valid patch was produced";
     if (!dryRun) {
+      await currentIssue();
       await github.createComment(issue.number, `AI maintainer did not open a PR. ${sanitizeMarkdown(reason)}\n<!-- ai-maintainer:fix-run=${context.runId} -->`);
     }
     return { created: false, reason, dryRun };
@@ -495,9 +511,11 @@ export async function publishFix({ artifactDirectory, config, configSha256, toke
     fingerprint,
     issueNumber: issue.number,
     finding: null,
+    revalidateBeforeMutation: currentIssue,
     dryRun
   });
   if (!dryRun && repair.url) {
+    await currentIssue();
     await github.createComment(issue.number, `AI maintainer opened a repair pull request: ${repair.url}`);
   }
   return repair;

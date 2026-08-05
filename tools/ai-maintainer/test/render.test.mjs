@@ -14,6 +14,7 @@ test("review comment contains deterministic policy decision", () => {
     },
     { eligible: false, reasons: ["Swift files require manual review"] }
   );
+  assert.match(markdown, /^## PR review summary$/m);
   assert.match(markdown, /Manual boundary retained/);
   assert.match(markdown, /Swift files require manual review/);
 });

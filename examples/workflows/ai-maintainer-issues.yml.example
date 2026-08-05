@@ -3,6 +3,8 @@
 name: AI Maintainer issue triage
 
 on:
+  issues:
+    types: [opened, reopened, edited]
   issue_comment:
     types: [created]
 
@@ -15,6 +17,7 @@ jobs:
     uses: OWNER/REPOSITORY/.github/workflows/ai-maintainer-issues.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.AI_MAINTAINER_ENABLED == 'true' }}
+      auto_triage: true
       app_client_id: ${{ vars.AI_MAINTAINER_APP_CLIENT_ID }}
     secrets:
       # Match this secret to ai.agents.issue.provider in .github/ai-maintainer.json.

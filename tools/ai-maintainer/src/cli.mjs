@@ -114,7 +114,7 @@ async function main() {
       result = await prepareAudit({ directory, config, toolingSha, configSha256 });
       break;
     case "prepare-issue":
-      result = await prepareIssue({ eventPath: args.require("event"), actor: args.require("actor"), directory, config, token, toolingSha, configSha256 });
+      result = await prepareIssue({ eventPath: args.require("event"), actor: args.require("actor"), triageMode: args.require("triage-mode"), directory, config, token, toolingSha, configSha256 });
       break;
     case "prepare-fix":
       result = await prepareFix({

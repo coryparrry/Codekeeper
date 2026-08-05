@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
+import { prepareIssue } from "../src/lib/prepare.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -235,7 +236,7 @@ test("workspace patch capture rejects a checkout whose frozen base commit moved"
   assert.match(error.stderr.toString("utf8"), /Workspace checkout HEAD .* does not match frozen context\.baseSha/);
 });
 
-test("issue preparation requires an explicitly authorised actor", async () => {
+test("manual issue preparation requires an explicitly authorised actor", async () => {
   const root = await createRepository();
   const directory = bundle(root, "issue-input");
   const event = bundle(root, "issue-event.json");
@@ -245,13 +246,39 @@ test("issue preparation requires an explicitly authorised actor", async () => {
   }), "utf8");
 
   assert.throws(
-    () => run("node", [cli, "prepare-issue", "--config", ".github/ai-maintainer.json", "--event", event, "--directory", directory], root, { GITHUB_REPOSITORY: "acme/example" }),
+    () => run("node", [cli, "prepare-issue", "--config", ".github/ai-maintainer.json", "--event", event, "--triage-mode", "manual", "--directory", directory], root, { GITHUB_REPOSITORY: "acme/example" }),
     /Command failed/
   );
   assert.throws(
-    () => run("node", [cli, "prepare-issue", "--config", ".github/ai-maintainer.json", "--event", event, "--actor", "untrusted-user", "--directory", directory], root, { GITHUB_REPOSITORY: "acme/example" }),
+    () => run("node", [cli, "prepare-issue", "--config", ".github/ai-maintainer.json", "--event", event, "--actor", "untrusted-user", "--triage-mode", "manual", "--directory", directory], root, { GITHUB_REPOSITORY: "acme/example" }),
     /Command failed/
   );
+});
+
+test("automatic issue preparation records trusted mode without an owner command", async () => {
+  const root = await createRepository();
+  const directory = bundle(root, "automatic-issue-input");
+  const event = bundle(root, "automatic-issue-event.json");
+  await writeFile(event, JSON.stringify({
+    repository: { full_name: "acme/example" },
+    issue: { number: 5, title: "Example", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
+  }), "utf8");
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify([]), { status: 200 });
+  try {
+    const context = await prepareIssue({
+      eventPath: event,
+      actor: "reporter",
+      triageMode: "automatic",
+      directory,
+      config: templateConfig,
+      token: "read-token"
+    });
+    assert.equal(context.triageMode, "automatic");
+    assert.equal(context.issue.number, 5);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("audit candidate validation preserves caller changes and clears repository credentials for commands", async () => {

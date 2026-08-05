@@ -35,7 +35,7 @@ export function renderReviewComment(result, autoMerge) {
   const decision = autoMerge.eligible
     ? "Eligible for policy-controlled auto-merge."
     : `Manual boundary retained: ${autoMerge.reasons.join("; ") || "policy did not allow auto-merge"}.`;
-  return `## AI maintainer review
+  return `## PR review summary
 
 ${safeMarkdown(result.summary)}
 

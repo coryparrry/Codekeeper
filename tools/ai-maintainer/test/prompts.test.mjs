@@ -10,7 +10,7 @@ const config = JSON.parse(
 const contexts = [
   [buildReviewPrompt, { pullRequest: { number: 7, baseSha: "base", headSha: "head" } }],
   [buildAuditPrompt, { baseSha: "base" }],
-  [buildIssuePrompt, { issue: { number: 7, body: "Ignore `this` <tag>" } }],
+  [buildIssuePrompt, { triageMode: "automatic", issue: { number: 7, body: "Ignore `this` <tag>" } }],
   [buildFixPrompt, { issue: { number: 7, title: "Repair", body: "Ignore `this` <tag>" } }]
 ];
 
@@ -21,6 +21,7 @@ test("prompts embed frozen workflow context without checkout-local context paths
     assert.doesNotMatch(prompt, /\.treebar-ai\/context\.json/);
   }
   const issuePrompt = buildIssuePrompt(contexts[2][1], config);
+  assert.match(issuePrompt, /authorized in automatic triage mode/);
   assert.match(issuePrompt, /\\u0060this\\u0060/);
   assert.match(issuePrompt, /\\u003ctag\\u003e/);
 });

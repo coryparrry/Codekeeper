@@ -50,6 +50,28 @@ Provider base URLs must use HTTPS. Explicit loopback HTTP is accepted only for l
 
 `model_api_key` maps the selected mode’s provider credential. It is required in every reusable workflow and never falls back to an OpenAI key. The optional Codex specialist uses `workspace_api_key`; `openai_api_key` remains only as a compatibility fallback for that OpenAI-only workspace action.
 
+## Executable coordinator profiles
+
+The coordinator profile is versioned with the reusable workflow, not configured in the adopter policy. The runtime loads the selected Markdown file into the actual Agents SDK `Agent.instructions`, followed by shared security instructions. These profiles make existing output responsibilities explicit; they do not add tools, external skill packages, or any independent runtime access.
+
+| Mode | Profile path | Explicit output responsibility |
+|---|---|---|
+| review | `tools/ai-maintainer/agents/pr-reviewer.md` | PR summary and evidence-backed review findings. |
+| issue | `tools/ai-maintainer/agents/issue-triager.md` | Issue classification, actionability, and duplicate assessment. |
+| audit | `tools/ai-maintainer/agents/repository-auditor.md` | Audit category and priority classification. |
+| fix | `tools/ai-maintainer/agents/maintenance-planner.md` | Bounded maintenance planning and implementation/no-change result. |
+
+Repository-specific policy and dynamic event context stay in the frozen prompts and policy file; profile files do not replace them.
+
+## Caller automation controls
+
+Reusable workflow callers expose two explicit booleans alongside `enabled`:
+
+- `auto_review` defaults to `true` and permits eligible pull-request events to run the review workflow. Setting it to `false` skips automatic review; the supplied required review gate then fails closed.
+- `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/ai-maintainer triage` comments from configured owners remain available.
+
+Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
+
 ## Workspace specialists
 
 The coordinator itself is one tool-less Agents SDK `Agent` per mode. Codex is optional and is used only as a checkout-aware specialist whose result remains untrusted evidence for the coordinator. The Codex job and coordinator run on separate fresh runners: the coordinator rebuilds trusted context, checks its digest against the workspace job output, consumes specialist JSON and any audit/fix patch as untrusted artifacts, and applies that patch only after model execution.

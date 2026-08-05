@@ -8,6 +8,11 @@ on:
         required: false
         default: true
         type: boolean
+      auto_triage:
+        description: Automatically triage eligible issue lifecycle events.
+        required: false
+        default: true
+        type: boolean
       app_client_id:
         description: GitHub App client ID. This identifier is not secret.
         required: true
@@ -39,16 +44,22 @@ concurrency:
 jobs:
   workspace:
     name: AI Maintainer issue workspace specialist
-    # Comment-triggered triage is deliberately maintainer-only. prepare-issue uses
-    # the GitHub event payload; it does not execute for arbitrary issue reporters.
+    # Automatic triage is limited to trusted issue lifecycle events. Comment-triggered
+    # triage remains restricted to an eligible configured owner by prepare-issue.
     if: >-
       inputs.enabled &&
       !github.event.issue.pull_request &&
-      (github.event.comment.body == '/ai-maintainer triage' ||
-       startsWith(github.event.comment.body, '/ai-maintainer triage ')) &&
-      (github.event.comment.author_association == 'OWNER' ||
-       github.event.comment.author_association == 'MEMBER' ||
-       github.event.comment.author_association == 'COLLABORATOR')
+      ((inputs.auto_triage &&
+        github.event_name == 'issues' &&
+        (github.event.action == 'opened' ||
+         github.event.action == 'reopened' ||
+         github.event.action == 'edited')) ||
+       (github.event_name == 'issue_comment' &&
+        (github.event.comment.body == '/ai-maintainer triage' ||
+         startsWith(github.event.comment.body, '/ai-maintainer triage ')) &&
+        (github.event.comment.author_association == 'OWNER' ||
+         github.event.comment.author_association == 'MEMBER' ||
+         github.event.comment.author_association == 'COLLABORATOR')))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -85,6 +96,7 @@ jobs:
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/ai-maintainer.json
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
+          TRIAGE_MODE: ${{ github.event_name == 'issues' && 'automatic' || 'manual' }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -97,6 +109,7 @@ jobs:
             --directory "$BUNDLE" \
             --event "$GITHUB_EVENT_PATH" \
             --actor "$GITHUB_ACTOR" \
+            --triage-mode "$TRIAGE_MODE" \
             --tooling-sha "$AI_MAINTAINER_TOOLING_SHA"
           {
             echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
@@ -191,6 +204,7 @@ jobs:
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/ai-maintainer.json
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
+          TRIAGE_MODE: ${{ github.event_name == 'issues' && 'automatic' || 'manual' }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -203,6 +217,7 @@ jobs:
             --directory "$BUNDLE" \
             --event "$GITHUB_EVENT_PATH" \
             --actor "$GITHUB_ACTOR" \
+            --triage-mode "$TRIAGE_MODE" \
             --tooling-sha "$AI_MAINTAINER_TOOLING_SHA"
           {
             echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"

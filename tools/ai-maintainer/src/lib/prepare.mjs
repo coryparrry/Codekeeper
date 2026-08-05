@@ -128,8 +128,11 @@ export async function prepareAudit({ directory, config, toolingSha, configSha256
   return context;
 }
 
-export async function prepareIssue({ eventPath, actor, directory, config, token, toolingSha, configSha256 }) {
-  if (!config.repository.ownerLogins.includes(actor)) {
+export async function prepareIssue({ eventPath, actor, triageMode, directory, config, token, toolingSha, configSha256 }) {
+  if (triageMode !== "automatic" && triageMode !== "manual") {
+    throw new Error("Issue triage mode must be automatic or manual");
+  }
+  if (triageMode === "manual" && !config.repository.ownerLogins.includes(actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request AI maintainer issue triage`);
   }
   const event = await readJson(eventPath);
@@ -140,6 +143,7 @@ export async function prepareIssue({ eventPath, actor, directory, config, token,
   const existing = await github.listOpenIssues(config.issues.maximumOpenIssueContext);
   const context = {
     mode: "issue",
+    triageMode,
     repository,
     ...runMetadata({ toolingSha, configSha256 }),
     runUrl: runUrl(repository),

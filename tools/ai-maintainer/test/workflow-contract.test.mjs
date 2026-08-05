@@ -181,25 +181,39 @@ test("candidate and sealed artifact names include run id and retry attempt", asy
 
 test("review uses a PR-native fail-closed gate instead of a reusable commit status", async () => {
   const source = await workflow("review");
+  const caller = await repositoryFile("examples/workflows/ai-maintainer-review.yml.example");
   const gate = jobSection(source, "gate");
   assert.match(gate, /name: AI Maintainer review gate/);
   assert.match(gate, /if: always\(\)/);
   assert.match(gate, /fails closed/);
   assert.match(gate, /exit 1/);
+  assert.match(source, /auto_review:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
+  assert.match(jobSection(source, "workspace", "analyze"), /inputs\.auto_review/);
+  assert.match(caller, /auto_review: true/);
   assert.doesNotMatch(source, /publish-review-status|pull_request_target|state="success"/);
 });
 
-test("issue triage and fixes require exact maintainer commands before Codex can run", async () => {
+test("issue triage allows only bounded automatic events while owner commands and fixes stay gated", async () => {
   const issue = await workflow("issues");
   const fix = await workflow("fix");
-  for (const [source, command] of [[issue, "triage"], [fix, "fix"]]) {
-    assert.match(source, new RegExp(`github\\.event\\.comment\\.body == '/ai-maintainer ${command}'`));
-    assert.match(source, new RegExp(`startsWith\\(github\\.event\\.comment\\.body, '/ai-maintainer ${command} '\\)`));
-    assert.match(source, /github\.event\.comment\.author_association == 'OWNER'/);
-    assert.match(source, /allow-users: \$\{\{ github\.actor \}\}/);
-    assert.doesNotMatch(source, /issues:\n\s+types: \[opened/);
-  }
+  const caller = await repositoryFile("examples/workflows/ai-maintainer-issues.yml.example");
+  assert.match(issue, /auto_triage:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
+  assert.match(issue, /inputs\.auto_triage &&\s+github\.event_name == 'issues'/);
+  for (const action of ["opened", "reopened", "edited"]) assert.match(issue, new RegExp(`github\\.event\\.action == '${action}'`));
+  assert.match(issue, /github\.event\.comment\.body == '\/ai-maintainer triage'/);
+  assert.match(issue, /startsWith\(github\.event\.comment\.body, '\/ai-maintainer triage '\)/);
+  assert.match(issue, /github\.event\.comment\.author_association == 'OWNER'/);
+  assert.match(issue, /TRIAGE_MODE: \$\{\{ github\.event_name == 'issues' && 'automatic' \|\| 'manual' \}\}/);
   assert.match(issue, /prepare-issue[\s\S]*--actor "\$GITHUB_ACTOR"/);
+  assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
+  assert.match(caller, /issues:\n\s+types: \[opened, reopened, edited\]/);
+  assert.match(caller, /auto_triage: true/);
+
+  assert.match(fix, /github\.event\.comment\.body == '\/ai-maintainer fix'/);
+  assert.match(fix, /startsWith\(github\.event\.comment\.body, '\/ai-maintainer fix '\)/);
+  assert.match(fix, /github\.event\.comment\.author_association == 'OWNER'/);
+  assert.match(fix, /allow-users: \$\{\{ github\.actor \}\}/);
+  assert.doesNotMatch(fix, /github\.event_name == 'issues'/);
 });
 
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {

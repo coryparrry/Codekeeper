@@ -15,6 +15,7 @@ jobs:
     uses: OWNER/REPOSITORY/.github/workflows/ai-maintainer-review.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.AI_MAINTAINER_ENABLED == 'true' }}
+      auto_review: true
       automation_bot_login: ${{ vars.AI_MAINTAINER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.AI_MAINTAINER_APP_CLIENT_ID }}
     secrets:

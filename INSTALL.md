@@ -19,7 +19,14 @@ Update these values in the adopter's `.github/ai-maintainer.json`:
 - `projectInvariants` for repository-specific non-negotiables.
 - Repair `allowedPaths`, `protectedPaths`, limits, and deterministic `validationCommands`.
 - Auto-merge paths and eligible authors. The supplied policy permits only small Markdown changes to auto-merge.
-- Per-mode `ai.agents.<mode>` provider/model/settings and any optional Codex workspace. `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled` are all false by default.
+- Per-mode `ai.agents.<mode>` provider/model/settings and any optional Codex workspace. `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled` are all false by default. The pinned source revision also supplies the four executable coordinator profiles under `tools/ai-maintainer/agents/`; do not copy or alter them in the adopter repository.
+
+| Coordinator | Versioned profile path |
+|---|---|
+| Pull request reviewer | `tools/ai-maintainer/agents/pr-reviewer.md` |
+| Issue triager | `tools/ai-maintainer/agents/issue-triager.md` |
+| Repository auditor | `tools/ai-maintainer/agents/repository-auditor.md` |
+| Maintenance planner | `tools/ai-maintainer/agents/maintenance-planner.md` |
 
 The workflow rejects a policy whose `defaultBranch` differs from GitHub's repository default branch. Keep the supplied `ai-maintainer:*` labels, plus explicit `review.managedLabels` and `issues.managedLabels`; runtime emission depends on those exact names.
 
@@ -60,13 +67,15 @@ The App token is present only in publication jobs. Codex runs in a separate work
 
 Commit the configuration and callers to the default branch with `AI_MAINTAINER_ENABLED=false`. Run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests.
 
-Then enable the variable and open a small same-repository pull request targeting the default branch. Confirm that the caller's **AI Maintainer review gate** completes and the App identity, labels, and comment are correct before adding the gate to branch protection.
+Then enable the variable and open a small same-repository pull request targeting the default branch. The supplied caller sets `auto_review: true`; keep it true while proving the required review gate. Confirm that the caller's **AI Maintainer review gate** completes and the App identity, labels, and `PR review summary` comment are correct before adding the gate to branch protection.
 
 Branch protection remains the source of truth. Keep normal build, test, approval, and deployment checks required independently of this workflow.
 
-## 5. Use configured-owner commands
+## 5. Choose automatic triage and use configured-owner commands
 
-Only a GitHub login listed in `repository.ownerLogins` can request issue triage or a fix. Comment-triggered requests must also have an `OWNER`, `MEMBER`, or `COLLABORATOR` association. Use:
+The supplied issue caller opts in to `auto_triage: true`, so opened, reopened, and edited issues receive bounded automatic triage. Automatic triage can label, comment, and identify a duplicate candidate; it does not close an issue because `issues.closeExactDuplicates` remains false by default. Set `auto_triage: false` in the caller to skip those automatic events.
+
+Only a GitHub login listed in `repository.ownerLogins` can request manual issue triage or a fix. Comment-triggered requests must also have an `OWNER`, `MEMBER`, or `COLLABORATOR` association. Manual triage remains available even with `auto_triage: false`:
 
 ```text
 /ai-maintainer triage
@@ -85,6 +94,6 @@ The maintenance caller can also run on a schedule or through `workflow_dispatch`
 - GitHub Enterprise Server is unsupported.
 - Fork pull requests, drafts, disabled runs, and non-default-branch PR targets fail the review gate closed and need manual review.
 - The supplied review caller does not handle `merge_group`; do not require its gate for merge queues.
-- New and edited public issues are not automatically triaged. Only configured-owner commands run issue triage or fixes.
+- Set `auto_review: false` only when the failing-closed review gate is intentionally not required. Set `auto_triage: false` to require configured-owner triage commands while retaining automatic issue labels, comments, and duplicate candidates only when it is true.
 
 Treebar is an optional [policy example](examples/treebar/README.md), not an installation target or runtime dependency.
