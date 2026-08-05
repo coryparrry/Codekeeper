@@ -48,7 +48,7 @@ ce56ebcbfe63a878c70701c0a33aefbcdb2b9e1c15c93a0668b0e721cde824d4  ./tools/codeke
 9536e8e312f2cbf52c4b3080324ec7e280f3b3c1d7f3880677696b7692b2f7c8  ./tools/codekeeper/test/markers.test.mjs
 875cd72acb91e6fb1199420bf26be20361f7e21323dc096a16aa3f5201d6f28b  ./tools/codekeeper/test/policy.test.mjs
 bc6674322a83396329b263dabb0300a54962d551cfc50bfc821505bcf1553649  ./tools/codekeeper/test/prompts.test.mjs
-82fcbe90ededc5d9202a3488b624480f51ee2ee93171436204dcdf2c2b55666b  ./tools/codekeeper/test/publish.test.mjs
+11113b63dbe4b21d0e782bd4f4218afbb39e812065258cbc53c93a8d9e7ceb95  ./tools/codekeeper/test/publish.test.mjs
 3376b7d4baa8717319c6e0f50b45b85c040a7a28e91130aca95c92ba457d0554  ./tools/codekeeper/test/render.test.mjs
 0963d8aeed5d72e2b01776c478114515f9a75b8545b61b0295475e851aa2ad5d  ./tools/codekeeper/test/schemas.test.mjs
 2680cfa0cf70ef8906de72b5c05e97da2c20ba3a341c3c3bceb220bfff8137bc  ./tools/codekeeper/test/workflow-contract.test.mjs
