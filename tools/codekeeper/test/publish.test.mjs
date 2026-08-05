@@ -20,6 +20,14 @@ import {
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
 );
+const ambientGitHubEnvironment = ["GITHUB_REPOSITORY", "GITHUB_GRAPHQL_URL"].map((name) => [name, process.env[name]]);
+for (const [name] of ambientGitHubEnvironment) delete process.env[name];
+test.after(() => {
+  for (const [name, value] of ambientGitHubEnvironment) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
 
 const fingerprint = "a".repeat(64);
 const identity = { login: "codekeeper[bot]", id: "123456" };
