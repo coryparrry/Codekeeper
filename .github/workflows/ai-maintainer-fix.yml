@@ -1,0 +1,305 @@
+name: AI Maintainer issue implementation
+
+# GitHub.com only: this reusable workflow relies on job.workflow_repository/job.workflow_sha.
+on:
+  workflow_call:
+    inputs:
+      enabled:
+        required: false
+        default: true
+        type: boolean
+      issue_number:
+        description: Issue number for a workflow_dispatch caller.
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        required: false
+        default: true
+        type: boolean
+      app_client_id:
+        description: GitHub App client ID. This identifier is not secret.
+        required: true
+        type: string
+    secrets:
+      openai_api_key:
+        required: true
+      app_private_key:
+        required: true
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: ai-maintainer-fix-${{ inputs.issue_number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    # Comment-triggered implementation is deliberately maintainer-only. The
+    # frozen config then checks the exact configured owner login before Codex runs.
+    if: >-
+      inputs.enabled &&
+      (github.event_name == 'workflow_dispatch' ||
+       (!github.event.issue.pull_request &&
+        (github.event.comment.body == '/ai-maintainer fix' ||
+         startsWith(github.event.comment.body, '/ai-maintainer fix ')) &&
+        (github.event.comment.author_association == 'OWNER' ||
+         github.event.comment.author_association == 'MEMBER' ||
+         github.event.comment.author_association == 'COLLABORATOR')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      candidate_sha256: ${{ steps.validate.outputs.candidate_sha256 }}
+      context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
+    steps:
+      - name: Resolve authorised issue target
+        id: target
+        env:
+          MANUAL_ISSUE: ${{ inputs.issue_number }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+        run: |
+          issue="${MANUAL_ISSUE:-$EVENT_ISSUE}"
+          [[ "$issue" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue number"; exit 1; }
+          echo "issue_number=$issue" >> "$GITHUB_OUTPUT"
+      - name: Check out frozen maintainer tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: tooling
+          persist-credentials: false
+      - name: Check out trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          path: repository
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Prepare runner-owned implementation bundle
+        id: prepare
+        working-directory: repository
+        env:
+          AI_MAINTAINER_TOOLING_SHA: ${{ job.workflow_sha }}
+          BUNDLE: ${{ runner.temp }}/ai-maintainer-bundle
+          CONFIG: ${{ runner.temp }}/ai-maintainer-config.json
+          SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/ai-maintainer.json
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.target.outputs.issue_number }}
+        run: |
+          [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
+          cp "$SOURCE_CONFIG" "$CONFIG"
+          [[ "$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).repository.defaultBranch)' "$CONFIG")" == "$DEFAULT_BRANCH" ]] || {
+            echo "Configured default branch does not match the repository default branch"
+            exit 1
+          }
+          node ../tooling/tools/ai-maintainer/src/cli.mjs prepare-fix \
+            --config "$CONFIG" \
+            --directory "$BUNDLE" \
+            --issue-number "$ISSUE_NUMBER" \
+            --actor "$GITHUB_ACTOR" \
+            --tooling-sha "$AI_MAINTAINER_TOOLING_SHA"
+          {
+            echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
+            echo "model=$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).ai.fix.model)' "$CONFIG")"
+            echo "effort=$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).ai.fix.effort)' "$CONFIG")"
+          } >> "$GITHUB_OUTPUT"
+      - name: Implement with pinned Codex
+        uses: openai/codex-action@10cb888d2ed3b99867f7e7ccff174a861a75aeb6 # v1.9
+        with:
+          openai-api-key: ${{ secrets.openai_api_key }}
+          codex-version: 0.146.0
+          model: ${{ steps.prepare.outputs.model }}
+          effort: ${{ steps.prepare.outputs.effort }}
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          allow-users: ${{ github.actor }}
+          working-directory: repository
+          prompt-file: ${{ runner.temp }}/ai-maintainer-bundle/prompt.md
+          output-file: ${{ runner.temp }}/ai-maintainer-bundle/codex-result.json
+          output-schema-file: ${{ runner.temp }}/ai-maintainer-bundle/schema.json
+      - name: Capture untrusted implementation candidate
+        id: validate
+        working-directory: repository
+        env:
+          BUNDLE: ${{ runner.temp }}/ai-maintainer-bundle
+          CANDIDATE: ${{ runner.temp }}/ai-maintainer-candidate
+          CONFIG: ${{ runner.temp }}/ai-maintainer-config.json
+          ISSUE_NUMBER: ${{ steps.target.outputs.issue_number }}
+        run: |
+          node ../tooling/tools/ai-maintainer/src/cli.mjs validate-fix \
+            --config "$CONFIG" \
+            --directory "$BUNDLE" \
+            --context "$BUNDLE/context.json" \
+            --result "$BUNDLE/codex-result.json" \
+            --artifact "$CANDIDATE" \
+            --issue-number "$ISSUE_NUMBER"
+      - name: Upload untrusted implementation candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-maintainer-fix-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ai-maintainer-candidate
+          retention-days: 1
+          if-no-files-found: error
+
+  verify:
+    name: AI Maintainer implementation verification
+    needs: analyze
+    if: needs.analyze.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out frozen maintainer tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: tooling
+          persist-credentials: false
+      - name: Check out fresh default branch for verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          path: repository
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Download untrusted implementation candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ai-maintainer-fix-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ai-maintainer-candidate
+      - name: Verify candidate without OpenAI or App credentials
+        working-directory: repository
+        env:
+          CANDIDATE: ${{ runner.temp }}/ai-maintainer-candidate
+          CONFIG: ${{ github.workspace }}/repository/.github/ai-maintainer.json
+          CANDIDATE_SHA256: ${{ needs.analyze.outputs.candidate_sha256 }}
+        run: |
+          node ../tooling/tools/ai-maintainer/src/cli.mjs verify-fix \
+            --config "$CONFIG" \
+            --candidate "$CANDIDATE" \
+            --expected-candidate-sha "$CANDIDATE_SHA256"
+
+  seal:
+    needs: [analyze, verify]
+    if: needs.analyze.result == 'success' && needs.verify.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out frozen maintainer tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: tooling
+          persist-credentials: false
+      - name: Check out trusted default-branch configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: repository
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Download untrusted implementation candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ai-maintainer-fix-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ai-maintainer-candidate
+      - name: Seal implementation artifact without repository execution
+        env:
+          CANDIDATE: ${{ runner.temp }}/ai-maintainer-candidate
+          ARTIFACT: ${{ runner.temp }}/ai-maintainer-artifact
+          CONFIG: ${{ github.workspace }}/repository/.github/ai-maintainer.json
+          CANDIDATE_SHA256: ${{ needs.analyze.outputs.candidate_sha256 }}
+          CONTEXT_SHA256: ${{ needs.analyze.outputs.context_sha256 }}
+        run: |
+          node tooling/tools/ai-maintainer/src/cli.mjs seal-fix \
+            --config "$CONFIG" \
+            --candidate "$CANDIDATE" \
+            --artifact "$ARTIFACT" \
+            --expected-candidate-sha "$CANDIDATE_SHA256" \
+            --expected-context-sha "$CONTEXT_SHA256"
+      - name: Upload sealed implementation artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-maintainer-fix-artifact-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ai-maintainer-artifact
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: seal
+    if: needs.seal.result == 'success' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Create short-lived GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ inputs.app_client_id }}
+          private-key: ${{ secrets.app_private_key }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+      - name: Resolve immutable automation bot identity
+        id: bot
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          identity="$(curl --globoff --fail-with-body --silent --show-error --header "Authorization: Bearer $GITHUB_TOKEN" --header "Accept: application/vnd.github+json" "$GITHUB_API_URL/users/${APP_SLUG}[bot]")"
+          echo "login=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).login))')" >> "$GITHUB_OUTPUT"
+          echo "id=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).id))')" >> "$GITHUB_OUTPUT"
+      - name: Check out frozen maintainer tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: tooling
+          persist-credentials: false
+      - name: Check out current default branch without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          path: repository
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Download sealed implementation artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ai-maintainer-fix-artifact-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ai-maintainer-artifact
+      - name: Publish sealed implementation pull request
+        working-directory: repository
+        env:
+          AI_MAINTAINER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
+          AI_MAINTAINER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          node ../tooling/tools/ai-maintainer/src/cli.mjs publish-fix \
+            --artifact "$RUNNER_TEMP/ai-maintainer-artifact"

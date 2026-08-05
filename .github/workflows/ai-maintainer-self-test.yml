@@ -1,0 +1,47 @@
+name: AI Maintainer checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ai-maintainer-*.yml"
+      - ".github/ai-maintainer.json"
+      - "examples/workflows/**"
+      - "tools/ai-maintainer/**"
+  push:
+    paths:
+      - ".github/workflows/ai-maintainer-*.yml"
+      - ".github/ai-maintainer.json"
+      - "examples/workflows/**"
+      - "tools/ai-maintainer/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  maintainer-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Run maintainer unit tests
+        working-directory: tools/ai-maintainer
+        run: npm test
+      - name: Validate GitHub Actions workflow contracts
+        uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e # v1.73.0
+        with:
+          reporter: github-pr-check
+          filter_mode: nofilter
+          fail_level: any
+          # actionlint predates GitHub's reusable-workflow identity fields.
+          actionlint_flags: -ignore 'property "workflow_(repository|sha)" is not defined'
+      - name: Syntax-check workflow YAML
+        run: |
+          ruby -e 'require "yaml"; Dir[".github/workflows/ai-maintainer-*.yml"].each { |file| YAML.load_file(file); puts "parsed #{file}" }'
