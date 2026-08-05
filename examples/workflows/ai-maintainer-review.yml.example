@@ -18,5 +18,10 @@ jobs:
       automation_bot_login: ${{ vars.AI_MAINTAINER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.AI_MAINTAINER_APP_CLIENT_ID }}
     secrets:
-      openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+      # Match this secret to ai.agents.review.provider in .github/ai-maintainer.json.
+      model_api_key: ${{ secrets.OPENAI_API_KEY }}
+      # Required while this mode keeps workspace.enabled=true.
+      workspace_api_key: ${{ secrets.OPENAI_API_KEY }}
+      # Always a separate OpenAI trace-export key, never the model-provider key.
+      trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
       app_private_key: ${{ secrets.AI_MAINTAINER_APP_PRIVATE_KEY }}

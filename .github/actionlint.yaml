@@ -1,0 +1,8 @@
+# GitHub.com documents these reusable-workflow identity properties on `job`.
+# actionlint v1.7.12 has not yet added them to its expression schema, so keep
+# this exception limited to the source-workflow checkouts that require them.
+paths:
+  .github/workflows/ai-maintainer-*.yml:
+    ignore:
+      - 'property "workflow_repository" is not defined'
+      - 'property "workflow_sha" is not defined'

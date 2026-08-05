@@ -19,6 +19,7 @@ Update these values in the adopter's `.github/ai-maintainer.json`:
 - `projectInvariants` for repository-specific non-negotiables.
 - Repair `allowedPaths`, `protectedPaths`, limits, and deterministic `validationCommands`.
 - Auto-merge paths and eligible authors. The supplied policy permits only small Markdown changes to auto-merge.
+- Per-mode `ai.agents.<mode>` provider/model/settings and any optional Codex workspace. `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled` are all false by default.
 
 The workflow rejects a policy whose `defaultBranch` differs from GitHub's repository default branch. Keep the supplied `ai-maintainer:*` labels, plus explicit `review.managedLabels` and `issues.managedLabels`; runtime emission depends on those exact names.
 
@@ -47,11 +48,13 @@ Set these adopter repository values and secrets:
 AI_MAINTAINER_APP_CLIENT_ID=<GitHub App client ID>              # Actions variable
 AI_MAINTAINER_AUTOMATION_BOT_LOGIN=<app-slug>[bot]             # Actions variable, review caller only
 AI_MAINTAINER_APP_PRIVATE_KEY=<full GitHub App PEM>            # Actions secret
-OPENAI_API_KEY=<OpenAI API key>                                # Actions secret
+OPENAI_API_KEY=<OpenAI coordinator/workspace key>              # Actions secret when a mode uses OpenAI
+DEEPSEEK_API_KEY=<DeepSeek coordinator key>                    # Actions secret for the starter issue mode
+OPENAI_TRACE_API_KEY=<dedicated OpenAI trace-export key>       # Actions secret; never a model/provider key
 AI_MAINTAINER_ENABLED=false                                   # Actions variable initially
 ```
 
-The App token is present only in publication jobs. The OpenAI key is present only in analysis jobs.
+The App token is present only in publication jobs. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The starter policy enables Agents SDK tracing with `includeSensitiveData=false`; every caller maps a separate `trace_api_key`. View runs at [OpenAI Platform Traces](https://platform.openai.com/traces) under **Logs > Traces**. This remains true for the DeepSeek issue mode: never map the DeepSeek provider key to `trace_api_key`.
 
 ## 4. Prove the configuration before making the gate required
 

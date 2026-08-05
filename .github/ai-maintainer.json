@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "repository": {
     "displayName": "Example Repository",
     "defaultBranch": "main",
@@ -14,21 +14,103 @@
     "Do not change repository automation, security policy, release configuration, or credentials outside the explicit path policy."
   ],
   "ai": {
-    "review": {
-      "model": "gpt-5.6-sol",
-      "effort": "high"
+    "tracing": {
+      "enabled": true,
+      "includeSensitiveData": false
     },
-    "audit": {
-      "model": "gpt-5.6-sol",
-      "effort": "high"
+    "providers": {
+      "openai": {
+        "baseUrl": "https://api.openai.com/v1",
+        "api": "responses",
+        "structuredOutputs": true,
+        "supportsReasoningEffort": true
+      },
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com",
+        "api": "chat_completions",
+        "structuredOutputs": false,
+        "supportsReasoningEffort": false
+      }
     },
-    "issue": {
-      "model": "gpt-5.6-luna",
-      "effort": "max"
-    },
-    "fix": {
-      "model": "gpt-5.6-terra",
-      "effort": "high"
+    "agents": {
+      "review": {
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "maxTurns": 2,
+        "maximumAttempts": 2,
+        "modelSettings": {
+          "text": {
+            "verbosity": "low"
+          }
+        },
+        "workspace": {
+          "enabled": true,
+          "allowWrites": false,
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      },
+      "audit": {
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "maxTurns": 2,
+        "maximumAttempts": 2,
+        "modelSettings": {
+          "text": {
+            "verbosity": "low"
+          }
+        },
+        "workspace": {
+          "enabled": true,
+          "allowWrites": true,
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      },
+      "issue": {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "effort": "none",
+        "maxTurns": 2,
+        "maximumAttempts": 2,
+        "modelSettings": {
+          "temperature": 0.2,
+          "providerData": {
+            "thinking": {
+              "type": "disabled"
+            },
+            "response_format": {
+              "type": "json_object"
+            }
+          }
+        },
+        "workspace": {
+          "enabled": false,
+          "allowWrites": false,
+          "model": "gpt-5.6-sol",
+          "effort": "low"
+        }
+      },
+      "fix": {
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "effort": "high",
+        "maxTurns": 2,
+        "maximumAttempts": 2,
+        "modelSettings": {
+          "text": {
+            "verbosity": "low"
+          }
+        },
+        "workspace": {
+          "enabled": true,
+          "allowWrites": true,
+          "model": "gpt-5.6-terra",
+          "effort": "high"
+        }
+      }
     }
   },
   "labels": {
@@ -146,11 +228,15 @@
       "ai-maintainer:type-question",
       "ai-maintainer:type-security",
       "ai-maintainer:type-testing"
-    ]
+    ],
+    "maximumDiffBytes": 262144,
+    "maximumChangedFiles": 500,
+    "includeDiffInAgentContext": true
   },
   "audit": {
     "maximumIssuesPerRun": 5,
     "repair": {
+      "enabled": false,
       "allowedPaths": [
         "README.md",
         "*.md",
@@ -199,6 +285,7 @@
     }
   },
   "issues": {
+    "allowAiImplementation": false,
     "closeExactDuplicates": false,
     "maximumOpenIssueContext": 50,
     "managedLabels": [
@@ -223,7 +310,7 @@
     ]
   },
   "merge": {
-    "enabled": true,
+    "enabled": false,
     "method": "SQUASH",
     "allowAutomationPullRequests": true,
     "allowUserPullRequests": false,

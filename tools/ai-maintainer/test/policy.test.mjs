@@ -7,6 +7,7 @@ const source = JSON.parse(
   await readFile(new URL("../../../.github/ai-maintainer.json", import.meta.url), "utf8")
 );
 const config = structuredClone(source);
+config.merge.enabled = true;
 config.audit.repair.maximumPatchBytes ??= 1024;
 config.audit.repair.maximumFileBytes ??= 512;
 
@@ -68,6 +69,7 @@ test("auto-merge is limited to low-risk allowlisted automation PRs", () => {
     pullRequest,
     files: [{ filename: "docs/README.md", additions: 10, deletions: 2 }],
     reviewResult,
+    reviewContextComplete: true,
     automationBotLogin: "ai-maintainer[bot]"
   });
   assert.equal(accepted.eligible, true);
@@ -100,6 +102,34 @@ test("auto-merge is limited to low-risk allowlisted automation PRs", () => {
   });
   assert.equal(agentInstructions.eligible, false);
   assert.ok(agentInstructions.reasons.some((reason) => reason.includes("blocked")));
+});
+
+test("auto-merge fails closed when frozen review diff context is incomplete", () => {
+  const pullRequest = {
+    state: "open",
+    draft: false,
+    user: { login: "ai-maintainer[bot]", type: "Bot" },
+    head: { ref: `${config.repository.automationBranchPrefix}audit-1`, repo: { full_name: "owner/repository" } },
+    base: { repo: { full_name: "owner/repository" } }
+  };
+  const reviewResult = {
+    risk: "low",
+    blockingFindings: [],
+    tests: { adequate: true },
+    mergeRecommendation: "auto"
+  };
+  for (const reviewContextComplete of [false, undefined]) {
+    const decision = evaluateAutoMerge({
+      config,
+      pullRequest,
+      files: [{ filename: "docs/README.md", additions: 1, deletions: 0 }],
+      reviewResult,
+      reviewContextComplete,
+      automationBotLogin: "ai-maintainer[bot]"
+    });
+    assert.equal(decision.eligible, false);
+    assert.ok(decision.reasons.some((reason) => reason.includes("Frozen review diff context is incomplete")));
+  }
 });
 
 

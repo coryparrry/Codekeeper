@@ -105,6 +105,7 @@ export function evaluateAutoMerge({
   pullRequest,
   files,
   reviewResult = null,
+  reviewContextComplete = false,
   automationBotLogin = process.env.AI_MAINTAINER_AUTOMATION_BOT_LOGIN ?? ""
 }) {
   const policy = config.merge;
@@ -150,6 +151,9 @@ export function evaluateAutoMerge({
     if (hasCriticalFinding(reviewResult)) reasons.push("AI review has a critical finding");
     if (!reviewResult.tests.adequate) reasons.push("AI review says test coverage is inadequate");
     if (reviewResult.mergeRecommendation !== "auto") reasons.push(`AI merge recommendation is ${reviewResult.mergeRecommendation}`);
+  }
+  if (!reviewContextComplete) {
+    reasons.push("Frozen review diff context is incomplete");
   }
 
   return {

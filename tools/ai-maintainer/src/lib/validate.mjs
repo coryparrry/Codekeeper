@@ -1,8 +1,8 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { applyPatch, changedFilesBetween, changedLineHunksBetween, collectWorkingTreeChanges, createPatch, currentHead, ensureClean, runValidationCommands } from "./git.mjs";
-import { writeJson } from "./io.mjs";
+import { readRegularFile, readRegularJson, writeJson } from "./io.mjs";
 import { sha256 } from "./markers.mjs";
 import { validatePatch } from "./policy.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
@@ -36,21 +36,6 @@ async function createFreshDirectory(directory) {
   } catch (error) {
     if (error.code === "EEXIST") throw new Error(`Output directory already exists: ${directory}`);
     throw error;
-  }
-}
-
-async function readRegularFile(filePath) {
-  const stat = await lstat(filePath);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Expected a regular file: ${filePath}`);
-  return readFile(filePath);
-}
-
-async function readRegularJson(filePath) {
-  const text = (await readRegularFile(filePath)).toString("utf8");
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error(`Invalid JSON in ${filePath}: ${error.message}`);
   }
 }
 
@@ -220,6 +205,15 @@ export async function validateAudit({ directory, contextPath = path.join(directo
   assertTrustedContext(context, "audit");
   assertFrozenPolicy(context, configSha256);
   const result = validateAuditResult(await readRegularJson(resultPath), config);
+  if (!config.audit.repair.enabled && result.repair.requested) {
+    throw new Error("Audit requested a repair while audit.repair.enabled=false");
+  }
+  if (!config.audit.repair.enabled) {
+    const changes = await collectWorkingTreeChanges();
+    if (changes.files.length > 0) {
+      throw new Error("Audit changed files while audit.repair.enabled=false");
+    }
+  }
   const { patch, patchBytes } = await captureWorkspacePatch({
     context,
     config,

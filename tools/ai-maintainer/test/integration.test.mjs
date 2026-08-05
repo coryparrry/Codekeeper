@@ -6,7 +6,7 @@ import { copyFile, lstat, mkdtemp, mkdir, readFile, symlink, writeFile } from "n
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
+import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -97,6 +97,33 @@ test("working-tree metadata preserves rename and executable-file policy inputs",
   assert.equal(executable.newMode, "100755");
 });
 
+test("review context terminates a large bounded diff and rejects excessive changed-file context", async () => {
+  const root = await createRepository();
+  const base = run("git", ["rev-parse", "HEAD"], root).trim();
+  await writeFile(path.join(root, "large.md"), `${"x".repeat(2 * 1024 * 1024)}\n`, "utf8");
+  await writeFile(path.join(root, "second.md"), "second changed file\n", "utf8");
+  run("git", ["add", "large.md", "second.md"], root);
+  run("git", ["commit", "-qm", "large review context"], root);
+  const head = run("git", ["rev-parse", "HEAD"], root).trim();
+
+  const diff = await boundedDiffBetween(base, head, 512, root);
+  assert.equal(diff.includedBytes, 512);
+  assert.equal(Buffer.byteLength(diff.patch), 512);
+  assert.ok(diff.bytes > diff.includedBytes);
+  assert.ok(diff.bytes < 2 * 1024 * 1024);
+  assert.equal(diff.bytesExact, false);
+  assert.equal(diff.truncated, true);
+  const complete = await boundedDiffBetween(base, head, 3 * 1024 * 1024, root);
+  assert.equal(complete.bytesExact, true);
+  assert.equal(complete.truncated, false);
+  assert.equal(complete.bytes, complete.includedBytes);
+  assert.equal(complete.bytes, Buffer.byteLength(complete.patch));
+  await assert.rejects(
+    boundedChangedFilesBetween(base, head, 1, root),
+    /changed-file context exceeds configured maximum/
+  );
+});
+
 function prepareAudit(root, directory, env = {}) {
   run(
     "node",
@@ -126,6 +153,88 @@ test("prepare requires an external runner-owned directory and cannot follow chec
   assert.equal(await readFile(victim, "utf8"), "safe\n");
 });
 
+test("workspace patch handoff applies captured regular-file bytes in a fresh checkout", async () => {
+  const root = await createRepository();
+  const directory = bundle(root, "workspace");
+  const patch = path.join(directory, "workspace.patch");
+  const coordinator = bundle(root, "coordinator");
+  prepareAudit(root, directory);
+  await writeFile(path.join(root, "README.md"), "# Example\n\nWorkspace evidence.\n", "utf8");
+  run(
+    "node",
+    [cli, "capture-workspace-patch", "--config", ".github/ai-maintainer.json", "--directory", directory, "--patch", patch],
+    root,
+    { GITHUB_REPOSITORY: "acme/example" }
+  );
+  run("git", ["clone", "-q", root, coordinator], root);
+  run(
+    "node",
+    [cli, "apply-workspace-patch", "--config", ".github/ai-maintainer.json", "--patch", patch],
+    coordinator,
+    { GITHUB_REPOSITORY: "acme/example" }
+  );
+  assert.equal(await readFile(path.join(coordinator, "README.md"), "utf8"), "# Example\n\nWorkspace evidence.\n");
+});
+
+test("workspace patch handoff accepts an empty specialist patch", async () => {
+  const root = await createRepository();
+  const directory = bundle(root, "empty-workspace");
+  const patch = path.join(directory, "workspace.patch");
+  const coordinator = bundle(root, "empty-coordinator");
+  prepareAudit(root, directory);
+  run(
+    "node",
+    [cli, "capture-workspace-patch", "--config", ".github/ai-maintainer.json", "--directory", directory, "--patch", patch],
+    root,
+    { GITHUB_REPOSITORY: "acme/example" }
+  );
+  run("git", ["clone", "-q", root, coordinator], root);
+  run(
+    "node",
+    [cli, "apply-workspace-patch", "--config", ".github/ai-maintainer.json", "--patch", patch],
+    coordinator,
+    { GITHUB_REPOSITORY: "acme/example" }
+  );
+  assert.equal(await readFile(path.join(coordinator, "README.md"), "utf8"), "# Example\n");
+  const link = path.join(directory, "workspace-link.patch");
+  await symlink(patch, link);
+  let error;
+  try {
+    run(
+      "node",
+      [cli, "apply-workspace-patch", "--config", ".github/ai-maintainer.json", "--patch", link],
+      coordinator,
+      { GITHUB_REPOSITORY: "acme/example" }
+    );
+  } catch (caught) {
+    error = caught;
+  }
+  assert.ok(error);
+  assert.match(error.stderr.toString("utf8"), /Expected a regular file/);
+});
+
+test("workspace patch capture rejects a checkout whose frozen base commit moved", async () => {
+  const root = await createRepository();
+  const directory = bundle(root, "moved-workspace");
+  prepareAudit(root, directory);
+  await writeFile(path.join(root, "README.md"), "# Example\n\nMoved checkout.\n", "utf8");
+  run("git", ["add", "README.md"], root);
+  run("git", ["commit", "-qm", "move checkout"], root);
+  let error;
+  try {
+    run(
+      "node",
+      [cli, "capture-workspace-patch", "--config", ".github/ai-maintainer.json", "--directory", directory, "--patch", path.join(directory, "workspace.patch")],
+      root,
+      { GITHUB_REPOSITORY: "acme/example" }
+    );
+  } catch (caught) {
+    error = caught;
+  }
+  assert.ok(error);
+  assert.match(error.stderr.toString("utf8"), /Workspace checkout HEAD .* does not match frozen context\.baseSha/);
+});
+
 test("issue preparation requires an explicitly authorised actor", async () => {
   const root = await createRepository();
   const directory = bundle(root, "issue-input");
@@ -152,6 +261,7 @@ test("audit candidate validation preserves caller changes and clears repository 
   const verifier = bundle(root, "verifier");
   const configPath = path.join(root, ".github/ai-maintainer.json");
   const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.audit.repair.enabled = true;
   config.audit.repair.validationCommands = ["test -z \"$GITHUB_TOKEN\" && test -z \"$OPENAI_API_KEY\" && test -z \"$ACTIONS_RUNTIME_TOKEN\""];
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   run("git", ["add", ".github/ai-maintainer.json"], root);

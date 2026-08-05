@@ -1,6 +1,6 @@
 # AI Repo Maintainer
 
-AI Repo Maintainer is a dependency-free set of **versioned reusable GitHub Actions workflows** for one repository at a time. It reviews same-repository pull requests, triages maintainer-requested issues, audits the default branch, and can open bounded repair pull requests.
+AI Repo Maintainer is a set of **versioned reusable GitHub Actions workflows** for one repository at a time. It uses four independently configured Agents SDK coordinators to review same-repository pull requests, triage maintainer-requested issues, audit the default branch, and implement explicitly enabled, bounded fixes.
 
 It is not a hosted service, webhook receiver, multi-tenant GitHub App, or npm package. Each adopter owns its GitHub App credentials and policy; caller workflows pin this repository to an immutable release commit.
 
@@ -15,18 +15,20 @@ It is not a hosted service, webhook receiver, multi-tenant GitHub App, or npm pa
 
 Copy the matching non-executable templates from [`examples/workflows`](examples/workflows) into the adopter repository, replace `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copy [`.github/ai-maintainer.json`](.github/ai-maintainer.json) into the adopter's default branch. The reusable workflows check out their own pinned tooling revision; adopters do not copy `tools/ai-maintainer` or the source workflow files.
 
-The root policy is a valid starter, not a safe default for every repository. Before enabling it, replace `repository.ownerLogins`, verify the default branch and automation prefix, and tailor repair, validation, and auto-merge paths. The runtime label names are intentionally namespaced and must remain defined exactly as supplied.
+The root policy is a valid starter, not a safe default for every repository. Before enabling it, replace `repository.ownerLogins`, verify the default branch and automation prefix, and tailor repair, validation, and auto-merge paths. Each mode has its own `ai.agents.<mode>` provider, model, settings, and optional Codex workspace specialist. The runtime label names are intentionally namespaced and must remain defined exactly as supplied. See [configuration](docs/CONFIGURATION.md).
 
 ## Security model
 
-- The OpenAI key and GitHub App write token are never present in the same job.
+- Codex runs in a workspace-only job with no model, trace, or GitHub App credential. A fresh coordinator job receives model and optional trace credentials, rebuilds trusted context, and treats the specialist artifact as untrusted evidence.
+- The GitHub App write token exists only in publication; verification and sealing remain credential-free.
 - Workflow code is fetched from the caller's pinned source revision; adopter policy is read only from its default branch.
 - The review caller is a default-branch `pull_request_target` definition: it only invokes the reusable workflow and never checks out or executes PR code.
 - Event fields, issue text, comments, repository files, and model output are treated as untrusted data. Frozen workflow context is embedded in the model prompt.
 - Candidate output is structurally validated, copied into a sealed artifact, and published only by a later App-token job. Repository code is never executed in that publishing job.
 - Repair patches are checked again in a fresh credential-free checkout before sealing and publication.
 - Review labels, sticky comments, issue fingerprints, and repair PRs trust only the configured GitHub App bot identity.
-- Auto-merge remains opt-in and is independently limited by author, branch, risk, tests, paths, files, and changed lines.
+- Auto-merge remains opt-in and is independently limited by author, branch, risk, tests, paths, files, changed lines, and complete frozen diff context.
+- Agents SDK tracing is enabled by the starter policy with `includeSensitiveData=false`. It requires a separate OpenAI `trace_api_key` even when the selected model provider is DeepSeek; traces appear in [OpenAI Platform Traces](https://platform.openai.com/traces) under **Logs > Traces**.
 
 See [the architecture](docs/ARCHITECTURE.md) and [installation guide](INSTALL.md) for the exact boundaries.
 
@@ -45,7 +47,7 @@ Treebar-specific paths and policy are kept only as an optional [example](example
 
 ```bash
 node tools/ai-maintainer/src/cli.mjs check-config
-cd tools/ai-maintainer && npm test
+cd tools/ai-maintainer && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
 
-The package has no runtime npm dependencies and requires Node.js 22 or newer locally. The reusable workflows pin Node.js and the Codex CLI themselves.
+The package pins its Agents SDK dependencies and requires Node.js 22 or newer locally. The reusable workflows pin Node.js, npm dependencies, and the optional Codex CLI themselves.

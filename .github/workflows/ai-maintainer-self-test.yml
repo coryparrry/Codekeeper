@@ -17,7 +17,6 @@ on:
 
 permissions:
   contents: read
-  checks: write
 
 jobs:
   maintainer-checks:
@@ -31,17 +30,18 @@ jobs:
         with:
           node-version: 24.19.0
           package-manager-cache: false
-      - name: Run maintainer unit tests
+      - name: Install pinned Agents SDK runtime
         working-directory: tools/ai-maintainer
-        run: npm test
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run maintainer syntax and unit checks
+        working-directory: tools/ai-maintainer
+        run: npm run check
       - name: Validate GitHub Actions workflow contracts
         uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e # v1.73.0
         with:
-          reporter: github-pr-check
+          reporter: github-annotations
           filter_mode: nofilter
           fail_level: any
-          # actionlint predates GitHub's reusable-workflow identity fields.
-          actionlint_flags: -ignore 'property "workflow_(repository|sha)" is not defined'
       - name: Syntax-check workflow YAML
         run: |
           ruby -e 'require "yaml"; Dir[".github/workflows/ai-maintainer-*.yml"].each { |file| YAML.load_file(file); puts "parsed #{file}" }'

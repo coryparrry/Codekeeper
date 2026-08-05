@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { loadConfig } from "./lib/config.mjs";
-import { log, parseArgs, setGitHubOutput } from "./lib/io.mjs";
+import os from "node:os";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { getAgentRuntimeSettings, loadConfig } from "./lib/config.mjs";
+import { log, parseArgs, readJson, readRegularFile, setGitHubOutput } from "./lib/io.mjs";
+import { applyPatch, createPatch, currentHead } from "./lib/git.mjs";
 import { prepareAudit, prepareFix, prepareIssue, prepareReview } from "./lib/prepare.mjs";
 import { publishAudit, publishFix, publishIssue, publishReview } from "./lib/publish.mjs";
 import { sealAudit, sealFix, sealIssue, sealReview, validateAudit, validateFix, validateIssue, validateReview, verifyAudit, verifyFix } from "./lib/validate.mjs";
 import { assertRunnerOwnedDirectory } from "./lib/workspace.mjs";
 import { sha256 } from "./lib/markers.mjs";
+import { runAgentFromBundle } from "./lib/agents-runtime.mjs";
 
 function integer(value, name) {
   const parsed = Number(value);
@@ -22,6 +25,25 @@ function bundleFile(directory, filePath, flag) {
     throw new Error(`--${flag} must be a file inside the runner-owned --directory`);
   }
   return resolved;
+}
+
+function runnerFile(filePath, flag) {
+  const resolved = path.resolve(filePath);
+  assertRunnerOwnedDirectory(path.dirname(resolved));
+  return resolved;
+}
+
+async function applyUntrustedWorkspacePatch(patchPath) {
+  const patch = await readRegularFile(patchPath);
+  if (patch.length === 0) return;
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "ai-maintainer-workspace-patch-"));
+  try {
+    const safePatchPath = path.join(temporaryDirectory, "workspace.patch");
+    await writeFile(safePatchPath, patch);
+    applyPatch(safePatchPath);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
 }
 
 async function main() {
@@ -40,7 +62,7 @@ async function main() {
   );
   const { config, path: loadedConfigPath } = await loadConfig(configPath);
   const configSha256 = sha256(await readFile(loadedConfigPath));
-  const usesRunnerDirectory = command.startsWith("prepare-") || command.startsWith("validate-");
+  const usesRunnerDirectory = command.startsWith("prepare-") || command.startsWith("validate-") || command === "run-agent" || command === "capture-workspace-patch";
   const directory = usesRunnerDirectory
     ? assertRunnerOwnedDirectory(args.require("directory"))
     : null;
@@ -55,6 +77,35 @@ async function main() {
   switch (command) {
     case "check-config":
       result = { valid: true, version: config.version };
+      break;
+    case "agent-settings":
+      result = getAgentRuntimeSettings(config, args.require("mode"));
+      break;
+    case "run-agent":
+      result = await runAgentFromBundle({
+        mode: args.require("mode"),
+        directory,
+        config,
+        resultPath: bundleFile(directory, args.require("result"), "result"),
+        workspaceResultPath: args.get("workspace-result")
+          ? runnerFile(args.get("workspace-result"), "workspace-result")
+          : undefined
+      });
+      break;
+    case "capture-workspace-patch":
+      {
+        const context = await readJson(contextPath);
+        const expectedHead = String(context.baseSha ?? "").trim();
+        const actualHead = currentHead();
+        if (!expectedHead || actualHead !== expectedHead) {
+          throw new Error(`Workspace checkout HEAD ${actualHead} does not match frozen context.baseSha ${expectedHead || "missing"}`);
+        }
+      }
+      result = await createPatch(bundleFile(directory, args.require("patch"), "patch"));
+      break;
+    case "apply-workspace-patch":
+      await applyUntrustedWorkspacePatch(runnerFile(args.require("patch"), "patch"));
+      result = { applied: true };
       break;
     case "prepare-review":
       result = await prepareReview({ eventPath: args.require("event"), directory, config, toolingSha, configSha256 });
@@ -141,6 +192,12 @@ async function main() {
   }
 
   await setGitHubOutput("result", JSON.stringify(result));
+  if (command === "agent-settings") {
+    for (const [name, value] of Object.entries(result)) {
+      const outputName = name.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`);
+      await setGitHubOutput(outputName, value);
+    }
+  }
   if (result?.candidateSha256) await setGitHubOutput("candidate_sha256", result.candidateSha256);
   log(`${command} completed`);
 

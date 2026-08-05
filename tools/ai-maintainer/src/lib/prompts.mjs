@@ -38,6 +38,7 @@ TASK:
 Review only the changes in pull request #${context.pullRequest.number}.
 The trusted comparison is:
   git diff ${context.pullRequest.baseSha}...${context.pullRequest.headSha}
+A bounded copy of that diff and its changed-file list are present in the frozen context for the provider-neutral coordinator. If context.pullRequest.diff.truncated is true, do not infer that omitted changes are safe; recommend manual review unless the workspace specialist supplied enough concrete evidence.
 
 Evaluate correctness, regressions, security, data loss, concurrency, lifecycle behavior, error handling, tests, and unnecessary complexity. Prefer a small number of high-confidence findings. Do not block for taste, formatting, speculative concerns, or pre-existing problems outside this diff. Do not modify the checkout.
 
@@ -63,7 +64,7 @@ Audit the current default-branch checkout at ${context.baseSha} for real, eviden
 
 Do not create findings merely to fill the quota. Report at most ${config.audit.maximumIssuesPerRun} findings. Each finding needs concrete evidence and an owning path. Reuse a stable problemKey for the same underlying problem across future runs.
 
-You may implement at most one narrow repair. A repair is optional. Only edit files allowed by this policy:
+You may implement at most one narrow repair. A repair is optional and repository policy currently sets repair.enabled=${repair.enabled}. When it is false, leave the worktree unchanged and set repair.requested=false. When it is true, only edit files allowed by this policy:
 ${repair.allowedPaths.map((item) => `- ${item}`).join("\n")}
 
 Never edit protected paths:

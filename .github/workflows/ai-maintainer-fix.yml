@@ -22,8 +22,18 @@ on:
         required: true
         type: string
     secrets:
-      openai_api_key:
+      model_api_key:
+        description: API key for the provider selected by ai.agents.fix.provider.
         required: true
+      workspace_api_key:
+        description: OpenAI API key for the optional Codex workspace specialist.
+        required: false
+      openai_api_key:
+        description: Deprecated compatibility fallback for the Codex workspace specialist only.
+        required: false
+      trace_api_key:
+        description: Dedicated OpenAI API key used only to export required Agents SDK traces.
+        required: false
       app_private_key:
         required: true
 
@@ -36,7 +46,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  analyze:
+  workspace:
+    name: AI Maintainer implementation workspace specialist
     # Comment-triggered implementation is deliberately maintainer-only. The
     # frozen config then checks the exact configured owner login before Codex runs.
     if: >-
@@ -50,8 +61,10 @@ jobs:
          github.event.comment.author_association == 'COLLABORATOR')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: read
     outputs:
-      candidate_sha256: ${{ steps.validate.outputs.candidate_sha256 }}
       context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
     steps:
       - name: Resolve authorised issue target
@@ -108,23 +121,167 @@ jobs:
             --tooling-sha "$AI_MAINTAINER_TOOLING_SHA"
           {
             echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
-            echo "model=$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).ai.fix.model)' "$CONFIG")"
-            echo "effort=$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).ai.fix.effort)' "$CONFIG")"
           } >> "$GITHUB_OUTPUT"
-      - name: Implement with pinned Codex
+      - name: Resolve fix agent settings
+        id: settings
+        working-directory: repository
+        env:
+          CONFIG: ${{ runner.temp }}/ai-maintainer-config.json
+        run: |
+          node ../tooling/tools/ai-maintainer/src/cli.mjs agent-settings \
+            --config "$CONFIG" \
+            --mode fix
+      - name: Require optional workspace specialist key
+        if: steps.settings.outputs.workspace_enabled == 'true'
+        env:
+          WORKSPACE_API_KEY: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
+        run: |
+          test -n "$WORKSPACE_API_KEY" || {
+            echo "workspace_api_key is required because ai.agents.fix.workspace.enabled=true"
+            exit 1
+          }
+      - name: Implement with optional Codex specialist
+        if: steps.settings.outputs.workspace_enabled == 'true'
         uses: openai/codex-action@10cb888d2ed3b99867f7e7ccff174a861a75aeb6 # v1.9
         with:
-          openai-api-key: ${{ secrets.openai_api_key }}
+          openai-api-key: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
           codex-version: 0.146.0
-          model: ${{ steps.prepare.outputs.model }}
-          effort: ${{ steps.prepare.outputs.effort }}
-          sandbox: workspace-write
+          model: ${{ steps.settings.outputs.workspace_model }}
+          effort: ${{ steps.settings.outputs.workspace_effort }}
+          sandbox: ${{ steps.settings.outputs.workspace_sandbox }}
           safety-strategy: drop-sudo
           allow-users: ${{ github.actor }}
           working-directory: repository
           prompt-file: ${{ runner.temp }}/ai-maintainer-bundle/prompt.md
-          output-file: ${{ runner.temp }}/ai-maintainer-bundle/codex-result.json
+          output-file: ${{ runner.temp }}/ai-maintainer-bundle/workspace-result.json
           output-schema-file: ${{ runner.temp }}/ai-maintainer-bundle/schema.json
+      - name: Capture untrusted workspace patch
+        working-directory: repository
+        env:
+          BUNDLE: ${{ runner.temp }}/ai-maintainer-bundle
+          CONFIG: ${{ runner.temp }}/ai-maintainer-config.json
+        run: |
+          node ../tooling/tools/ai-maintainer/src/cli.mjs capture-workspace-patch \
+            --config "$CONFIG" \
+            --directory "$BUNDLE" \
+            --patch "$BUNDLE/workspace.patch"
+      - name: Upload untrusted workspace evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-maintainer-fix-workspace-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ai-maintainer-bundle
+          retention-days: 1
+          if-no-files-found: error
+
+  analyze:
+    name: AI Maintainer implementation analysis
+    needs: workspace
+    if: needs.workspace.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      candidate_sha256: ${{ steps.validate.outputs.candidate_sha256 }}
+      context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
+    steps:
+      - name: Resolve authorised issue target
+        id: target
+        env:
+          MANUAL_ISSUE: ${{ inputs.issue_number }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+        run: |
+          issue="${MANUAL_ISSUE:-$EVENT_ISSUE}"
+          [[ "$issue" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue number"; exit 1; }
+          echo "issue_number=$issue" >> "$GITHUB_OUTPUT"
+      - name: Check out frozen maintainer tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: tooling
+          persist-credentials: false
+      - name: Check out trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          path: repository
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Install pinned Agents SDK runtime
+        working-directory: tooling/tools/ai-maintainer
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Download untrusted workspace evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ai-maintainer-fix-workspace-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ai-maintainer-workspace
+      - name: Prepare runner-owned implementation bundle
+        id: prepare
+        working-directory: repository
+        env:
+          AI_MAINTAINER_TOOLING_SHA: ${{ job.workflow_sha }}
+          BUNDLE: ${{ runner.temp }}/ai-maintainer-bundle
+          CONFIG: ${{ runner.temp }}/ai-maintainer-config.json
+          SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/ai-maintainer.json
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.target.outputs.issue_number }}
+        run: |
+          [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
+          cp "$SOURCE_CONFIG" "$CONFIG"
+          [[ "$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).repository.defaultBranch)' "$CONFIG")" == "$DEFAULT_BRANCH" ]] || {
+            echo "Configured default branch does not match the repository default branch"
+            exit 1
+          }
+          node ../tooling/tools/ai-maintainer/src/cli.mjs prepare-fix \
+            --config "$CONFIG" \
+            --directory "$BUNDLE" \
+            --issue-number "$ISSUE_NUMBER" \
+            --actor "$GITHUB_ACTOR" \
+            --tooling-sha "$AI_MAINTAINER_TOOLING_SHA"
+          {
+            echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
+          } >> "$GITHUB_OUTPUT"
+      - name: Bind workspace evidence to frozen context
+        env:
+          WORKSPACE_CONTEXT_SHA256: ${{ needs.workspace.outputs.context_sha256 }}
+          COORDINATOR_CONTEXT_SHA256: ${{ steps.prepare.outputs.context_sha256 }}
+        run: |
+          test -n "$WORKSPACE_CONTEXT_SHA256" || { echo "Workspace context digest is missing"; exit 1; }
+          test -n "$COORDINATOR_CONTEXT_SHA256" || { echo "Coordinator context digest is missing"; exit 1; }
+          [[ "$WORKSPACE_CONTEXT_SHA256" == "$COORDINATOR_CONTEXT_SHA256" ]] || {
+            echo "Workspace evidence does not match the frozen coordinator context"
+            exit 1
+          }
+      - name: Finalize implementation result with configured Agents SDK model
+        working-directory: repository
+        env:
+          AI_MAINTAINER_MODEL_API_KEY: ${{ secrets.model_api_key }}
+          AI_MAINTAINER_TRACE_API_KEY: ${{ secrets.trace_api_key }}
+          BUNDLE: ${{ runner.temp }}/ai-maintainer-bundle
+          WORKSPACE: ${{ runner.temp }}/ai-maintainer-workspace
+          CONFIG: ${{ runner.temp }}/ai-maintainer-config.json
+        run: |
+          node ../tooling/tools/ai-maintainer/src/cli.mjs run-agent \
+            --config "$CONFIG" \
+            --mode fix \
+            --directory "$BUNDLE" \
+            --workspace-result "$WORKSPACE/workspace-result.json" \
+            --result "$BUNDLE/agent-result.json"
+      - name: Apply untrusted workspace patch
+        working-directory: repository
+        env:
+          WORKSPACE: ${{ runner.temp }}/ai-maintainer-workspace
+        run: |
+          node ../tooling/tools/ai-maintainer/src/cli.mjs apply-workspace-patch \
+            --patch "$WORKSPACE/workspace.patch"
       - name: Capture untrusted implementation candidate
         id: validate
         working-directory: repository
@@ -138,7 +295,7 @@ jobs:
             --config "$CONFIG" \
             --directory "$BUNDLE" \
             --context "$BUNDLE/context.json" \
-            --result "$BUNDLE/codex-result.json" \
+            --result "$BUNDLE/agent-result.json" \
             --artifact "$CANDIDATE" \
             --issue-number "$ISSUE_NUMBER"
       - name: Upload untrusted implementation candidate

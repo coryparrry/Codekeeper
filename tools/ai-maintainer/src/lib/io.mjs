@@ -1,5 +1,31 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+export async function readRegularFile(filePath) {
+  const information = await lstat(filePath);
+  if (!information.isFile() || information.isSymbolicLink()) {
+    throw new Error(`Expected a regular file: ${filePath}`);
+  }
+  return readFile(filePath);
+}
+
+export async function readRegularJson(filePath) {
+  const text = (await readRegularFile(filePath)).toString("utf8");
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${filePath}: ${error.message}`);
+  }
+}
+
+export async function readOptionalRegularJson(filePath) {
+  try {
+    return await readRegularJson(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
 
 export async function readJson(filePath) {
   const text = await readFile(filePath, "utf8");

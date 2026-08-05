@@ -103,7 +103,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, t
   const pull = await currentReviewPull(github, context, config);
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
   const automationBotLogin = String(process.env.AI_MAINTAINER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
-  const autoMerge = evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, automationBotLogin });
+  const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
+  const autoMerge = evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin });
   const desiredSet = new Set(reviewLabels(result));
   desiredSet.delete("ai-maintainer:auto-merge");
   desiredSet.delete("ai-maintainer:manual-review");
@@ -138,7 +139,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, t
   );
 
   const currentPull = await currentReviewPull(github, context, config);
-  const currentAutoMerge = evaluateAutoMerge({ config, pullRequest: currentPull, files, reviewResult: result, automationBotLogin: automationIdentity.login });
+  const currentAutoMerge = evaluateAutoMerge({ config, pullRequest: currentPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
   const autoMergeResult = await reconcileAutoMerge(github, currentPull, config, currentAutoMerge);
   return { pullRequest: pull.number, desiredLabels, autoMerge: currentAutoMerge, autoMergeResult, blocking };
 }

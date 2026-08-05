@@ -100,19 +100,50 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
   for (const mode of modes) {
     const source = await workflow(mode);
     const repairMode = mode === "maintain" || mode === "fix";
+    const effectiveMode = mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode;
+    const workspace = jobSection(source, "workspace", "analyze");
     const analyze = jobSection(source, "analyze", repairMode ? "verify" : "seal");
     const verify = repairMode ? jobSection(source, "verify", "seal") : null;
     const seal = jobSection(source, "seal", "publish");
     const publish = jobSection(source, "publish", mode === "review" ? "gate" : undefined);
 
+    assert.match(workspace, /ai-maintainer-bundle/);
+    assert.match(workspace, /ai-maintainer-config\.json/);
+    assert.match(workspace, /cp "\$SOURCE_CONFIG" "\$CONFIG"/);
+    assert.match(workspace, /Configured default branch does not match the repository default branch/);
+    assert.match(workspace, new RegExp(`prepare-${effectiveMode}`));
+    assert.match(workspace, /openai\/codex-action@/);
+    assert.match(workspace, /outputs:\n\s+context_sha256: \$\{\{ steps\.prepare\.outputs\.context_sha256 \}\}/);
+    if (repairMode) {
+      assert.match(workspace, /capture-workspace-patch/);
+      assert.match(workspace, /workspace\.patch/);
+    } else {
+      assert.doesNotMatch(workspace, /capture-workspace-patch|workspace\.patch/);
+    }
+    assert.doesNotMatch(workspace, /secrets\.(?:model_api_key|trace_api_key|app_private_key|app_client_id)/);
+    assert.doesNotMatch(workspace, /AI_MAINTAINER_(?:MODEL|TRACE)_API_KEY/);
+    assert.doesNotMatch(workspace, /create-github-app-token/);
+
+    assert.match(analyze, /needs: workspace/);
     assert.match(analyze, /ai-maintainer-bundle/);
     assert.match(analyze, /ai-maintainer-config\.json/);
     assert.match(analyze, /cp "\$SOURCE_CONFIG" "\$CONFIG"/);
     assert.match(analyze, /Configured default branch does not match the repository default branch/);
     assert.match(analyze, /ai-maintainer-candidate/);
-    assert.match(analyze, new RegExp(`prepare-${mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode}`));
-    assert.match(analyze, new RegExp(`validate-${mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode}`));
-    assert.match(analyze, /openai\/codex-action@/);
+    assert.match(analyze, new RegExp(`prepare-${effectiveMode}`));
+    assert.match(analyze, new RegExp(`validate-${effectiveMode}`));
+    assert.match(analyze, /download-artifact@/);
+    assert.match(analyze, /--workspace-result "\$WORKSPACE\/workspace-result\.json"/);
+    assert.match(analyze, /Bind workspace evidence to frozen context/);
+    assert.match(analyze, /needs\.workspace\.outputs\.context_sha256/);
+    assert.match(analyze, /steps\.prepare\.outputs\.context_sha256/);
+    assert.ok(analyze.indexOf("Bind workspace evidence to frozen context") < analyze.indexOf("run-agent"));
+    if (repairMode) {
+      assert.match(analyze, /apply-workspace-patch/);
+    } else {
+      assert.doesNotMatch(analyze, /apply-workspace-patch|workspace\.patch/);
+    }
+    assert.doesNotMatch(analyze, /openai\/codex-action@|secrets\.(?:workspace_api_key|openai_api_key|app_private_key)/);
     assert.doesNotMatch(analyze, /create-github-app-token/);
 
     if (verify) {
@@ -169,4 +200,49 @@ test("issue triage and fixes require exact maintainer commands before Codex can 
     assert.doesNotMatch(source, /issues:\n\s+types: \[opened/);
   }
   assert.match(issue, /prepare-issue[\s\S]*--actor "\$GITHUB_ACTOR"/);
+});
+
+test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {
+  const packageJson = JSON.parse(await repositoryFile("tools/ai-maintainer/package.json"));
+  const packageLock = JSON.parse(await repositoryFile("tools/ai-maintainer/package-lock.json"));
+  assert.deepEqual(packageJson.dependencies, { "@openai/agents": "0.14.2", zod: "4.4.3" });
+  assert.equal(packageLock.lockfileVersion, 3);
+  assert.equal(packageLock.packages[""].dependencies["@openai/agents"], "0.14.2");
+  assert.equal(packageLock.packages[""].dependencies.zod, "4.4.3");
+
+  for (const mode of modes) {
+    const source = await workflow(mode);
+    const caller = await repositoryFile(`examples/workflows/ai-maintainer-${mode}.yml.example`);
+    const repairMode = mode === "maintain" || mode === "fix";
+    const workspace = jobSection(source, "workspace", "analyze");
+    const analyze = jobSection(source, "analyze", repairMode ? "verify" : "seal");
+    const effectiveMode = mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode;
+    assert.match(source, /model_api_key:\n[\s\S]*required: true/);
+    assert.match(source, /trace_api_key:\n\s+description:[^\n]*\n\s+required: false/);
+    assert.doesNotMatch(workspace, /npm ci --ignore-scripts --no-audit --no-fund/);
+    assert.match(workspace, new RegExp(`agent-settings[\\s\\S]*--mode ${effectiveMode}`));
+    assert.match(workspace, /secrets\.workspace_api_key \|\| secrets\.openai_api_key/);
+    assert.doesNotMatch(workspace, /secrets\.(?:model_api_key|trace_api_key|app_private_key)/);
+    assert.match(analyze, /npm ci --ignore-scripts --no-audit --no-fund/);
+    assert.match(analyze, /run-agent/);
+    assert.match(analyze, /AI_MAINTAINER_MODEL_API_KEY: \$\{\{ secrets\.model_api_key \}\}/);
+    assert.doesNotMatch(analyze, /AI_MAINTAINER_MODEL_API_KEY: \$\{\{ secrets\.model_api_key \|\| secrets\.openai_api_key \}\}/);
+    assert.match(analyze, /AI_MAINTAINER_TRACE_API_KEY: \$\{\{ secrets\.trace_api_key \}\}/);
+    assert.match(analyze, /workspace-result\.json/);
+    assert.match(analyze, /agent-result\.json/);
+    assert.match(caller, /model_api_key:/);
+    assert.match(caller, /trace_api_key: \$\{\{ secrets\.OPENAI_TRACE_API_KEY \}\}/);
+  }
+
+  const selfTest = await workflow("self-test");
+  assert.match(selfTest, /npm ci --ignore-scripts --no-audit --no-fund/);
+  assert.match(selfTest, /npm run check/);
+});
+
+test("self-test reports through annotations with read-only repository permissions", async () => {
+  const selfTest = await workflow("self-test");
+  assert.match(selfTest, /permissions:\n\s+contents: read/);
+  assert.doesNotMatch(selfTest, /checks: write/);
+  assert.match(selfTest, /reporter: github-annotations/);
+  assert.match(selfTest, /fail_level: any/);
 });

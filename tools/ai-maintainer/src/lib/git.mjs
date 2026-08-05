@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { copyFile, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -291,6 +291,127 @@ export function changedFilesBetween(base, head, cwd = process.cwd()) {
     git(["diff", "--name-only", "-z", `${base}...${head}`], { cwd, encoding: null }).stdout
   );
   return tokens;
+}
+
+export function boundedDiffBetween(base, head, maximumBytes, cwd = process.cwd()) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0) {
+    throw new Error("maximumBytes must be a positive integer");
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", [
+      "diff", "--no-ext-diff", "--no-renames", `${base}...${head}`
+    ], { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const chunks = [];
+    let includedBytes = 0;
+    let bytes = 0;
+    let stderr = "";
+    let truncated = false;
+    let settled = false;
+    const settle = (error, value) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(value);
+    };
+    child.stdout.on("data", (chunk) => {
+      if (truncated) return;
+      bytes += chunk.length;
+      const remaining = maximumBytes - includedBytes;
+      if (remaining > 0) {
+        // Copy instead of retaining a subarray backed by the complete stream
+        // chunk: maximumBytes is a true in-memory capture bound.
+        const selected = Buffer.from(chunk.subarray(0, remaining));
+        chunks.push(selected);
+        includedBytes += selected.length;
+      }
+      if (chunk.length > remaining) {
+        truncated = true;
+        child.kill();
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-12000);
+    });
+    child.once("error", (error) => {
+      if (!truncated) settle(error);
+    });
+    child.once("close", (code) => {
+      if (truncated) {
+        settle(null, {
+          patch: Buffer.concat(chunks).toString("utf8"),
+          bytes,
+          bytesExact: false,
+          includedBytes,
+          truncated: true
+        });
+        return;
+      }
+      if (code !== 0) {
+        settle(new Error(`git diff failed with exit code ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
+        return;
+      }
+      const patch = Buffer.concat(chunks);
+      settle(null, {
+        patch: patch.toString("utf8"),
+        bytes,
+        bytesExact: true,
+        includedBytes,
+        truncated: false
+      });
+    });
+  });
+}
+
+export function boundedChangedFilesBetween(base, head, maximumFiles, cwd = process.cwd()) {
+  if (!Number.isSafeInteger(maximumFiles) || maximumFiles <= 0) {
+    throw new Error("maximumFiles must be a positive integer");
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["diff", "--name-only", "-z", `${base}...${head}`], {
+      cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const files = [];
+    let pending = Buffer.alloc(0);
+    let exceeded = false;
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      if (exceeded) return;
+      pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
+      let delimiter;
+      while ((delimiter = pending.indexOf(0)) !== -1) {
+        const file = pending.subarray(0, delimiter).toString("utf8");
+        pending = pending.subarray(delimiter + 1);
+        if (!file) continue;
+        files.push(file);
+        if (files.length > maximumFiles) {
+          exceeded = true;
+          child.kill();
+          return;
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-12000);
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (exceeded) {
+        reject(new Error(`Review changed-file context exceeds configured maximum of ${maximumFiles} files`));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(`git diff --name-only failed with exit code ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
+        return;
+      }
+      if (pending.length !== 0) {
+        reject(new Error("Could not parse git diff --name-only output"));
+        return;
+      }
+      resolve(files);
+    });
+  });
 }
 
 // A review may cite only a line that exists in the current side of a changed

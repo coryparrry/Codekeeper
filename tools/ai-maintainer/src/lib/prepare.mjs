@@ -1,6 +1,6 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
-import { currentHead } from "./git.mjs";
+import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
 import { auditSchema, fixSchema, issueSchema, reviewSchema } from "./schemas.mjs";
@@ -80,6 +80,26 @@ export async function prepareReview({ eventPath, directory, config, toolingSha, 
   if (!context.pullRequest.baseSha || !context.pullRequest.headSha) {
     throw new Error("Pull request base/head SHA is missing");
   }
+  context.pullRequest.changedFiles = await boundedChangedFilesBetween(
+    context.pullRequest.baseSha,
+    context.pullRequest.headSha,
+    config.review.maximumChangedFiles
+  );
+  if (config.review.includeDiffInAgentContext) {
+    context.pullRequest.diff = await boundedDiffBetween(
+      context.pullRequest.baseSha,
+      context.pullRequest.headSha,
+      config.review.maximumDiffBytes
+    );
+  } else {
+    context.pullRequest.diff = {
+      patch: "",
+      bytes: 0,
+      includedBytes: 0,
+      truncated: false,
+      disabled: true
+    };
+  }
   await writeBundle({
     directory,
     context,
@@ -149,6 +169,9 @@ export async function prepareIssue({ eventPath, actor, directory, config, token,
 }
 
 export async function prepareFix({ issueNumber, actor, directory, config, token, toolingSha, configSha256 }) {
+  if (!config.issues.allowAiImplementation) {
+    throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
+  }
   if (!config.repository.ownerLogins.includes(actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request an AI maintainer fix`);
   }
