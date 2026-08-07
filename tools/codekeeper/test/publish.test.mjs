@@ -32,7 +32,7 @@ test.after(() => {
 const fingerprint = "a".repeat(64);
 const identity = { login: "codekeeper[bot]", id: "123456" };
 const trustedPull = {
-  body: "A maintainer may edit this description without affecting deduplication.",
+  body: `A maintainer may edit this description without affecting deduplication.\n<!-- codekeeper:repair=${fingerprint} -->`,
   user: { login: identity.login, id: Number(identity.id), type: "Bot" },
   head: {
     ref: repairBranch(config, "audit", fingerprint),
@@ -95,11 +95,12 @@ function replaceGitHubMethods(methods) {
   return () => Object.assign(GitHubClient.prototype, originals);
 }
 
-test("repair PR deduplication accepts only the configured App branch and repositories", () => {
+test("repair PR deduplication accepts only the configured App marker, branch, and repositories", () => {
   assert.equal(matches(trustedPull), true);
   assert.equal(matches({ ...trustedPull, user: { login: "person", id: 123456, type: "User" } }), false);
   assert.equal(matches({ ...trustedPull, user: { login: "other-app[bot]", id: 123456, type: "Bot" } }), false);
   assert.equal(matches({ ...trustedPull, user: { ...trustedPull.user, id: 999 } }), false);
+  assert.equal(matches({ ...trustedPull, body: `${trustedPull.body}\nuntrusted suffix` }), false);
   assert.equal(matches({ ...trustedPull, head: { ...trustedPull.head, ref: "feature/spoofed-marker" } }), false);
   assert.equal(matches({
     ...trustedPull,
@@ -121,25 +122,18 @@ test("sticky marker comments ignore human and unrelated-bot spoofing", () => {
   assert.equal(isOwnedMarkerComment({ ...trusted, body: `${trusted.body}\nuntrusted suffix` }, marker, identity), false);
 });
 
-test("maintenance issue fingerprints require a matching configured-App marker comment", () => {
+test("maintenance issue fingerprints require the configured App author", () => {
   const marker = findingMarker("b".repeat(64));
-  const otherMarker = findingMarker("c".repeat(64));
   const issue = {
     body: `Trusted maintenance finding\n${marker}`,
     user: { login: identity.login, id: Number(identity.id), type: "Bot" }
   };
-  const trustedComment = {
-    body: marker,
-    user: { login: identity.login, id: Number(identity.id), type: "Bot" }
-  };
   const options = { marker, botLogin: identity.login, botId: identity.id };
-  assert.equal(isTrustedMaintenanceIssue(issue, [trustedComment], options), true);
-  assert.equal(isTrustedMaintenanceIssue(issue, [], options), false);
-  assert.equal(isTrustedMaintenanceIssue(issue, [{ ...trustedComment, user: { login: "other-app[bot]", id: 123456, type: "Bot" } }], options), false);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, body: `Edited finding\n${otherMarker}` }, [trustedComment], {
-    ...options,
-    marker: otherMarker
-  }), false);
+  assert.equal(isTrustedMaintenanceIssue(issue, options), true);
+  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { login: "person", id: 123456, type: "User" } }, options), false);
+  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { login: "other-app[bot]", id: 123456, type: "Bot" } }, options), false);
+  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { ...issue.user, id: 999 } }, options), false);
+  assert.equal(isTrustedMaintenanceIssue({ ...issue, body: `${issue.body}\nuntrusted suffix` }, options), false);
 });
 
 test("GraphQL follows the configured GitHub API host", () => {
@@ -297,6 +291,177 @@ test("fix publication does not create a repair PR after the issue changes", asyn
   } finally {
     process.chdir(originalDirectory);
     restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(repository, { recursive: true, force: true });
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("maintenance publication adopts an App-created issue after response loss", async () => {
+  const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-retry-test-"));
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-retry-artifact-"));
+  const configSha256 = "c".repeat(64);
+  const originalDirectory = process.cwd();
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  const issues = [];
+  let creates = 0;
+  const restoreGitHub = replaceGitHubMethods({
+    async listMaintenanceIssues() { return issues; },
+    async listIssueComments() { throw new Error("orphan adoption must not require a second write"); },
+    async ensureLabels() {},
+    async createIssue(input) {
+      creates += 1;
+      const issue = {
+        number: 1,
+        state: "open",
+        body: input.body,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      };
+      issues.push(issue);
+      throw new Error("connection lost after issue creation");
+    },
+    async updateIssue(number, changes) {
+      Object.assign(issues.find((issue) => issue.number === number), changes);
+    },
+    async replaceManagedLabels() {}
+  });
+  try {
+    await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
+    git(repository, ["init", "-q", "-b", "main"]);
+    git(repository, ["config", "user.name", "Test"]);
+    git(repository, ["config", "user.email", "test@example.com"]);
+    git(repository, ["add", "README.md"]);
+    git(repository, ["commit", "-qm", "initial"]);
+    const baseSha = git(repository, ["rev-parse", "HEAD"]);
+    const context = { mode: "audit", repository: "owner/repository", configSha256, baseSha, runUrl: "https://example.test/run" };
+    const result = {
+      mode: "audit",
+      summary: "One maintenance finding.",
+      findings: [{
+        title: "Missing guide", evidence: "The guide is missing.", proposedAction: "Add the guide.",
+        owningPath: "README.md", category: "docs", priority: "p2", problemKey: "missing-guide", labels: []
+      }],
+      repair: {
+        requested: false, findingIndex: null, title: "", body: "", risk: "low", validationSummary: ""
+      },
+      noActionReason: null
+    };
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "audit", context, result, configSha256 });
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    process.chdir(repository);
+    await assert.rejects(
+      publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+      /connection lost after issue creation/
+    );
+    const retry = await publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
+    assert.equal(creates, 1);
+    assert.equal(issues.length, 1);
+    assert.deepEqual(retry.findings.map(({ state, issueNumber }) => ({ state, issueNumber })), [
+      { state: "updated", issueNumber: 1 }
+    ]);
+  } finally {
+    process.chdir(originalDirectory);
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(repository, { recursive: true, force: true });
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("fix publication adopts an exact orphan repair branch", async () => {
+  const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-fix-retry-test-"));
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-fix-retry-artifact-"));
+  const configSha256 = "d".repeat(64);
+  const originalDirectory = process.cwd();
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  let pullsCreated = 0;
+  try {
+    await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
+    git(repository, ["init", "-q", "-b", "main"]);
+    git(repository, ["config", "user.name", "Test"]);
+    git(repository, ["config", "user.email", "test@example.com"]);
+    git(repository, ["add", "README.md"]);
+    git(repository, ["commit", "-qm", "initial"]);
+    const baseSha = git(repository, ["rev-parse", "HEAD"]);
+    await writeFile(path.join(repository, "README.md"), "# Example\n\nRepair.\n", "utf8");
+    const patch = execFileSync("git", ["diff", "--binary", "--full-index", "HEAD"], { cwd: repository });
+    await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
+    git(repository, ["checkout", "-b", "seed-orphan"]);
+    git(repository, ["add", "README.md"]);
+    git(repository, ["commit", "-qm", "orphan repair"]);
+    const orphanTreeSha = git(repository, ["rev-parse", "HEAD^{tree}"]);
+    git(repository, ["checkout", "main"]);
+    git(repository, ["branch", "-D", "seed-orphan"]);
+
+    const context = {
+      mode: "fix", repository: "owner/repository", configSha256, baseSha,
+      defaultBranch: config.repository.defaultBranch, issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
+    };
+    const result = {
+      mode: "fix", summary: "Repair the documentation.", changedSummary: "Adds the missing repair guidance.",
+      risk: "low", issueNumber: 7, testsRun: [], readyForReview: true, noChangeReason: null
+    };
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "fix",
+      context,
+      result,
+      configSha256,
+      patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: ["README.md"] }
+    });
+    const branch = repairBranch(config, "fix", sha256("issue|owner/repository|7"));
+    let remoteTreeSha = orphanTreeSha;
+    const restoreGitHub = replaceGitHubMethods({
+      async getIssue(number) { return { number, title: "Repair", state: "open", updated_at: context.issue.updatedAt }; },
+      async findOpenPullByHead() { return null; },
+      async request(method, endpoint) {
+        assert.equal(method, "GET");
+        assert.ok(endpoint.endsWith(`/branches/${encodeURIComponent(branch)}`));
+        return {
+          data: {
+            name: branch,
+            commit: { commit: { tree: { sha: remoteTreeSha } }, parents: [{ sha: baseSha }] }
+          }
+        };
+      },
+      async createPull(input) {
+        pullsCreated += 1;
+        assert.equal(input.head, branch);
+        return { number: 12, html_url: "https://example.test/pull/12" };
+      },
+      async ensureLabels() {},
+      async replaceManagedLabels() {},
+      async createComment() {}
+    });
+    try {
+      process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+      process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+      process.chdir(repository);
+      const repair = await publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
+      assert.equal(repair.created, true);
+      assert.equal(repair.pullRequest, 12);
+      assert.equal(pullsCreated, 1);
+      git(repository, ["checkout", "main"]);
+      git(repository, ["branch", "-D", branch]);
+      remoteTreeSha = "0".repeat(40);
+      await assert.rejects(
+        publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+        /already exists with unexpected content/
+      );
+      assert.equal(pullsCreated, 1);
+    } finally {
+      restoreGitHub();
+    }
+  } finally {
+    process.chdir(originalDirectory);
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
     else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
     if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;

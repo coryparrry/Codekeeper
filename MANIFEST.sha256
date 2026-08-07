@@ -36,7 +36,7 @@ e928b6dc7967d0352001f0951f0f9dfa1107efdc14091c1fb5a7bec285de8934  ./tools/codeke
 1c85b21f75d3a56fc3f71257dcfa1c7b854f1b131ee0682a612cbeb58fdd08ee  ./tools/codekeeper/src/lib/policy.mjs
 917429e1fcd5e24c4af3b66e083fd85a631ee6fdf8786c58ee37357783674ef0  ./tools/codekeeper/src/lib/prepare.mjs
 22d7a145613be4de0e8c1538264e1a31cdae341419326aa0de0efbecab4b6315  ./tools/codekeeper/src/lib/prompts.mjs
-fa94ba97c8f2c36230e77ca4591c06e8fa0cbb0c30b601fb6be34e532db0d198  ./tools/codekeeper/src/lib/publish.mjs
+d1938d854e503924f6fabf5337e0356c5effade97e9af45ba2803713bcc69b12  ./tools/codekeeper/src/lib/publish.mjs
 13720d4a9f1e978855b449d2aeb6c09132f43649fc9dd99bc1c537ff570b232e  ./tools/codekeeper/src/lib/render.mjs
 df4b9a1c1f846559a3e29d30aa4b226e1638bf454fee1871f9904caf4804cf0c  ./tools/codekeeper/src/lib/schemas.mjs
 456dff805cd4631a75a5104ebd0f6d07e85a22be16d4465f97253e76d125dc68  ./tools/codekeeper/src/lib/validate.mjs
@@ -48,7 +48,7 @@ ce56ebcbfe63a878c70701c0a33aefbcdb2b9e1c15c93a0668b0e721cde824d4  ./tools/codeke
 9536e8e312f2cbf52c4b3080324ec7e280f3b3c1d7f3880677696b7692b2f7c8  ./tools/codekeeper/test/markers.test.mjs
 875cd72acb91e6fb1199420bf26be20361f7e21323dc096a16aa3f5201d6f28b  ./tools/codekeeper/test/policy.test.mjs
 bc6674322a83396329b263dabb0300a54962d551cfc50bfc821505bcf1553649  ./tools/codekeeper/test/prompts.test.mjs
-d5e2615588962f8f5b8cc81ef067011dc81be7fdf2c8b377db149784f2b7d4b8  ./tools/codekeeper/test/publish.test.mjs
+4d837ff667b2f11b593b66573b5c5b478b0f3f064c7bf74f8c70299a7cfcc72b  ./tools/codekeeper/test/publish.test.mjs
 3376b7d4baa8717319c6e0f50b45b85c040a7a28e91130aca95c92ba457d0554  ./tools/codekeeper/test/render.test.mjs
 0963d8aeed5d72e2b01776c478114515f9a75b8545b61b0295475e851aa2ad5d  ./tools/codekeeper/test/schemas.test.mjs
 50cd13ec4f21c91f4c1ec3a2d52d538d88026cd1d3461866e3aa932b2fffe727  ./tools/codekeeper/test/workflow-contract.test.mjs
