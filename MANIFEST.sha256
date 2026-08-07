@@ -51,4 +51,4 @@ bc6674322a83396329b263dabb0300a54962d551cfc50bfc821505bcf1553649  ./tools/codeke
 d5e2615588962f8f5b8cc81ef067011dc81be7fdf2c8b377db149784f2b7d4b8  ./tools/codekeeper/test/publish.test.mjs
 3376b7d4baa8717319c6e0f50b45b85c040a7a28e91130aca95c92ba457d0554  ./tools/codekeeper/test/render.test.mjs
 0963d8aeed5d72e2b01776c478114515f9a75b8545b61b0295475e851aa2ad5d  ./tools/codekeeper/test/schemas.test.mjs
-d240734f11addb91c93c3ec38d6b40849a40c645d0819843614e660f403c3fbb  ./tools/codekeeper/test/workflow-contract.test.mjs
+50cd13ec4f21c91f4c1ec3a2d52d538d88026cd1d3461866e3aa932b2fffe727  ./tools/codekeeper/test/workflow-contract.test.mjs

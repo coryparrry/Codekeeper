@@ -169,6 +169,11 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(publish, /\$GITHUB_API_URL\/users\/\$\{APP_SLUG\}\[bot\]/);
     assert.doesNotMatch(publish, /\$GITHUB_API_URL\/user(?:["']|\))/);
     assert.match(publish, /codekeeper-artifact/);
+    assert.match(
+      publish,
+      /ref: \$\{\{ github\.event\.repository\.default_branch \}\}[\s\S]*?path: repository/
+    );
+    assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/);
     assert.match(publish, /--config "\$CONFIG"/);
     assert.match(publish, /--expected-manifest-sha "\$MANIFEST_SHA256"/);
     assert.doesNotMatch(publish, /openai\/codex-action@|validate-|seal-/);
