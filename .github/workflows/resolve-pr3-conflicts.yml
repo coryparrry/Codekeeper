@@ -1,0 +1,46 @@
+name: Resolve PR 3 conflicts
+
+on:
+  push:
+    branches:
+      - agent/recover-interrupted-publication
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Apply and verify the conflict resolution
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base64 --decode .github/pr3-conflict-resolution.patch.gz.b64 | gzip --decompress > /tmp/pr3-conflict-resolution.patch
+          echo "a8dc55c7e3b06489624ec83ac9db38f0ba12164863ecf35abeb7419749443cc5  /tmp/pr3-conflict-resolution.patch" | sha256sum --check -
+          git apply --check /tmp/pr3-conflict-resolution.patch
+          git apply /tmp/pr3-conflict-resolution.patch
+          cd tools/codekeeper
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+          cd ../..
+          sha256sum -c MANIFEST.sha256
+          git diff --check
+          git rm .github/pr3-conflict-resolution.patch.gz.b64 .github/workflows/resolve-pr3-conflicts.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: resolve merge conflicts"
+          authorization=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $authorization" push origin HEAD:"$GITHUB_REF_NAME"
