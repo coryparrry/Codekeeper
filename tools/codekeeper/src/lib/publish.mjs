@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, pushBranch } from "./git.mjs";
 import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
-import { readJson, log, warn } from "./io.mjs";
+import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, findingFingerprint, findingMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
 import { renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
+import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
 function singleLine(value, maximum = 256) {
   return String(value ?? "")
@@ -16,19 +17,61 @@ function singleLine(value, maximum = 256) {
     .slice(0, maximum);
 }
 
-async function loadArtifact(artifactDirectory, expectedMode, configSha256) {
-  const [manifest, context, result] = await Promise.all([
-    readJson(path.join(artifactDirectory, "manifest.json")),
-    readJson(path.join(artifactDirectory, "context.json")),
-    readJson(path.join(artifactDirectory, "result.json"))
-  ]);
-  if (manifest.version !== 1) throw new Error("Unsupported artifact manifest version");
+function parseArtifactJson(bytes, name) {
+  try {
+    return JSON.parse(bytes.toString("utf8"));
+  } catch (error) {
+    throw new Error(`Invalid JSON in sealed artifact ${name}: ${error.message}`);
+  }
+}
+
+function validateArtifactResult(mode, result, context, config) {
+  if (mode === "review") return validateReviewResult(result, config);
+  if (mode === "audit") return validateAuditResult(result, config);
+  if (mode === "issue") return validateIssueResult(result, config);
+  if (mode === "fix") return validateFixResult(result, context.issue?.number);
+  throw new Error(`Unsupported artifact mode: ${mode}`);
+}
+
+async function loadArtifact(artifactDirectory, expectedMode, config, configSha256, expectedManifestSha256) {
+  if (!/^[a-f0-9]{64}$/i.test(String(expectedManifestSha256 ?? ""))) {
+    throw new Error("Publisher requires the trusted sealed manifest SHA-256");
+  }
+  const manifestBytes = await readRegularFile(path.join(artifactDirectory, "manifest.json"));
+  if (sha256(manifestBytes) !== expectedManifestSha256) {
+    throw new Error("Sealed artifact manifest changed after sealing");
+  }
+  const manifest = parseArtifactJson(manifestBytes, "manifest.json");
+  if (manifest.version !== 2) throw new Error("Unsupported artifact manifest version");
   if (manifest.sealed !== true) throw new Error("Only sealed artifacts may be published");
   if (!/^[a-f0-9]{64}$/i.test(String(configSha256 ?? ""))) {
     throw new Error("Publisher requires the SHA-256 of its frozen configuration");
   }
+
+  const [contextBytes, resultBytes, configBytes, validationBytes] = await Promise.all([
+    readRegularFile(path.join(artifactDirectory, "context.json")),
+    readRegularFile(path.join(artifactDirectory, "result.json")),
+    readRegularFile(path.join(artifactDirectory, "config.json")),
+    readRegularFile(path.join(artifactDirectory, "validation.json"))
+  ]);
+  if (
+    sha256(contextBytes) !== manifest.contextSha256 ||
+    sha256(resultBytes) !== manifest.resultSha256 ||
+    sha256(configBytes) !== manifest.configFileSha256 ||
+    sha256(validationBytes) !== manifest.validationSha256
+  ) {
+    throw new Error("Sealed artifact component changed after sealing");
+  }
+
+  const context = parseArtifactJson(contextBytes, "context.json");
+  const result = parseArtifactJson(resultBytes, "result.json");
+  const artifactConfig = parseArtifactJson(configBytes, "config.json");
+  const validation = parseArtifactJson(validationBytes, "validation.json");
   if (manifest.configSha256 !== configSha256 || context.configSha256 !== configSha256) {
     throw new Error("Artifact configuration does not match the publisher's frozen configuration");
+  }
+  if (JSON.stringify(artifactConfig) !== JSON.stringify(config)) {
+    throw new Error("Sealed artifact configuration differs from the trusted publisher configuration");
   }
   if (manifest.mode !== expectedMode || context.mode !== expectedMode || result.mode !== expectedMode) {
     throw new Error(`Artifact mode mismatch; expected ${expectedMode}`);
@@ -37,6 +80,18 @@ async function loadArtifact(artifactDirectory, expectedMode, configSha256) {
   if (JSON.stringify(manifest.context) !== JSON.stringify(context)) {
     throw new Error("Artifact context does not match its trusted manifest");
   }
+  if (JSON.stringify(manifest.validation) !== JSON.stringify(validation)) {
+    throw new Error("Artifact validation does not match its trusted manifest");
+  }
+  if (manifest.patch?.valid) {
+    const patchBytes = await readRegularFile(path.join(artifactDirectory, "patch.diff"));
+    if (sha256(patchBytes) !== manifest.patchSha256 || sha256(patchBytes) !== manifest.patch.sha256) {
+      throw new Error("Sealed artifact patch changed after sealing");
+    }
+  } else if (manifest.patchSha256 !== null) {
+    throw new Error("Sealed artifact contains an unexpected patch hash");
+  }
+  validateArtifactResult(expectedMode, result, context, config);
   if (process.env.GITHUB_REPOSITORY && context.repository !== process.env.GITHUB_REPOSITORY) {
     throw new Error(`Artifact targets ${context.repository}; workflow repository is ${process.env.GITHUB_REPOSITORY}`);
   }
@@ -107,8 +162,8 @@ async function currentReviewPull(github, context, config) {
   return pull;
 }
 
-export async function publishReview({ artifactDirectory, config, configSha256, token, dryRun = false }) {
-  const { context, result } = await loadArtifact(artifactDirectory, "review", configSha256);
+export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
+  const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256);
   const github = new GitHubClient({ token, repository: context.repository });
   const pull = await currentReviewPull(github, context, config);
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
@@ -154,8 +209,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, t
   return { pullRequest: pull.number, desiredLabels, autoMerge: currentAutoMerge, autoMergeResult, blocking };
 }
 
-export async function publishIssue({ artifactDirectory, config, configSha256, token, dryRun = false }) {
-  const { context, result } = await loadArtifact(artifactDirectory, "issue", configSha256);
+export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
+  const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256);
   const github = new GitHubClient({ token, repository: context.repository });
   const currentIssue = () => currentOpenIssue(github, context.issue, "analysis");
   const issue = await currentIssue();
@@ -347,7 +402,7 @@ async function publishPatchPullRequest({
   }
   ensureClean();
   const patchPath = path.join(artifactDirectory, manifest.patch.fileName);
-  const patchBytes = await readFile(patchPath);
+  const patchBytes = await readRegularFile(patchPath);
   if (sha256(patchBytes) !== manifest.patch.sha256) throw new Error("Patch artifact SHA-256 does not match manifest");
   if (patchBytes.length > config.audit.repair.maximumPatchBytes) {
     throw new Error(`Patch artifact is ${patchBytes.length} bytes; maximum is ${config.audit.repair.maximumPatchBytes}`);
@@ -438,8 +493,8 @@ async function publishPatchPullRequest({
   };
 }
 
-export async function publishAudit({ artifactDirectory, config, configSha256, token, dryRun = false }) {
-  const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", configSha256);
+export async function publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
+  const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", config, configSha256, expectedManifestSha256);
   const liveHead = currentHead();
   if (liveHead !== context.baseSha) {
     throw new Error(`Default branch moved from ${context.baseSha} to ${liveHead}; stale audit will not publish`);
@@ -481,8 +536,8 @@ export async function publishAudit({ artifactDirectory, config, configSha256, to
   return { findings, repair, dryRun };
 }
 
-export async function publishFix({ artifactDirectory, config, configSha256, token, dryRun = false }) {
-  const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", configSha256);
+export async function publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
+  const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", config, configSha256, expectedManifestSha256);
   const github = new GitHubClient({ token, repository: context.repository });
   const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started");
   const issue = await currentIssue();

@@ -53,13 +53,12 @@ async function main() {
   const sealedPublishCommands = new Set(["publish-review", "publish-audit", "publish-issue", "publish-fix"]);
   const artifactDirectory = args.get("artifact")
     ? assertRunnerOwnedDirectory(args.get("artifact"))
-    : null;
-  const configPath = args.get(
-    "config",
-    sealedPublishCommands.has(command)
-      ? path.join(artifactDirectory ?? assertRunnerOwnedDirectory(args.require("artifact")), "config.json")
-      : ".github/codekeeper.json"
-  );
+    : sealedPublishCommands.has(command)
+      ? assertRunnerOwnedDirectory(args.require("artifact"))
+      : null;
+  const configPath = sealedPublishCommands.has(command)
+    ? args.require("config")
+    : args.get("config", ".github/codekeeper.json");
   const { config, path: loadedConfigPath } = await loadConfig(configPath);
   const configSha256 = sha256(await readFile(loadedConfigPath));
   const usesRunnerDirectory = command.startsWith("prepare-") || command.startsWith("validate-") || command === "run-agent" || command === "capture-workspace-patch";
@@ -72,6 +71,7 @@ async function main() {
     : null;
   const dryRun = args.boolean("dry-run", false);
   const toolingSha = args.get("tooling-sha", process.env.CODEKEEPER_TOOLING_SHA ?? "");
+  const expectedManifestSha256 = sealedPublishCommands.has(command) ? args.require("expected-manifest-sha") : undefined;
 
   let result;
   switch (command) {
@@ -176,16 +176,16 @@ async function main() {
       });
       break;
     case "publish-review":
-      result = await publishReview({ artifactDirectory, config, configSha256, token, dryRun });
+      result = await publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun });
       break;
     case "publish-audit":
-      result = await publishAudit({ artifactDirectory, config, configSha256, token, dryRun });
+      result = await publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun });
       break;
     case "publish-issue":
-      result = await publishIssue({ artifactDirectory, config, configSha256, token, dryRun });
+      result = await publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun });
       break;
     case "publish-fix":
-      result = await publishFix({ artifactDirectory, config, configSha256, token, dryRun });
+      result = await publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun });
       break;
     default:
       throw new Error(`Unknown command: ${command}`);
@@ -199,6 +199,7 @@ async function main() {
     }
   }
   if (result?.candidateSha256) await setGitHubOutput("candidate_sha256", result.candidateSha256);
+  if (result?.manifestSha256) await setGitHubOutput("manifest_sha256", result.manifestSha256);
   log(`${command} completed`);
 
   if (command === "publish-review" && result.blocking) {

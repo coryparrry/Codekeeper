@@ -382,10 +382,15 @@ test("seal produces the only manifest and embeds the frozen policy", async () =>
     { GITHUB_REPOSITORY: "acme/example" }
   );
   const manifest = JSON.parse(await readFile(path.join(sealed, "manifest.json"), "utf8"));
+  assert.equal(manifest.version, 2);
   assert.equal(manifest.sealed, true);
   assert.equal(manifest.context.runAttempt, "2");
   assert.ok(manifest.context.configSha256);
-  assert.equal((await lstat(path.join(sealed, "config.json"))).isFile(), true);
+  assert.equal(manifest.contextSha256, digest(await readFile(path.join(sealed, "context.json"))));
+  assert.equal(manifest.resultSha256, digest(await readFile(path.join(sealed, "result.json"))));
+  assert.equal(manifest.configFileSha256, digest(await readFile(path.join(sealed, "config.json"))));
+  assert.equal(manifest.validationSha256, digest(await readFile(path.join(sealed, "validation.json"))));
+  assert.equal(manifest.patchSha256, null);
 });
 
 test("review findings must cite a changed line hunk", async () => {
