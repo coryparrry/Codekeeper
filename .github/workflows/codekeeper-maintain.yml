@@ -309,6 +309,8 @@ jobs:
     if: needs.analyze.result == 'success' && needs.verify.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
     steps:
       - name: Check out frozen maintainer tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -334,6 +336,7 @@ jobs:
           name: codekeeper-maintenance-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/codekeeper-candidate
       - name: Seal maintenance artifact without repository execution
+        id: seal
         env:
           CANDIDATE: ${{ runner.temp }}/codekeeper-candidate
           ARTIFACT: ${{ runner.temp }}/codekeeper-artifact
@@ -410,6 +413,10 @@ jobs:
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
           node ../tooling/tools/codekeeper/src/cli.mjs publish-audit \
-            --artifact "$RUNNER_TEMP/codekeeper-artifact"
+            --config "$CONFIG" \
+            --artifact "$RUNNER_TEMP/codekeeper-artifact" \
+            --expected-manifest-sha "$MANIFEST_SHA256"

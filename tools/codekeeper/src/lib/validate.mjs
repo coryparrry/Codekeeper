@@ -79,9 +79,16 @@ async function writeArtifact({ artifactDirectory, context, result, patch = null,
   await writeJson(path.join(artifactDirectory, "context.json"), context);
   await writeJson(path.join(artifactDirectory, "result.json"), result);
   await writeJson(path.join(artifactDirectory, "config.json"), config);
+  await writeJson(path.join(artifactDirectory, "validation.json"), validation);
   if (patchBytes) await writeFile(path.join(artifactDirectory, "patch.diff"), patchBytes);
+
+  const contextBytes = await readRegularFile(path.join(artifactDirectory, "context.json"));
+  const resultBytes = await readRegularFile(path.join(artifactDirectory, "result.json"));
+  const configBytes = await readRegularFile(path.join(artifactDirectory, "config.json"));
+  const validationBytes = await readRegularFile(path.join(artifactDirectory, "validation.json"));
+  const sealedPatchBytes = patchBytes ? await readRegularFile(path.join(artifactDirectory, "patch.diff")) : null;
   const manifest = {
-    version: 1,
+    version: 2,
     sealed: true,
     mode: context.mode,
     repository: context.repository,
@@ -89,10 +96,13 @@ async function writeArtifact({ artifactDirectory, context, result, patch = null,
     context,
     patch,
     validation,
-    configSha256
+    configSha256,
+    configFileSha256: sha256(configBytes),
+    ...candidateComponents({ contextBytes, resultBytes, patchBytes: sealedPatchBytes, validationBytes })
   };
-  await writeJson(path.join(artifactDirectory, "manifest.json"), manifest);
-  return manifest;
+  const manifestPath = path.join(artifactDirectory, "manifest.json");
+  await writeJson(manifestPath, manifest);
+  return { manifest, manifestSha256: sha256(await readRegularFile(manifestPath)) };
 }
 
 function reviewResult(context, result) {

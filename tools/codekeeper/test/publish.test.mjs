@@ -52,21 +52,37 @@ function matches(pull) {
   });
 }
 
-async function writeSealedArtifact(artifactDirectory, { mode, context, result, configSha256, patch = null }) {
+async function writeSealedArtifact(artifactDirectory, {
+  mode, context, result, configSha256, patch = null, validation = { checks: [] }, artifactConfig = config
+}) {
+  const components = {
+    context: Buffer.from(JSON.stringify(context)),
+    result: Buffer.from(JSON.stringify(result)),
+    config: Buffer.from(JSON.stringify(artifactConfig)),
+    validation: Buffer.from(JSON.stringify(validation))
+  };
+  await Promise.all(Object.entries(components).map(([name, bytes]) =>
+    writeFile(path.join(artifactDirectory, `${name}.json`), bytes)
+  ));
+  const patchBytes = patch?.valid ? await readFile(path.join(artifactDirectory, "patch.diff")) : null;
   const manifest = {
-    version: 1,
+    version: 2,
     sealed: true,
     mode,
     repository: context.repository,
     configSha256,
     context,
-    patch
+    patch,
+    validation,
+    contextSha256: sha256(components.context),
+    resultSha256: sha256(components.result),
+    configFileSha256: sha256(components.config),
+    validationSha256: sha256(components.validation),
+    patchSha256: patchBytes ? sha256(patchBytes) : null
   };
-  await Promise.all([
-    writeFile(path.join(artifactDirectory, "manifest.json"), JSON.stringify(manifest)),
-    writeFile(path.join(artifactDirectory, "context.json"), JSON.stringify(context)),
-    writeFile(path.join(artifactDirectory, "result.json"), JSON.stringify(result))
-  ]);
+  const manifestBytes = Buffer.from(JSON.stringify(manifest));
+  await writeFile(path.join(artifactDirectory, "manifest.json"), manifestBytes);
+  return { expectedManifestSha256: sha256(manifestBytes) };
 }
 
 function git(cwd, args) {
@@ -206,9 +222,11 @@ test("issue publication does not close a duplicate after the triaged issue chang
   try {
     process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
     process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
-    await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "issue", context, result, configSha256, artifactConfig: issueConfig
+    });
     await assert.rejects(
-      publishIssue({ artifactDirectory, config: issueConfig, configSha256, token: "token" }),
+      publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
       /changed after analysis/
     );
     assert.equal(duplicateCommentPublished, false);
@@ -259,9 +277,9 @@ test("fix publication does not create a repair PR after the issue changes", asyn
     };
     const result = {
       mode: "fix", summary: "Repair the documentation.", changedSummary: "Adds the missing repair guidance.",
-      risk: "low", readyForReview: true, noChangeReason: null
+      risk: "low", issueNumber: 7, testsRun: [], readyForReview: true, noChangeReason: null
     };
-    await writeSealedArtifact(artifactDirectory, {
+    const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "fix",
       context,
       result,
@@ -272,7 +290,7 @@ test("fix publication does not create a repair PR after the issue changes", asyn
     process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
     process.chdir(repository);
     await assert.rejects(
-      publishFix({ artifactDirectory, config, configSha256, token: "token" }),
+      publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
       /changed after implementation started/
     );
     assert.equal(pullCreated, false);
@@ -289,42 +307,67 @@ test("fix publication does not create a repair PR after the issue changes", asyn
 });
 
 test("publication rejects sealed artifacts with a tampered configuration hash", async () => {
-  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-test-"));
   const expectedConfigSha256 = "a".repeat(64);
-  try {
-    for (const [manifestConfigSha256, contextConfigSha256] of [
-      ["b".repeat(64), expectedConfigSha256],
-      [expectedConfigSha256, "b".repeat(64)]
-    ]) {
-      const context = {
-        mode: "audit",
-        repository: "owner/repository",
-        configSha256: contextConfigSha256
-      };
-      const manifest = {
-        version: 1,
-        sealed: true,
-        mode: "audit",
-        repository: context.repository,
-        configSha256: manifestConfigSha256,
-        context,
-        patch: null
-      };
-      await Promise.all([
-        writeFile(path.join(artifactDirectory, "manifest.json"), JSON.stringify(manifest)),
-        writeFile(path.join(artifactDirectory, "context.json"), JSON.stringify(context)),
-        writeFile(path.join(artifactDirectory, "result.json"), JSON.stringify({ mode: "audit" }))
-      ]);
+  for (const [manifestConfigSha256, contextConfigSha256] of [
+    ["b".repeat(64), expectedConfigSha256],
+    [expectedConfigSha256, "b".repeat(64)]
+  ]) {
+    const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-test-"));
+    try {
+      const context = { mode: "audit", repository: "owner/repository", configSha256: contextConfigSha256 };
+      const integrity = await writeSealedArtifact(artifactDirectory, {
+        mode: "audit", context, result: { mode: "audit" }, configSha256: manifestConfigSha256
+      });
       await assert.rejects(
-        publishAudit({
-          artifactDirectory,
-          config,
-          configSha256: expectedConfigSha256,
-          token: "unused"
-        }),
+        publishAudit({ artifactDirectory, config, configSha256: expectedConfigSha256, ...integrity, token: "unused" }),
         /Artifact configuration does not match/
       );
+    } finally {
+      await rm(artifactDirectory, { recursive: true, force: true });
     }
+  }
+});
+
+test("publication rejects a result changed after sealing before GitHub access", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-result-tamper-"));
+  const configSha256 = "a".repeat(64);
+  const context = {
+    mode: "issue", repository: "owner/repository", configSha256,
+    issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" }
+  };
+  const result = {
+    mode: "issue", summary: "Ready for triage.", type: "bug", priority: "p3", labels: [], actionable: true,
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+  };
+  const originalFetch = globalThis.fetch;
+  let githubAccessed = false;
+  try {
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
+    await writeFile(path.join(artifactDirectory, "result.json"), JSON.stringify({ ...result, priority: "p1" }));
+    globalThis.fetch = async () => { githubAccessed = true; throw new Error("unexpected GitHub access"); };
+    await assert.rejects(
+      publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "unused" }),
+      /component changed after sealing/
+    );
+    assert.equal(githubAccessed, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("publication revalidates a sealed result before GitHub access", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-result-schema-"));
+  const configSha256 = "a".repeat(64);
+  const context = { mode: "issue", repository: "owner/repository", configSha256, issue: { number: 7 } };
+  try {
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "issue", context, result: { mode: "issue" }, configSha256
+    });
+    await assert.rejects(
+      publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "unused" }),
+      /Invalid Codex result/
+    );
   } finally {
     await rm(artifactDirectory, { recursive: true, force: true });
   }
@@ -339,22 +382,13 @@ test("review publication rejects same-SHA retargets before mutations", async () 
     configSha256,
     pullRequest: { number: 7, headSha: "head", baseSha: "base" }
   };
-  const manifest = {
-    version: 1,
-    sealed: true,
-    mode: "review",
-    repository: context.repository,
-    configSha256,
-    context,
-    patch: null
+  const result = {
+    mode: "review", summary: "No blocking findings.", risk: "low", labels: [], blockingFindings: [],
+    nonBlockingFindings: [], tests: { adequate: true, notes: "" }, mergeRecommendation: "manual", noActionReason: null
   };
   const originalFetch = globalThis.fetch;
   try {
-    await Promise.all([
-      writeFile(path.join(artifactDirectory, "manifest.json"), JSON.stringify(manifest)),
-      writeFile(path.join(artifactDirectory, "context.json"), JSON.stringify(context)),
-      writeFile(path.join(artifactDirectory, "result.json"), JSON.stringify({ mode: "review" }))
-    ]);
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "review", context, result, configSha256 });
     for (const pull of [
       { baseRef: "release", headRepository: context.repository, baseRepository: context.repository },
       { baseRef: config.repository.defaultBranch, headRepository: "attacker/repository", baseRepository: context.repository },
@@ -371,7 +405,7 @@ test("review publication rejects same-SHA retargets before mutations", async () 
         }));
       };
       await assert.rejects(
-        publishReview({ artifactDirectory, config, configSha256, token: "unused", dryRun: true }),
+        publishReview({ artifactDirectory, config, configSha256, ...integrity, token: "unused", dryRun: true }),
         /base branch changed|repository changed/
       );
       assert.deepEqual(calls.map((call) => call.method), ["GET"]);

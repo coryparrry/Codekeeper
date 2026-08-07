@@ -14,7 +14,7 @@ const actionPins = {
   "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
   "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
   "actions/create-github-app-token": "bcd2ba49218906704ab6c1aa796996da409d3eb1",
-  "openai/codex-action": "10cb888d2ed3b99867f7e7ccff174a861a75aeb6",
+  "openai/codex-action": "52fe01ec70a42f454c9d2ebd47598f9fd6893d56",
   "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
 };
 
@@ -157,6 +157,8 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(seal, /codekeeper-candidate/);
     assert.match(seal, /codekeeper-artifact/);
     assert.match(seal, new RegExp(`seal-${mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode}`));
+    assert.match(seal, /manifest_sha256: \$\{\{ steps\.seal\.outputs\.manifest_sha256 \}\}/);
+    assert.match(seal, /id: seal/);
     assert.doesNotMatch(seal, /openai\/codex-action@|create-github-app-token/);
 
     assert.match(publish, /create-github-app-token/);
@@ -167,6 +169,13 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(publish, /\$GITHUB_API_URL\/users\/\$\{APP_SLUG\}\[bot\]/);
     assert.doesNotMatch(publish, /\$GITHUB_API_URL\/user(?:["']|\))/);
     assert.match(publish, /codekeeper-artifact/);
+    assert.match(
+      publish,
+      /ref: \$\{\{ github\.event\.repository\.default_branch \}\}[\s\S]*?path: repository/
+    );
+    assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/);
+    assert.match(publish, /--config "\$CONFIG"/);
+    assert.match(publish, /--expected-manifest-sha "\$MANIFEST_SHA256"/);
     assert.doesNotMatch(publish, /openai\/codex-action@|validate-|seal-/);
   }
 });

@@ -298,6 +298,8 @@ jobs:
     if: needs.analyze.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
     permissions:
       contents: read
     steps:
@@ -329,6 +331,7 @@ jobs:
           path: ${{ runner.temp }}/codekeeper-candidate
 
       - name: Seal review artifact without repository execution
+        id: seal
         env:
           CANDIDATE: ${{ runner.temp }}/codekeeper-candidate
           ARTIFACT: ${{ runner.temp }}/codekeeper-artifact
@@ -391,6 +394,13 @@ jobs:
           path: tooling
           persist-credentials: false
 
+      - name: Check out trusted default-branch configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: repository
+          persist-credentials: false
+
       - name: Set up pinned Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -409,9 +419,13 @@ jobs:
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
           node tools/codekeeper/src/cli.mjs publish-review \
-            --artifact "$RUNNER_TEMP/codekeeper-artifact"
+            --config "$CONFIG" \
+            --artifact "$RUNNER_TEMP/codekeeper-artifact" \
+            --expected-manifest-sha "$MANIFEST_SHA256"
 
   gate:
     name: Codekeeper review gate
