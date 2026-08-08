@@ -60,6 +60,100 @@ test("configuration validator rejects unsafe or incomplete policy values", async
   );
 });
 
+test("configuration rejects unsupported user auto-merge, unknown keys, and unsafe ref prefixes", async () => {
+  const userAutoMerge = structuredClone(source);
+  userAutoMerge.merge.allowUserPullRequests = true;
+  await assert.rejects(
+    loadConfig(await writeConfig(userAutoMerge)),
+    /merge\.allowUserPullRequests must remain false in version 2/
+  );
+
+  const unknownRoot = structuredClone(source);
+  unknownRoot.unexpected = true;
+  await assert.rejects(loadConfig(await writeConfig(unknownRoot)), /policy contains an unknown key unexpected/);
+
+  const unknownNested = structuredClone(source);
+  unknownNested.ai.agents.review.workspace.unexpected = true;
+  await assert.rejects(
+    loadConfig(await writeConfig(unknownNested)),
+    /ai\.agents\.review\.workspace contains an unknown key unexpected/
+  );
+
+  for (const prefix of ["automation//codekeeper/", "automation/../codekeeper/", "automation/codekeeper.lock/"]) {
+    const invalidPrefix = structuredClone(source);
+    invalidPrefix.repository.automationBranchPrefix = prefix;
+    await assert.rejects(
+      loadConfig(await writeConfig(invalidPrefix)),
+      /automationBranchPrefix must be a safe Git ref prefix/
+    );
+  }
+});
+
+test("configuration normalizes owners and rejects duplicate owners after normalization", async () => {
+  const normalized = structuredClone(source);
+  normalized.repository.ownerLogins = ["Repository-Owner"];
+  const { config } = await loadConfig(await writeConfig(normalized));
+  assert.deepEqual(config.repository.ownerLogins, ["repository-owner"]);
+
+  const duplicate = structuredClone(source);
+  duplicate.repository.ownerLogins = ["Repository-Owner", "repository-owner"];
+  await assert.rejects(
+    loadConfig(await writeConfig(duplicate)),
+    /repository\.ownerLogins must not contain duplicates after normalization/
+  );
+});
+
+test("configuration rejects resource limits above global ceilings and accepts the starter policy", async () => {
+  const excessiveLimits = [
+    (config) => { config.review.maximumBlockingFindings = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.review.maximumNonBlockingFindings = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.review.maximumDiffBytes = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.review.maximumChangedFiles = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.audit.maximumIssuesPerRun = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.audit.repair.maximumFiles = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.audit.repair.maximumChangedLines = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.audit.repair.maximumPatchBytes = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.audit.repair.maximumFileBytes = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.issues.maximumOpenIssueContext = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.merge.maximumFiles = Number.MAX_SAFE_INTEGER; },
+    (config) => { config.merge.maximumChangedLines = Number.MAX_SAFE_INTEGER; }
+  ];
+  for (const setExcessiveLimit of excessiveLimits) {
+    const invalid = structuredClone(source);
+    setExcessiveLimit(invalid);
+    await assert.rejects(loadConfig(await writeConfig(invalid)), /must be at most/);
+  }
+  await assert.doesNotReject(loadConfig(await writeConfig(structuredClone(source))));
+});
+
+test("configuration bounds policy list cardinality", async () => {
+  const excessiveCommands = structuredClone(source);
+  excessiveCommands.audit.repair.validationCommands = Array.from({ length: 17 }, (_, index) => `echo ${index}`);
+  await assert.rejects(
+    loadConfig(await writeConfig(excessiveCommands)),
+    /audit\.repair\.validationCommands must contain at most 16 entries/
+  );
+});
+
+test("configuration bounds nested model settings numeric magnitudes", async () => {
+  const boundaryValues = structuredClone(source);
+  boundaryValues.ai.agents.issue.modelSettings.providerData.numericSettings = {
+    fractional: 0.25,
+    negative: -1_000_000,
+    positive: 1_000_000
+  };
+  await assert.doesNotReject(loadConfig(await writeConfig(boundaryValues)));
+
+  for (const value of [Number.MAX_SAFE_INTEGER, Number.MAX_VALUE]) {
+    const excessiveValue = structuredClone(source);
+    excessiveValue.ai.agents.issue.modelSettings.providerData.numericSettings = { value };
+    await assert.rejects(
+      loadConfig(await writeConfig(excessiveValue)),
+      /modelSettings\.providerData\.numericSettings\.value must have an absolute value at most 1000000/
+    );
+  }
+});
+
 test("configuration requires HTTPS providers except explicit loopback development endpoints", async () => {
   const publicHttp = structuredClone(source);
   publicHttp.ai.providers.openai.baseUrl = "http://api.example.test/v1";

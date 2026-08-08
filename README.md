@@ -63,3 +63,14 @@ cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run c
 ```
 
 The package pins its Agents SDK dependencies and requires Node.js 22 or newer locally. The reusable workflows pin Node.js, npm dependencies, and the optional Codex CLI themselves.
+
+## Source releases
+
+Source releases are built only from a clean, immutable Git commit. The release command archives tracked content, verifies the unpacked manifest and inventory, and prints the archive checksum:
+
+```bash
+mkdir -p ../codekeeper-release-artifacts
+bash scripts/release-source.sh --output ../codekeeper-release-artifacts
+```
+
+See [validation](VALIDATION.md#source-release-integrity) for the clean-tree requirement, verification-only command, and the boundary between source integrity and GitHub release visibility.

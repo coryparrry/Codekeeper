@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
-import { prepareIssue } from "../src/lib/prepare.mjs";
+import { prepareFix, prepareIssue } from "../src/lib/prepare.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -253,6 +253,61 @@ test("manual issue preparation requires an explicitly authorised actor", async (
     () => run("node", [cli, "prepare-issue", "--config", ".github/codekeeper.json", "--event", event, "--actor", "untrusted-user", "--triage-mode", "manual", "--directory", directory], root, { GITHUB_REPOSITORY: "acme/example" }),
     /Command failed/
   );
+});
+
+test("manual issue and fix preparation authorize owner login casing variants", async () => {
+  const root = await createRepository();
+  const issueDirectory = bundle(root, "case-insensitive-issue-input");
+  const fixDirectory = bundle(root, "case-insensitive-fix-input");
+  const event = bundle(root, "case-insensitive-issue-event.json");
+  await writeFile(event, JSON.stringify({
+    repository: { full_name: "acme/example" },
+    issue: { number: 5, title: "Example", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
+  }), "utf8");
+  const config = structuredClone(templateConfig);
+  config.repository.ownerLogins = ["Repository-Owner"];
+  config.issues.allowAiImplementation = true;
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Example",
+        body: "Details",
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        labels: []
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    const issueContext = await prepareIssue({
+      eventPath: event,
+      actor: "REPOSITORY-OWNER",
+      triageMode: "manual",
+      directory: issueDirectory,
+      config,
+      token: "read-token"
+    });
+    const fixContext = await prepareFix({
+      issueNumber: 5,
+      actor: "repository-owner",
+      directory: fixDirectory,
+      config,
+      token: "read-token"
+    });
+    assert.equal(issueContext.triageMode, "manual");
+    assert.equal(fixContext.requestedBy, "repository-owner");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
+  }
 });
 
 test("automatic issue preparation records trusted mode without an owner command", async () => {

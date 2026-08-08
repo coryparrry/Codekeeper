@@ -4,6 +4,28 @@ import { readJson } from "./io.mjs";
 export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "fix"]);
 const PROVIDER_APIS = new Set(["responses", "chat_completions"]);
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
+const LIMITS = Object.freeze({
+  stringLength: 16_384,
+  listEntries: 128,
+  providerEntries: 16,
+  labelEntries: 128,
+  ownerLogins: 64,
+  projectInvariants: 64,
+  validationCommands: 16,
+  modelSettingsNumberMagnitude: 1_000_000,
+  maximumBlockingFindings: 20,
+  maximumNonBlockingFindings: 20,
+  maximumDiffBytes: 5 * 1024 * 1024,
+  maximumChangedFiles: 1_000,
+  maximumIssuesPerRun: 20,
+  maximumRepairFiles: 100,
+  maximumRepairChangedLines: 10_000,
+  maximumPatchBytes: 5 * 1024 * 1024,
+  maximumFileBytes: 1 * 1024 * 1024,
+  maximumOpenIssueContext: 200,
+  maximumMergeFiles: 50,
+  maximumMergeChangedLines: 5_000
+});
 
 function assert(condition, message) {
   if (!condition) throw new Error(`Invalid Codekeeper policy: ${message}`);
@@ -14,18 +36,42 @@ function plainObject(value, name) {
   return value;
 }
 
+function fixedObject(value, name, keys) {
+  plainObject(value, name);
+  const allowedKeys = new Set(keys);
+  for (const key of Object.keys(value)) {
+    assert(allowedKeys.has(key), `${name} contains an unknown key ${key}`);
+  }
+  return value;
+}
+
+function dynamicObject(value, name, maximumEntries) {
+  plainObject(value, name);
+  const keys = Object.keys(value);
+  assert(keys.length <= maximumEntries, `${name} must contain at most ${maximumEntries} entries`);
+  for (const key of keys) {
+    assert(key.length <= LIMITS.stringLength, `${name} contains an overlong key`);
+  }
+  return value;
+}
+
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function nonEmptyString(value, name) {
+function nonEmptyString(value, name, maximumLength = LIMITS.stringLength) {
   assert(typeof value === "string" && value.trim().length > 0, `${name} must be a non-empty string`);
+  assert(value.length <= maximumLength, `${name} must be at most ${maximumLength} characters`);
   return value;
 }
 
-function stringArray(value, name) {
+function stringArray(value, name, { maximumEntries = LIMITS.listEntries, maximumLength = LIMITS.stringLength } = {}) {
   assert(Array.isArray(value), `${name} must be an array`);
-  for (const item of value) assert(typeof item === "string" && item.trim(), `${name} must contain strings`);
+  assert(value.length <= maximumEntries, `${name} must contain at most ${maximumEntries} entries`);
+  for (const item of value) {
+    assert(typeof item === "string" && item.trim(), `${name} must contain strings`);
+    assert(item.length <= maximumLength, `${name} must contain strings at most ${maximumLength} characters long`);
+  }
   assert(new Set(value).size === value.length, `${name} must not contain duplicates`);
   return value;
 }
@@ -37,6 +83,18 @@ function positiveInteger(value, name) {
 
 function nonNegativeInteger(value, name) {
   assert(Number.isSafeInteger(value) && value >= 0, `${name} must be a non-negative integer`);
+  return value;
+}
+
+function cappedPositiveInteger(value, name, maximum) {
+  positiveInteger(value, name);
+  assert(value <= maximum, `${name} must be at most ${maximum}`);
+  return value;
+}
+
+function cappedNonNegativeInteger(value, name, maximum) {
+  nonNegativeInteger(value, name);
+  assert(value <= maximum, `${name} must be at most ${maximum}`);
   return value;
 }
 
@@ -53,7 +111,7 @@ function isLoopbackHostname(hostname) {
 }
 
 function validateUrl(value, name) {
-  nonEmptyString(value, name);
+  nonEmptyString(value, name, 2_048);
   let parsed;
   try {
     parsed = new URL(value);
@@ -71,22 +129,50 @@ function validateUrl(value, name) {
 
 function validateJsonValue(value, name, depth = 0) {
   assert(depth <= 20, `${name} is nested too deeply`);
-  if (value === null || ["string", "boolean"].includes(typeof value)) return;
+  if (value === null || typeof value === "boolean") return;
+  if (typeof value === "string") {
+    assert(value.length <= LIMITS.stringLength, `${name} must be at most ${LIMITS.stringLength} characters`);
+    return;
+  }
   if (typeof value === "number") {
     assert(Number.isFinite(value), `${name} must contain finite numbers`);
+    assert(Math.abs(value) <= LIMITS.modelSettingsNumberMagnitude, `${name} must have an absolute value at most ${LIMITS.modelSettingsNumberMagnitude}`);
     return;
   }
   if (Array.isArray(value)) {
+    assert(value.length <= LIMITS.listEntries, `${name} must contain at most ${LIMITS.listEntries} entries`);
     for (let index = 0; index < value.length; index += 1) {
       validateJsonValue(value[index], `${name}[${index}]`, depth + 1);
     }
     return;
   }
   plainObject(value, name);
-  for (const [key, item] of Object.entries(value)) {
+  const entries = Object.entries(value);
+  assert(entries.length <= LIMITS.listEntries, `${name} must contain at most ${LIMITS.listEntries} entries`);
+  for (const [key, item] of entries) {
     assert(!["__proto__", "constructor", "prototype"].includes(key), `${name} contains a forbidden key`);
+    assert(key.length <= LIMITS.stringLength, `${name} contains an overlong key`);
     validateJsonValue(item, `${name}.${key}`, depth + 1);
   }
+}
+
+function normalizeLogin(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function validateAutomationBranchPrefix(value) {
+  nonEmptyString(value, "repository.automationBranchPrefix", 160);
+  assert(!value.startsWith("/"), "repository.automationBranchPrefix must be repository-relative");
+  assert(value.endsWith("/"), "repository.automationBranchPrefix must end with /");
+  const components = value.slice(0, -1).split("/");
+  assert(
+    components.every((component) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(component)
+      && !component.endsWith(".")
+      && !component.toLowerCase().endsWith(".lock")
+      && !component.includes("..")),
+    "repository.automationBranchPrefix must be a safe Git ref prefix"
+  );
+  return value;
 }
 
 const REQUIRED_RUNTIME_LABELS = [
@@ -145,31 +231,31 @@ const ISSUE_MANAGED_LABELS = [
 ];
 
 function validateAi(config) {
-  plainObject(config.ai, "ai");
-  plainObject(config.ai.tracing, "ai.tracing");
+  fixedObject(config.ai, "ai", ["tracing", "providers", "agents"]);
+  fixedObject(config.ai.tracing, "ai.tracing", ["enabled", "includeSensitiveData"]);
   boolean(config.ai.tracing.enabled, "ai.tracing.enabled");
   boolean(config.ai.tracing.includeSensitiveData, "ai.tracing.includeSensitiveData");
   if (config.ai.tracing.includeSensitiveData) {
     assert(config.ai.tracing.enabled, "ai.tracing.includeSensitiveData requires ai.tracing.enabled=true");
   }
 
-  const providers = plainObject(config.ai.providers, "ai.providers");
+  const providers = dynamicObject(config.ai.providers, "ai.providers", LIMITS.providerEntries);
   assert(Object.keys(providers).length > 0, "ai.providers must not be empty");
   for (const [name, provider] of Object.entries(providers)) {
     assert(/^[a-z][a-z0-9_-]{0,63}$/.test(name), `ai.providers.${name} has an invalid provider name`);
-    plainObject(provider, `ai.providers.${name}`);
+    fixedObject(provider, `ai.providers.${name}`, ["baseUrl", "api", "structuredOutputs", "supportsReasoningEffort"]);
     validateUrl(provider.baseUrl, `ai.providers.${name}.baseUrl`);
     assert(PROVIDER_APIS.has(provider.api), `ai.providers.${name}.api must be responses or chat_completions`);
     boolean(provider.structuredOutputs, `ai.providers.${name}.structuredOutputs`);
     boolean(provider.supportsReasoningEffort, `ai.providers.${name}.supportsReasoningEffort`);
   }
 
-  const agents = plainObject(config.ai.agents, "ai.agents");
+  const agents = fixedObject(config.ai.agents, "ai.agents", AGENT_MODES);
   for (const mode of AGENT_MODES) {
-    const agent = plainObject(agents[mode], `ai.agents.${mode}`);
-    nonEmptyString(agent.provider, `ai.agents.${mode}.provider`);
+    const agent = fixedObject(agents[mode], `ai.agents.${mode}`, ["provider", "model", "effort", "maxTurns", "maximumAttempts", "modelSettings", "workspace"]);
+    nonEmptyString(agent.provider, `ai.agents.${mode}.provider`, 64);
     assert(providers[agent.provider], `ai.agents.${mode}.provider references undefined provider ${agent.provider}`);
-    nonEmptyString(agent.model, `ai.agents.${mode}.model`);
+    nonEmptyString(agent.model, `ai.agents.${mode}.model`, 256);
     assert(REASONING_EFFORTS.has(agent.effort), `ai.agents.${mode}.effort is unsupported`);
     assert(
       agent.effort === "none" || providers[agent.provider].supportsReasoningEffort,
@@ -192,11 +278,11 @@ function validateAi(config) {
       }
     }
 
-    const workspace = plainObject(agent.workspace, `ai.agents.${mode}.workspace`);
+    const workspace = fixedObject(agent.workspace, `ai.agents.${mode}.workspace`, ["enabled", "allowWrites", "model", "effort"]);
     boolean(workspace.enabled, `ai.agents.${mode}.workspace.enabled`);
     boolean(workspace.allowWrites, `ai.agents.${mode}.workspace.allowWrites`);
     if (workspace.enabled) {
-      nonEmptyString(workspace.model, `ai.agents.${mode}.workspace.model`);
+      nonEmptyString(workspace.model, `ai.agents.${mode}.workspace.model`, 256);
       assert(REASONING_EFFORTS.has(workspace.effort), `ai.agents.${mode}.workspace.effort is unsupported`);
     }
     if (mode === "review" || mode === "issue") {
@@ -244,37 +330,40 @@ export function getAgentRuntimeSettings(config, mode) {
 export async function loadConfig(configPath = ".github/codekeeper.json") {
   const resolved = path.resolve(configPath);
   const config = await readJson(resolved);
+  fixedObject(config, "policy", ["version", "repository", "projectInvariants", "ai", "labels", "review", "audit", "issues", "merge"]);
   assert(config.version === 2, "version must be 2");
-  plainObject(config.repository, "repository");
-  nonEmptyString(config.repository.displayName, "repository.displayName");
-  nonEmptyString(config.repository.defaultBranch, "repository.defaultBranch");
-  nonEmptyString(config.repository.automationBranchPrefix, "repository.automationBranchPrefix");
-  assert(!config.repository.automationBranchPrefix.startsWith("/"), "repository.automationBranchPrefix must be repository-relative");
-  assert(config.repository.automationBranchPrefix.endsWith("/"), "repository.automationBranchPrefix must end with /");
-  assert(config.repository.automationBranchPrefix.length <= 160, "repository.automationBranchPrefix must be at most 160 characters");
-  stringArray(config.repository.ownerLogins, "repository.ownerLogins");
+  fixedObject(config.repository, "repository", ["displayName", "defaultBranch", "ownerLogins", "automationBranchPrefix"]);
+  nonEmptyString(config.repository.displayName, "repository.displayName", 256);
+  nonEmptyString(config.repository.defaultBranch, "repository.defaultBranch", 255);
+  validateAutomationBranchPrefix(config.repository.automationBranchPrefix);
+  stringArray(config.repository.ownerLogins, "repository.ownerLogins", { maximumEntries: LIMITS.ownerLogins, maximumLength: 256 });
   assert(config.repository.ownerLogins.length > 0, "repository.ownerLogins must not be empty");
-  stringArray(config.projectInvariants ?? [], "projectInvariants");
+  const normalizedOwnerLogins = config.repository.ownerLogins.map(normalizeLogin);
+  assert(new Set(normalizedOwnerLogins).size === normalizedOwnerLogins.length, "repository.ownerLogins must not contain duplicates after normalization");
+  config.repository.ownerLogins = normalizedOwnerLogins;
+  stringArray(config.projectInvariants ?? [], "projectInvariants", { maximumEntries: LIMITS.projectInvariants, maximumLength: 4_096 });
   validateAi(config);
 
-  plainObject(config.labels, "labels");
+  dynamicObject(config.labels, "labels", LIMITS.labelEntries);
   for (const [name, definition] of Object.entries(config.labels)) {
-    plainObject(definition, `label ${name}`);
+    assert(name.length <= 256, `label ${name} has an overlong name`);
+    fixedObject(definition, `label ${name}`, ["color", "description"]);
     assert(/^[0-9A-Fa-f]{6}$/.test(definition.color), `label ${name} has invalid color`);
     assert(typeof definition.description === "string", `label ${name} needs a description`);
+    assert(definition.description.length <= 1_024, `label ${name} description must be at most 1024 characters`);
   }
   for (const label of REQUIRED_RUNTIME_LABELS) {
     assert(config.labels[label], `runtime requires undefined label ${label}`);
   }
 
-  plainObject(config.review, "review");
-  nonNegativeInteger(config.review.maximumBlockingFindings, "review.maximumBlockingFindings");
-  nonNegativeInteger(config.review.maximumNonBlockingFindings, "review.maximumNonBlockingFindings");
-  positiveInteger(config.review.maximumDiffBytes, "review.maximumDiffBytes");
-  positiveInteger(config.review.maximumChangedFiles, "review.maximumChangedFiles");
+  fixedObject(config.review, "review", ["maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
+  cappedNonNegativeInteger(config.review.maximumBlockingFindings, "review.maximumBlockingFindings", LIMITS.maximumBlockingFindings);
+  cappedNonNegativeInteger(config.review.maximumNonBlockingFindings, "review.maximumNonBlockingFindings", LIMITS.maximumNonBlockingFindings);
+  cappedPositiveInteger(config.review.maximumDiffBytes, "review.maximumDiffBytes", LIMITS.maximumDiffBytes);
+  cappedPositiveInteger(config.review.maximumChangedFiles, "review.maximumChangedFiles", LIMITS.maximumChangedFiles);
   boolean(config.review.includeDiffInAgentContext, "review.includeDiffInAgentContext");
-  stringArray(config.review.allowedLabels, "review.allowedLabels");
-  stringArray(config.review.managedLabels, "review.managedLabels");
+  stringArray(config.review.allowedLabels, "review.allowedLabels", { maximumLength: 256 });
+  stringArray(config.review.managedLabels, "review.managedLabels", { maximumLength: 256 });
   for (const label of [...config.review.allowedLabels, ...config.review.managedLabels]) {
     assert(config.labels[label], `review references undefined label ${label}`);
   }
@@ -283,24 +372,24 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
     assert(managedReviewLabels.has(label), `review must explicitly manage emitted label ${label}`);
   }
 
-  plainObject(config.audit, "audit");
-  positiveInteger(config.audit.maximumIssuesPerRun, "audit.maximumIssuesPerRun");
-  plainObject(config.audit.repair, "audit.repair");
+  fixedObject(config.audit, "audit", ["maximumIssuesPerRun", "repair"]);
+  cappedPositiveInteger(config.audit.maximumIssuesPerRun, "audit.maximumIssuesPerRun", LIMITS.maximumIssuesPerRun);
+  fixedObject(config.audit.repair, "audit.repair", ["enabled", "allowedPaths", "protectedPaths", "allowAdd", "maximumFiles", "maximumChangedLines", "maximumPatchBytes", "maximumFileBytes", "validationCommands"]);
   boolean(config.audit.repair.enabled, "audit.repair.enabled");
-  stringArray(config.audit.repair.allowedPaths, "audit.repair.allowedPaths");
-  stringArray(config.audit.repair.protectedPaths, "audit.repair.protectedPaths");
-  stringArray(config.audit.repair.validationCommands, "audit.repair.validationCommands");
+  stringArray(config.audit.repair.allowedPaths, "audit.repair.allowedPaths", { maximumLength: 1_024 });
+  stringArray(config.audit.repair.protectedPaths, "audit.repair.protectedPaths", { maximumLength: 1_024 });
+  stringArray(config.audit.repair.validationCommands, "audit.repair.validationCommands", { maximumEntries: LIMITS.validationCommands, maximumLength: 8_192 });
   boolean(config.audit.repair.allowAdd, "audit.repair.allowAdd");
-  positiveInteger(config.audit.repair.maximumFiles, "audit.repair.maximumFiles");
-  positiveInteger(config.audit.repair.maximumChangedLines, "audit.repair.maximumChangedLines");
-  positiveInteger(config.audit.repair.maximumPatchBytes, "audit.repair.maximumPatchBytes");
-  positiveInteger(config.audit.repair.maximumFileBytes, "audit.repair.maximumFileBytes");
+  cappedPositiveInteger(config.audit.repair.maximumFiles, "audit.repair.maximumFiles", LIMITS.maximumRepairFiles);
+  cappedPositiveInteger(config.audit.repair.maximumChangedLines, "audit.repair.maximumChangedLines", LIMITS.maximumRepairChangedLines);
+  cappedPositiveInteger(config.audit.repair.maximumPatchBytes, "audit.repair.maximumPatchBytes", LIMITS.maximumPatchBytes);
+  cappedPositiveInteger(config.audit.repair.maximumFileBytes, "audit.repair.maximumFileBytes", LIMITS.maximumFileBytes);
 
-  plainObject(config.issues, "issues");
+  fixedObject(config.issues, "issues", ["closeExactDuplicates", "allowAiImplementation", "maximumOpenIssueContext", "managedLabels"]);
   boolean(config.issues.closeExactDuplicates, "issues.closeExactDuplicates");
   boolean(config.issues.allowAiImplementation, "issues.allowAiImplementation");
-  positiveInteger(config.issues.maximumOpenIssueContext, "issues.maximumOpenIssueContext");
-  stringArray(config.issues.managedLabels, "issues.managedLabels");
+  cappedPositiveInteger(config.issues.maximumOpenIssueContext, "issues.maximumOpenIssueContext", LIMITS.maximumOpenIssueContext);
+  stringArray(config.issues.managedLabels, "issues.managedLabels", { maximumLength: 256 });
   for (const label of config.issues.managedLabels) {
     assert(config.labels[label], `issues references undefined label ${label}`);
   }
@@ -309,15 +398,16 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
     assert(managedIssueLabels.has(label), `issues must explicitly manage emitted label ${label}`);
   }
 
-  plainObject(config.merge, "merge");
+  fixedObject(config.merge, "merge", ["enabled", "method", "allowAutomationPullRequests", "allowUserPullRequests", "allowedUserAuthors", "maximumFiles", "maximumChangedLines", "allowedPaths", "blockedPaths"]);
   boolean(config.merge.enabled, "merge.enabled");
   boolean(config.merge.allowAutomationPullRequests, "merge.allowAutomationPullRequests");
   boolean(config.merge.allowUserPullRequests, "merge.allowUserPullRequests");
+  assert(!config.merge.allowUserPullRequests, "merge.allowUserPullRequests must remain false in version 2");
   assert(["MERGE", "SQUASH", "REBASE"].includes(config.merge.method), "merge.method must be MERGE, SQUASH, or REBASE");
-  positiveInteger(config.merge.maximumFiles, "merge.maximumFiles");
-  positiveInteger(config.merge.maximumChangedLines, "merge.maximumChangedLines");
-  stringArray(config.merge.allowedPaths, "merge.allowedPaths");
-  stringArray(config.merge.blockedPaths, "merge.blockedPaths");
-  stringArray(config.merge.allowedUserAuthors, "merge.allowedUserAuthors");
+  cappedPositiveInteger(config.merge.maximumFiles, "merge.maximumFiles", LIMITS.maximumMergeFiles);
+  cappedPositiveInteger(config.merge.maximumChangedLines, "merge.maximumChangedLines", LIMITS.maximumMergeChangedLines);
+  stringArray(config.merge.allowedPaths, "merge.allowedPaths", { maximumLength: 1_024 });
+  stringArray(config.merge.blockedPaths, "merge.blockedPaths", { maximumLength: 1_024 });
+  stringArray(config.merge.allowedUserAuthors, "merge.allowedUserAuthors", { maximumEntries: LIMITS.ownerLogins, maximumLength: 256 });
   return { config, path: resolved };
 }

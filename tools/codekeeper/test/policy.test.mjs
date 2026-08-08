@@ -198,6 +198,33 @@ test("auto-merge rejects a human author using the automation branch prefix", () 
   assert.ok(decision.reasons.some((reason) => reason.includes("not opened by a GitHub App bot")));
 });
 
+test("auto-merge never admits a human pull request when an unvalidated v2 policy enables it", () => {
+  const unsafeConfig = structuredClone(config);
+  unsafeConfig.merge.allowUserPullRequests = true;
+  unsafeConfig.merge.allowedUserAuthors = ["person"];
+  const decision = evaluateAutoMerge({
+    config: unsafeConfig,
+    pullRequest: {
+      state: "open",
+      draft: false,
+      user: { login: "person", type: "User" },
+      head: { ref: "docs/manual-update", repo: { full_name: "owner/repository" } },
+      base: { repo: { full_name: "owner/repository" } }
+    },
+    files: [{ filename: "docs/README.md", additions: 1, deletions: 0 }],
+    reviewResult: {
+      risk: "low",
+      blockingFindings: [],
+      tests: { adequate: true },
+      mergeRecommendation: "auto"
+    },
+    reviewContextComplete: true,
+    automationBotLogin: "codekeeper[bot]"
+  });
+  assert.equal(decision.eligible, false);
+  assert.ok(decision.reasons.some((reason) => reason.includes("User pull request auto-merge is not supported")));
+});
+
 
 test("auto-merge cannot be enabled without a current-head AI review result", () => {
   const decision = evaluateAutoMerge({

@@ -28,6 +28,7 @@ jobs:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       issue_number: ${{ inputs.issue_number || '' }}
       dry_run: ${{ inputs.dry_run || false }}
+      # Optional for dry_run=true; required when dry_run=false publishes changes.
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:
       # Match this secret to ai.agents.fix.provider in .github/codekeeper.json.
@@ -36,4 +37,5 @@ jobs:
       workspace_api_key: ${{ secrets.OPENAI_API_KEY }}
       # Always a separate OpenAI trace-export key, never the model-provider key.
       trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
+      # Optional for dry_run=true; required when dry_run=false publishes changes.
       app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}
