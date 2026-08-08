@@ -7,6 +7,8 @@ node tools/codekeeper/src/cli.mjs check-config
 cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
 
+`npm run check` also regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. The manifest's SHA-256 is deliberately embedded in the four source workflows: release changes to the production tooling must update the generated manifest and its four pinned workflow digests together. The top-level release manifest remains a separate release-owner responsibility.
+
 ## Decision-quality evaluation
 
 The deterministic fixture gate exercises the production prompt builders, coordinator profiles, schemas, and provider adapter with a fake provider. It makes no network or paid-provider calls and writes neither provider outputs nor credentials:
