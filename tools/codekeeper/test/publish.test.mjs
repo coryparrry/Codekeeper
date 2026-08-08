@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/lib/github.mjs";
-import { findingMarker, sha256 } from "../src/lib/markers.mjs";
+import { findingFingerprint, findingMarker, sha256 } from "../src/lib/markers.mjs";
 import {
   isTrustedMaintenanceIssue,
   isTrustedRepairPull,
@@ -367,6 +367,105 @@ test("maintenance publication adopts an App-created issue after response loss", 
   } finally {
     process.chdir(originalDirectory);
     restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(repository, { recursive: true, force: true });
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("maintenance repair notification remains singular after response loss", async () => {
+  const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-repair-retry-test-"));
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-repair-retry-artifact-"));
+  const configSha256 = "e".repeat(64);
+  const originalDirectory = process.cwd();
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  const notifications = [];
+  let notificationAttempts = 0;
+  try {
+    await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
+    git(repository, ["init", "-q", "-b", "main"]);
+    git(repository, ["config", "user.name", "Test"]);
+    git(repository, ["config", "user.email", "test@example.com"]);
+    git(repository, ["add", "README.md"]);
+    git(repository, ["commit", "-qm", "initial"]);
+    const baseSha = git(repository, ["rev-parse", "HEAD"]);
+    const finding = {
+      title: "Missing guide", evidence: "The guide is missing.", proposedAction: "Add the guide.",
+      owningPath: "README.md", category: "docs", priority: "p2", problemKey: "missing-guide", labels: []
+    };
+    const repairFingerprint = findingFingerprint(finding);
+    const context = { mode: "audit", repository: "owner/repository", configSha256, baseSha, runUrl: "https://example.test/run" };
+    const result = {
+      mode: "audit",
+      summary: "One maintenance finding.",
+      findings: [finding],
+      repair: {
+        requested: true, findingIndex: 0, title: "Add the guide.", body: "Adds the missing guide.", risk: "low", validationSummary: ""
+      },
+      noActionReason: null
+    };
+    const patch = Buffer.from("");
+    await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "audit",
+      context,
+      result,
+      configSha256,
+      patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: [] }
+    });
+    const maintenanceIssue = {
+      number: 1,
+      state: "open",
+      body: `Existing maintenance finding\n${findingMarker(repairFingerprint)}`,
+      user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+    };
+    const repairPull = {
+      number: 12,
+      html_url: "https://example.test/pull/12",
+      body: `Repair\n<!-- codekeeper:repair=${repairFingerprint} -->`,
+      user: { login: identity.login, id: Number(identity.id), type: "Bot" },
+      head: { ref: repairBranch(config, "audit", repairFingerprint), repo: { full_name: context.repository } },
+      base: { repo: { full_name: context.repository } }
+    };
+    const restoreGitHub = replaceGitHubMethods({
+      async listMaintenanceIssues() { return [maintenanceIssue]; },
+      async ensureLabels() {},
+      async updateIssue() {},
+      async replaceManagedLabels() {},
+      async findOpenPullByHead() { return repairPull; },
+      async upsertMarkerComment(number, marker, body, authorIdentity) {
+        assert.equal(number, maintenanceIssue.number);
+        assert.equal(marker, `<!-- codekeeper:repair-notification=${repairFingerprint} -->`);
+        assert.deepEqual(authorIdentity, identity);
+        const content = `${body}\n${marker}`;
+        if (notifications.length === 0) notifications.push(content);
+        else notifications[0] = content;
+        notificationAttempts += 1;
+        if (notificationAttempts === 1) throw new Error("connection lost after repair notification");
+      }
+    });
+    try {
+      process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+      process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+      process.chdir(repository);
+      await assert.rejects(
+        publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+        /connection lost after repair notification/
+      );
+      await publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
+      assert.equal(notificationAttempts, 2);
+      assert.deepEqual(notifications, [
+        `A repair pull request was opened: ${repairPull.html_url}\n<!-- codekeeper:repair-notification=${repairFingerprint} -->`
+      ]);
+    } finally {
+      restoreGitHub();
+    }
+  } finally {
+    process.chdir(originalDirectory);
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
     else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
     if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;

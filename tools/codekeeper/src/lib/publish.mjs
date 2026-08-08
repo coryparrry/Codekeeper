@@ -552,7 +552,12 @@ export async function publishAudit({ artifactDirectory, config, configSha256, ex
       dryRun
     });
     if (!dryRun && publishedFinding?.issueNumber && repair.url) {
-      await github.createComment(publishedFinding.issueNumber, `A repair pull request was opened: ${repair.url}`);
+      await github.upsertMarkerComment(
+        publishedFinding.issueNumber,
+        `<!-- codekeeper:repair-notification=${fingerprint} -->`,
+        `A repair pull request was opened: ${repair.url}`,
+        expectedAutomationIdentity()
+      );
     }
   }
   return { findings, repair, dryRun };
