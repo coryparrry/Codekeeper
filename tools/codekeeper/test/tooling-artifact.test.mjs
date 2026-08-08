@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { toolingManifestText } from "../scripts/generate-tooling-manifest.mjs";
 import { verifyToolingArtifact } from "../scripts/verify-tooling-artifact.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(testDirectory, "..");
 const manifestPath = path.join(packageRoot, "tooling-manifest.json");
+const execFileAsync = promisify(execFile);
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -39,6 +42,36 @@ async function stagedFixture(context) {
   const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-tooling-artifact-test-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   return stageProductionTooling(root);
+}
+
+async function actionStagingScript() {
+  const action = await readFile(path.join(packageRoot, "action.yml"), "utf8");
+  const stageStart = action.indexOf("    - name: Stage pinned production tooling\n");
+  assert.notEqual(stageStart, -1, "missing composite action staging step");
+  const runStart = action.indexOf("      run: |\n", stageStart);
+  const nextStep = action.indexOf("\n    - name:", runStart);
+  assert.notEqual(runStart, -1, "missing composite action staging script");
+  assert.notEqual(nextStep, -1, "missing composite action upload step");
+  const indentedScript = action.slice(runStart + "      run: |\n".length, nextStep);
+  return indentedScript
+    .split("\n")
+    .map((line) => line.length === 0 ? line : line.replace(/^ {8}/, ""))
+    .join("\n");
+}
+
+async function actionPathFixture(context) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-composite-action-test-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const actionPath = await copyProductionTooling(path.join(root, "action-path"));
+  await copyFile(path.join(packageRoot, "action.yml"), path.join(actionPath, "action.yml"));
+  return { actionPath, stagingRoot: path.join(root, "staging") };
+}
+
+async function runCompositeStaging({ actionPath, stagingRoot }) {
+  return execFileAsync("bash", ["-c", await actionStagingScript()], {
+    env: { ACTION_PATH: actionPath, PATH: process.env.PATH ?? "/usr/bin:/bin", STAGING_ROOT: stagingRoot },
+    maxBuffer: 32 * 1024
+  });
 }
 
 async function expectedManifestSha256() {
@@ -72,6 +105,32 @@ test("canonical tooling manifest exactly covers the production runtime payload",
 test("verifier accepts the exact bootstrapped production tooling package", async (context) => {
   const target = await stagedFixture(context);
   await verifyToolingArtifact({ root: target, expectedManifestSha256: await expectedManifestSha256() });
+});
+
+test("composite staging script accepts a clean action path and rejects hidden or symlink payloads", async (context) => {
+  const clean = await actionPathFixture(context);
+  const result = await runCompositeStaging(clean);
+  assert.equal(result.stdout, "");
+  const target = path.join(clean.stagingRoot, "tooling", "tools", "codekeeper");
+  assert.deepEqual(
+    (await readdir(target)).sort(),
+    ["agents", "package-lock.json", "package.json", "presets", "scripts", "src", "tooling-manifest.json"]
+  );
+  await verifyToolingArtifact({ root: target, expectedManifestSha256: await expectedManifestSha256() });
+
+  const hidden = await actionPathFixture(context);
+  await writeFile(path.join(hidden.actionPath, "src", ".artifact-hidden.mjs"), "export {};\n", "utf8");
+  await assert.rejects(
+    () => runCompositeStaging(hidden),
+    (error) => error.code === 1 && /refused a hidden tooling path/.test(error.stderr)
+  );
+
+  const linked = await actionPathFixture(context);
+  await symlink("../package.json", path.join(linked.actionPath, "src", "package-link.json"));
+  await assert.rejects(
+    () => runCompositeStaging(linked),
+    (error) => error.code === 1 && /refused a tooling symlink/.test(error.stderr)
+  );
 });
 
 test("verifier rejects a substituted manifest before it can trust the artifact helper", async (context) => {
@@ -129,6 +188,8 @@ test("hidden runtime paths are refused before GitHub's default artifact upload c
 
   const action = await readFile(path.join(packageRoot, "action.yml"), "utf8");
   assert.match(action, /find "\$ACTION_PATH\/\$directory" -name '\.\*'/);
+  assert.match(action, /if find "\$ACTION_PATH\/\$directory" -name '\.\*' -print -quit \| grep -q \.; then/);
+  assert.doesNotMatch(action, /grep -q \. &&/);
   assert.match(action, /refused a hidden tooling path/);
   assert.match(action, /created a hidden path/);
   assert.doesNotMatch(action, /include-hidden-files:\s*true/);

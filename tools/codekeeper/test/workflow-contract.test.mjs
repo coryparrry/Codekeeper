@@ -126,6 +126,8 @@ test("private-action bootstrap stages only the production runtime and retains it
   assert.match(action, /for directory in agents presets src/);
   assert.match(action, /scripts\/verify-tooling-artifact\.mjs/);
   assert.match(action, /find "\$target" -type l/);
+  assert.match(action, /if find "\$target" -type l -print -quit \| grep -q \.; then/);
+  assert.doesNotMatch(action, /grep -q \. &&/);
   assert.match(action, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
   assert.match(action, /retention-days: 1/);
   assert.doesNotMatch(action, /secrets\.|GITHUB_TOKEN|GH_TOKEN|actions\/checkout/);
