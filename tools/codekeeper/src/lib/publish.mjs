@@ -208,6 +208,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const github = new GitHubClient({ token, repository: context.repository });
   const pull = await currentReviewPull(github, context, config);
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
+  const runUrl = trustedPublicationRunUrl(context);
   const automationBotLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
@@ -225,7 +226,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     }
     return {
       desiredLabels: [...desiredSet],
-      comment: renderReviewComment(result, autoMerge)
+      comment: renderReviewComment(result, autoMerge, runUrl)
     };
   };
 
@@ -301,12 +302,13 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   const github = new GitHubClient({ token, repository: context.repository });
   const currentIssue = () => currentOpenIssue(github, context.issue, "analysis");
   const issue = await currentIssue();
+  const runUrl = trustedPublicationRunUrl(context);
 
   const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
   if (result.implementationRecommendation === "ai-ready") desired.add("codekeeper:ready");
   if (result.duplicateOf && result.duplicateConfidence === "high") desired.add("codekeeper:duplicate-candidate");
   const desiredLabels = [...desired];
-  const comment = renderIssueTriage(result);
+  const comment = renderIssueTriage(result, runUrl);
 
   if (dryRun) {
     log(`DRY RUN issue triage #${issue.number}`, { desiredLabels, comment });
@@ -421,6 +423,27 @@ function expectedAutomationIdentity() {
     throw new Error("CODEKEEPER_AUTOMATION_BOT_LOGIN and CODEKEEPER_AUTOMATION_BOT_ID must identify the configured GitHub App bot");
   }
   return identity;
+}
+
+function trustedPublicationRunUrl(context) {
+  const repository = String(context?.repository ?? "");
+  const runId = String(context?.runId ?? "");
+  const raw = String(context?.runUrl ?? "");
+  if (!/^[A-Za-z0-9_.-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/.test(repository) || !/^[1-9]\d{0,19}$/.test(runId) || raw.length > 2048) {
+    throw new Error("Publication context has no valid workflow run URL");
+  }
+  let run;
+  let server;
+  try {
+    run = new URL(raw);
+    server = new URL(process.env.GITHUB_SERVER_URL ?? "https://github.com");
+  } catch {
+    throw new Error("Publication context has no valid workflow run URL");
+  }
+  if (run.protocol !== "https:" || run.origin !== server.origin || run.username || run.password || run.search || run.hash || run.pathname !== `/${repository}/actions/runs/${runId}`) {
+    throw new Error("Publication context has no valid workflow run URL");
+  }
+  return run.toString();
 }
 
 export function repairBranch(config, mode, fingerprint) {

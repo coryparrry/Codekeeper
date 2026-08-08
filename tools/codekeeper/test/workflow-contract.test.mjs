@@ -58,6 +58,9 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.match(reviewCaller, /on:\n\s+pull_request_target:/);
   assert.doesNotMatch(reviewCaller, /on:\n\s+pull_request:/);
   assert.match(reviewCaller, /pull-requests: read/);
+  assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \}\} @\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/);
+  const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
+  assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
 });
 
@@ -271,6 +274,7 @@ test("issue triage allows only bounded automatic events while owner commands and
   assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
   assert.match(caller, /issues:\n\s+types: \[opened, reopened, edited\]/);
   assert.match(caller, /auto_triage: true/);
+  assert.match(caller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \}\}"/);
 
   assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
   assert.match(fix, /startsWith\(github\.event\.comment\.body, '\/codekeeper fix '\)/);

@@ -1,6 +1,7 @@
 # Copy to .github/workflows/codekeeper-issues.yml, then replace OWNER/REPOSITORY
 # and FULL_COMMIT_SHA with the published maintainer repository and release commit.
 name: Codekeeper issue triage
+run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"
 
 on:
   issues:

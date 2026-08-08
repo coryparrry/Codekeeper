@@ -285,6 +285,8 @@ test("review publication activates auto-merge last and falls back safely", async
     mode: "review",
     repository: "owner/repository",
     configSha256,
+    runId: "7001",
+    runUrl: "https://github.com/owner/repository/actions/runs/7001",
     pullRequest: {
       number: 7,
       headSha: "head",
@@ -356,6 +358,7 @@ test("review publication activates auto-merge last and falls back safely", async
     assert.match(comment.comment, /Manual boundary retained/);
     assert.match(comment.comment, /Auto-merge is not active: GitHub rejected enablement/);
     assert.doesNotMatch(comment.comment, /Eligible for policy-controlled auto-merge/);
+    assert.match(comment.comment, /<sub>Codekeeper workflow run: https:\/\/github\.com\/owner\/repository\/actions\/runs\/7001<\/sub>/);
 
     calls.length = 0;
     rejectEnable = false;
@@ -397,7 +400,7 @@ test("issue publication does not close a duplicate after the triaged issue chang
   const configSha256 = "a".repeat(64);
   const issueConfig = structuredClone(config);
   issueConfig.issues.closeExactDuplicates = true;
-  const context = { mode: "issue", repository: "owner/repository", configSha256, issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
+  const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7002", runUrl: "https://github.com/owner/repository/actions/runs/7002", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
   const result = {
     mode: "issue", summary: "Exact duplicate.", type: "bug", priority: "p3", labels: [], actionable: true,
     missingInformation: [], duplicateOf: 9, duplicateConfidence: "high", implementationRecommendation: "manual", comment: "Thanks for the report."

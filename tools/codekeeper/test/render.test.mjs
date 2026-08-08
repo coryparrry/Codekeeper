@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderReviewComment, sanitizeMarkdown } from "../src/lib/render.mjs";
+import { renderIssueTriage, renderReviewComment, sanitizeMarkdown } from "../src/lib/render.mjs";
 
 test("review comment contains deterministic policy decision", () => {
   const markdown = renderReviewComment(
@@ -12,11 +12,21 @@ test("review comment contains deterministic policy decision", () => {
       blockingFindings: [],
       nonBlockingFindings: []
     },
-    { eligible: false, reasons: ["Swift files require manual review"] }
+    { eligible: false, reasons: ["Swift files require manual review"] },
+    "https://github.com/owner/repository/actions/runs/7001"
   );
   assert.match(markdown, /^## PR review summary$/m);
   assert.match(markdown, /Manual boundary retained/);
   assert.match(markdown, /Swift files require manual review/);
+  assert.match(markdown, /<sub>Codekeeper workflow run: https:\/\/github\.com\/owner\/repository\/actions\/runs\/7001<\/sub>/);
+});
+
+test("issue triage keeps trusted workflow-run evidence separate from model text", () => {
+  const markdown = renderIssueTriage({
+    comment: "Triage completed.", type: "bug", priority: "p2", actionable: true,
+    implementationRecommendation: "manual", duplicateOf: null, duplicateConfidence: "none", missingInformation: []
+  }, "https://github.com/owner/repository/actions/runs/7002");
+  assert.match(markdown, /<sub>Codekeeper workflow run: https:\/\/github\.com\/owner\/repository\/actions\/runs\/7002<\/sub>/);
 });
 
 

@@ -1,5 +1,5 @@
 {
-  "name": "codekeeper",
+  "name": "codekeeper-runtime",
   "description": "Provider-configurable Agents SDK runtime and deterministic GitHub maintainer policy",
   "version": "0.2.0",
   "private": true,
@@ -13,6 +13,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs test/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs"
+    "eval:offline": "node evals/decision-quality.mjs --offline",
+    "eval:live": "node evals/decision-quality.mjs",
+    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs presets/*.mjs evals/*.mjs test/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs"
   }
 }

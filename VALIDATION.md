@@ -7,6 +7,31 @@ node tools/codekeeper/src/cli.mjs check-config
 cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
 
+## Decision-quality evaluation
+
+The deterministic fixture gate exercises the production prompt builders, coordinator profiles, schemas, and provider adapter with a fake provider. It makes no network or paid-provider calls and writes neither provider outputs nor credentials:
+
+```bash
+cd tools/codekeeper && npm run eval:offline
+```
+
+The live gate is explicit and is not part of `npm run check`. A mixed run requires both `OPENAI_API_KEY` and `DEEPSEEK_API_KEY`; an OpenAI-preset run requires `OPENAI_API_KEY`. Under the default tracing policy it also requires a distinct `CODEKEEPER_TRACE_API_KEY`. The runner resolves keys per configured provider before any provider call, never prints or writes them, and reports only scenario, preset, model, attempt, and pass/fail; do not redirect its output or provide secrets through command-line arguments:
+
+```bash
+cd tools/codekeeper && npm run eval:live -- --preset mixed --repeat 3
+cd tools/codekeeper && npm run eval:live -- --preset openai --repeat 3
+```
+
+For an authorized OpenAI issue-triage release decision, run the same OpenAI matrix with one candidate at a time and select the first all-pass result deliberately. These commands are evaluation overrides only; they do not change the shipped policy:
+
+```bash
+cd tools/codekeeper && npm run eval:live -- --preset openai --openai-issue terra-medium --repeat 3
+cd tools/codekeeper && npm run eval:live -- --preset openai --openai-issue terra-high --repeat 3
+cd tools/codekeeper && npm run eval:live -- --preset openai --openai-issue sol-high --repeat 3
+```
+
+Passing an offline or live decision gate proves only the bounded fixture assertions. It does not authorize GitHub mutations, repairs, model changes, or a release.
+
 ## Source-release integrity
 
 Run the release command only from a clean checkout at the immutable commit to publish. It creates a deterministic `git archive` from tracked Git content, unpacks it for verification, checks the full manifest and file inventory, and prints the archive SHA-256. Choose an output directory outside this checkout:
