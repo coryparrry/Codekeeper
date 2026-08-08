@@ -3,7 +3,7 @@
   "files": [
     {
       "path": "agents/issue-triager.md",
-      "sha256": "501de451224387218aa3cb1bfff65d12c49a147803df13deafea48c1a8d8a501"
+      "sha256": "73686f4516e6bc6e0fe838e36a4f017bff45094598da470173ac130f6bec1b13"
     },
     {
       "path": "agents/maintenance-planner.md",
