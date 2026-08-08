@@ -1,0 +1,14 @@
+{
+  "name": "codekeeper-acceptance",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Offline-tested acceptance harness for an explicitly supplied private Codekeeper fixture",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs fixture/src/*.mjs fixture/test/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs && node --test fixture/test/*.test.mjs"
+  }
+}

@@ -33,7 +33,11 @@ function findingList(findings) {
     .join("\n");
 }
 
-export function renderReviewComment(result, autoMerge) {
+function workflowRunEvidence(runUrl = "") {
+  return runUrl ? `\n\n<sub>Codekeeper workflow run: ${runUrl}</sub>` : "";
+}
+
+export function renderReviewComment(result, autoMerge, runUrl = "") {
   const decision = autoMerge.eligible
     ? "Eligible for policy-controlled auto-merge."
     : `Manual boundary retained: ${autoMerge.reasons.join("; ") || "policy did not allow auto-merge"}.`;
@@ -60,10 +64,10 @@ ${findingList(result.nonBlockingFindings)}
 
 ${safeMarkdown(result.tests.notes || "No additional test note.")}
 
-<sub>Generated from the exact PR head analysed by the repository maintainer. Blocking findings fail the required Codekeeper review gate; GitHub branch protection remains authoritative.</sub>`;
+<sub>Generated from the exact PR head analysed by the repository maintainer. Blocking findings fail the required Codekeeper review gate; GitHub branch protection remains authoritative.</sub>${workflowRunEvidence(runUrl)}`;
 }
 
-export function renderIssueTriage(result) {
+export function renderIssueTriage(result, runUrl = "") {
   const missing = result.missingInformation.length
     ? result.missingInformation.map((item) => `- ${safeMarkdown(item)}`).join("\n")
     : "None.";
@@ -84,7 +88,7 @@ ${safeMarkdown(result.comment)}
 
 ### Missing information
 
-${missing}`;
+${missing}${workflowRunEvidence(runUrl)}`;
 }
 
 export function renderMaintenanceIssue(finding, fingerprint, runUrl = "") {

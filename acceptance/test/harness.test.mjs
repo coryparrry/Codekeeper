@@ -1,0 +1,535 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir, stat, symlink } from "node:fs/promises";
+import path from "node:path";
+import {
+  FIXTURE_ALLOWED_FIX_PATHS,
+  createGhRunner,
+  parseCommandLine,
+  parseEventCallerRunName,
+  parsePinnedWorkflowUses,
+  preflight,
+  redact,
+  runScenario,
+  safeEnvironment
+} from "../src/harness.mjs";
+import { EvidenceError, prepareEvidenceDestination, validateEvidence, writeEvidenceAtomically } from "../src/evidence.mjs";
+
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+const HEAD = "fedcba9876543210fedcba9876543210fedcba98";
+const REPO = "owner/codekeeper-acceptance-fixture";
+const APP = { login: "codekeeper-acceptance[bot]", id: "99" };
+const NOW = "2026-08-08T00:00:00.000Z";
+const RUN_CREATED = "2026-08-08T00:00:00.001Z";
+const RUN_STARTED = "2026-08-08T00:00:00.002Z";
+const RUN_UPDATED = "2026-08-08T00:00:00.003Z";
+const MARKER_UPDATED = "2026-08-08T00:00:00.004Z";
+const SUBJECT_UPDATED = "2026-08-08T00:00:00.005Z";
+const TEMP_ROOT = "/private/tmp";
+const FIXTURE = await mkdtemp(path.join(TEMP_ROOT, "codekeeper-acceptance-fixture-"));
+
+function encoded(value) {
+  return Buffer.from(value, "utf8").toString("base64");
+}
+
+function response(stdout, exitCode = 0, stderr = "") {
+  return { stdout: typeof stdout === "string" ? stdout : JSON.stringify(stdout), stderr, exitCode };
+}
+
+function metadata() {
+  return {
+    full_name: REPO,
+    name: "codekeeper-acceptance-fixture",
+    private: true,
+    visibility: "private",
+    html_url: `https://github.com/${REPO}`,
+    default_branch: "main"
+  };
+}
+
+function workflowPin(workflow) {
+  const runName = workflow === "codekeeper-review.yml"
+    ? 'run-name: "Codekeeper review #${{ github.event.pull_request.number }} @${{ github.event.pull_request.head.sha }}"\n'
+    : workflow === "codekeeper-issues.yml"
+      ? 'run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"\n'
+      : "";
+  return encoded(`${runName}jobs:\n  call:\n    uses: owner/codekeeper/.github/workflows/${workflow}@${SHA}\n`);
+}
+
+async function freshEvidencePath(name = "evidence") {
+  const parent = await mkdtemp(path.join(TEMP_ROOT, "codekeeper-evidence-"));
+  return path.join(parent, `${name}.json`);
+}
+
+async function scenarioOptions(extra = {}) {
+  return {
+    repo: REPO,
+    "source-sha": SHA,
+    "acknowledge-private-acceptance": true,
+    "fixture-checkout": FIXTURE,
+    evidence: await freshEvidencePath(),
+    ...extra
+  };
+}
+
+function createRepairFingerprint(issueNumber) {
+  return createHash("sha256").update(`issue|${REPO}|${issueNumber}`).digest("hex");
+}
+
+function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concurrentDispatch = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false } = {}) {
+  const calls = [];
+  let workflowListCount = 0;
+  let pullListCount = 0;
+  let pullViewCount = 0;
+  let tag;
+  const detail = {
+    "maintenance-dry-run": ["codekeeper-maintain.yml", "Codekeeper maintenance", "workflow_dispatch"],
+    "review-introduced-defect": ["codekeeper-review.yml", "Codekeeper review", "pull_request_target"],
+    "issue-triage-related": ["codekeeper-issues.yml", "Codekeeper issue triage", "issues"],
+    "controlled-fix": ["codekeeper-fix.yml", "Codekeeper issue implementation", "workflow_dispatch"]
+  }[scenario];
+  const issueNumber = 14;
+  const fingerprint = createRepairFingerprint(issueNumber);
+  const branch = `codekeeper/fix/fix-${fingerprint}`;
+  const reviewHead = reviewHeadChanges ? SHA : HEAD;
+  const displayTitle = scenario === "review-introduced-defect"
+    ? `Codekeeper review #12 @${reviewHead}`
+    : scenario === "issue-triage-related"
+      ? "Codekeeper issue triage #13"
+      : detail[1];
+  const runHead = crossReviewHead ? SHA : HEAD;
+  const runBranch = scenario === "maintenance-dry-run" || scenario === "controlled-fix" ? () => tag : () => "main";
+  const runEntry = (id = 77, overrides = {}) => ({
+    databaseId: id,
+    attempt: 1,
+    status: "completed",
+    createdAt: RUN_CREATED,
+    updatedAt: RUN_UPDATED,
+    headSha: runHead,
+    headBranch: runBranch(),
+    displayTitle: wrongDisplayTitle ? `${displayTitle} stale` : displayTitle,
+    ...overrides
+  });
+  const runner = async (args) => {
+    calls.push(args);
+    const text = args.join(" ");
+    if (commandFailure) return response("ghp_abcdefghi token=leak https://user:password@example.invalid", 1, "GH_TOKEN=leak");
+    if (text === "auth status --hostname github.com") return response("");
+    if (text === `api --hostname github.com repos/${REPO}`) return response(metadata());
+    if (text === "api --hostname github.com user --jq .login") return response("dispatcher\n");
+    if (text === `api --hostname github.com repos/${REPO}/git/ref/heads/main`) return response({ object: { sha: HEAD } });
+    if (args[0] === "api" && args.includes("--method") && args.includes("POST") && args.includes(`repos/${REPO}/git/refs`)) {
+      const ref = args.find((item) => item.startsWith("ref=refs/tags/"));
+      const sha = args.find((item) => item.startsWith("sha="));
+      tag = ref?.slice("ref=refs/tags/".length);
+      if (tagCreationFailure) return response("creation failed", 1);
+      if (!tag || sha !== `sha=${HEAD}`) throw new Error(`Unexpected acceptance tag creation: ${text}`);
+      return response({ ref: `refs/tags/${tag}`, object: { type: "commit", sha: HEAD } });
+    }
+    if (text.includes(`/git/ref/tags/`)) {
+      const encodedTag = text.slice(text.indexOf("/git/ref/tags/") + "/git/ref/tags/".length);
+      if (decodeURIComponent(encodedTag) !== tag) throw new Error(`Unexpected acceptance tag lookup: ${text}`);
+      return response({ ref: `refs/tags/${tag}`, object: { type: "commit", sha: tagMismatch ? SHA : HEAD } });
+    }
+    if (text.includes(`/contents/.github/workflows/${detail?.[0]}`)) return response(workflowSource ? encoded(workflowSource) : workflowPin(detail[0]));
+    if (text.includes("/contents/.github/codekeeper.json")) {
+      return response(encoded(JSON.stringify({
+        repository: { automationBranchPrefix: "codekeeper/fix/" },
+        issues: { allowAiImplementation: !invalidFixPolicy },
+        audit: { repair: { allowedPaths: invalidFixPolicy ? ["README.md"] : [...FIXTURE_ALLOWED_FIX_PATHS], validationCommands: invalidFixPolicy ? [] : ["node --test test/*.test.mjs"] } }
+      })));
+    }
+    if (args[0] === "run" && args[1] === "list") {
+      workflowListCount += 1;
+      if (scenario === "issue-triage-related") {
+        const runs = [runEntry()];
+        return response(runs);
+      }
+      if (workflowListCount === 1) return response(baselineRun || baselineRerun ? [runEntry(66, { createdAt: "2026-08-07T23:59:59.000Z", updatedAt: "2026-08-07T23:59:59.001Z", headBranch: "main" })] : []);
+      const runs = [runEntry()];
+      if (baselineRun || baselineRerun) runs.unshift(runEntry(66, { createdAt: "2026-08-07T23:59:59.000Z", updatedAt: baselineRerun ? RUN_UPDATED : "2026-08-07T23:59:59.001Z", headBranch: "main", attempt: baselineRerun ? 2 : 1 }));
+      if (concurrentDispatch) runs.push(runEntry(78));
+      return response(runs);
+    }
+    if (args[0] === "workflow" && args[1] === "run") return response("");
+    if (args[0] === "run" && args[1] === "view") {
+      return response({
+        databaseId: 77,
+        url: `https://github.com/${REPO}/actions/runs/77`,
+        status: "completed",
+        conclusion: scenario === "review-introduced-defect" ? "failure" : "success",
+        workflowName: detail[1],
+        headSha: runHead,
+        headBranch: runBranch(),
+        createdAt: RUN_CREATED,
+        startedAt: RUN_STARTED,
+        updatedAt: RUN_UPDATED,
+        attempt: 1,
+        displayTitle: wrongDisplayTitle ? `${displayTitle} stale` : displayTitle
+      });
+    }
+    if (new RegExp(`^api --hostname github\\.com repos/${REPO}/actions/runs/(?:66|77)$`).test(text)) {
+      const runId = Number(text.slice(text.lastIndexOf("/") + 1));
+      const baseline = runId === 66;
+      return response({
+        id: runId,
+        html_url: `https://github.com/${REPO}/actions/runs/${runId}`,
+        event: detail[2],
+        head_sha: baseline ? runHead : runHead,
+        head_branch: baseline ? "main" : runBranch(),
+        created_at: baseline ? "2026-08-07T23:59:59.000Z" : RUN_CREATED,
+        updated_at: baseline ? (baselineRerun ? RUN_UPDATED : "2026-08-07T23:59:59.001Z") : RUN_UPDATED,
+        run_attempt: baseline ? (baselineRerun ? 2 : 1) : 1,
+        status: "completed",
+        display_title: baseline ? displayTitle : (wrongDisplayTitle ? `${displayTitle} stale` : displayTitle),
+        actor: { login: "dispatcher" }
+      });
+    }
+    if (text.includes("/actions/runs/77/jobs")) {
+      const jobs = scenario === "maintenance-dry-run"
+        ? [{ name: "publish", conclusion: "skipped" }]
+        : [{ name: "Codekeeper implementation verification", conclusion: "success" }];
+      return response({ jobs });
+    }
+    if (args[0] === "pr" && args[1] === "view") {
+      pullViewCount += 1;
+      return response({
+        number: 12,
+        url: `https://github.com/${REPO}/pull/12`,
+        state: "OPEN",
+        isDraft: reviewDraft,
+        isCrossRepository: false,
+        baseRefName: reviewRetarget ? "release" : "main",
+        headRefOid: reviewHeadChanges && pullViewCount > 1 ? SHA : HEAD,
+        headRefName: "main",
+        labels: [{ name: "codekeeper:blocked" }],
+        updatedAt: SUBJECT_UPDATED
+      });
+    }
+    if (args[0] === "pr" && args[1] === "checks") return response([{ name: "Codekeeper review gate", bucket: "fail" }]);
+    if (args[0] === "issue" && args[1] === "view") return response({ number: scenario === "issue-triage-related" ? 13 : issueNumber, url: `https://github.com/${REPO}/issues/${scenario === "issue-triage-related" ? 13 : issueNumber}`, state: "OPEN", labels: [{ name: "codekeeper:ready" }], updatedAt: SUBJECT_UPDATED });
+    if (args[0] === "pr" && args[1] === "list") {
+      pullListCount += 1;
+      return response(pullListCount === 1 ? [] : [{ number: 14, url: `https://github.com/${REPO}/pull/14`, headRefName: branch, createdAt: SUBJECT_UPDATED }]);
+    }
+    if (args[0] === "api" && args[1] === "graphql") {
+      if (text.includes("comments(last:100)")) {
+        const isReview = text.includes("pullRequest(number:$number)");
+        const marker = isReview ? "<!-- codekeeper:review -->" : scenario === "controlled-fix" ? `<!-- codekeeper:repair-notification=${wrongRepairMarker ? "0".repeat(64) : fingerprint} -->` : "<!-- codekeeper:issue-triage -->";
+        const object = isReview ? "pullRequest" : "issue";
+        const runEvidence = (isReview || scenario === "issue-triage-related")
+          ? `\n<sub>Codekeeper workflow run: https://github.com/${REPO}/actions/runs/${staleMarker ? 78 : 77}</sub>`
+          : "";
+        return response({
+          data: {
+            repository: {
+              [object]: {
+                comments: {
+                  nodes: [{ body: `summary${runEvidence}\n${marker}`, updatedAt: staleMarker ? RUN_CREATED : MARKER_UPDATED, author: { login: APP.login, databaseId: foreignAppMarker ? 100 : Number(APP.id) } }],
+                  pageInfo: { hasNextPage: false }
+                }
+              }
+            }
+          }
+        });
+      }
+      if (text.includes("files(first:100)")) {
+        return response({
+          data: {
+            repository: {
+              pullRequest: {
+                files: { nodes: FIXTURE_ALLOWED_FIX_PATHS.map((file) => ({ path: file })), pageInfo: { hasNextPage: false } }
+              }
+            }
+          }
+        });
+      }
+      if (text.includes("body author")) {
+        return response({
+          data: {
+            repository: {
+              pullRequest: {
+                number: 14,
+                url: `https://github.com/${REPO}/pull/14`,
+                state: "OPEN",
+                mergedAt: null,
+                autoMergeRequest: null,
+                headRefName: branch,
+                createdAt: SUBJECT_UPDATED,
+                body: `Closes #${issueNumber}\n<!-- codekeeper:repair=${wrongRepairMarker ? "0".repeat(64) : fingerprint} -->`,
+                author: { login: APP.login, databaseId: Number(APP.id) }
+              }
+            }
+          }
+        });
+      }
+    }
+    throw new Error(`Unexpected fake gh command: ${text}`);
+  };
+  return { runner, calls };
+}
+
+test("source pin parser accepts one exact active reusable workflow and rejects comments, aliases, refs, duplicates, expressions, and unrelated lines", () => {
+  const exact = `jobs:\n  keeper:\n    uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}\n`;
+  assert.equal(parsePinnedWorkflowUses(exact, "codekeeper-maintain.yml", SHA), true);
+  for (const source of [
+    `# uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`,
+    `jobs:\n  keeper:\n    uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@main`,
+    `jobs:\n  keeper:\n    uses: *keeper`,
+    `jobs:\n  keeper:\n    uses: \${{ github.repository }}/.github/workflows/codekeeper-maintain.yml@${SHA}`,
+    `${exact}  another:\n    uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`,
+    `jobs:\n  note: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`
+  ]) {
+    assert.throws(() => parsePinnedWorkflowUses(source, "codekeeper-maintain.yml", SHA), /Caller workflow/);
+  }
+});
+
+test("event caller run-name parser accepts only the exact active durable expressions", () => {
+  const review = 'run-name: "Codekeeper review #${{ github.event.pull_request.number }} @${{ github.event.pull_request.head.sha }}"';
+  const issue = 'run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"';
+  assert.equal(parseEventCallerRunName(review, "review-introduced-defect"), true);
+  assert.equal(parseEventCallerRunName(issue, "issue-triage-related"), true);
+  for (const source of [
+    `# ${review}`,
+    'run-name: "Codekeeper review #${{ github.event.pull_request.number }}"',
+    `${issue}\nrun-name: "another title"`,
+    `  ${issue}`,
+    'run-name: ${{ github.event.issue.title }}'
+  ]) {
+    assert.throws(() => parseEventCallerRunName(source, source.includes("review") ? "review-introduced-defect" : "issue-triage-related"), /deterministic run-name/);
+  }
+});
+
+test("preflight refuses implicit, unauthenticated, public, wrong-host, and mismatched targets without exposing CLI output", async () => {
+  await assert.rejects(() => preflight({ repo: ".", gh: async () => response("") }), /explicit --repo/);
+  await assert.rejects(() => preflight({ repo: "owner/unrelated", gh: async () => response("") }), /must begin/);
+  await assert.rejects(() => preflight({ repo: REPO, gh: async () => response("token=leak ghp_abcdefghi", 1) }), (error) => error.message === "GitHub CLI command failed");
+  await assert.rejects(() => preflight({ repo: REPO, gh: async (args) => args[0] === "auth" ? response("") : response({ ...metadata(), private: false, visibility: "public" }) }), /explicit private GitHub.com/);
+  await assert.rejects(() => preflight({ repo: REPO, gh: async (args) => args[0] === "auth" ? response("") : response({ ...metadata(), html_url: "https://ghe.example/owner/codekeeper-acceptance-fixture" }) }), /explicit private GitHub.com/);
+  await assert.rejects(() => preflight({ repo: REPO, gh: async (args) => args[0] === "auth" ? response("") : response({ ...metadata(), full_name: "owner/codekeeper-acceptance-other" }) }), /explicit private GitHub.com/);
+});
+
+test("scenario gates reject acknowledgements, non-SHAs, missing App identity, and unknown evidence parents before gh", async () => {
+  const never = async () => { throw new Error("gh must not run"); };
+  const missingAcknowledgement = await scenarioOptions({ "acknowledge-private-acceptance": false });
+  const branchRef = await scenarioOptions({ "source-sha": "main" });
+  const missingAppId = await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login });
+  const missingParent = await scenarioOptions({ evidence: path.join(TEMP_ROOT, "not-created-parent", "evidence.json") });
+  const oversizedRepository = await scenarioOptions({ repo: `${"o".repeat(40)}/codekeeper-acceptance-fixture` });
+  await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: missingAcknowledgement, gh: never }), /acknowledge/);
+  await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: branchRef, gh: never }), /40-character/);
+  await assert.rejects(() => runScenario({ scenario: "review-introduced-defect", options: missingAppId, gh: never }), /--app-id/);
+  await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: missingParent, gh: never }), /output parent must already exist/);
+  await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: oversizedRepository, gh: never }), /bounded repository limits/);
+});
+
+test("a commented or conflicting source pin fails before a scenario can dispatch", async () => {
+  const source = `# uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}\njobs:\n  keeper:\n    uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@main`;
+  const fake = fakeGh({ scenario: "maintenance-dry-run", workflowSource: source });
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(result.passed, false);
+  assert.equal(result.evidence.dispatchRef, null);
+  assert.equal(fake.calls.some((args) => args.includes(`repos/${REPO}/git/refs`)), false);
+  assert.equal(fake.calls.some((args) => args[0] === "workflow"), false);
+});
+
+test("dispatch refuses tag creation or tag-to-SHA verification failures before workflow dispatch", async () => {
+  for (const option of [{ tagCreationFailure: true }, { tagMismatch: true }]) {
+    const fake = fakeGh({ scenario: "maintenance-dry-run", ...option });
+    const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: () => new Date(NOW), sleep: async () => {} });
+    assert.equal(result.passed, false);
+    if (option.tagMismatch) assert.match(result.evidence.dispatchRef, /^codekeeper-acceptance\/dispatch-maintenance-dry-run-fedcba987654-[0-9a-f-]{36}$/);
+    assert.equal(fake.calls.some((args) => args[0] === "workflow" && args[1] === "run"), false);
+  }
+});
+
+test("fix policy prevalidation fails before an immutable acceptance tag is created", async () => {
+  const fake = fakeGh({ scenario: "controlled-fix", invalidFixPolicy: true });
+  const result = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: fake.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(result.passed, false);
+  assert.equal(result.evidence.dispatchRef, null);
+  assert.equal(fake.calls.some((args) => args.includes(`repos/${REPO}/git/refs`)), false);
+  assert.equal(fake.calls.some((args) => args[0] === "workflow" && args[1] === "run"), false);
+});
+
+test("maintenance dry-run uses a quiescent, actor-bound dispatch boundary and only records skipped publication", async () => {
+  const { runner, calls } = fakeGh({ scenario: "maintenance-dry-run" });
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(result.passed, true);
+  const dispatch = calls.find((args) => args[0] === "workflow" && args[1] === "run");
+  assert.match(dispatch[6], /^codekeeper-acceptance\/dispatch-maintenance-dry-run-fedcba987654-[0-9a-f-]{36}$/);
+  assert.equal(dispatch[6], result.evidence.dispatchRef);
+  assert.deepEqual(result.evidence.assertions.map((item) => item.passed), [true, true, true]);
+  assert.ok(calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-maintain.yml?ref=${encodeURIComponent(result.evidence.dispatchRef)}`));
+  assert.ok(calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-maintain.yml?ref=${HEAD}`));
+  assert.ok(calls.findIndex((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-maintain.yml?ref=${HEAD}`) < calls.findIndex((args) => args.includes(`repos/${REPO}/git/refs`)));
+  assert.ok(calls.every((args) => !args.join(" ").match(/\b(secret|token|password|api[_-]?key)\b/i)));
+});
+
+test("dispatch revalidates stable baseline runs after every poll and after selected completion", async () => {
+  const { runner, calls } = fakeGh({ scenario: "maintenance-dry-run", baselineRun: true });
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(result.passed, true);
+  assert.equal(calls.filter((args) => args[3] === `repos/${REPO}/actions/runs/66`).length, 2);
+});
+
+test("review requires a current App-owned canonical marker and immutable current-head linkage", async () => {
+  const good = fakeGh({ scenario: "review-introduced-defect" });
+  const pass = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(pass.passed, true);
+  assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-review.yml?ref=${HEAD}`));
+  const stale = fakeGh({ scenario: "review-introduced-defect", staleMarker: true });
+  const staleResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: stale.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(staleResult.passed, false);
+  const cross = fakeGh({ scenario: "review-introduced-defect", crossReviewHead: true });
+  const crossResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: cross.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(crossResult.passed, false);
+  const foreign = fakeGh({ scenario: "review-introduced-defect", foreignAppMarker: true });
+  const foreignResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: foreign.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(foreignResult.passed, false);
+  for (const option of [{ wrongDisplayTitle: true }, { reviewDraft: true }, { reviewRetarget: true }, { reviewHeadChanges: true }]) {
+    const falsePositive = fakeGh({ scenario: "review-introduced-defect", ...option });
+    const result = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: falsePositive.runner, now: () => new Date(NOW), sleep: async () => {} });
+    assert.equal(result.passed, false);
+  }
+});
+
+test("issue triage rejects stale publisher-run evidence and wrong durable titles", async () => {
+  const good = fakeGh({ scenario: "issue-triage-related" });
+  const pass = await runScenario({ scenario: "issue-triage-related", options: await scenarioOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(pass.passed, true);
+  assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-issues.yml?ref=${HEAD}`));
+  const stale = fakeGh({ scenario: "issue-triage-related", staleMarker: true });
+  const staleResult = await runScenario({ scenario: "issue-triage-related", options: await scenarioOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: stale.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(staleResult.passed, false);
+  const wrongTitle = fakeGh({ scenario: "issue-triage-related", wrongDisplayTitle: true });
+  const wrongTitleResult = await runScenario({ scenario: "issue-triage-related", options: await scenarioOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: wrongTitle.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(wrongTitleResult.passed, false);
+});
+
+test("controlled fix rejects concurrent runs and accepts exactly one current canonical repair PR", async () => {
+  const good = fakeGh({ scenario: "controlled-fix" });
+  const pass = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(pass.passed, true);
+  assert.deepEqual(pass.evidence.assertions.map((item) => item.passed), [true, true, true, true, true, true]);
+  assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/codekeeper.json?ref=${encodeURIComponent(pass.evidence.dispatchRef)}`));
+  assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/codekeeper.json?ref=${HEAD}`));
+  assert.ok(good.calls.findIndex((args) => args[3] === `repos/${REPO}/contents/.github/codekeeper.json?ref=${HEAD}`) < good.calls.findIndex((args) => args.includes(`repos/${REPO}/git/refs`)));
+  const concurrent = fakeGh({ scenario: "controlled-fix", concurrentDispatch: true });
+  const failed = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: concurrent.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(failed.passed, false);
+  assert.equal(concurrent.calls.some((args) => args[0] === "workflow"), true);
+  const wrongMarker = fakeGh({ scenario: "controlled-fix", wrongRepairMarker: true });
+  const wrongMarkerResult = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: wrongMarker.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(wrongMarkerResult.passed, false);
+  const rerun = fakeGh({ scenario: "controlled-fix", baselineRerun: true });
+  const rerunResult = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: rerun.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(rerunResult.passed, false);
+  assert.equal(rerun.calls.some((args) => args[0] === "workflow" && args[1] === "run"), true);
+});
+
+test("evidence rejects fixture containment and an external-directory symlink into the fixture, then writes atomically with private permissions", async () => {
+  const evidence = {
+    schemaVersion: 1,
+    targetRepository: REPO,
+    scenario: "maintenance-dry-run",
+    sourceSha: SHA,
+    dispatchRef: null,
+    workflow: { id: 77, url: `https://github.com/${REPO}/actions/runs/77`, conclusion: "success" },
+    resource: null,
+    assertions: [{ expectation: "publication skipped", passed: true }],
+    passed: true,
+    startedAt: NOW,
+    completedAt: RUN_CREATED
+  };
+  const outputParent = await mkdtemp(path.join(TEMP_ROOT, "codekeeper-evidence-parent-"));
+  await assert.rejects(() => prepareEvidenceDestination({ evidencePath: path.join(FIXTURE, "evidence.json"), fixtureCheckout: FIXTURE }), /outside/);
+  const external = await mkdtemp(path.join(TEMP_ROOT, "codekeeper-external-"));
+  await symlink(FIXTURE, path.join(external, "points-into-fixture"));
+  await assert.rejects(() => prepareEvidenceDestination({ evidencePath: path.join(external, "points-into-fixture", "evidence.json"), fixtureCheckout: FIXTURE }), /symbolic-link/);
+  const output = path.join(outputParent, "evidence.json");
+  const destination = await prepareEvidenceDestination({ evidencePath: output, fixtureCheckout: FIXTURE });
+  await writeEvidenceAtomically({ evidence, destination });
+  assert.equal((await stat(output)).mode & 0o777, 0o600);
+  assert.deepEqual((await readdir(outputParent)).sort(), ["evidence.json"]);
+  assert.equal(JSON.parse(await readFile(output, "utf8")).passed, true);
+  await assert.rejects(() => writeEvidenceAtomically({ evidence, destination }), /refusing to overwrite/);
+});
+
+test("redaction handles credential forms and command failures never include raw gh output", async () => {
+  const probes = [
+    "GH_TOKEN=github-token-value",
+    "GITHUB_TOKEN: github-token-value",
+    "ghr_abcdefghijklmno",
+    "ghp_abcdefghijklmno",
+    "github_pat_abcdefghijklmno",
+    "Bearer bearer-secret-value",
+    "https://user:password@example.invalid/path",
+    "-----BEGIN PRIVATE KEY-----\nprivate-key-value\n-----END PRIVATE KEY-----"
+  ];
+  for (const probe of probes) {
+    const output = redact(probe);
+    assert.equal(output.includes("github-token-value") || output.includes("bearer-secret-value") || output.includes("password") || output.includes("private-key-value") || output.includes("abcdefghijklmno"), false, probe);
+  }
+  const { runner } = fakeGh({ scenario: "maintenance-dry-run", commandFailure: true });
+  await assert.rejects(() => preflight({ repo: REPO, gh: runner }), (error) => error.message === "GitHub CLI command failed");
+  assert.deepEqual(safeEnvironment({ PATH: "/bin", HOME: "/tmp/home", GH_TOKEN: "no", GITHUB_TOKEN: "no", OPENAI_API_KEY: "no" }), { PATH: "/bin", HOME: "/tmp/home" });
+});
+
+test("process runner terminates a non-closing child with SIGTERM then SIGKILL and removes listeners", async () => {
+  class FakeChild extends EventEmitter {
+    constructor() {
+      super();
+      this.stdout = new EventEmitter();
+      this.stderr = new EventEmitter();
+      this.signals = [];
+    }
+    kill(signal) {
+      this.signals.push(signal);
+      return true;
+    }
+  }
+  const child = new FakeChild();
+  const runner = createGhRunner({ spawn: () => child, timeoutMs: 2, killGraceMs: 2 });
+  await assert.rejects(() => runner(["auth", "status"]), /GitHub CLI command failed/);
+  assert.deepEqual(child.signals, ["SIGTERM", "SIGKILL"]);
+  assert.equal(child.listenerCount("close"), 0);
+  assert.equal(child.stdout.listenerCount("data"), 0);
+  assert.equal(child.stderr.listenerCount("data"), 0);
+  assert.equal(child.listenerCount("error"), 0);
+});
+
+test("evidence schema remains bounded and command parsing requires explicit options", () => {
+  const evidence = {
+    schemaVersion: 1,
+    targetRepository: REPO,
+    scenario: "maintenance-dry-run",
+    sourceSha: SHA,
+    dispatchRef: null,
+    workflow: null,
+    resource: null,
+    assertions: [{ expectation: "failed safely", passed: false }],
+    passed: false,
+    startedAt: NOW,
+    completedAt: RUN_CREATED
+  };
+  assert.equal(validateEvidence(evidence), evidence);
+  assert.throws(() => validateEvidence({ ...evidence, logs: "forbidden" }), EvidenceError);
+  assert.throws(() => validateEvidence({ ...evidence, targetRepository: `${"o".repeat(40)}/codekeeper-acceptance-fixture` }), /targetRepository/);
+  assert.throws(() => validateEvidence({
+    ...evidence,
+    workflow: { id: 77, url: `https://github.com/${"x".repeat(2048)}`, conclusion: "success" }
+  }), /workflow.url/);
+  const boundedUrl = `https://github.com/${"x".repeat(2028)}`;
+  assert.throws(() => validateEvidence({
+    ...evidence,
+    workflow: { id: 77, url: boundedUrl, conclusion: "success" },
+    resource: { kind: "issue", number: 1, url: boundedUrl },
+    assertions: Array.from({ length: 12 }, () => ({ expectation: "x".repeat(180), passed: true }))
+  }), /serialized size/);
+  assert.deepEqual(parseCommandLine(["preflight", "--repo", REPO]), { command: "preflight", options: { repo: REPO } });
+  assert.throws(() => parseCommandLine(["maintenance-dry-run", "--repo", REPO, "--repo", REPO]), /Duplicate/);
+  assert.throws(() => parseCommandLine(["maintenance-dry-run", "--current-repo", "true"]), /unsupported/);
+});
