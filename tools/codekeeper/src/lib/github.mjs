@@ -74,6 +74,14 @@ function isRetryableGraphqlPayload(payload) {
   );
 }
 
+function isRetrySafeMethod(method) {
+  return ["GET", "HEAD"].includes(String(method).toUpperCase());
+}
+
+function isGraphqlMutation(query) {
+  return /^\s*mutation\b/i.test(String(query));
+}
+
 
 function normalizeLogin(value) {
   return String(value ?? "").trim().toLowerCase();
@@ -181,8 +189,9 @@ export class GitHubClient {
     throw new Error("GitHub retry budget exhausted");
   }
 
-  async request(method, endpoint, { body, headers = {}, retries = this.retryAttempts } = {}) {
+  async request(method, endpoint, { body, headers = {}, retries } = {}) {
     const url = endpoint.startsWith("http") ? endpoint : `${this.apiUrl}${endpoint}`;
+    const retryBudget = retries ?? (isRetrySafeMethod(method) ? this.retryAttempts : 0);
     const { response, text, payload } = await this.fetchWithRetry(url, {
       method,
       headers: {
@@ -195,7 +204,7 @@ export class GitHubClient {
       },
       body: body === undefined ? undefined : JSON.stringify(body)
     }, {
-      retries,
+      retries: retryBudget,
       consume: async (response, signal) => {
         const text = await awaitWithSignal(response.text(), signal);
         let payload = null;
@@ -410,6 +419,7 @@ export class GitHubClient {
   }
 
   async graphql(query, variables = {}) {
+    const retries = isGraphqlMutation(query) ? 0 : this.retryAttempts;
     const { response, payload } = await this.fetchWithRetry(this.graphqlUrl, {
       method: "POST",
       headers: {
@@ -420,6 +430,7 @@ export class GitHubClient {
       },
       body: JSON.stringify({ query, variables })
     }, {
+      retries,
       consume: async (response, signal) => ({
         response,
         payload: await awaitWithSignal(response.json(), signal)

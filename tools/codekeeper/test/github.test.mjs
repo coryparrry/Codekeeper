@@ -49,6 +49,24 @@ test("GitHub retries a REST response-body timeout within the capped budget", asy
   assert.equal(attempts, 2);
 });
 
+test("GitHub does not retry an ambiguous mutation response-body timeout", async () => {
+  let attempts = 0;
+  const github = client({
+    timeoutMs: 5,
+    sleep: async () => { throw new Error("mutations must not be retried"); },
+    fetch: async () => {
+      attempts += 1;
+      return new Response(new ReadableStream({ start() {} }), { status: 201 });
+    }
+  });
+
+  await assert.rejects(
+    github.createIssue({ title: "Finding", body: "Details" }),
+    /timed out after 5ms/
+  );
+  assert.equal(attempts, 1);
+});
+
 test("GitHub keeps GraphQL deadlines active while response bodies are read", async () => {
   const github = client({
     timeoutMs: 5,
@@ -183,6 +201,27 @@ test("GraphQL retries HTTP 200 rate-limit errors", async () => {
   assert.deepEqual(await github.graphql("query { viewer { login } }"), { viewer: { login: "codekeeper" } });
   assert.equal(attempts, 2);
   assert.deepEqual(delays, [500]);
+});
+
+test("GraphQL does not retry ambiguous mutation failures", async () => {
+  let attempts = 0;
+  const github = client({
+    sleep: async () => { throw new Error("mutations must not be retried"); },
+    fetch: async () => {
+      attempts += 1;
+      return new Response(JSON.stringify({ errors: [{ type: "RATE_LIMITED", message: "rate limited" }] }));
+    }
+  });
+
+  await assert.rejects(
+    github.graphql("mutation Update { updateIssue(input: {}) { clientMutationId } }"),
+    (error) => {
+      assert.equal(error.status, 200);
+      assert.deepEqual(error.payload, { errors: [{ type: "RATE_LIMITED", message: "rate limited" }] });
+      return true;
+    }
+  );
+  assert.equal(attempts, 1);
 });
 
 test("GraphQL preserves exhausted HTTP 200 rate-limit errors", async () => {

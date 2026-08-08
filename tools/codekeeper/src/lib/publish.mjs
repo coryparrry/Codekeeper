@@ -162,6 +162,29 @@ export async function reconcileAutoMerge(github, pullRequest, config, decision) 
   return { enabled: false, disabled: false, reason: decision.reasons.join("; ") };
 }
 
+async function suspendAutoMerge(github, pullRequest, refreshPull) {
+  if (!pullRequest.auto_merge) return { pullRequest, disabled: false };
+  let disableError = null;
+  try {
+    await github.disableAutoMerge(pullRequest.node_id);
+  } catch (error) {
+    disableError = error;
+    warn(`Could not confirm auto-merge disablement for PR #${pullRequest.number}: ${error.message}`);
+  }
+
+  let refreshedPull;
+  try {
+    refreshedPull = await refreshPull();
+  } catch (error) {
+    throw new Error(`Could not verify auto-merge was suspended for PR #${pullRequest.number}: ${error.message}`, { cause: error });
+  }
+  if (!Object.hasOwn(refreshedPull, "auto_merge") || refreshedPull.auto_merge) {
+    const detail = disableError ? ` after GitHub reported: ${disableError.message}` : "";
+    throw new Error(`Could not suspend auto-merge for PR #${pullRequest.number}${detail}`);
+  }
+  return { pullRequest: refreshedPull, disabled: true };
+}
+
 async function currentReviewPull(github, context, config) {
   const pull = await github.getPull(context.pullRequest.number);
   if (pull.state !== "open") throw new Error(`PR #${pull.number} is not open`);
@@ -215,34 +238,60 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   }
 
   const automationIdentity = expectedAutomationIdentity();
-  const currentPull = await currentReviewPull(github, context, config);
-  const currentAutoMerge = evaluateAutoMerge({ config, pullRequest: currentPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
-  const eligibleState = publicationState(currentAutoMerge);
-  const manualFallbackState = publicationState({ ...currentAutoMerge, eligible: false });
+  let reconciledPull = await currentReviewPull(github, context, config);
+  const suspension = await suspendAutoMerge(
+    github,
+    reconciledPull,
+    () => currentReviewPull(github, context, config)
+  );
+  reconciledPull = suspension.pullRequest;
+  let publishedAutoMerge = evaluateAutoMerge({ config, pullRequest: reconciledPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
+  const eligibleState = publicationState(publishedAutoMerge);
+  const manualFallbackState = publicationState({ ...publishedAutoMerge, eligible: false });
   const provisionedLabels = [...new Set([...eligibleState.desiredLabels, ...manualFallbackState.desiredLabels])];
   await github.ensureLabels(config.labels, provisionedLabels);
 
-  const reconciledPull = await currentReviewPull(github, context, config);
-  const reconciledAutoMerge = evaluateAutoMerge({ config, pullRequest: reconciledPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
-  const autoMergeResult = await reconcileAutoMerge(github, reconciledPull, config, reconciledAutoMerge);
-  const publishedAutoMerge = reconciledAutoMerge.eligible && !autoMergeResult.enabled
-    ? {
-      ...reconciledAutoMerge,
-      eligible: false,
-      reasons: [...reconciledAutoMerge.reasons, `Auto-merge is not active: ${autoMergeResult.reason || "enablement failed"}`]
-    }
-    : reconciledAutoMerge;
-  const { desiredLabels, comment } = publicationState(publishedAutoMerge);
+  const writePublicationState = async (decision) => {
+    const state = publicationState(decision);
+    await currentReviewPull(github, context, config);
+    await github.replaceManagedLabels(pull.number, state.desiredLabels, config.review.managedLabels);
+    await currentReviewPull(github, context, config);
+    await github.upsertMarkerComment(
+      pull.number,
+      REVIEW_MARKER,
+      state.comment,
+      automationIdentity
+    );
+    return state;
+  };
 
-  await currentReviewPull(github, context, config);
-  await github.replaceManagedLabels(pull.number, desiredLabels, config.review.managedLabels);
-  await currentReviewPull(github, context, config);
-  await github.upsertMarkerComment(
-    pull.number,
-    REVIEW_MARKER,
-    comment,
-    automationIdentity
-  );
+  let { desiredLabels } = await writePublicationState(publishedAutoMerge);
+  let autoMergeResult = {
+    enabled: false,
+    disabled: suspension.disabled,
+    reason: suspension.disabled ? "suspended before publication" : publishedAutoMerge.reasons.join("; ")
+  };
+
+  if (publishedAutoMerge.eligible) {
+    const activationPull = await currentReviewPull(github, context, config);
+    const activationDecision = evaluateAutoMerge({ config, pullRequest: activationPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
+    if (!activationDecision.eligible) {
+      publishedAutoMerge = activationDecision;
+      ({ desiredLabels } = await writePublicationState(publishedAutoMerge));
+      autoMergeResult = { enabled: false, disabled: suspension.disabled, reason: activationDecision.reasons.join("; ") };
+    } else {
+      autoMergeResult = await reconcileAutoMerge(github, activationPull, config, activationDecision);
+      publishedAutoMerge = activationDecision;
+      if (!autoMergeResult.enabled) {
+        publishedAutoMerge = {
+          ...activationDecision,
+          eligible: false,
+          reasons: [...activationDecision.reasons, `Auto-merge is not active: ${autoMergeResult.reason || "enablement failed"}`]
+        };
+        ({ desiredLabels } = await writePublicationState(publishedAutoMerge));
+      }
+    }
+  }
 
   return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, blocking };
 }

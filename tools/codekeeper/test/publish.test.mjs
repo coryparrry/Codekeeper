@@ -276,7 +276,7 @@ test("failed enablement fails publication when auto-merge state cannot be refetc
   );
 });
 
-test("review publication reports manual review when auto-merge enablement fails", async () => {
+test("review publication activates auto-merge last and falls back safely", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-review-auto-merge-test-"));
   const configSha256 = "d".repeat(64);
   const reviewConfig = structuredClone(config);
@@ -309,15 +309,26 @@ test("review publication reports manual review when auto-merge enablement fails"
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   const calls = [];
+  let rejectEnable = true;
+  let rejectDisable = false;
+  let rejectLabels = false;
   const restoreGitHub = replaceGitHubMethods({
     async getPull() { return structuredClone(pull); },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
     async enableAutoMerge() {
       calls.push({ type: "enable" });
-      throw new Error("GitHub rejected enablement");
+      if (rejectEnable) throw new Error("GitHub rejected enablement");
+    },
+    async disableAutoMerge() {
+      calls.push({ type: "disable" });
+      if (rejectDisable) throw new Error("GitHub rejected disablement");
+      pull.auto_merge = null;
     },
     async ensureLabels(_definitions, desiredLabels) { calls.push({ type: "ensure", desiredLabels }); },
-    async replaceManagedLabels(_number, desiredLabels) { calls.push({ type: "labels", desiredLabels }); },
+    async replaceManagedLabels(_number, desiredLabels) {
+      calls.push({ type: "labels", desiredLabels });
+      if (rejectLabels) throw new Error("label publication failed");
+    },
     async upsertMarkerComment(_number, _marker, comment) { calls.push({ type: "comment", comment }); }
   });
   try {
@@ -328,21 +339,49 @@ test("review publication reports manual review when auto-merge enablement fails"
     });
     const publication = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" });
     const provisioned = calls.find((call) => call.type === "ensure");
-    const labels = calls.find((call) => call.type === "labels");
-    const comment = calls.find((call) => call.type === "comment");
+    const labelCalls = calls.filter((call) => call.type === "labels");
+    const commentCalls = calls.filter((call) => call.type === "comment");
+    const labels = labelCalls.at(-1);
+    const comment = commentCalls.at(-1);
 
     assert.equal(publication.blocking, false);
     assert.equal(publication.autoMerge.eligible, false);
     assert.equal(publication.autoMergeResult.enabled, false);
-    assert.deepEqual(calls.map((call) => call.type), ["ensure", "enable", "labels", "comment"]);
+    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "labels", "comment"]);
     assert.ok(provisioned.desiredLabels.includes("codekeeper:auto-merge"));
     assert.ok(provisioned.desiredLabels.includes("codekeeper:manual-review"));
-    assert.equal(calls.slice(0, calls.findIndex((call) => call.type === "enable")).some((call) => call.type === "labels"), false);
+    assert.ok(labelCalls[0].desiredLabels.includes("codekeeper:auto-merge"));
     assert.ok(labels.desiredLabels.includes("codekeeper:manual-review"));
     assert.ok(!labels.desiredLabels.includes("codekeeper:auto-merge"));
     assert.match(comment.comment, /Manual boundary retained/);
     assert.match(comment.comment, /Auto-merge is not active: GitHub rejected enablement/);
     assert.doesNotMatch(comment.comment, /Eligible for policy-controlled auto-merge/);
+
+    calls.length = 0;
+    rejectEnable = false;
+    const successful = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" });
+    assert.equal(successful.autoMergeResult.enabled, true);
+    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable"]);
+
+    calls.length = 0;
+    pull.auto_merge = { enabled_at: "now" };
+    rejectLabels = true;
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
+      /label publication failed/
+    );
+    assert.deepEqual(calls.map((call) => call.type), ["disable", "ensure", "labels"]);
+    assert.equal(pull.auto_merge, null);
+
+    calls.length = 0;
+    pull.auto_merge = { enabled_at: "now" };
+    rejectDisable = true;
+    rejectLabels = false;
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
+      /Could not suspend auto-merge/
+    );
+    assert.deepEqual(calls.map((call) => call.type), ["disable"]);
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
