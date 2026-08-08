@@ -2,7 +2,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentConfig } from "./config.mjs";
 import { readJson, readOptionalRegularJson, writeJson } from "./io.mjs";
-import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
+import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
+
+export { providerCompatibleJsonSchema } from "./schemas.mjs";
 
 const MODE_NAMES = Object.freeze({
   review: "Pull request reviewer",
@@ -44,23 +46,6 @@ export function modelSettingsFor(agent, provider) {
     settings = mergeObjects({ reasoning: { effort: agent.effort } }, settings);
   }
   return settings;
-}
-
-export function providerCompatibleJsonSchema(value) {
-  if (Array.isArray(value)) return value.map((item) => providerCompatibleJsonSchema(item));
-  if (!isPlainObject(value)) return cloneJson(value);
-  const projected = {};
-  for (const [key, item] of Object.entries(value)) {
-    // The Responses structured-output subset accepts enum but not const. Keep
-    // the original schema for the local validator and project only its wire
-    // representation so the same single permitted value remains strict.
-    if (key === "const") {
-      projected.enum = [cloneJson(item)];
-    } else {
-      projected[key] = providerCompatibleJsonSchema(item);
-    }
-  }
-  return projected;
 }
 
 export function structuredOutputType(mode, schema) {

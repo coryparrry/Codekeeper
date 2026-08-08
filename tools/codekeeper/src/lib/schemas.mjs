@@ -9,6 +9,53 @@ const LIMITS = Object.freeze({
   result: 8000
 });
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function cloneJson(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function providerConstType(value) {
+  if (value === null) return "null";
+  if (typeof value === "string") return "string";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Number.isInteger(value) ? "integer" : "number";
+  }
+  throw new Error("Provider schema projection supports only JSON primitive const values");
+}
+
+function providerConstSchema(source) {
+  const inferredType = providerConstType(source.const);
+  if (Object.hasOwn(source, "enum") && (!Array.isArray(source.enum) || source.enum.length !== 1 || !Object.is(source.enum[0], source.const))) {
+    throw new Error("Provider schema projection const requires an identical singleton enum");
+  }
+  if (!Object.hasOwn(source, "type")) return { type: inferredType, enum: [cloneJson(source.const)] };
+  if (typeof source.type !== "string" || !["string", "boolean", "null", "number", "integer"].includes(source.type)) {
+    throw new Error("Provider schema projection requires a supported primitive type for const");
+  }
+  const typeMatches = source.type === inferredType || (source.type === "number" && inferredType === "integer");
+  if (!typeMatches) throw new Error("Provider schema projection const does not match its type");
+  return { type: source.type, enum: [cloneJson(source.const)] };
+}
+
+// The Codex workspace action consumes this file through its provider's strict
+// output-schema API. The local validators continue to use the source schemas;
+// this creates only the provider-wire representation it requires.
+export function providerCompatibleJsonSchema(value) {
+  if (Array.isArray(value)) return value.map((item) => providerCompatibleJsonSchema(item));
+  if (!isPlainObject(value)) return cloneJson(value);
+  const hasConst = Object.hasOwn(value, "const");
+  const projected = hasConst ? providerConstSchema(value) : {};
+  for (const [key, item] of Object.entries(value)) {
+    if (hasConst && (key === "const" || key === "enum" || key === "type")) continue;
+    projected[key] = providerCompatibleJsonSchema(item);
+  }
+  return projected;
+}
+
 function stringSchema({ minLength = 1, maxLength = LIMITS.summary } = {}) {
   return { type: "string", minLength, maxLength };
 }

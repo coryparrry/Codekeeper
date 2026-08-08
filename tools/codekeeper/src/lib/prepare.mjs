@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
-import { auditSchema, fixSchema, issueSchema, reviewSchema } from "./schemas.mjs";
+import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
 import { assertRunnerOwnedDirectory, runUrl } from "./workspace.mjs";
 
@@ -50,7 +50,7 @@ async function writeBundle({ directory, context, prompt, schema }) {
   }
   await writeJson(path.join(directory, "context.json"), context);
   await writeText(path.join(directory, "prompt.md"), `${prompt}\n`);
-  await writeJson(path.join(directory, "schema.json"), schema);
+  await writeJson(path.join(directory, "schema.json"), providerCompatibleJsonSchema(schema));
 }
 
 function runMetadata({ toolingSha = process.env.CODEKEEPER_TOOLING_SHA ?? "", configSha256 = "" } = {}) {

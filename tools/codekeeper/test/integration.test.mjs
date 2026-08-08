@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, lstat, mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
-import { prepareFix, prepareIssue } from "../src/lib/prepare.mjs";
+import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -31,6 +31,13 @@ function digest(value) {
 
 function bundle(root, name = "bundle") {
   return `${root}-${name}`;
+}
+
+function assertWorkspaceOutputSchema(schema, mode) {
+  assert.equal(schema.type, "object");
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.properties?.mode, { type: "string", enum: [mode] });
+  assert.doesNotMatch(JSON.stringify(schema), /"const"/);
 }
 
 function auditResult({ repair = false } = {}) {
@@ -333,6 +340,71 @@ test("automatic issue preparation records trusted mode without an owner command"
     assert.equal(context.issue.number, 5);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("prepare writes provider-compatible workspace output schemas for every mode", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-workspace-schema-test-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const config = structuredClone(templateConfig);
+  config.issues.allowAiImplementation = true;
+  config.repository.ownerLogins = ["workspace-owner"];
+  const revision = run("git", ["rev-parse", "HEAD"], projectRoot).trim();
+  const reviewEvent = path.join(root, "review-event.json");
+  const issueEvent = path.join(root, "issue-event.json");
+  await writeFile(reviewEvent, JSON.stringify({
+    repository: { full_name: "acme/example" },
+    pull_request: {
+      number: 7,
+      title: "Schema fixture review",
+      body: "",
+      draft: false,
+      html_url: "https://github.com/acme/example/pull/7",
+      user: { login: "contributor" },
+      base: { ref: "main", sha: revision },
+      head: { ref: "main", sha: revision, repo: { full_name: "acme/example" } }
+    }
+  }), "utf8");
+  await writeFile(issueEvent, JSON.stringify({
+    repository: { full_name: "acme/example" },
+    issue: { number: 5, title: "Schema fixture issue", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
+  }), "utf8");
+
+  const originalFetch = globalThis.fetch;
+  const savedEnvironment = Object.fromEntries(["GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"].map((name) => [name, process.env[name]]));
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  process.env.GITHUB_RUN_ID = "123";
+  process.env.GITHUB_RUN_ATTEMPT = "2";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/issues/5/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Schema fixture issue",
+        body: "Details",
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        labels: []
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  const directories = Object.fromEntries(["review", "audit", "issue", "fix"].map((mode) => [mode, path.join(root, mode)]));
+  try {
+    await prepareReview({ eventPath: reviewEvent, directory: directories.review, config });
+    await prepareAuditBundle({ directory: directories.audit, config });
+    await prepareIssue({ eventPath: issueEvent, actor: "reporter", triageMode: "automatic", directory: directories.issue, config, token: "read-token" });
+    await prepareFix({ issueNumber: 5, actor: "workspace-owner", directory: directories.fix, config, token: "read-token" });
+    for (const mode of Object.keys(directories)) {
+      assertWorkspaceOutputSchema(JSON.parse(await readFile(path.join(directories[mode], "schema.json"), "utf8")), mode);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of Object.entries(savedEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });
 
