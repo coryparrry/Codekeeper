@@ -272,15 +272,16 @@ function assignEvaluationOption(options, flag, value) {
   if (flag === "--preset") options.preset = value;
   else if (flag === "--repeat") options.repeat = Number(value);
   else if (flag === "--openai-issue") options.openaiIssueCandidate = value;
+  else if (flag === "--scenario") options.scenario = value;
   else throw new Error(`Unknown evaluation option: ${flag}`);
 }
 
 export function parseEvaluationArgs(argv) {
-  const options = { preset: "mixed", repeat: DEFAULT_REPEAT, offline: false, openaiIssueCandidate: undefined };
+  const options = { preset: "mixed", repeat: DEFAULT_REPEAT, offline: false, openaiIssueCandidate: undefined, scenario: undefined };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--offline") options.offline = true;
-    else if (argument === "--preset" || argument === "--repeat" || argument === "--openai-issue") {
+    else if (argument === "--preset" || argument === "--repeat" || argument === "--openai-issue" || argument === "--scenario") {
       assignEvaluationOption(options, argument, argv[index + 1]);
       index += 1;
     } else {
@@ -292,6 +293,7 @@ export function parseEvaluationArgs(argv) {
   if (!POLICY_PRESETS[options.preset]) throw new Error(`Unknown policy preset: ${options.preset}`);
   if (!Number.isSafeInteger(options.repeat) || options.repeat <= 0 || options.repeat > 10) throw new Error("--repeat must be a whole number from 1 through 10");
   if (options.openaiIssueCandidate && options.preset !== "openai") throw new Error("--openai-issue is available only with --preset openai");
+  if (options.scenario && !SCENARIOS.some((scenario) => scenario.name === options.scenario)) throw new Error(`Unknown evaluation scenario: ${options.scenario}`);
   return options;
 }
 
@@ -313,9 +315,9 @@ export function environmentKeyResolver(_providerName, environmentName) {
   return process.env[environmentName];
 }
 
-async function requiredProviderKeys(policy, keyResolver) {
+async function requiredProviderKeys(policy, scenarios, keyResolver) {
   const keys = new Map();
-  const providerNames = new Set(SCENARIOS.map((scenario) => policy.ai.agents[scenario.mode].provider));
+  const providerNames = new Set(scenarios.map((scenario) => policy.ai.agents[scenario.mode].provider));
   for (const providerName of providerNames) {
     const environmentName = providerKeyEnvironment(providerName);
     let candidate;
@@ -353,16 +355,19 @@ export function makeOfflineSdk(fixtures = Object.fromEntries(SCENARIOS.map((scen
   return { Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider };
 }
 
-export async function runDecisionEvaluation({ preset = "mixed", repeat = DEFAULT_REPEAT, openaiIssueCandidate, keyResolver = environmentKeyResolver, sdkLoader, report = () => {}, throwOnFailure = true, starterPolicy, disableTracing = false } = {}) {
+export async function runDecisionEvaluation({ preset = "mixed", repeat = DEFAULT_REPEAT, openaiIssueCandidate, scenario: scenarioName, keyResolver = environmentKeyResolver, sdkLoader, report = () => {}, throwOnFailure = true, starterPolicy, disableTracing = false } = {}) {
   const policy = resolveEvaluationPolicy(starterPolicy ?? await readStarterPolicy(), { preset, openaiIssueCandidate });
   if (disableTracing) policy.ai.tracing.enabled = false;
-  const providerKeys = await requiredProviderKeys(policy, keyResolver);
+  const scenarios = scenarioName ? SCENARIOS.filter((scenario) => scenario.name === scenarioName) : SCENARIOS;
+  if (scenarios.length === 0) throw new Error(`Unknown evaluation scenario: ${scenarioName}`);
+  const providerKeys = await requiredProviderKeys(policy, scenarios, keyResolver);
   const results = [];
-  for (const scenario of SCENARIOS) {
+  for (const scenario of scenarios) {
     const { prompt, schema, validate } = promptAndSchemaFor(scenario, policy);
     const agent = policy.ai.agents[scenario.mode];
     for (let repeatIndex = 1; repeatIndex <= repeat; repeatIndex += 1) {
       let metadata;
+      let runtimeDiagnostic;
       let pass = false;
       try {
         const result = await runConfiguredAgent({
@@ -373,7 +378,8 @@ export async function runDecisionEvaluation({ preset = "mixed", repeat = DEFAULT
           specialistResult: scenario.specialistResult,
           validateOutput: validate,
           apiKey: providerKeys.get(agent.provider),
-          sdkLoader
+          sdkLoader,
+          diagnostic: (event) => { runtimeDiagnostic = event; }
         });
         metadata = result.metadata;
         assertScenarioOutput(scenario, result.output);
@@ -385,12 +391,13 @@ export async function runDecisionEvaluation({ preset = "mixed", repeat = DEFAULT
         scenario: scenario.name,
         preset,
         model: agent.model,
-        attempt: metadata?.attempt ?? 0,
+        attempt: metadata?.attempt ?? runtimeDiagnostic?.attempt ?? 0,
+        stage: metadata ? "semantic-assertion" : runtimeDiagnostic?.stage ?? "unknown",
         pass,
         repeat: repeatIndex
       };
       results.push(row);
-      report(`${pass ? "PASS" : "FAIL"} scenario=${row.scenario} preset=${row.preset} model=${row.model} attempt=${row.attempt} repeat=${row.repeat}`);
+      report(`${pass ? "PASS" : "FAIL"} scenario=${row.scenario} preset=${row.preset} model=${row.model} attempt=${row.attempt} stage=${row.stage} repeat=${row.repeat}`);
     }
   }
   const failures = results.filter((result) => !result.pass);

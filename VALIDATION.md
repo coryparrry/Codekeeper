@@ -15,7 +15,7 @@ The deterministic fixture gate exercises the production prompt builders, coordin
 cd tools/codekeeper && npm run eval:offline
 ```
 
-The live gate is explicit and is not part of `npm run check`. A mixed run requires both `OPENAI_API_KEY` and `DEEPSEEK_API_KEY`; an OpenAI-preset run requires `OPENAI_API_KEY`. Under the default tracing policy it also requires a distinct `CODEKEEPER_TRACE_API_KEY`. The runner resolves keys per configured provider before any provider call, never prints or writes them, and reports only scenario, preset, model, attempt, and pass/fail; do not redirect its output or provide secrets through command-line arguments:
+The live gate is explicit and is not part of `npm run check`. A mixed run requires both `OPENAI_API_KEY` and `DEEPSEEK_API_KEY`; an OpenAI-preset run requires `OPENAI_API_KEY`. Under the default tracing policy it also requires a distinct `CODEKEEPER_TRACE_API_KEY`. The runner resolves keys per configured provider before any provider call, never prints or writes them, and reports only scenario, preset, model, attempt, safe execution stage, and pass/fail; do not redirect its output or provide secrets through command-line arguments:
 
 ```bash
 cd tools/codekeeper && npm run eval:live -- --preset mixed --repeat 3

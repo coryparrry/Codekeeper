@@ -33,13 +33,14 @@ test("mixed preset is a cloned view of the tracked starter and OpenAI preset onl
 });
 
 test("decision evaluation parses repeat defaults and only permits OpenAI fallback candidates for the OpenAI preset", () => {
-  assert.deepEqual(parseEvaluationArgs([]), { preset: "mixed", repeat: DEFAULT_REPEAT, offline: false, openaiIssueCandidate: undefined });
+  assert.deepEqual(parseEvaluationArgs([]), { preset: "mixed", repeat: DEFAULT_REPEAT, offline: false, openaiIssueCandidate: undefined, scenario: undefined });
   assert.deepEqual(
-    parseEvaluationArgs(["--offline", "--preset=openai", "--repeat", "2", "--openai-issue=sol-high"]),
-    { preset: "openai", repeat: 2, offline: true, openaiIssueCandidate: "sol-high" }
+    parseEvaluationArgs(["--offline", "--preset=openai", "--repeat", "2", "--openai-issue=sol-high", "--scenario", "introduced-major-pr-failure"]),
+    { preset: "openai", repeat: 2, offline: true, openaiIssueCandidate: "sol-high", scenario: "introduced-major-pr-failure" }
   );
   assert.throws(() => parseEvaluationArgs(["--repeat", "0"]), /1 through 10/);
   assert.throws(() => parseEvaluationArgs(["--openai-issue", "terra-high"]), /only with --preset openai/);
+  assert.throws(() => parseEvaluationArgs(["--scenario", "unknown"]), /Unknown evaluation scenario/);
   assert.throws(() => resolveEvaluationPolicy(starter, { preset: "openai", openaiIssueCandidate: "unknown" }), /Unknown OpenAI issue candidate/);
 
   const high = resolveEvaluationPolicy(starter, { preset: "openai", openaiIssueCandidate: "terra-high" });
@@ -77,8 +78,8 @@ test("offline decision matrix uses the coordinator provider path and reports det
   assert.equal(issueAgent.modelSettings.reasoning.effort, "medium");
   assert.equal(issueAgent.outputType.type, "json_schema");
   assert.equal(issueAgent.outputType.strict, true);
-  assert.match(reports[0], /^PASS scenario=prompt-injection preset=openai model=gpt-5\.6-terra attempt=1 repeat=1$/);
-  assert.ok(reports.every((line) => /scenario=.+ preset=openai model=.+ attempt=\d+ repeat=\d+/.test(line)));
+  assert.match(reports[0], /^PASS scenario=prompt-injection preset=openai model=gpt-5\.6-terra attempt=1 stage=semantic-assertion repeat=1$/);
+  assert.ok(reports.every((line) => /scenario=.+ preset=openai model=.+ attempt=\d+ stage=.+ repeat=\d+/.test(line)));
 });
 
 test("mixed evaluation resolves provider-specific credentials before constructing any provider", async () => {
@@ -178,6 +179,8 @@ test("semantic assertions fail closed and evaluation never reports provider keys
   });
   assert.equal(summary.failed, 1);
   assert.equal(summary.results[0].scenario, "prompt-injection");
+  assert.equal(summary.results[0].attempt, 1);
+  assert.equal(summary.results[0].stage, "semantic-assertion");
   assert.equal(summary.results[0].pass, false);
   assert.doesNotMatch(reports.join("\n"), /provider-key-secret|provider-result-secret/);
   assert.deepEqual((await readdir(new URL("../evals/", import.meta.url))).sort(), ["decision-quality.mjs"]);
