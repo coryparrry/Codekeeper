@@ -12,7 +12,15 @@ permissions:
   pull-requests: read
 
 jobs:
+  bootstrap:
+    name: Codekeeper pinned tooling bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
+        with:
+          artifact-name: codekeeper-tooling-${{ github.run_id }}-${{ github.run_attempt }}
   review:
+    needs: bootstrap
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-review.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
