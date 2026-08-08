@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "0bc47355dad134236d3f90dffaf0d87fb57887789c46c3bda7a2b2a4fefabbd9";
+const toolingManifestSha256 = "5988f3517337f502e92bfb6d9e56cdfb0867311c025f8500a51658c245f13c12";
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -192,6 +192,7 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(workspace, /Configured default branch does not match the repository default branch/);
     assert.match(workspace, new RegExp(`prepare-${effectiveMode}`));
     assert.match(workspace, /openai\/codex-action@/);
+    assert.match(workspace, /output-schema-file: \$\{\{ runner\.temp \}\}\/codekeeper-bundle\/schema\.json/);
     assert.match(workspace, /outputs:\n\s+context_sha256: \$\{\{ steps\.prepare\.outputs\.context_sha256 \}\}/);
     if (repairMode) {
       assert.match(workspace, /capture-workspace-patch/);

@@ -9,12 +9,11 @@ import {
   loadCoordinatorProfile,
   modelSettingsFor,
   parseAgentOutput,
-  providerCompatibleJsonSchema,
   runAgentFromBundle,
   runConfiguredAgent,
   structuredOutputType
 } from "../src/lib/agents-runtime.mjs";
-import { validateIssueResult } from "../src/lib/schemas.mjs";
+import { providerCompatibleJsonSchema, validateIssueResult } from "../src/lib/schemas.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -84,7 +83,7 @@ test("structured output wraps the deterministic schema in the SDK contract", () 
       ...schema,
       properties: {
         ...schema.properties,
-        mode: { enum: ["issue"] }
+        mode: { type: "string", enum: ["issue"] }
       }
     }
   });
@@ -98,20 +97,60 @@ test("provider-compatible schema projection preserves strict structure while rep
     additionalProperties: false,
     properties: {
       mode: { const: "review" },
-      nested: { anyOf: [{ const: null }, { type: "object", additionalProperties: false, properties: { state: { const: "ready" } }, required: ["state"] }] }
+      nested: {
+        anyOf: [
+          { const: null },
+          { const: true },
+          { const: 7 },
+          { const: 1.5 },
+          { type: "object", additionalProperties: false, properties: { state: { const: "ready" } }, required: ["state"] }
+        ]
+      }
     },
     required: ["mode", "nested"]
   };
+  const original = structuredClone(source);
   assert.deepEqual(providerCompatibleJsonSchema(source), {
     type: "object",
     additionalProperties: false,
     properties: {
-      mode: { enum: ["review"] },
-      nested: { anyOf: [{ enum: [null] }, { type: "object", additionalProperties: false, properties: { state: { enum: ["ready"] } }, required: ["state"] }] }
+      mode: { type: "string", enum: ["review"] },
+      nested: {
+        anyOf: [
+          { type: "null", enum: [null] },
+          { type: "boolean", enum: [true] },
+          { type: "integer", enum: [7] },
+          { type: "number", enum: [1.5] },
+          { type: "object", additionalProperties: false, properties: { state: { type: "string", enum: ["ready"] } }, required: ["state"] }
+        ]
+      }
     },
     required: ["mode", "nested"]
   });
-  assert.deepEqual(source.properties.mode, { const: "review" });
+  assert.deepEqual(source, original);
+});
+
+test("provider-compatible schema projection rejects unsupported or contradictory const values", () => {
+  assert.throws(() => providerCompatibleJsonSchema({ const: {} }), /only JSON primitive const values/);
+  assert.throws(() => providerCompatibleJsonSchema({ const: [] }), /only JSON primitive const values/);
+  assert.throws(() => providerCompatibleJsonSchema({ const: Number.NaN }), /only JSON primitive const values/);
+  assert.throws(() => providerCompatibleJsonSchema({ type: "string", const: 1 }), /does not match its type/);
+  assert.deepEqual(providerCompatibleJsonSchema({ type: "number", const: 1 }), { type: "number", enum: [1] });
+});
+
+test("provider-compatible schema projection permits only an identical singleton enum with const", () => {
+  const source = { type: "string", const: "review", enum: ["review"] };
+  const original = structuredClone(source);
+  assert.deepEqual(providerCompatibleJsonSchema(source), { type: "string", enum: ["review"] });
+  assert.deepEqual(source, original);
+  assert.throws(
+    () => providerCompatibleJsonSchema({ type: "string", const: "review", enum: ["manual"] }),
+    /identical singleton enum/
+  );
+  assert.throws(
+    () => providerCompatibleJsonSchema({ type: "string", const: "review", enum: ["review", "manual"] }),
+    /identical singleton enum/
+  );
 });
 
 test("workspace-free audit and fix coordination fail safely", () => {
