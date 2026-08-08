@@ -1,8 +1,8 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, pushBranch } from "./git.mjs";
-import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
+import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
+import { GitHubClient } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, findingFingerprint, findingMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
@@ -263,14 +263,13 @@ function matchesAutomationActor(actor, identity) {
   );
 }
 
-export function isTrustedMaintenanceIssue(issue, comments, { marker, botLogin, botId }) {
+export function isTrustedMaintenanceIssue(issue, { marker, botLogin, botId }) {
   const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
   return Boolean(
     identity &&
+    matchesAutomationActor(issue?.user, identity) &&
     typeof issue?.body === "string" &&
-    issue.body.endsWith(marker) &&
-    Array.isArray(comments) &&
-    comments.some((comment) => isOwnedMarkerComment(comment, marker, identity))
+    issue.body.endsWith(marker)
   );
 }
 
@@ -283,9 +282,7 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
     const marker = findingMarker(fingerprint);
     let match;
     for (const issue of existing) {
-      if (typeof issue?.body !== "string" || !issue.body.endsWith(marker)) continue;
-      const comments = await github.listIssueComments(issue.number);
-      if (isTrustedMaintenanceIssue(issue, comments, {
+      if (isTrustedMaintenanceIssue(issue, {
         marker,
         botLogin: automationIdentity.login,
         botId: automationIdentity.id
@@ -313,7 +310,6 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
       published.push({ fingerprint, state: "updated", issueNumber: match.number });
     } else {
       const created = await github.createIssue({ title, body, labels });
-      await github.createComment(created.number, marker);
       published.push({ fingerprint, state: "created", issueNumber: created.number });
       existing.push(created);
     }
@@ -353,6 +349,8 @@ export function isTrustedRepairPull(pull, { fingerprint, config, repository, bot
   const branch = repairBranch(config, mode, fingerprint);
   return Boolean(
     matchesAutomationActor(pull?.user, identity) &&
+    typeof pull?.body === "string" &&
+    pull.body.endsWith(`<!-- codekeeper:repair=${fingerprint} -->`) &&
     String(pull.head?.ref ?? "") === branch &&
     pull.head?.repo?.full_name === repository &&
     pull.base?.repo?.full_name === repository
@@ -394,8 +392,18 @@ async function publishPatchPullRequest({
     return { created: false, reason: manifest.patch?.reasons?.join("; ") || "No validated patch" };
   }
 
+  const labels = new Set(["codekeeper:maintenance", `codekeeper:risk-${risk}`, "codekeeper:manual-review"]);
+  if (finding) findingLabels(finding).forEach((label) => labels.add(label));
   const existing = await findOpenRepairPull(github, fingerprint, config, context.mode);
-  if (existing) return { created: false, reason: "Existing repair PR", pullRequest: existing.number, url: existing.html_url };
+  if (existing) {
+    if (!dryRun) {
+      if (revalidateBeforeMutation) await revalidateBeforeMutation();
+      await github.ensureLabels(config.labels, [...labels]);
+      if (revalidateBeforeMutation) await revalidateBeforeMutation();
+      await github.replaceManagedLabels(existing.number, [...labels], managedIssueLabels(config));
+    }
+    return { created: false, reason: "Existing repair PR", pullRequest: existing.number, url: existing.html_url };
+  }
 
   if (currentHead() !== context.baseSha) {
     return { created: false, reason: `Default branch moved from ${context.baseSha} to ${currentHead()}` };
@@ -456,7 +464,23 @@ async function publishPatchPullRequest({
   configureAutomationIdentity(automationIdentity);
   createBranchAndCommit({ branch, message: "chore: apply automated maintenance repair" });
   if (revalidateBeforeMutation) await revalidateBeforeMutation();
-  pushBranch(branch, github.token);
+  let remote;
+  try {
+    remote = (await github.request("GET", github.repoPath(`/branches/${encodeURIComponent(branch)}`))).data;
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+  if (remote) {
+    if (
+      remote.commit?.commit?.tree?.sha !== gitText(["rev-parse", "HEAD^{tree}"]) ||
+      remote.commit?.parents?.length !== 1 ||
+      remote.commit.parents[0]?.sha !== context.baseSha
+    ) {
+      throw new Error(`Automation branch ${branch} already exists with unexpected content`);
+    }
+  } else {
+    pushBranch(branch, github.token);
+  }
   let pull;
   try {
     if (revalidateBeforeMutation) await revalidateBeforeMutation();
@@ -476,8 +500,6 @@ async function publishPatchPullRequest({
     }
     throw error;
   }
-  const labels = new Set(["codekeeper:maintenance", `codekeeper:risk-${risk}`, "codekeeper:manual-review"]);
-  if (finding) findingLabels(finding).forEach((label) => labels.add(label));
   if (revalidateBeforeMutation) await revalidateBeforeMutation();
   await github.ensureLabels(config.labels, [...labels]);
   if (revalidateBeforeMutation) await revalidateBeforeMutation();
@@ -530,7 +552,12 @@ export async function publishAudit({ artifactDirectory, config, configSha256, ex
       dryRun
     });
     if (!dryRun && publishedFinding?.issueNumber && repair.url) {
-      await github.createComment(publishedFinding.issueNumber, `A repair pull request was opened: ${repair.url}`);
+      await github.upsertMarkerComment(
+        publishedFinding.issueNumber,
+        `<!-- codekeeper:repair-notification=${fingerprint} -->`,
+        `A repair pull request was opened: ${repair.url}`,
+        expectedAutomationIdentity()
+      );
     }
   }
   return { findings, repair, dryRun };
