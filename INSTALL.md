@@ -52,22 +52,22 @@ Create a GitHub App and install it only where automation is intended. No webhook
 Set these adopter repository values and secrets:
 
 ```text
-CODEKEEPER_APP_CLIENT_ID=<GitHub App client ID>              # Actions variable
+CODEKEEPER_APP_CLIENT_ID=<GitHub App client ID>              # Required by review/issue and maintenance/fix dry_run=false
 CODEKEEPER_AUTOMATION_BOT_LOGIN=<app-slug>[bot]             # Actions variable, review caller only
-CODEKEEPER_APP_PRIVATE_KEY=<full GitHub App PEM>            # Actions secret
+CODEKEEPER_APP_PRIVATE_KEY=<full GitHub App PEM>            # Required by review/issue and maintenance/fix dry_run=false
 OPENAI_API_KEY=<OpenAI coordinator/workspace key>              # Actions secret when a mode uses OpenAI
 DEEPSEEK_API_KEY=<DeepSeek coordinator key>                    # Actions secret for the starter issue mode
 OPENAI_TRACE_API_KEY=<dedicated OpenAI trace-export key>       # Actions secret; never a model/provider key
 CODEKEEPER_ENABLED=false                                   # Actions variable initially
 ```
 
-The App token is present only in publication jobs. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The starter policy enables Agents SDK tracing with `includeSensitiveData=false`; every caller maps a separate `trace_api_key`. View runs at [OpenAI Platform Traces](https://platform.openai.com/traces) under **Logs > Traces**. This remains true for the DeepSeek issue mode: never map the DeepSeek provider key to `trace_api_key`.
+The App token is present only in publication jobs. Maintenance and fix callers may map empty App values for `dry_run=true`; their reusable contracts do not require an App client ID or private key until `dry_run=false` selects publication, where both are checked before token minting. Review and issue-triage always publish, so their App mappings remain required. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The starter policy enables Agents SDK tracing with `includeSensitiveData=false`; every caller maps a separate `trace_api_key`. View runs at [OpenAI Platform Traces](https://platform.openai.com/traces) under **Logs > Traces**. This remains true for the DeepSeek issue mode: never map the DeepSeek provider key to `trace_api_key`.
 
 ## 4. Prove the configuration before making the gate required
 
-Commit the configuration and callers to the default branch with `CODEKEEPER_ENABLED=false`. Run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests.
+Commit the configuration and callers to the default branch with `CODEKEEPER_ENABLED=false`. When ready to prove the configuration, set it to `true` and run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests, and does not require the maintenance App client ID or private-key mapping.
 
-Then enable the variable and open a small same-repository pull request targeting the default branch. The supplied caller sets `auto_review: true`; keep it true while proving the required review gate. Confirm that the caller's **Codekeeper review gate** completes and the App identity, labels, and `PR review summary` comment are correct before adding the gate to branch protection.
+Then open a small same-repository pull request targeting the default branch. The supplied caller sets `auto_review: true`; keep it true while proving the required review gate. Confirm that the caller's **Codekeeper review gate** completes and the App identity, labels, and `PR review summary` comment are correct before adding the gate to branch protection.
 
 Branch protection remains the source of truth. Keep normal build, test, approval, and deployment checks required independently of this workflow.
 

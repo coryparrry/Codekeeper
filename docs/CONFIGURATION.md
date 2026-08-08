@@ -2,6 +2,14 @@
 
 The adopter-owned `.github/codekeeper.json` is the only runtime policy file. It is read from the adopter default branch, validated before every coordinator run, copied into the sealed artifact, and hash-checked again before publication.
 
+## Validation and resource bounds
+
+Version 2 treats every named policy object as closed: unknown keys fail validation. The intentional extension points are the provider names in `ai.providers`, label names in `labels`, and provider-specific JSON in `modelSettings`; these dynamic maps remain supported but have bounded entry counts, nesting, strings, arrays, and numeric values. `modelSettings` numbers may be negative or fractional when a provider supports them, but their absolute magnitude may not exceed 1,000,000. Lists, strings, provider and label counts, and validation-command count are also bounded before a coordinator can consume them.
+
+Every operation limit has a global ceiling. Review context is limited to 20 findings of each kind, 5 MiB of diff, and 1,000 files. Audit publication is limited to 20 issues and issue triage to 200 open-issue summaries. A repair can be at most 100 files, 10,000 changed lines, 5 MiB total, and 1 MiB per file. Auto-merge is limited to 50 files and 5,000 changed lines. These ceilings are intentionally above the starter policy while preventing a trusted-policy mistake from turning into unbounded work.
+
+`repository.automationBranchPrefix` must be a repository-relative, slash-terminated safe Git-ref prefix. Configured owner logins are trimmed and normalized to lowercase; duplicate owners after normalization are rejected, and manual issue/fix authorization compares actors with that same case-insensitive form.
+
 ## Provider and coordinator settings
 
 Each coordinator mode is independent under `ai.agents.review`, `audit`, `issue`, and `fix`. It selects a provider from `ai.providers`, a model, attempt/turn limits, JSON model settings, and an optional Codex workspace specialist. The JSON below is a partial excerpt; use the [starter policy](../.github/codekeeper.json) for the complete required four-mode `agents` object.
@@ -90,6 +98,8 @@ Review and issue workspace writes are rejected by config validation. `audit.repa
 `review.maximumDiffBytes` is a streaming capture bound: only that many diff bytes are retained in frozen coordinator context, and exceeding it terminates the diff process. When capture completes, `bytes` is exact; when it terminates, `truncated=true`, `bytesExact=false`, and `bytes` is an observed lower bound. `review.maximumChangedFiles` bounds the changed-file list; a review fails safely before prompting if that bound is exceeded. Set `includeDiffInAgentContext=false` only for a deliberate no-diff workflow; it makes deterministic auto-merge ineligible.
 
 Auto-merge additionally fails closed when frozen diff context is truncated. It never relies on model compliance or the presence of a workspace specialist.
+
+Version 2 auto-merge is intentionally limited to a same-repository pull request opened by the configured GitHub App bot from the configured automation branch prefix. `merge.allowUserPullRequests` must remain `false`; user pull-request auto-merge needs byte- and binary-aware metadata that this version does not transport.
 
 ## Tracing
 

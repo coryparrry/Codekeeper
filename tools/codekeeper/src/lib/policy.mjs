@@ -117,9 +117,8 @@ export function evaluateAutoMerge({
 
   const automationBranch = String(pullRequest.head?.ref ?? "").startsWith(config.repository.automationBranchPrefix);
   const pullAuthor = pullRequest.user?.login ?? "";
-  const automationAuthor = pullRequest.user?.type === "Bot" && pullAuthor.endsWith("[bot]");
+  const automationAuthor = pullRequest.user?.type === "Bot" && pullAuthor.toLowerCase().endsWith("[bot]");
   const configuredAutomationAuthor = String(automationBotLogin).trim().toLowerCase();
-  const userAuthor = config.merge.allowedUserAuthors.includes(pullAuthor);
   if (automationBranch) {
     if (!automationAuthor) reasons.push("Automation branch was not opened by a GitHub App bot");
     if (!configuredAutomationAuthor) {
@@ -128,7 +127,8 @@ export function evaluateAutoMerge({
       reasons.push(`Automation pull request author ${pullAuthor || "unknown"} is not the configured automation bot`);
     }
     if (!policy.allowAutomationPullRequests) reasons.push("Automation pull requests are not allowed to auto-merge");
-  } else if (!(policy.allowUserPullRequests && userAuthor)) {
+  } else {
+    if (policy.allowUserPullRequests) reasons.push("User pull request auto-merge is not supported by version 2 policy");
     reasons.push("Pull request author/branch is not allowed to auto-merge");
   }
 

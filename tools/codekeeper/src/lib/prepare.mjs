@@ -23,6 +23,12 @@ function boundedLabels(labels, maximum = 30) {
     .map((label) => boundedText(typeof label === "string" ? label : label?.name, 128, "…"));
 }
 
+function isConfiguredOwner(config, actor) {
+  const normalizedActor = String(actor ?? "").trim().toLowerCase();
+  return normalizedActor.length > 0 && (config.repository.ownerLogins ?? [])
+    .some((owner) => String(owner).trim().toLowerCase() === normalizedActor);
+}
+
 function ensureSameRepositoryPullRequest(event, repository) {
   const pull = event.pull_request;
   if (!pull) throw new Error("Pull request payload is missing");
@@ -132,7 +138,7 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   if (triageMode !== "automatic" && triageMode !== "manual") {
     throw new Error("Issue triage mode must be automatic or manual");
   }
-  if (triageMode === "manual" && !config.repository.ownerLogins.includes(actor)) {
+  if (triageMode === "manual" && !isConfiguredOwner(config, actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request Codekeeper issue triage`);
   }
   const event = await readJson(eventPath);
@@ -176,7 +182,7 @@ export async function prepareFix({ issueNumber, actor, directory, config, token,
   if (!config.issues.allowAiImplementation) {
     throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
   }
-  if (!config.repository.ownerLogins.includes(actor)) {
+  if (!isConfiguredOwner(config, actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request an Codekeeper fix`);
   }
   const repository = process.env.GITHUB_REPOSITORY;

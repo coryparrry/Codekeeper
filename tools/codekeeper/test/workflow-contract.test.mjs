@@ -34,6 +34,13 @@ function jobSection(source, name, nextName) {
   return source.slice(start, next);
 }
 
+test("self-test runs for every tracked-file change", async () => {
+  const source = await workflow("self-test");
+  const triggers = source.slice(0, source.indexOf("\npermissions:"));
+  assert.match(triggers, /on:\n  pull_request:\n  push:\n  workflow_dispatch:/);
+  assert.doesNotMatch(triggers, /\n\s+paths(?:-ignore)?:/);
+});
+
 test("four generic mode workflows expose workflow_call and caller templates remain non-executable", async () => {
   const files = await readdir(workflowDirectory);
   for (const mode of modes) {
@@ -185,6 +192,53 @@ test("candidate and sealed artifact names include run id and retry attempt", asy
     const source = await workflow(mode);
     assert.match(source, new RegExp(`codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-candidate-\\$\\{\\{ github\\.run_id \\}\\}-\\$\\{\\{ github\\.run_attempt \\}\\}`));
     assert.match(source, new RegExp(`codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-artifact-\\$\\{\\{ github\\.run_id \\}\\}-\\$\\{\\{ github\\.run_attempt \\}\\}`));
+  }
+});
+
+test("maintenance and fix dry runs do not require App credentials, but publication fails closed without them", async () => {
+  for (const mode of ["maintain", "fix"]) {
+    const source = await workflow(mode);
+    const caller = await repositoryFile(`examples/workflows/codekeeper-${mode}.yml.example`);
+    const publish = jobSection(source, "publish");
+
+    assert.match(
+      source,
+      /app_client_id:\n\s+description: GitHub App client ID\. Required only when dry_run=false\.\n\s+required: false\n\s+default: ""\n\s+type: string/
+    );
+    assert.match(
+      source,
+      /app_private_key:\n\s+description: GitHub App private key\. Required only when dry_run=false\.\n\s+required: false/
+    );
+    assert.match(source, /if: needs\.seal\.result == 'success' && !inputs\.dry_run/);
+    assert.match(publish, /name: Require GitHub App publication credentials/);
+    assert.match(publish, /APP_CLIENT_ID: \$\{\{ inputs\.app_client_id \}\}/);
+    assert.match(publish, /APP_PRIVATE_KEY: \$\{\{ secrets\.app_private_key \}\}/);
+    assert.match(publish, /test -n "\$APP_CLIENT_ID"/);
+    assert.match(publish, /test -n "\$APP_PRIVATE_KEY"/);
+    assert.match(publish, /app_client_id is required when dry_run=false/);
+    assert.match(publish, /app_private_key is required when dry_run=false/);
+    assert.ok(
+      publish.indexOf("Require GitHub App publication credentials") < publish.indexOf("create-github-app-token"),
+      `${mode} must check credentials before minting an App token`
+    );
+    assert.match(caller, /Optional for dry_run=true; required when dry_run=false publishes changes\./);
+    assert.match(caller, /app_client_id: \$\{\{ vars\.CODEKEEPER_APP_CLIENT_ID \}\}/);
+    assert.match(caller, /app_private_key: \$\{\{ secrets\.CODEKEEPER_APP_PRIVATE_KEY \}\}/);
+  }
+});
+
+test("review and issue-triage retain mandatory App credentials", async () => {
+  for (const mode of ["review", "issues"]) {
+    const source = await workflow(mode);
+    const caller = await repositoryFile(`examples/workflows/codekeeper-${mode}.yml.example`);
+
+    assert.match(
+      source,
+      /app_client_id:\n\s+description: GitHub App client ID\. This identifier is not secret\.\n\s+required: true\n\s+type: string/
+    );
+    assert.match(source, /app_private_key:\n\s+required: true/);
+    assert.match(caller, /app_client_id: \$\{\{ vars\.CODEKEEPER_APP_CLIENT_ID \}\}/);
+    assert.match(caller, /app_private_key: \$\{\{ secrets\.CODEKEEPER_APP_PRIVATE_KEY \}\}/);
   }
 });
 

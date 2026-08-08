@@ -1,7 +1,85 @@
 const API_VERSION = "2022-11-28";
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_RETRY_ATTEMPTS = 2;
+const MAX_RETRY_ATTEMPTS = 2;
+const MAX_RETRY_DELAY_MS = 5_000;
+const RETRYABLE_STATUS = new Set([408, 429]);
+const TRANSIENT_GRAPHQL_ERROR_TYPES = new Set(["INTERNAL", "INTERNAL_ERROR", "RATE_LIMITED", "SERVICE_UNAVAILABLE"]);
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function positiveFiniteNumber(value, fallback) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function retryAttempts(value, fallback) {
+  return Number.isSafeInteger(value) && value >= 0
+    ? Math.min(value, MAX_RETRY_ATTEMPTS)
+    : fallback;
+}
+
+function retryAfterMilliseconds(value, now) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now()) : null;
+}
+
+function rateLimitResetMilliseconds(value, now) {
+  if (!value) return null;
+  const seconds = Number(value);
+  return Number.isFinite(seconds) ? Math.max(0, seconds * 1_000 - now()) : null;
+}
+
+function isRateLimited(response) {
+  return response.status === 403 && (
+    response.headers.has("retry-after") || response.headers.get("x-ratelimit-remaining") === "0"
+  );
+}
+
+function isRetryableResponse(response) {
+  return RETRYABLE_STATUS.has(response.status) || response.status >= 500 || isRateLimited(response);
+}
+
+function cappedDelay(milliseconds) {
+  return Math.min(Math.max(0, milliseconds), MAX_RETRY_DELAY_MS);
+}
+
+function isTransientFailure(error, signal) {
+  return signal.aborted || error instanceof TypeError;
+}
+
+function awaitWithSignal(promise, signal) {
+  return new Promise((resolve, reject) => {
+    const abort = () => finish(reject, signal.reason ?? new Error("GitHub request aborted"));
+    const finish = (settle, value) => {
+      signal.removeEventListener("abort", abort);
+      settle(value);
+    };
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(promise).then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error)
+    );
+  });
+}
+
+function isRetryableGraphqlPayload(payload) {
+  return payload?.errors?.some((error) =>
+    TRANSIENT_GRAPHQL_ERROR_TYPES.has(String(error?.type ?? error?.extensions?.code ?? "").toUpperCase())
+  );
+}
+
+function isRetrySafeMethod(method) {
+  return ["GET", "HEAD"].includes(String(method).toUpperCase());
+}
+
+function isGraphqlMutation(query) {
+  return /^\s*mutation\b/i.test(String(query));
 }
 
 
@@ -51,7 +129,13 @@ function parseLinkHeader(value) {
 }
 
 export class GitHubClient {
-  constructor({ token, repository = process.env.GITHUB_REPOSITORY, apiUrl = process.env.GITHUB_API_URL ?? "https://api.github.com", graphqlUrl }) {
+  constructor({
+    token,
+    repository = process.env.GITHUB_REPOSITORY,
+    apiUrl = process.env.GITHUB_API_URL ?? "https://api.github.com",
+    graphqlUrl,
+    transport = {}
+  }) {
     if (!token) throw new Error("GitHub token is required");
     if (!repository || !repository.includes("/")) throw new Error("Repository must be owner/name");
     const [owner, repo] = repository.split("/", 2);
@@ -61,37 +145,79 @@ export class GitHubClient {
     this.repository = repository;
     this.apiUrl = apiUrl.replace(/\/$/, "");
     this.graphqlUrl = resolveGraphqlUrl(this.apiUrl, graphqlUrl);
+    this.fetch = typeof transport.fetch === "function" ? transport.fetch : globalThis.fetch;
+    this.requestTimeoutMs = positiveFiniteNumber(transport.timeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
+    this.retryAttempts = retryAttempts(transport.retries, DEFAULT_RETRY_ATTEMPTS);
+    this.sleep = typeof transport.sleep === "function" ? transport.sleep : sleep;
+    this.now = typeof transport.now === "function" ? transport.now : Date.now;
   }
 
-  async request(method, endpoint, { body, headers = {}, retries = 2 } = {}) {
-    const url = endpoint.startsWith("http") ? endpoint : `${this.apiUrl}${endpoint}`;
-    let response;
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-      response = await fetch(url, {
-        method,
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${this.token}`,
-          "X-GitHub-Api-Version": API_VERSION,
-          "User-Agent": "codekeeper",
-          "Content-Type": "application/json",
-          ...headers
-        },
-        body: body === undefined ? undefined : JSON.stringify(body)
-      });
-      if (response.status !== 429 && response.status < 500) break;
-      if (attempt < retries) await sleep(500 * 2 ** attempt);
-    }
+  retryDelay(response, attempt) {
+    const retryAfter = retryAfterMilliseconds(response.headers.get("retry-after"), this.now);
+    if (retryAfter !== null) return cappedDelay(retryAfter);
+    const reset = rateLimitResetMilliseconds(response.headers.get("x-ratelimit-reset"), this.now);
+    if (reset !== null) return cappedDelay(reset);
+    return cappedDelay(500 * 2 ** attempt);
+  }
 
-    const text = await response.text();
-    let payload = null;
-    if (text) {
+  async fetchWithRetry(url, options, { retries = this.retryAttempts, consume, retryPayload = () => false } = {}) {
+    const retryBudget = retryAttempts(retries, this.retryAttempts);
+    for (let attempt = 0; attempt <= retryBudget; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(new Error(`GitHub request timed out after ${this.requestTimeoutMs}ms`)),
+        this.requestTimeoutMs
+      );
+      let delay = null;
       try {
-        payload = JSON.parse(text);
-      } catch {
-        payload = text;
+        const response = await this.fetch(url, { ...options, signal: controller.signal });
+        if (isRetryableResponse(response) && attempt < retryBudget) {
+          delay = this.retryDelay(response, attempt);
+        } else {
+          const value = await consume(response, controller.signal);
+          if (!retryPayload(value) || attempt === retryBudget) return value;
+          delay = this.retryDelay(response, attempt);
+        }
+      } catch (error) {
+        if (!isTransientFailure(error, controller.signal) || attempt === retryBudget) throw error;
+        delay = cappedDelay(500 * 2 ** attempt);
+      } finally {
+        clearTimeout(timeout);
       }
+      await this.sleep(delay);
     }
+    throw new Error("GitHub retry budget exhausted");
+  }
+
+  async request(method, endpoint, { body, headers = {}, retries } = {}) {
+    const url = endpoint.startsWith("http") ? endpoint : `${this.apiUrl}${endpoint}`;
+    const retryBudget = retries ?? (isRetrySafeMethod(method) ? this.retryAttempts : 0);
+    const { response, text, payload } = await this.fetchWithRetry(url, {
+      method,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${this.token}`,
+        "X-GitHub-Api-Version": API_VERSION,
+        "User-Agent": "codekeeper",
+        "Content-Type": "application/json",
+        ...headers
+      },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }, {
+      retries: retryBudget,
+      consume: async (response, signal) => {
+        const text = await awaitWithSignal(response.text(), signal);
+        let payload = null;
+        if (text) {
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            payload = text;
+          }
+        }
+        return { response, text, payload };
+      }
+    });
     if (!response.ok) {
       const message = typeof payload === "object" && payload?.message ? payload.message : text || response.statusText;
       const error = new Error(`GitHub ${method} ${endpoint} failed (${response.status}): ${message}`);
@@ -293,7 +419,8 @@ export class GitHubClient {
   }
 
   async graphql(query, variables = {}) {
-    const response = await fetch(this.graphqlUrl, {
+    const retries = isGraphqlMutation(query) ? 0 : this.retryAttempts;
+    const { response, payload } = await this.fetchWithRetry(this.graphqlUrl, {
       method: "POST",
       headers: {
         Accept: "application/vnd.github+json",
@@ -302,8 +429,14 @@ export class GitHubClient {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ query, variables })
+    }, {
+      retries,
+      consume: async (response, signal) => ({
+        response,
+        payload: await awaitWithSignal(response.json(), signal)
+      }),
+      retryPayload: ({ payload }) => isRetryableGraphqlPayload(payload)
     });
-    const payload = await response.json();
     if (!response.ok || payload.errors?.length) {
       const message = payload.errors?.map((error) => error.message).join("; ") || response.statusText;
       const error = new Error(`GitHub GraphQL failed: ${message}`);

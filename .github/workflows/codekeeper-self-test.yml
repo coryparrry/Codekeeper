@@ -2,17 +2,7 @@ name: Codekeeper checks
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/codekeeper-*.yml"
-      - ".github/codekeeper.json"
-      - "examples/workflows/**"
-      - "tools/codekeeper/**"
   push:
-    paths:
-      - ".github/workflows/codekeeper-*.yml"
-      - ".github/codekeeper.json"
-      - "examples/workflows/**"
-      - "tools/codekeeper/**"
   workflow_dispatch:
 
 permissions:
@@ -36,6 +26,8 @@ jobs:
       - name: Run maintainer syntax and unit checks
         working-directory: tools/codekeeper
         run: npm run check
+      - name: Verify source-release integrity
+        run: bash scripts/release-source.sh --verify
       - name: Validate GitHub Actions workflow contracts
         uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e # v1.73.0
         with:

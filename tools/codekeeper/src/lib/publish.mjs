@@ -123,12 +123,30 @@ function branchSlug(value) {
 
 export async function reconcileAutoMerge(github, pullRequest, config, decision) {
   if (decision.eligible) {
+    if (pullRequest.auto_merge) {
+      return { enabled: true, disabled: false, reason: "already enabled" };
+    }
     try {
       await github.enableAutoMerge(pullRequest.node_id, config.merge.method);
       return { enabled: true, disabled: false, reason: "enabled" };
     } catch (error) {
       warn(`Could not enable auto-merge for PR #${pullRequest.number}: ${error.message}`);
-      return { enabled: false, disabled: false, reason: error.message };
+      let refreshedPull;
+      try {
+        refreshedPull = await github.getPull(pullRequest.number);
+      } catch (refetchError) {
+        throw new Error(`Could not determine auto-merge state for PR #${pullRequest.number} after failed enablement: ${refetchError.message}`, { cause: refetchError });
+      }
+      if (refreshedPull?.number !== pullRequest.number || !Object.hasOwn(refreshedPull, "auto_merge")) {
+        throw new Error(`Could not determine auto-merge state for PR #${pullRequest.number} after failed enablement`);
+      }
+      if (refreshedPull.auto_merge) {
+        return { enabled: true, disabled: false, reason: "confirmed enabled after failed enable request" };
+      }
+      if (refreshedPull.auto_merge === null) {
+        return { enabled: false, disabled: false, reason: error.message };
+      }
+      throw new Error(`Could not determine auto-merge state for PR #${pullRequest.number} after failed enablement`);
     }
   }
 
@@ -142,6 +160,29 @@ export async function reconcileAutoMerge(github, pullRequest, config, decision) 
   }
 
   return { enabled: false, disabled: false, reason: decision.reasons.join("; ") };
+}
+
+async function suspendAutoMerge(github, pullRequest, refreshPull) {
+  if (!pullRequest.auto_merge) return { pullRequest, disabled: false };
+  let disableError = null;
+  try {
+    await github.disableAutoMerge(pullRequest.node_id);
+  } catch (error) {
+    disableError = error;
+    warn(`Could not confirm auto-merge disablement for PR #${pullRequest.number}: ${error.message}`);
+  }
+
+  let refreshedPull;
+  try {
+    refreshedPull = await refreshPull();
+  } catch (error) {
+    throw new Error(`Could not verify auto-merge was suspended for PR #${pullRequest.number}: ${error.message}`, { cause: error });
+  }
+  if (!Object.hasOwn(refreshedPull, "auto_merge") || refreshedPull.auto_merge) {
+    const detail = disableError ? ` after GitHub reported: ${disableError.message}` : "";
+    throw new Error(`Could not suspend auto-merge for PR #${pullRequest.number}${detail}`);
+  }
+  return { pullRequest: refreshedPull, disabled: true };
 }
 
 async function currentReviewPull(github, context, config) {
@@ -169,44 +210,90 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
   const automationBotLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
-  const autoMerge = evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin });
-  const desiredSet = new Set(reviewLabels(result));
-  desiredSet.delete("codekeeper:auto-merge");
-  desiredSet.delete("codekeeper:manual-review");
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
-  if (result.blockingFindings.length > 0 || critical || result.mergeRecommendation === "block") {
-    desiredSet.add("codekeeper:blocked");
-  } else if (autoMerge.eligible) {
-    desiredSet.add("codekeeper:auto-merge");
-  } else {
-    desiredSet.add("codekeeper:manual-review");
-  }
-  const desiredLabels = [...desiredSet];
-  const comment = renderReviewComment(result, autoMerge);
   const blocking = result.blockingFindings.length > 0 || critical || result.mergeRecommendation === "block";
+  const publicationState = (autoMerge) => {
+    const desiredSet = new Set(reviewLabels(result));
+    desiredSet.delete("codekeeper:auto-merge");
+    desiredSet.delete("codekeeper:manual-review");
+    if (blocking) {
+      desiredSet.add("codekeeper:blocked");
+    } else if (autoMerge.eligible) {
+      desiredSet.add("codekeeper:auto-merge");
+    } else {
+      desiredSet.add("codekeeper:manual-review");
+    }
+    return {
+      desiredLabels: [...desiredSet],
+      comment: renderReviewComment(result, autoMerge)
+    };
+  };
+
+  const autoMerge = evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin });
+  const initialState = publicationState(autoMerge);
 
   if (dryRun) {
-    log(`DRY RUN review PR #${pull.number}`, { desiredLabels, autoMerge, comment, blocking });
-    return { pullRequest: pull.number, desiredLabels, autoMerge, blocking, dryRun: true };
+    log(`DRY RUN review PR #${pull.number}`, { ...initialState, autoMerge, blocking });
+    return { pullRequest: pull.number, ...initialState, autoMerge, blocking, dryRun: true };
   }
 
   const automationIdentity = expectedAutomationIdentity();
-  await currentReviewPull(github, context, config);
-  await github.ensureLabels(config.labels, desiredLabels);
-  await currentReviewPull(github, context, config);
-  await github.replaceManagedLabels(pull.number, desiredLabels, config.review.managedLabels);
-  await currentReviewPull(github, context, config);
-  await github.upsertMarkerComment(
-    pull.number,
-    REVIEW_MARKER,
-    comment,
-    automationIdentity
+  let reconciledPull = await currentReviewPull(github, context, config);
+  const suspension = await suspendAutoMerge(
+    github,
+    reconciledPull,
+    () => currentReviewPull(github, context, config)
   );
+  reconciledPull = suspension.pullRequest;
+  let publishedAutoMerge = evaluateAutoMerge({ config, pullRequest: reconciledPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
+  const eligibleState = publicationState(publishedAutoMerge);
+  const manualFallbackState = publicationState({ ...publishedAutoMerge, eligible: false });
+  const provisionedLabels = [...new Set([...eligibleState.desiredLabels, ...manualFallbackState.desiredLabels])];
+  await github.ensureLabels(config.labels, provisionedLabels);
 
-  const currentPull = await currentReviewPull(github, context, config);
-  const currentAutoMerge = evaluateAutoMerge({ config, pullRequest: currentPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
-  const autoMergeResult = await reconcileAutoMerge(github, currentPull, config, currentAutoMerge);
-  return { pullRequest: pull.number, desiredLabels, autoMerge: currentAutoMerge, autoMergeResult, blocking };
+  const writePublicationState = async (decision) => {
+    const state = publicationState(decision);
+    await currentReviewPull(github, context, config);
+    await github.replaceManagedLabels(pull.number, state.desiredLabels, config.review.managedLabels);
+    await currentReviewPull(github, context, config);
+    await github.upsertMarkerComment(
+      pull.number,
+      REVIEW_MARKER,
+      state.comment,
+      automationIdentity
+    );
+    return state;
+  };
+
+  let { desiredLabels } = await writePublicationState(publishedAutoMerge);
+  let autoMergeResult = {
+    enabled: false,
+    disabled: suspension.disabled,
+    reason: suspension.disabled ? "suspended before publication" : publishedAutoMerge.reasons.join("; ")
+  };
+
+  if (publishedAutoMerge.eligible) {
+    const activationPull = await currentReviewPull(github, context, config);
+    const activationDecision = evaluateAutoMerge({ config, pullRequest: activationPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
+    if (!activationDecision.eligible) {
+      publishedAutoMerge = activationDecision;
+      ({ desiredLabels } = await writePublicationState(publishedAutoMerge));
+      autoMergeResult = { enabled: false, disabled: suspension.disabled, reason: activationDecision.reasons.join("; ") };
+    } else {
+      autoMergeResult = await reconcileAutoMerge(github, activationPull, config, activationDecision);
+      publishedAutoMerge = activationDecision;
+      if (!autoMergeResult.enabled) {
+        publishedAutoMerge = {
+          ...activationDecision,
+          eligible: false,
+          reasons: [...activationDecision.reasons, `Auto-merge is not active: ${autoMergeResult.reason || "enablement failed"}`]
+        };
+        ({ desiredLabels } = await writePublicationState(publishedAutoMerge));
+      }
+    }
+  }
+
+  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, blocking };
 }
 
 export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
