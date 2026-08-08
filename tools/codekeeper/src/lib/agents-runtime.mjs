@@ -46,6 +46,23 @@ export function modelSettingsFor(agent, provider) {
   return settings;
 }
 
+export function providerCompatibleJsonSchema(value) {
+  if (Array.isArray(value)) return value.map((item) => providerCompatibleJsonSchema(item));
+  if (!isPlainObject(value)) return cloneJson(value);
+  const projected = {};
+  for (const [key, item] of Object.entries(value)) {
+    // The Responses structured-output subset accepts enum but not const. Keep
+    // the original schema for the local validator and project only its wire
+    // representation so the same single permitted value remains strict.
+    if (key === "const") {
+      projected.enum = [cloneJson(item)];
+    } else {
+      projected[key] = providerCompatibleJsonSchema(item);
+    }
+  }
+  return projected;
+}
+
 export function structuredOutputType(mode, schema) {
   if (!MODE_NAMES[mode]) throw new Error(`Unknown agent mode: ${mode}`);
   if (!isPlainObject(schema)) throw new Error("Agent output schema must be a JSON object");
@@ -53,7 +70,7 @@ export function structuredOutputType(mode, schema) {
     type: "json_schema",
     name: `codekeeper_${mode}_result`,
     strict: true,
-    schema: cloneJson(schema)
+    schema: providerCompatibleJsonSchema(schema)
   };
 }
 
@@ -173,6 +190,15 @@ function retryMessage(input, error, attempt) {
   ].join("\n");
 }
 
+function reportDiagnostic(diagnostic, stage, attempt = 0) {
+  if (typeof diagnostic !== "function") return;
+  try {
+    diagnostic({ stage, attempt });
+  } catch {
+    // Diagnostics are observability only and must not alter agent execution.
+  }
+}
+
 export async function runConfiguredAgent({
   mode,
   config,
@@ -181,62 +207,83 @@ export async function runConfiguredAgent({
   specialistResult = null,
   validateOutput = (output) => output,
   apiKey = process.env.CODEKEEPER_MODEL_API_KEY,
-  sdkLoader = () => import("@openai/agents")
+  sdkLoader = () => import("@openai/agents"),
+  diagnostic
 }) {
-  if (!apiKey || !String(apiKey).trim()) {
-    throw new Error("CODEKEEPER_MODEL_API_KEY is required for the configured model provider");
-  }
-  const modelApiKey = String(apiKey).trim();
-  const { agent, provider, tracing } = getAgentConfig(config, mode);
-  runtimeEnvironment(tracing);
-  const sdk = await sdkLoader();
-  for (const exportName of ["Agent", "Runner", "OpenAIProvider"]) {
-    if (typeof sdk[exportName] !== "function") {
-      throw new Error(`Installed @openai/agents package does not export ${exportName}`);
-    }
-  }
-  const traceApiKey = process.env.CODEKEEPER_TRACE_API_KEY?.trim();
-  if (tracing.enabled) {
-    if (!traceApiKey) {
-      throw new Error("CODEKEEPER_TRACE_API_KEY is required when ai.tracing.enabled=true");
-    }
-    if (traceApiKey === modelApiKey) {
-      throw new Error("CODEKEEPER_TRACE_API_KEY must differ from CODEKEEPER_MODEL_API_KEY when ai.tracing.enabled=true");
-    }
-    if (typeof sdk.setTracingExportApiKey !== "function") {
-      throw new Error("Installed @openai/agents package does not export setTracingExportApiKey");
-    }
-    sdk.setTracingExportApiKey(traceApiKey);
-  }
-
-  const modelProvider = new sdk.OpenAIProvider({
-    apiKey: modelApiKey,
-    baseURL: provider.baseUrl,
-    useResponses: provider.api === "responses",
-    strictFeatureValidation: true
-  });
+  let modelProvider;
   let lastError;
+  let lastFailureStage = "provider-run";
+  let lastFailureAttempt = 0;
   try {
+    if (!apiKey || !String(apiKey).trim()) {
+      lastFailureStage = "api-key";
+      throw new Error("CODEKEEPER_MODEL_API_KEY is required for the configured model provider");
+    }
+    const modelApiKey = String(apiKey).trim();
+    lastFailureStage = "configuration";
+    const { agent, provider, tracing } = getAgentConfig(config, mode);
+    runtimeEnvironment(tracing);
+
+    lastFailureStage = "sdk-load";
+    const sdk = await sdkLoader();
+    lastFailureStage = "sdk-contract";
+    for (const exportName of ["Agent", "Runner", "OpenAIProvider"]) {
+      if (typeof sdk[exportName] !== "function") {
+        throw new Error(`Installed @openai/agents package does not export ${exportName}`);
+      }
+    }
+    const traceApiKey = process.env.CODEKEEPER_TRACE_API_KEY?.trim();
+    lastFailureStage = "tracing";
+    if (tracing.enabled) {
+      if (!traceApiKey) {
+        throw new Error("CODEKEEPER_TRACE_API_KEY is required when ai.tracing.enabled=true");
+      }
+      if (traceApiKey === modelApiKey) {
+        throw new Error("CODEKEEPER_TRACE_API_KEY must differ from CODEKEEPER_MODEL_API_KEY when ai.tracing.enabled=true");
+      }
+      if (typeof sdk.setTracingExportApiKey !== "function") {
+        throw new Error("Installed @openai/agents package does not export setTracingExportApiKey");
+      }
+      sdk.setTracingExportApiKey(traceApiKey);
+    }
+
+    lastFailureStage = "provider-create";
+    modelProvider = new sdk.OpenAIProvider({
+      apiKey: modelApiKey,
+      baseURL: provider.baseUrl,
+      useResponses: provider.api === "responses",
+      strictFeatureValidation: true
+    });
+    lastFailureStage = "output-schema";
     const outputType = provider.structuredOutputs ? structuredOutputType(mode, schema) : undefined;
+    lastFailureStage = "coordinator-instructions";
+    const instructions = await coordinatorInstructions(mode);
+    lastFailureStage = "agent-create";
     const configuredAgent = new sdk.Agent({
       name: MODE_NAMES[mode],
-      instructions: await coordinatorInstructions(mode),
+      instructions,
       model: agent.model,
       modelSettings: modelSettingsFor(agent, provider),
       ...(outputType ? { outputType } : {})
     });
+    lastFailureStage = "runner-create";
     const runner = new sdk.Runner({
       modelProvider,
       tracingDisabled: !tracing.enabled,
       traceIncludeSensitiveData: tracing.includeSensitiveData,
       workflowName: `Codekeeper: ${mode}`
     });
+    lastFailureStage = "input-build";
     const baseInput = buildCoordinatorInput({ mode, prompt, schema, specialistResult });
     let input = baseInput;
     for (let attempt = 1; attempt <= agent.maximumAttempts; attempt += 1) {
       try {
+        lastFailureStage = "provider-run";
         const runResult = await runner.run(configuredAgent, input, { maxTurns: agent.maxTurns });
-        const output = validateOutput(parseAgentOutput(runResult?.finalOutput));
+        lastFailureStage = "output-parse";
+        const parsedOutput = parseAgentOutput(runResult?.finalOutput);
+        lastFailureStage = "local-schema";
+        const output = validateOutput(parsedOutput);
         return {
           output,
           metadata: {
@@ -250,14 +297,25 @@ export async function runConfiguredAgent({
         };
       } catch (error) {
         lastError = error;
+        lastFailureAttempt = attempt;
         if (attempt >= agent.maximumAttempts) break;
         input = retryMessage(baseInput, error, attempt);
       }
     }
+    throw new Error(`Codekeeper ${mode} agent failed after ${agent.maximumAttempts} attempt(s): ${lastError?.message ?? lastError}`);
+  } catch (error) {
+    reportDiagnostic(diagnostic, lastFailureStage, lastFailureAttempt);
+    throw error;
   } finally {
-    if (typeof modelProvider.close === "function") await modelProvider.close();
+    if (modelProvider && typeof modelProvider.close === "function") {
+      try {
+        await modelProvider.close();
+      } catch (error) {
+        reportDiagnostic(diagnostic, "provider-close", lastFailureAttempt);
+        throw error;
+      }
+    }
   }
-  throw new Error(`Codekeeper ${mode} agent failed after ${agent.maximumAttempts} attempt(s): ${lastError?.message ?? lastError}`);
 }
 
 function validatorForBundle(mode, config, context) {

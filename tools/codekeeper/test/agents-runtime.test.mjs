@@ -9,6 +9,7 @@ import {
   loadCoordinatorProfile,
   modelSettingsFor,
   parseAgentOutput,
+  providerCompatibleJsonSchema,
   runAgentFromBundle,
   runConfiguredAgent,
   structuredOutputType
@@ -79,9 +80,38 @@ test("structured output wraps the deterministic schema in the SDK contract", () 
     type: "json_schema",
     name: "codekeeper_review_result",
     strict: true,
-    schema
+    schema: {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        mode: { enum: ["issue"] }
+      }
+    }
   });
   assert.notEqual(wrapped.schema, schema);
+  assert.deepEqual(schema.properties.mode, { const: "issue" });
+});
+
+test("provider-compatible schema projection preserves strict structure while replacing const recursively", () => {
+  const source = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      mode: { const: "review" },
+      nested: { anyOf: [{ const: null }, { type: "object", additionalProperties: false, properties: { state: { const: "ready" } }, required: ["state"] }] }
+    },
+    required: ["mode", "nested"]
+  };
+  assert.deepEqual(providerCompatibleJsonSchema(source), {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      mode: { enum: ["review"] },
+      nested: { anyOf: [{ enum: [null] }, { type: "object", additionalProperties: false, properties: { state: { enum: ["ready"] } }, required: ["state"] }] }
+    },
+    required: ["mode", "nested"]
+  });
+  assert.deepEqual(source.properties.mode, { const: "review" });
 });
 
 test("workspace-free audit and fix coordination fail safely", () => {
@@ -183,6 +213,28 @@ test("retries rebuild from the original prompt instead of recursively growing it
   assert.equal(inputs[2].split("UNIQUE_TRUSTED_PROMPT").length - 1, 1);
   assert.match(inputs[2], /previous response attempt 2 was unusable/i);
   assert.doesNotMatch(inputs[2], /previous response attempt 1 was unusable/i);
+});
+
+test("runtime diagnostics expose only the final failure stage and attempt", async () => {
+  const diagnostics = [];
+  class FakeProvider { async close() {} }
+  class FakeAgent {}
+  class FakeRunner {
+    async run() { return { finalOutput: "not-json" }; }
+  }
+  await assert.rejects(
+    runConfiguredAgent({
+      mode: "issue",
+      config: withoutTracing(),
+      prompt: "Classify.",
+      schema,
+      apiKey: "provider-secret",
+      sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider }),
+      diagnostic: (event) => diagnostics.push(event)
+    }),
+    /failed after 2 attempt/
+  );
+  assert.deepEqual(diagnostics, [{ stage: "output-parse", attempt: 2 }]);
 });
 
 test("tracing uses a separate export key without changing the model provider key", async () => {
