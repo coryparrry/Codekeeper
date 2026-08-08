@@ -19,3 +19,15 @@ export function findingFingerprint(finding) {
 export function findingMarker(fingerprint) {
   return `<!-- codekeeper:fingerprint=${fingerprint} -->`;
 }
+
+export function repairMarker(fingerprint) {
+  return `<!-- codekeeper:repair=${fingerprint} -->`;
+}
+
+export function repairNotificationMarker(fingerprint) {
+  return `<!-- codekeeper:repair-notification=${fingerprint} -->`;
+}
+
+export function fixRunMarker(runId) {
+  return `<!-- codekeeper:fix-run=${runId} -->`;
+}

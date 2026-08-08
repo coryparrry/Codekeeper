@@ -1,3 +1,5 @@
+import { repairMarker } from "./markers.mjs";
+
 function safeMarkdown(value) {
   return String(value ?? "")
     .replace(/<!--\s*codekeeper:/gi, "&lt;!-- codekeeper:")
@@ -131,5 +133,5 @@ ${validationSummary || "Validation is delegated to repository CI and Xcode Cloud
 
 ${links}
 
-<!-- codekeeper:repair=${fingerprint} -->`;
+${repairMarker(fingerprint)}`;
 }

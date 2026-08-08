@@ -242,6 +242,22 @@ export class GitHubClient {
     return pulls.find((pull) => pull.head?.ref === branch && pull.head?.repo?.full_name === this.repository) ?? null;
   }
 
+  async getBranchTip(branch) {
+    let branchData;
+    try {
+      branchData = (await this.request("GET", this.repoPath(`/branches/${encodeURIComponent(branch)}`))).data;
+    } catch (error) {
+      if (error.status === 404) return null;
+      throw error;
+    }
+    const treeSha = branchData?.commit?.commit?.tree?.sha;
+    const parentShas = branchData?.commit?.parents?.map((parent) => parent?.sha);
+    if (typeof treeSha !== "string" || !Array.isArray(parentShas) || parentShas.some((sha) => typeof sha !== "string")) {
+      throw new Error(`GitHub branch ${branch} has an invalid commit shape`);
+    }
+    return { treeSha, parentShas };
+  }
+
   async deleteBranch(branch) {
     return this.request("DELETE", this.repoPath(`/git/refs/heads/${encodeURIComponent(branch)}`));
   }
