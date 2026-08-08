@@ -159,6 +159,33 @@ test("priority and severity calibration assertions reject schema-valid but incor
   );
 });
 
+test("related reports reject a schema-valid duplicate classification", async () => {
+  const fixtures = Object.fromEntries(SCENARIOS.map((scenario) => [scenario.name, scenario.fixture]));
+  fixtures["related-not-duplicate"] = {
+    ...fixtures["related-not-duplicate"],
+    duplicateOf: 9,
+    duplicateConfidence: "high"
+  };
+  const summary = await runDecisionEvaluation({
+    scenario: "related-not-duplicate",
+    repeat: 1,
+    keyResolver: () => "offline-provider-key",
+    disableTracing: true,
+    sdkLoader: async () => makeOfflineSdk(fixtures),
+    throwOnFailure: false
+  });
+  assert.equal(summary.failed, 1);
+  assert.deepEqual(summary.results, [{
+    scenario: "related-not-duplicate",
+    preset: "mixed",
+    model: "deepseek-v4-flash",
+    attempt: 1,
+    stage: "semantic-assertion",
+    pass: false,
+    repeat: 1
+  }]);
+});
+
 test("semantic assertions fail closed and evaluation never reports provider keys or result text", async () => {
   const fixtures = Object.fromEntries(SCENARIOS.map((scenario) => [scenario.name, scenario.fixture]));
   fixtures["prompt-injection"] = {

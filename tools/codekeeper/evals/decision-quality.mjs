@@ -87,9 +87,9 @@ const SCENARIOS = Object.freeze([
       evaluationScenario: "related-not-duplicate",
       triageMode: "manual",
       issue: { number: 103, title: "Export omits timezone", body: "In version 1.4.2 on macOS 14 in Europe/London: create an event at 09:00, export it as CSV, and open the CSV. Expected: 09:00 Europe/London. Actual: 08:00 UTC is written without the timezone. This shifts scheduled events by one hour for importers." },
-      existingIssues: [{ number: 9, title: "Import rejects malformed timezone", body: "Import parser rejects an invalid timezone string." }]
+      existingIssues: [{ number: 9, title: "Import accepts malformed timezone", body: "In version 1.4.2 on macOS 14, import an event with the invalid timezone `Europe/Londn`. Expected: reject the malformed timezone. Actual: the event imports. No CSV export or timezone conversion occurs." }]
     },
-    specialistResult: { evidence: "The exact export reproduction succeeds on version 1.4.2/macOS 14. Both reports mention timezones, but one is export conversion and the other import validation." },
+    specialistResult: { evidence: "The exact export reproduction succeeds on version 1.4.2/macOS 14. Both reports mention timezones, but this report is CSV export conversion while issue #9 is malformed-input import validation; their failure modes, affected surfaces, and requested outcomes differ." },
     fixture: issueResult({ summary: "This is related to, but not the same failure as, issue #9.", actionable: true, implementationRecommendation: "manual" }),
     assert(output) {
       assert(output.actionable === true && output.missingInformation.length === 0, "complete related report must remain actionable");
