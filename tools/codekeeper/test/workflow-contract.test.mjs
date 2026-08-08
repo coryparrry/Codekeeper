@@ -34,6 +34,13 @@ function jobSection(source, name, nextName) {
   return source.slice(start, next);
 }
 
+test("self-test runs for every tracked-file change", async () => {
+  const source = await workflow("self-test");
+  const triggers = source.slice(0, source.indexOf("\npermissions:"));
+  assert.match(triggers, /on:\n  pull_request:\n  push:\n  workflow_dispatch:/);
+  assert.doesNotMatch(triggers, /\n\s+paths(?:-ignore)?:/);
+});
+
 test("four generic mode workflows expose workflow_call and caller templates remain non-executable", async () => {
   const files = await readdir(workflowDirectory);
   for (const mode of modes) {

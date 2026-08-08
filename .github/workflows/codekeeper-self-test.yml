@@ -2,31 +2,7 @@ name: Codekeeper checks
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/codekeeper-*.yml"
-      - ".github/actionlint.yaml"
-      - ".github/codekeeper.json"
-      - ".github/dependabot.yml"
-      - ".gitignore"
-      - "MANIFEST.sha256"
-      - "README.md"
-      - "VALIDATION.md"
-      - "examples/workflows/**"
-      - "scripts/release-source.sh"
-      - "tools/codekeeper/**"
   push:
-    paths:
-      - ".github/workflows/codekeeper-*.yml"
-      - ".github/actionlint.yaml"
-      - ".github/codekeeper.json"
-      - ".github/dependabot.yml"
-      - ".gitignore"
-      - "MANIFEST.sha256"
-      - "README.md"
-      - "VALIDATION.md"
-      - "examples/workflows/**"
-      - "scripts/release-source.sh"
-      - "tools/codekeeper/**"
   workflow_dispatch:
 
 permissions:

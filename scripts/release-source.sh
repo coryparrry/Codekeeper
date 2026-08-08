@@ -47,6 +47,7 @@ while (( $# )); do
 done
 
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || die 'run inside a Git worktree'
+repo_root=$(cd "$repo_root" && pwd -P)
 cd "$repo_root"
 
 [[ -z $(git status --porcelain=v1 --untracked-files=all) ]] || die 'refusing dirty checkout'
@@ -56,11 +57,6 @@ prefix="codekeeper-source-${short_commit}/"
 
 if ! $verify_only; then
   [[ -n $output_dir ]] || die 'pass --output DIRECTORY outside this checkout, or use --verify'
-  requested_output=$output_dir
-  [[ $requested_output = /* ]] || requested_output="$repo_root/$requested_output"
-  case "$requested_output" in
-    "$repo_root"|"$repo_root"/*) die 'output directory must be outside the checkout' ;;
-  esac
   [[ -d $output_dir ]] || die "output directory does not exist: $output_dir"
   output_dir=$(cd "$output_dir" && pwd -P)
   case "$output_dir/" in
@@ -75,7 +71,9 @@ fi
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/codekeeper-source-verify.XXXXXX")
 cleanup() {
   rm -rf "$work_dir"
-  $verify_only && rm -f "$archive"
+  if $verify_only; then
+    rm -f "$archive"
+  fi
 }
 trap cleanup EXIT
 
