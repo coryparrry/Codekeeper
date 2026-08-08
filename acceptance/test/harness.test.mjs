@@ -49,13 +49,42 @@ function metadata() {
   };
 }
 
-function workflowPin(workflow) {
+function callerSource(workflow, {
+  bootstrapRepository = "owner/codekeeper",
+  bootstrapPath = "tools/codekeeper",
+  bootstrapSha = SHA,
+  reusableRepository = "owner/codekeeper",
+  reusablePath = `.github/workflows/${workflow}`,
+  reusableSha = SHA,
+  bootstrapJobIf = null,
+  bootstrapStepIf = null,
+  reusableJobIf = null,
+  reusableNeeds = "bootstrap",
+  extraUses = ""
+} = {}) {
+  const reusableJob = {
+    "codekeeper-maintain.yml": "maintain",
+    "codekeeper-review.yml": "review",
+    "codekeeper-issues.yml": "triage",
+    "codekeeper-fix.yml": "fix"
+  }[workflow];
+  assert.ok(reusableJob, `Unexpected caller workflow ${workflow}`);
   const runName = workflow === "codekeeper-review.yml"
     ? 'run-name: "Codekeeper review #${{ github.event.pull_request.number }} @${{ github.event.pull_request.head.sha }}"\n'
     : workflow === "codekeeper-issues.yml"
       ? 'run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"\n'
       : "";
-  return encoded(`${runName}jobs:\n  call:\n    uses: owner/codekeeper/.github/workflows/${workflow}@${SHA}\n`);
+  const bootstrapJobGate = bootstrapJobIf === null ? "" : `    if: ${bootstrapJobIf}\n`;
+  const bootstrapStep = bootstrapStepIf === null
+    ? `      - uses: ${bootstrapRepository}/${bootstrapPath}@${bootstrapSha}\n`
+    : `      - if: ${bootstrapStepIf}\n        uses: ${bootstrapRepository}/${bootstrapPath}@${bootstrapSha}\n`;
+  const reusableJobGate = reusableJobIf === null ? "" : `    if: ${reusableJobIf}\n`;
+  const needs = reusableNeeds === null ? "" : `    needs: ${reusableNeeds}\n`;
+  return `${runName}jobs:\n  bootstrap:\n${bootstrapJobGate}    steps:\n${bootstrapStep}  ${reusableJob}:\n${reusableJobGate}${needs}    uses: ${reusableRepository}/${reusablePath}@${reusableSha}\n${extraUses}`;
+}
+
+function workflowPin(workflow, options) {
+  return encoded(callerSource(workflow, options));
 }
 
 async function freshEvidencePath(name = "evidence") {
@@ -271,16 +300,46 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
   return { runner, calls };
 }
 
-test("source pin parser accepts one exact active reusable workflow and rejects comments, aliases, refs, duplicates, expressions, and unrelated lines", () => {
-  const exact = `jobs:\n  keeper:\n    uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}\n`;
-  assert.equal(parsePinnedWorkflowUses(exact, "codekeeper-maintain.yml", SHA), true);
+test("source pin parser requires exact matching bootstrap and reusable workflow pins", () => {
+  const workflow = "codekeeper-maintain.yml";
+  const bootstrap = `owner/codekeeper/tools/codekeeper@${SHA}`;
+  const reusable = `owner/codekeeper/.github/workflows/${workflow}@${SHA}`;
+  const exact = callerSource(workflow);
+  const quoted = exact
+    .replace(`- uses: ${bootstrap}`, `- uses: "${bootstrap}"`)
+    .replace(`uses: ${reusable}`, `uses: '${reusable}'`);
+  assert.equal(parsePinnedWorkflowUses(exact, workflow, SHA), true);
+  assert.equal(parsePinnedWorkflowUses(quoted, workflow, SHA), true);
+  assert.equal(parsePinnedWorkflowUses(`# - uses: ${bootstrap}\n# uses: ${reusable}\n${exact}`, workflow, SHA), true);
+
   for (const source of [
-    `# uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`,
-    `jobs:\n  keeper:\n    uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@main`,
-    `jobs:\n  keeper:\n    uses: *keeper`,
-    `jobs:\n  keeper:\n    uses: \${{ github.repository }}/.github/workflows/codekeeper-maintain.yml@${SHA}`,
-    `${exact}  another:\n    uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`,
-    `jobs:\n  note: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`
+    exact.replace(`- uses: ${bootstrap}`, `# - uses: ${bootstrap}`),
+    exact.replace(`uses: ${reusable}`, `# uses: ${reusable}`),
+    exact.replace(bootstrap, `owner/other/tools/codekeeper@${SHA}`),
+    exact.replace(bootstrap, `owner/codekeeper/tools/other@${SHA}`),
+    exact.replace(bootstrap, `owner/codekeeper/tools/codekeeper@${"f".repeat(40)}`),
+    exact.replace(reusable, `owner/codekeeper/.github/workflows/${workflow}@${"f".repeat(40)}`),
+    exact.replace(reusable, `owner/codekeeper/.github/workflows/codekeeper-fix.yml@${SHA}`),
+    exact.replace("/tools/codekeeper@", "/Tools/codekeeper@"),
+    exact.replace("/.github/workflows/", "/.github/Workflows/"),
+    exact.replace(bootstrap, "*bootstrap"),
+    exact.replace(bootstrap, `\${{ github.repository }}/tools/codekeeper@${SHA}`),
+    exact.replace(bootstrap, "owner/codekeeper/tools/codekeeper@main"),
+    callerSource(workflow, { bootstrapJobIf: "always()" }),
+    callerSource(workflow, { bootstrapStepIf: "always()" }),
+    callerSource(workflow, { reusableJobIf: "always()" }),
+    callerSource(workflow, { reusableNeeds: null }),
+    callerSource(workflow, { reusableNeeds: "other" }),
+    callerSource(workflow, { reusableNeeds: '"bootstrap"' }),
+    callerSource(workflow, { reusableNeeds: "${{ github.job }}" }),
+    callerSource(workflow, { reusableNeeds: "[bootstrap]" }),
+    callerSource(workflow, { reusableNeeds: "*bootstrap" }),
+    `${exact}  extra:\n    uses: owner/codekeeper/.github/workflows/${workflow}@${SHA}`,
+    `${exact}  bootstrap:\n    uses: ${bootstrap}`,
+    exact.replace(`- uses: ${bootstrap}`, `- uses: ${bootstrap}\n        if: always()`),
+    exact.replace(`- uses: ${bootstrap}`, `- name: bootstrap\n        with:\n          uses: ${bootstrap}`),
+    `${exact}notes: |\n  - uses: ${bootstrap}\n  uses: ${reusable}`,
+    `jobs:\n  note: ${reusable}`
   ]) {
     assert.throws(() => parsePinnedWorkflowUses(source, "codekeeper-maintain.yml", SHA), /Caller workflow/);
   }
@@ -325,14 +384,35 @@ test("scenario gates reject acknowledgements, non-SHAs, missing App identity, an
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: oversizedRepository, gh: never }), /bounded repository limits/);
 });
 
-test("a commented or conflicting source pin fails before a scenario can dispatch", async () => {
-  const source = `# uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}\njobs:\n  keeper:\n    uses: owner/codekeeper/.github/workflows/codekeeper-maintain.yml@main`;
+test("a malformed two-pin source caller fails before a scenario can dispatch", async () => {
+  const source = callerSource("codekeeper-maintain.yml", { reusableSha: "main" });
   const fake = fakeGh({ scenario: "maintenance-dry-run", workflowSource: source });
   const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(result.passed, false);
   assert.equal(result.evidence.dispatchRef, null);
   assert.equal(fake.calls.some((args) => args.includes(`repos/${REPO}/git/refs`)), false);
   assert.equal(fake.calls.some((args) => args[0] === "workflow"), false);
+});
+
+test("block-scalar, misplaced, and gated caller pins fail before an acceptance tag can be created", async () => {
+  const bootstrap = `owner/codekeeper/tools/codekeeper@${SHA}`;
+  const reusable = `owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`;
+  for (const source of [
+    `${callerSource("codekeeper-maintain.yml")}notes: |\n  - uses: ${bootstrap}\n  uses: ${reusable}`,
+    `${callerSource("codekeeper-maintain.yml")}  observer:\n    steps:\n      - uses: ${bootstrap}`,
+    callerSource("codekeeper-maintain.yml", { bootstrapJobIf: "always()" }),
+    callerSource("codekeeper-maintain.yml", { bootstrapStepIf: "always()" }),
+    callerSource("codekeeper-maintain.yml", { reusableJobIf: "always()" }),
+    callerSource("codekeeper-maintain.yml", { reusableNeeds: null }),
+    callerSource("codekeeper-maintain.yml", { reusableNeeds: "other" })
+  ]) {
+    const fake = fakeGh({ scenario: "maintenance-dry-run", workflowSource: source });
+    const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: () => new Date(NOW), sleep: async () => {} });
+    assert.equal(result.passed, false);
+    assert.equal(result.evidence.dispatchRef, null);
+    assert.equal(fake.calls.some((args) => args.includes(`repos/${REPO}/git/refs`)), false);
+    assert.equal(fake.calls.some((args) => args[0] === "workflow"), false);
+  }
 });
 
 test("dispatch refuses tag creation or tag-to-SHA verification failures before workflow dispatch", async () => {

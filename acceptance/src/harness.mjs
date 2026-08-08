@@ -5,8 +5,10 @@ import path from "node:path";
 import { prepareEvidenceDestination, writeEvidenceAtomically } from "./evidence.mjs";
 
 const PRIVATE_REPOSITORY_PREFIX = "codekeeper-acceptance-";
-const SHA = /^[0-9a-f]{40}$/i;
-const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const SHA_PATTERN = "[0-9A-Fa-f]{40}";
+const REPOSITORY_PATTERN = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
+const SHA = new RegExp(`^${SHA_PATTERN}$`, "i");
+const REPOSITORY = new RegExp(`^${REPOSITORY_PATTERN}$`);
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
 const SAFE_PREFIX = /^(?!\/)(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)+$/;
 const MAX_REPOSITORY_LENGTH = 140;
@@ -45,6 +47,12 @@ const SCENARIO_DETAILS = Object.freeze({
     workflowName: "Codekeeper issue implementation",
     event: "workflow_dispatch"
   }
+});
+const CALLER_JOB_BY_WORKFLOW = Object.freeze({
+  "codekeeper-maintain.yml": "maintain",
+  "codekeeper-review.yml": "review",
+  "codekeeper-issues.yml": "triage",
+  "codekeeper-fix.yml": "fix"
 });
 
 export const FIXTURE_ALLOWED_FIX_PATHS = Object.freeze(["src/discount.mjs", "test/discount.test.mjs"]);
@@ -292,20 +300,235 @@ function acceptanceTagName(scenario, headSha) {
   return name;
 }
 
-export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
-  const activeUses = [];
-  const expectedPath = `.github/workflows/${workflow}`.toLowerCase();
-  const exact = new RegExp(`^\\s*uses\\s*:\\s*(?:["'])?[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+\\/\\.github\\/workflows\\/${workflow.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}@${sourceSha}(?:["'])?\\s*$`, "i");
-  for (const rawLine of String(yaml).split(/\r?\n/)) {
-    const trimmed = rawLine.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const isUses = /^uses\s*:|^-\s*uses\s*:/i.test(trimmed);
-    const mentionsExpectedPath = trimmed.toLowerCase().includes(expectedPath);
-    if (isUses) activeUses.push(trimmed);
-    if (mentionsExpectedPath && !isUses) throw new AcceptanceError("Caller workflow contains an unrelated active Codekeeper workflow reference");
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripYamlComment(line) {
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (quote === '"') {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (quote === "'") {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "#" && (index === 0 || /\s/.test(line[index - 1]))) return line.slice(0, index);
   }
-  assert(activeUses.length === 1, "Caller workflow must contain exactly one active reusable-workflow uses entry");
-  assert(exact.test(activeUses[0]), "Caller workflow must use the expected Codekeeper workflow at the supplied immutable SHA");
+  return line;
+}
+
+function unquotedYamlText(value) {
+  let quote = null;
+  let escaped = false;
+  let result = "";
+  for (const character of value) {
+    if (quote === '"') {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
+      result += " ";
+      continue;
+    }
+    if (quote === "'") {
+      if (character === quote) quote = null;
+      result += " ";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      result += " ";
+      continue;
+    }
+    result += character;
+  }
+  assert(quote === null, "Caller workflow contains an unterminated quoted scalar");
+  return result;
+}
+
+function yamlLine(rawLine) {
+  const uncommented = stripYamlComment(rawLine);
+  if (!uncommented.trim()) return null;
+  assert(!uncommented.includes("\t"), "Caller workflow contains unsupported YAML indentation");
+  const indentation = /^( *)/.exec(uncommented)[1].length;
+  assert(indentation % 2 === 0, "Caller workflow contains unsupported YAML indentation");
+  const content = uncommented.slice(indentation).trimEnd();
+  const unquoted = unquotedYamlText(content);
+  assert(
+    !/(^|[\s:[{,}-])[*&][A-Za-z_][A-Za-z0-9_-]*(?=$|[\s,}\]])/.test(unquoted),
+    "Caller workflow does not support YAML anchors or aliases"
+  );
+  assert(!/:\s*![^\s]+(?:\s|$)/.test(unquoted), "Caller workflow does not support YAML tags");
+  const withoutExpressions = unquoted.replace(/\$\{\{.*?\}\}/g, "");
+  assert(!/[{}]/.test(withoutExpressions), "Caller workflow does not support YAML flow mappings");
+  assert(!/:\s*[>|][+-]?\d*\s*$/.test(unquoted), "Caller workflow does not support YAML block scalars");
+  assert(!/^(?:[-?]\s*$|[?]\s+|:\s)/.test(unquoted), "Caller workflow contains an unsupported YAML collection entry");
+  return { indentation, content };
+}
+
+function yamlMapping(line) {
+  const match = /^(?<sequence>-\s+)?(?<key>[A-Za-z0-9_-]+)\s*:\s*(?<value>.*)$/.exec(line.content);
+  if (match) return { sequence: Boolean(match.groups.sequence), key: match.groups.key, value: match.groups.value };
+  assert(!/^(?:"uses"|'uses')\s*:/.test(line.content), "Caller workflow contains an unsupported quoted uses key");
+  return null;
+}
+
+function yamlScalar(value) {
+  const trimmed = value.trim();
+  assert(trimmed.length > 0, "Caller workflow uses entries require a scalar value");
+  if (trimmed.startsWith('"')) {
+    const match = /^"([^"\\]+)"$/.exec(trimmed);
+    assert(match, "Caller workflow uses entries require a plain immutable scalar");
+    return match[1];
+  }
+  if (trimmed.startsWith("'")) {
+    const match = /^'([^']+)'$/.exec(trimmed);
+    assert(match, "Caller workflow uses entries require a plain immutable scalar");
+    return match[1];
+  }
+  assert(!/[\s"'{}[\],]/.test(trimmed), "Caller workflow uses entries require a plain immutable scalar");
+  return trimmed;
+}
+
+function expectedCallerJob(workflow) {
+  const job = CALLER_JOB_BY_WORKFLOW[workflow];
+  assert(job, "Caller workflow is missing its expected Codekeeper workflow name");
+  return job;
+}
+
+function recordUse(entries, mapping, location) {
+  if (mapping.key !== "uses") return;
+  entries.push({ ...location, value: yamlScalar(mapping.value) });
+}
+
+function unsupportedUse(mapping) {
+  if (mapping?.key === "uses") throw new AcceptanceError("Caller workflow contains a uses entry outside the supported bootstrap or reusable-workflow locations");
+}
+
+export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
+  const reusableJob = expectedCallerJob(workflow);
+  assert(typeof sourceSha === "string" && SHA.test(sourceSha), "Caller workflow requires the supplied immutable source SHA");
+
+  let jobsIndent = null;
+  let currentJob = null;
+  let steps = null;
+  let currentStepIndent = null;
+  let sawJobs = false;
+  const jobNames = new Set();
+  const entries = [];
+  const expectedJobs = new Map();
+
+  for (const rawLine of String(yaml).split(/\r?\n/)) {
+    const line = yamlLine(rawLine);
+    if (!line) continue;
+    const mapping = yamlMapping(line);
+
+    if (jobsIndent === null) {
+      if (line.indentation === 0 && mapping?.key === "jobs") {
+        assert(!mapping.sequence && mapping.value.trim() === "", "Caller workflow must use a block-style jobs mapping");
+        assert(!sawJobs, "Caller workflow contains duplicate jobs mappings");
+        sawJobs = true;
+        jobsIndent = line.indentation;
+        continue;
+      }
+      unsupportedUse(mapping);
+      continue;
+    }
+
+    if (line.indentation <= jobsIndent) {
+      jobsIndent = null;
+      currentJob = null;
+      steps = null;
+      currentStepIndent = null;
+      if (line.indentation === 0 && mapping?.key === "jobs") {
+        assert(false, "Caller workflow contains duplicate jobs mappings");
+      }
+      unsupportedUse(mapping);
+      continue;
+    }
+
+    if (line.indentation === jobsIndent + 2) {
+      assert(mapping && !mapping.sequence && mapping.value.trim() === "", "Caller workflow contains an unsupported job mapping");
+      assert(!jobNames.has(mapping.key), "Caller workflow contains duplicate job names");
+      jobNames.add(mapping.key);
+      currentJob = { name: mapping.key, indentation: line.indentation, stepsSeen: false, needs: [] };
+      if (mapping.key === "bootstrap" || mapping.key === reusableJob) expectedJobs.set(mapping.key, currentJob);
+      steps = null;
+      currentStepIndent = null;
+      continue;
+    }
+
+    assert(currentJob !== null, "Caller workflow contains an unsupported jobs structure");
+    if (line.indentation === currentJob.indentation + 2) {
+      assert(mapping && !mapping.sequence, "Caller workflow contains an unsupported job property");
+      if (mapping.key === "if" && (currentJob.name === "bootstrap" || currentJob.name === reusableJob)) {
+        throw new AcceptanceError("Caller workflow must not gate the expected bootstrap or reusable Codekeeper job");
+      }
+      if (mapping.key === "needs" && currentJob.name === reusableJob) {
+        currentJob.needs.push(mapping.value.trim());
+      }
+      if (mapping.key === "steps") {
+        assert(mapping.value.trim() === "" && !currentJob.stepsSeen, "Caller workflow contains an unsupported steps mapping");
+        currentJob.stepsSeen = true;
+        steps = { indentation: line.indentation };
+        currentStepIndent = null;
+      } else {
+        recordUse(entries, mapping, { kind: "job", job: currentJob.name });
+        steps = null;
+        currentStepIndent = null;
+      }
+      continue;
+    }
+
+    if (steps && line.indentation === steps.indentation + 2) {
+      assert(mapping?.sequence, "Caller workflow contains an unsupported step mapping");
+      const step = { hasIf: mapping.key === "if" };
+      recordUse(entries, mapping, { kind: "step", job: currentJob.name, step });
+      currentStepIndent = line.indentation;
+      steps.current = step;
+      continue;
+    }
+
+    if (steps && currentStepIndent !== null && line.indentation === currentStepIndent + 2) {
+      assert(mapping && !mapping.sequence, "Caller workflow contains an unsupported step property");
+      if (mapping.key === "if") steps.current.hasIf = true;
+      recordUse(entries, mapping, { kind: "step", job: currentJob.name, step: steps.current });
+      continue;
+    }
+
+    unsupportedUse(mapping);
+  }
+
+  assert(sawJobs, "Caller workflow is missing a supported jobs mapping");
+  assert(entries.length === 2, "Caller workflow must contain exactly one bootstrap action and one reusable-workflow uses entry");
+  const bootstrapEntries = entries.filter((entry) => entry.kind === "step" && entry.job === "bootstrap");
+  const reusableEntries = entries.filter((entry) => entry.kind === "job" && entry.job === reusableJob);
+  assert(bootstrapEntries.length === 1, "Caller workflow must contain exactly one direct Codekeeper bootstrap action step");
+  assert(reusableEntries.length === 1, "Caller workflow must contain exactly one Codekeeper reusable-workflow call");
+  assert(!bootstrapEntries[0].step.hasIf, "Caller workflow must not gate the direct Codekeeper bootstrap action step");
+  const reusableJobDefinition = expectedJobs.get(reusableJob);
+  assert(reusableJobDefinition && reusableJobDefinition.needs.length === 1 && reusableJobDefinition.needs[0] === "bootstrap", "Caller workflow reusable Codekeeper job must use the exact scalar needs: bootstrap dependency");
+
+  const bootstrap = new RegExp(`^(${REPOSITORY_PATTERN})/tools/codekeeper@(${SHA_PATTERN})$`).exec(bootstrapEntries[0].value);
+  const reusable = new RegExp(`^(${REPOSITORY_PATTERN})/\\.github/workflows/${escapeRegExp(workflow)}@(${SHA_PATTERN})$`).exec(reusableEntries[0].value);
+  assert(bootstrap, "Caller workflow must pin the direct Codekeeper bootstrap action to an immutable SHA with exact action path casing");
+  assert(reusable, "Caller workflow must pin the expected Codekeeper reusable workflow to an immutable SHA with exact workflow path casing");
+  assert(
+    bootstrap[1].toLowerCase() === reusable[1].toLowerCase() &&
+      bootstrap[2].toLowerCase() === sourceSha.toLowerCase() &&
+      reusable[2].toLowerCase() === sourceSha.toLowerCase(),
+    "Caller workflow bootstrap and reusable workflow must use the same supplied source repository and immutable SHA"
+  );
   return true;
 }
 
