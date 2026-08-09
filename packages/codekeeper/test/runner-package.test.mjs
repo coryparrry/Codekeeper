@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
@@ -118,6 +118,7 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   const packDestination = await temporaryDirectory(t, "codekeeper-pack-");
   const installRoot = await temporaryDirectory(t, "codekeeper-install-");
   const npmInstallRoot = await temporaryDirectory(t, "codekeeper-npm-install-");
+  const dependencyStaging = await temporaryDirectory(t, "codekeeper-dependency-staging-");
   const dependencyTarballs = await temporaryDirectory(t, "codekeeper-dependency-tarballs-");
   const npmEnvironment = {
     ...process.env,
@@ -177,13 +178,22 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   const packageManifest = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
   assert.deepEqual(packageLock.packages[""].dependencies, packageManifest.dependencies);
   const installerLock = structuredClone(packageLock);
-  for (const [packagePath, metadata] of Object.entries(installerLock.packages)) {
+  for (const [index, [packagePath, metadata]] of Object.entries(installerLock.packages).entries()) {
     if (!packagePath.startsWith("node_modules/")) continue;
     assert.equal(typeof metadata.version, "string", `${packagePath} is version-locked`);
     assert.match(metadata.integrity, /^sha512-/, `${packagePath} is integrity-locked`);
+    const packageName = packagePath.slice("node_modules/".length);
+    const stagedPackagePath = path.join(dependencyStaging, `${index}`);
+    await cp(path.join(PACKAGE_ROOT, packagePath), stagedPackagePath, { recursive: true });
+    const stagedManifestPath = path.join(stagedPackagePath, "package.json");
+    const stagedManifest = JSON.parse(await readFile(stagedManifestPath, "utf8"));
+    assert.equal(stagedManifest.name, packageName, `${packagePath} has the locked package name`);
+    assert.equal(stagedManifest.version, metadata.version, `${packagePath} has the locked version`);
+    delete stagedManifest.scripts;
+    await writeFile(stagedManifestPath, JSON.stringify(stagedManifest));
     const dependencyTarball = JSON.parse(execFileSync("npm", [
       "pack", "--json", "--ignore-scripts", "--pack-destination", dependencyTarballs
-    ], { cwd: path.join(PACKAGE_ROOT, packagePath), ...npmOptions }))[0];
+    ], { cwd: stagedPackagePath, ...npmOptions }))[0];
     delete metadata.integrity;
     metadata.resolved = `file:${path.join(dependencyTarballs, dependencyTarball.filename)}`;
   }
