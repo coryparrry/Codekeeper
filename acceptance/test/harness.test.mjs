@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, stat, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, stat, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   FIXTURE_ALLOWED_FIX_PATHS,
@@ -33,7 +34,7 @@ const SUBJECT_UPDATED = "2026-08-08T00:00:00.003Z";
 const MARKER_UPDATED = "2026-08-08T00:00:00.004Z";
 const RUN_UPDATED = "2026-08-08T00:00:00.005Z";
 const LATE_PUBLICATION = "2026-08-08T00:00:00.006Z";
-const TEMP_ROOT = "/private/tmp";
+const TEMP_ROOT = await realpath(tmpdir());
 const FIXTURE = await mkdtemp(path.join(TEMP_ROOT, "codekeeper-acceptance-fixture-"));
 
 function encoded(value) {
