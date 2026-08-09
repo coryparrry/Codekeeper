@@ -13,7 +13,7 @@ import {
 } from "./plan.mjs";
 import { configureRepositorySettings, installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
-import { PACKAGE_VERSION } from "./constants.mjs";
+import { MODES, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
 import { formatCommand } from "./shell-command.mjs";
 
 export const USAGE = `Usage:
@@ -63,16 +63,31 @@ function assertSameSnapshot(expected, actual, resumeCommand) {
 }
 
 function preview(plan, output) {
+  const policyFile = plan.files.find((file) => file.path === ".github/codekeeper.json");
+  const policy = JSON.parse(policyFile.contents);
   output.write("\nSetup preview\n");
   output.write(`  Repository: ${plan.repository}\n`);
   output.write(`  Default branch: ${plan.defaultBranch}\n`);
-  output.write(`  Preset: ${plan.preset}\n`);
+  output.write(`  Comment display name: ${plan.displayName}\n`);
+  output.write(`  Owner-command users: ${plan.ownerLogins.join(", ")}\n`);
+  output.write(`  Provider preset: ${plan.preset}${plan.preset === "openai" ? " (one OpenAI provider key)" : " (DeepSeek issue triage; OpenAI otherwise)"}\n`);
   output.write(`  Setup branch: ${plan.branch}\n`);
+  output.write("  Workflows:\n");
+  for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);
+  output.write("  Models (editable in .github/codekeeper.json before merge):\n");
+  for (const mode of plan.modes) {
+    const agent = policy.ai.agents[MODES[mode].policyAgent];
+    output.write(`    - ${MODES[mode].label}: ${agent.provider} / ${agent.model} / ${agent.effort} effort\n`);
+  }
   output.write("  Files:\n");
   for (const file of plan.files) output.write(`    - ${file.path}\n`);
   output.write(`  Variables: ${plan.variables.map((item) => item.name).join(", ")}\n`);
-  output.write(`  Secrets: ${plan.secrets.map((item) => item.name).join(", ")}\n`);
+  output.write("  Secrets entered later through GitHub CLI (not shown or stored here):\n");
+  for (const secret of plan.secrets) output.write(`    - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
   output.write("  Automation remains disabled and the setup PR will not be merged.\n");
+  if (plan.modes.includes("review")) {
+    output.write("  After merge, PR events intentionally show a failed Codekeeper review gate while disabled. Do not make that gate required until the controlled review proof passes.\n");
+  }
 }
 
 function printCompletion(plan, receipt, output) {
@@ -91,6 +106,7 @@ function printCompletion(plan, receipt, output) {
           : "owner-authorized command only after issue implementation is deliberately enabled";
     output.write(`  - ${item.mode}: ${proof}\n`);
   }
+  if (plan.modes.includes("review")) output.write("Do not make the Codekeeper review gate required until its controlled review proof passes.\n");
   output.write("The installer did not enable Codekeeper, dispatch a workflow, or merge the PR.\n");
 }
 
@@ -130,14 +146,14 @@ export async function runCli({
     const snapshot = await inspect({ runner, cwd, interactive });
     const setupAnswers = await collectSetupAnswers({ prompt, snapshot, bundle, output });
     const registrationUrl = appRegistrationUrl({ repository: snapshot.repository, displayName: setupAnswers.displayName });
-    output.write(`\nCreate and install an adopter-owned GitHub App only on ${snapshot.repository}:\n${registrationUrl}\n`);
+    output.write(`\nUse an adopter-owned GitHub App installed only on ${snapshot.repository}. The link creates one with the required permissions; if your test App is already installed here, close the page and use that App instead.\n${registrationUrl}\n`);
     try {
       await openUrl(registrationUrl);
     } catch {
       // Opening the browser is best-effort; the printed URL is always authoritative.
     }
     const appReady = await prompt.confirm({
-      message: "Have you created the App, installed it on this repository, and downloaded its private key?",
+      message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
       defaultValue: false
     });
     if (!appReady) {
@@ -146,7 +162,7 @@ export async function runCli({
         resume: resumeCommand
       });
     }
-    const appAnswers = await collectAppAnswers({ prompt, modes: setupAnswers.modes });
+    const appAnswers = await collectAppAnswers({ prompt, modes: setupAnswers.modes, output });
     const plan = buildInstallPlan({
       bundle,
       snapshot,

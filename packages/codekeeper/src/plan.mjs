@@ -9,6 +9,9 @@ import {
   MODES,
   OPENAI_SECRET,
   PRESET_IDS,
+  RECOMMENDED_MODES,
+  RECOMMENDED_PRESET,
+  SECRET_PURPOSES,
   SETUP_BRANCH,
   SETUP_COMMIT_MESSAGE,
   SETUP_PR_TITLE,
@@ -90,6 +93,8 @@ export function documentMap(files) {
 export function workflowMap(modes) {
   return normalizeModes(modes).map((mode) => Object.freeze({
     mode,
+    label: MODES[mode].label,
+    description: MODES[mode].description,
     workflow: MODES[mode].target,
     trigger: MODES[mode].trigger,
     policyAgent: MODES[mode].policyAgent
@@ -114,6 +119,9 @@ export function setupPullRequestBody(plan) {
     workflowMap(plan.modes).map((item) => [item.mode, item.trigger, `\`${item.policyAgent}\``])
   );
   const proofs = [];
+  const reviewDisabledNote = plan.modes.includes("review")
+    ? "\nReview events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`. Do not make that gate required until the controlled review proof passes.\n"
+    : "";
   if (plan.modes.includes("maintain")) proofs.push("Run maintenance manually with `dry_run=true`.");
   if (plan.modes.includes("review")) proofs.push("Open a controlled same-repository pull request and verify the App-owned review.");
   if (plan.modes.includes("issues")) proofs.push("Use a controlled issue event and verify bounded triage.");
@@ -135,6 +143,7 @@ ${workflows}
 ## Safety boundaries
 
 ${CONSERVATIVE_BOUNDARIES.map((item) => `- ${item}`).join("\n")}
+${reviewDisabledNote}
 
 Required variables: ${plan.variables.map((item) => `\`${item.name}\``).join(", ")}.
 
@@ -195,30 +204,52 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
 }
 
 export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) {
+  output.write(`Codekeeper guided setup\n\n`);
+  output.write("This creates a disabled setup pull request. It does not run a model, enable a workflow, merge a pull request, or put secret values in generated files.\n\n");
   const repositoryConfirmed = await prompt.confirm({
     message: `Install into ${snapshot.repository} on default branch ${snapshot.defaultBranch}?`,
     defaultValue: false
   });
   if (!repositoryConfirmed) throw new InstallerError("Setup was cancelled before any mutation.", { code: "USER_CANCELLED" });
-  const modes = await prompt.multiselect({
-    message: "Which Codekeeper workflows should be installed?",
-    choices: MODE_IDS.map((mode) => ({ value: mode, label: MODES[mode].label }))
-  });
-  const preset = await prompt.select({
-    message: "Which bundled release model preset should be used?",
-    defaultValue: "mixed",
-    choices: [
-      { value: "mixed", label: "mixed — OpenAI review/maintenance/fix; DeepSeek issue triage" },
-      { value: "openai", label: "openai — OpenAI for every selected mode" }
-    ]
-  });
+  output.write("Recommended starter setup\n");
+  output.write("  - Pull request review: your GitHub App posts comments, labels, and a blocking result on controlled same-repository PRs\n");
+  output.write("  - Repository maintenance: begin with a manual dry run that makes no GitHub changes\n");
+  output.write("  - OpenAI preset: one model-provider key; issue-event triage and the repair-PR workflow are omitted\n");
+  output.write("  - Model and publication jobs remain disabled until you deliberately run a bounded proof\n");
+  output.write("  - The maintenance caller includes a schedule after merge; while disabled, only its pinned bootstrap can run\n");
+  output.write("  - After merge, PR events also run bootstrap and the Codekeeper review gate intentionally fails while disabled; do not require it yet\n");
+  output.write("Press Return at the next question to accept these choices.\n");
+  const useRecommended = await prompt.confirm({ message: "Use the recommended starter setup?", defaultValue: true });
+
+  let modes;
+  let preset;
+  if (useRecommended) {
+    modes = [...RECOMMENDED_MODES];
+    preset = RECOMMENDED_PRESET;
+    output.write("Using pull request review + repository maintenance with the OpenAI preset.\n");
+  } else {
+    output.write("\nCustom setup: install only workflows you intend to prove. Issue triage reacts to issue events; issue fix is an advanced, separately gated mutation path.\n");
+    modes = await prompt.multiselect({
+      message: "Choose workflows to generate:",
+      defaultValues: RECOMMENDED_MODES,
+      choices: MODE_IDS.map((mode) => ({ value: mode, label: `${MODES[mode].label} — ${MODES[mode].description}` }))
+    });
+    preset = await prompt.select({
+      message: "Choose the model-provider preset:",
+      defaultValue: RECOMMENDED_PRESET,
+      choices: [
+        { value: "openai", label: "openai — one OpenAI provider key for every selected workflow (recommended)" },
+        { value: "mixed", label: "mixed — DeepSeek for issue triage and OpenAI for other workflows; both keys may be required" }
+      ]
+    });
+  }
   const displayName = await prompt.inputText({
-    message: "Repository display name",
+    message: "Human-readable name Codekeeper shows in GitHub comments (this does not rename the repository)",
     defaultValue: snapshot.displayName,
     validate: (value) => validDisplayName(value) || "Use 1–100 printable characters."
   });
   const ownersText = await prompt.inputText({
-    message: "Owner GitHub logins (comma-separated)",
+    message: "GitHub users allowed to run owner-only /codekeeper commands (comma-separated; keep the default unless sharing control)",
     defaultValue: snapshot.viewerLogin,
     validate(value) {
       try {
@@ -230,11 +261,14 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     }
   });
 
+  output.write("\nCredentials this setup will request later through GitHub CLI\n");
+  output.write("Setup itself makes no model call. The installer never reads these values; GitHub Actions supplies them later only to the selected jobs.\n");
+  for (const name of requiredSecretNames({ modes, preset })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
+
   const policy = JSON.parse(bundle.contents[`policies/${preset}.json`]);
   output.write("\nConservative setup boundaries:\n");
   CONSERVATIVE_BOUNDARIES.forEach((item) => output.write(`  - ${item}\n`));
-  output.write("Protected paths include:\n");
-  policy.audit.repair.protectedPaths.forEach((item) => output.write(`  - ${item}\n`));
+  output.write(`Protected paths: ${policy.audit.repair.protectedPaths.length} rules covering workflows, agent instructions, security and signing files, project metadata, dependency locks, and Codekeeper itself. The exact list will be in the generated policy for review before merge.\n`);
   const confirmed = await prompt.confirm({ message: "Continue with these disabled-by-default boundaries?", defaultValue: false });
   if (!confirmed) throw new InstallerError("Setup was cancelled before any mutation.", { code: "USER_CANCELLED" });
   return Object.freeze({
@@ -245,15 +279,18 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   });
 }
 
-export async function collectAppAnswers({ prompt, modes }) {
+export async function collectAppAnswers({ prompt, modes, output }) {
+  output.write("\nGitHub App identifiers\n");
+  output.write("  - Client ID: the value beginning with Iv in App settings; do not enter the numeric App ID\n");
+  if (modes.includes("review")) output.write("  - Bot login: <app-slug>[bot], used to recognize App-authored review output\n");
   const appClientId = await prompt.inputText({
-    message: "GitHub App Client ID",
+    message: "GitHub App Client ID (starts with Iv; not the numeric App ID)",
     validate: (value) => CLIENT_ID.test(value) || "Enter the App Client ID shown in GitHub App settings."
   });
   let automationBotLogin = null;
   if (modes.includes("review")) {
     automationBotLogin = await prompt.inputText({
-      message: "GitHub App bot login (for example my-app[bot])",
+      message: "GitHub App bot login (<app-slug>[bot], for example my-app[bot])",
       validate: (value) => BOT_LOGIN.test(value.toLowerCase()) || "Enter the App bot login ending in [bot]."
     });
   }

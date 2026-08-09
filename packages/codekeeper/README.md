@@ -30,7 +30,18 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 
 ## What `init` does
 
-The guided flow confirms the repository and default branch, lets you select review, maintenance, issue-triage, and fix callers, selects the bundled `mixed` or `openai` policy preset, and confirms owner logins and conservative policy invariants. It then:
+The guided flow first offers a recommended starter setup: pull-request review, repository maintenance beginning with a manual dry run, and the `openai` preset. Press Return to accept it. Model and publication jobs remain disabled, and issue-event automation plus the advanced fix path are omitted. The maintenance caller does include a scheduled trigger after merge; while `CODEKEEPER_ENABLED=false`, only its pinned bootstrap can run. PR events also run bootstrap and intentionally show a failed Codekeeper review gate while disabled, so do not make that gate required until the controlled review proof passes. Choose custom setup if you want review only, intend to prove additional workflows, or want DeepSeek for issue triage.
+
+| Choice | What it adds |
+|---|---|
+| Pull request review | App-owned review output for controlled same-repository pull requests after Codekeeper is deliberately enabled. |
+| Repository maintenance | Manual or scheduled audits; the first proof is a manual `dry_run=true` run with no GitHub mutation. |
+| Issue triage | Issue-event labels and comments when enabled; not needed for the starter proof. |
+| Owner-authorized issue fix | An advanced repair-PR path that still requires a separate policy opt-in and owner command. |
+
+The `openai` preset uses one OpenAI Platform provider key for every selected workflow. The `mixed` preset uses DeepSeek only for issue triage and OpenAI for the others, so selecting issue triage can require both provider keys. Both presets also request a separate OpenAI Platform trace-export key and the downloaded GitHub App PEM private key. A ChatGPT subscription is not an API key. Changing a model later is a small `.github/codekeeper.json` edit, not an installer change; the final preview shows each exact provider, model, and effort before mutation.
+
+After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
 1. Generates only `.github/codekeeper.json` and the selected caller workflows.
 2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `1938cd9efc3930d61b78d9e42189d1db3e3e3e9c`.
@@ -69,6 +80,8 @@ The generated policy and all model/publication jobs are deliberately disabled:
 - auto-merge is false.
 
 Caller triggers can still start their unconditional pinned-bootstrap jobs after the setup PR merges, including the maintenance schedule. Keep the setup PR unmerged until its triggers and source access are acceptable, and keep `CODEKEEPER_ENABLED=false` until controlled proof begins.
+
+When pull-request review is installed, PR events also run the fail-closed `Codekeeper review gate`. It intentionally fails while `CODEKEEPER_ENABLED=false`. Do not add it to branch protection until a controlled review has passed with Codekeeper deliberately enabled.
 
 Review protected paths, allowed repair paths, deterministic validation commands, owner logins, and `git diff --check` before merging. Enabling one control never implicitly enables another.
 

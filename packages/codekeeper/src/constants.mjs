@@ -11,6 +11,7 @@ export const MODES = Object.freeze({
   review: Object.freeze({
     id: "review",
     label: "Pull request review",
+    description: "reviews same-repository pull requests with comments, labels, and a blocking result when enabled",
     policyAgent: "review",
     target: ".github/workflows/codekeeper-review.yml",
     asset: "workflows/review.yml",
@@ -19,6 +20,7 @@ export const MODES = Object.freeze({
   maintain: Object.freeze({
     id: "maintain",
     label: "Repository maintenance",
+    description: "runs repository audits manually or on schedule; start with a no-change dry run",
     policyAgent: "audit",
     target: ".github/workflows/codekeeper-maintain.yml",
     asset: "workflows/maintain.yml",
@@ -27,6 +29,7 @@ export const MODES = Object.freeze({
   issues: Object.freeze({
     id: "issues",
     label: "Issue triage",
+    description: "adds issue labels and comments on issue events when enabled; duplicate closure stays off",
     policyAgent: "issue",
     target: ".github/workflows/codekeeper-issues.yml",
     asset: "workflows/issues.yml",
@@ -35,6 +38,7 @@ export const MODES = Object.freeze({
   fix: Object.freeze({
     id: "fix",
     label: "Owner-authorized issue fix",
+    description: "advanced; can open a repair PR only after an owner command and separate policy opt-in; auto-merge stays off",
     policyAgent: "fix",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
@@ -44,6 +48,8 @@ export const MODES = Object.freeze({
 
 export const MODE_IDS = Object.freeze(Object.keys(MODES));
 export const PRESET_IDS = Object.freeze(["mixed", "openai"]);
+export const RECOMMENDED_MODES = Object.freeze(["review", "maintain"]);
+export const RECOMMENDED_PRESET = "openai";
 export const POLICY_TARGET = ".github/codekeeper.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
@@ -62,6 +68,13 @@ export const DEEPSEEK_SECRET = "DEEPSEEK_API_KEY";
 export const ENABLED_VARIABLE = "CODEKEEPER_ENABLED";
 export const CLIENT_ID_VARIABLE = "CODEKEEPER_APP_CLIENT_ID";
 export const BOT_LOGIN_VARIABLE = "CODEKEEPER_AUTOMATION_BOT_LOGIN";
+
+export const SECRET_PURPOSES = Object.freeze({
+  [OPENAI_SECRET]: "OpenAI Platform API key for model calls after enablement; this is not a ChatGPT subscription",
+  [DEEPSEEK_SECRET]: "DeepSeek API key for issue triage when the mixed preset is selected",
+  [TRACE_SECRET]: "separate OpenAI Platform API key for trace export; do not reuse the model-provider key",
+  [APP_SECRET]: "downloaded GitHub App PEM private key used to mint App installation tokens"
+});
 
 export const CONSERVATIVE_BOUNDARIES = Object.freeze([
   "Codekeeper is installed disabled; CODEKEEPER_ENABLED remains false.",
