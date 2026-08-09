@@ -2,7 +2,7 @@
 
 Codekeeper is a set of **versioned reusable GitHub Actions workflows** for one repository at a time. It uses four independently configured Agents SDK coordinators to review same-repository pull requests, triage bounded issue lifecycle events or maintainer commands, audit the default branch, and implement explicitly enabled, bounded fixes.
 
-It is not a hosted service, webhook receiver, multi-tenant GitHub App, or npm package. Each adopter owns its GitHub App credentials and policy; caller workflows pin this repository to an immutable release commit.
+It is not a hosted service, webhook receiver, or multi-tenant GitHub App. The private runtime is not delivered through npm. A separate dependency-light [`codekeeper` installer package](packages/codekeeper/README.md) generates pinned policy and caller files; it remains unpublished while private acceptance is in progress. Each adopter owns its GitHub App credentials and policy, and caller workflows pin this repository to an immutable release commit.
 
 ## What adopters install
 
@@ -13,7 +13,7 @@ It is not a hosted service, webhook receiver, multi-tenant GitHub App, or npm pa
 | `codekeeper-issues.yml` | Triage opened, reopened, or edited issues while `auto_triage=true`; configured-owner `/codekeeper triage` comments remain available when automatic triage is off. |
 | `codekeeper-fix.yml` | Implement an issue only after a configured owner requests `/codekeeper fix` or manual dispatch. |
 
-Copy the matching non-executable templates from [`examples/workflows`](examples/workflows) into the adopter repository, replace `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copy [`.github/codekeeper.json`](.github/codekeeper.json) into the adopter's default branch. Each caller pins the direct Codekeeper bootstrap action and its reusable workflow to the same immutable commit. The action stages only the production `tools/codekeeper` payload as a one-day artifact; every reusable job verifies that payload against the source-controlled manifest before using it. Adopters do not copy `tools/codekeeper` or source workflow files, and do not provide a source-repository token.
+The guided installer performs this generation from release-pinned assets. Until it is published, use a locally built installer tarball for private acceptance or follow the [manual installation guide](INSTALL.md). The manual path copies the matching non-executable templates from [`examples/workflows`](examples/workflows) into the adopter repository, replaces `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copies [`.github/codekeeper.json`](.github/codekeeper.json) into the adopter's default branch. Each caller pins the direct Codekeeper bootstrap action and its reusable workflow to the same immutable commit. The action stages only the production `tools/codekeeper` payload as a one-day artifact; every reusable job verifies that payload against the source-controlled manifest before using it. Adopters do not copy `tools/codekeeper` or source workflow files, and do not provide a source-repository token.
 
 The root policy is a valid starter, not a safe default for every repository. Before enabling it, replace `repository.ownerLogins`, verify the default branch and automation prefix, and tailor repair, validation, and auto-merge paths. Each mode has its own `ai.agents.<mode>` provider, model, settings, and optional Codex workspace specialist. The runtime label names are intentionally namespaced and must remain defined exactly as supplied. See [configuration](docs/CONFIGURATION.md).
 

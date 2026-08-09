@@ -1,0 +1,49 @@
+# Copy to .github/workflows/codekeeper-fix.yml, then replace OWNER/REPOSITORY
+# and FULL_COMMIT_SHA with the published maintainer repository and release commit.
+name: Codekeeper issue implementation
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Open issue to implement
+        required: true
+        type: string
+      dry_run:
+        description: Validate and seal without opening a pull request
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  bootstrap:
+    name: Codekeeper pinned tooling bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
+        with:
+          artifact-name: codekeeper-tooling-${{ github.run_id }}-${{ github.run_attempt }}
+  fix:
+    needs: bootstrap
+    uses: OWNER/REPOSITORY/.github/workflows/codekeeper-fix.yml@FULL_COMMIT_SHA
+    with:
+      enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
+      issue_number: ${{ inputs.issue_number || '' }}
+      dry_run: ${{ inputs.dry_run || false }}
+      # Optional for dry_run=true; required when dry_run=false publishes changes.
+      app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
+    secrets:
+      # Match this secret to ai.agents.fix.provider in .github/codekeeper.json.
+      model_api_key: ${{ secrets.OPENAI_API_KEY }}
+      # Required while this mode keeps workspace.enabled=true.
+      workspace_api_key: ${{ secrets.OPENAI_API_KEY }}
+      # Always a separate OpenAI trace-export key, never the model-provider key.
+      trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
+      # Optional for dry_run=true; required when dry_run=false publishes changes.
+      app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}
