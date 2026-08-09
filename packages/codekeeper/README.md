@@ -1,11 +1,11 @@
 # Codekeeper installer
 
-`codekeeper` is the dependency-light installer for Codekeeper's versioned GitHub Actions workflows. It generates a disabled setup on a new branch, pushes that branch, and opens a setup pull request. It does not install the private runtime into the adopter repository.
+`codekeeper` is the Node.js installer for Codekeeper's versioned GitHub Actions workflows. `npx codekeeper init` opens a keyboard-driven terminal UI, generates a disabled setup on a new branch, pushes that branch, and opens a setup pull request. It does not install the private runtime into the adopter repository.
 
 The package is currently **unpublished** while private acceptance is in progress. Exercise the exact local tarball from a clean adopter checkout:
 
 ```bash
-npm exec --package /absolute/path/to/codekeeper-0.1.1.tgz -- codekeeper init
+npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper init
 ```
 
 The v1 CLI surface is:
@@ -16,7 +16,7 @@ npx codekeeper --help
 npx codekeeper --version
 ```
 
-Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. GitHub.com is the only supported host.
+Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. GitHub.com is the only supported host. In a real TTY, use the arrow keys, Space, Enter, and Escape to move through the installer. Plain prompts remain the fallback for limited terminals; `--help` and `--version` never start the terminal UI.
 
 ## Document map
 
@@ -30,7 +30,7 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 
 ## What `init` does
 
-The guided flow first offers a recommended starter setup: pull-request review, repository maintenance beginning with a manual dry run, and the `openai` preset. Press Return to accept it. Model and publication jobs remain disabled, and issue-event automation plus the advanced fix path are omitted. The maintenance caller does include a scheduled trigger after merge; while `CODEKEEPER_ENABLED=false`, only its pinned bootstrap can run. PR events also run bootstrap and intentionally show a failed Codekeeper review gate while disabled, so do not make that gate required until the controlled review proof passes. Choose custom setup if you want review only, intend to prove additional workflows, or want DeepSeek for issue triage.
+The guided flow first offers a recommended starter setup: pull-request review, repository maintenance beginning with a manual dry run, and the `openai` preset. Select it to accept those choices. Model and publication jobs remain disabled, and issue-event automation plus the advanced fix path are omitted. The maintenance caller does include a scheduled trigger after merge; while `CODEKEEPER_ENABLED=false`, only its pinned bootstrap can run. PR events also run bootstrap and intentionally show a failed Codekeeper review gate while disabled, so do not make that gate required until the controlled review proof passes. Choose custom setup if you want review only, intend to prove additional workflows, or want DeepSeek for issue triage.
 
 | Choice | What it adds |
 |---|---|
@@ -46,7 +46,7 @@ After choosing the starter or custom path, the flow explains that the display na
 1. Generates only `.github/codekeeper.json` and the selected caller workflows.
 2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `1938cd9efc3930d61b78d9e42189d1db3e3e3e9c`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
-4. After the final confirmation, asks for the absolute path to the downloaded App PEM, opens that file read-only, and validates the same opened descriptor as a nonempty regular file within GitHub's 48 KB secret limit.
+4. Before the final confirmation, opens a metadata-only file picker at Downloads (or the home folder fallback) that shows only real directories and nonempty regular `.pem` files within GitHub's 48 KB secret limit. It ignores symlinks, never reads PEM contents, and never prints the selected path.
 5. Forces `CODEKEEPER_ENABLED=false`, invokes inherited-terminal `gh secret set` for each single-line provider or trace key, and feeds only the App PEM descriptor to `gh` through non-terminal standard input. An existing same-named secret is deliberately replaced only after its new input is supplied.
 6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add disabled setup`, pushes the branch, and opens a setup PR.
 
@@ -66,7 +66,7 @@ If App registration, a secret prompt, push, or PR creation fails after setup beg
 
 The GitHub App needs contents, issues, and pull requests read-write plus metadata read-only, with webhooks disabled. Its settings page shows both a numeric **App ID** and a string **Client ID**. Codekeeper uses the **Client ID** (typically beginning `Iv`) for `CODEKEEPER_APP_CLIENT_ID`; the numeric App ID is not a substitute.
 
-The App settings page also shows the App slug. Its publication login is `<app-slug>[bot]`; review setup asks for that login so App-authored automation pull requests can be identified. Provider and trace keys are single-line values entered at inherited `gh secret set` prompts. The App private key is different: never paste the multiline PEM into a prompt. After the final setup confirmation, enter only the downloaded file's absolute path. The installer opens it read-only and passes the file descriptor directly to `gh secret set` with child output suppressed. PEM bytes are not put in command arguments, environment variables, installer buffers, generated files, terminal output, logs, plans, receipts, or snapshots. GitHub CLI reads the secret from standard input and encrypts it locally before submission. Never paste a key into `.github/codekeeper.json` or this installer.
+The App settings page also shows the App slug. Its publication login is `<app-slug>[bot]`; review setup asks for the slug and derives that login so App-authored review output can be identified. Provider and trace keys are single-line values entered at inherited `gh secret set` prompts; the terminal UI suspends while GitHub CLI owns the terminal, then redraws safely. The App private key is different: never paste the multiline PEM into a prompt. Select its downloaded file in the metadata-only picker before the final review. After confirmation, the installer opens it read-only and passes the descriptor directly to `gh secret set` with child output suppressed. PEM bytes are not put in command arguments, environment variables, installer buffers, generated files, terminal output, logs, plans, receipts, or snapshots. GitHub CLI reads the secret from standard input and encrypts it locally before submission. Never paste a key into `.github/codekeeper.json` or this installer.
 
 The selected modes determine which provider secrets are requested. The `mixed` preset uses OpenAI for review, audit, and fix and DeepSeek for issue triage. The `openai` preset uses OpenAI for all selected modes. The bundled policies enable tracing, so both require a separate OpenAI trace key; a trace key is not the coordinator's provider key.
 

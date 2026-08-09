@@ -122,11 +122,18 @@ async function runMutation(runner, command, args, options, message, resume) {
   return result.stdout.trim();
 }
 
+function reportProgress(onProgress, id, status, detail) {
+  if (typeof onProgress !== "function") return;
+  onProgress(Object.freeze({ id, status, ...(detail ? { detail } : {}) }));
+}
+
 export async function configureRepositorySettings(plan, {
   runner,
   output,
   appPrivateKeyPath,
   openInputFile = openSafeStdinFile,
+  onProgress,
+  withInteractiveTerminal = (callback) => callback(),
   resumeCommand = "codekeeper init"
 }) {
   const [enabledVariable, ...remainingVariables] = plan.variables;
@@ -145,6 +152,7 @@ export async function configureRepositorySettings(plan, {
   }
 
   try {
+    reportProgress(onProgress, "settings:disable", "active");
     await runMutation(
       runner,
       "gh",
@@ -153,13 +161,21 @@ export async function configureRepositorySettings(plan, {
       "GitHub CLI could not force CODEKEEPER_ENABLED=false; no secret or file mutation was attempted.",
       resumeCommand
     );
+    reportProgress(onProgress, "settings:disable", "done");
 
     output.write("\nRequired GitHub Actions secrets\n");
     output.write("Setup makes no model call. Provider and trace values go directly from the terminal to GitHub CLI. The App PEM is supplied to GitHub CLI from its opened file descriptor; the installer never reads or displays its contents. GitHub Actions supplies the stored secrets later only to selected jobs.\n");
     for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
 
+    let providerProgressStarted = false;
+    let providerProgressFinished = false;
     for (const secret of plan.secrets) {
       if (secret.name === APP_SECRET) {
+        if (providerProgressStarted && !providerProgressFinished) {
+          reportProgress(onProgress, "secret:provider", "done");
+          providerProgressFinished = true;
+        }
+        reportProgress(onProgress, "secret:app", "active", `${APP_SECRET} — ${SECRET_PURPOSES[APP_SECRET]}`);
         output.write(`\nSetting ${APP_SECRET} from the selected PEM file through non-terminal GitHub CLI input. Its path and contents are not displayed. If the secret already exists, this deliberately replaces it.\n`);
         await runMutation(
           runner,
@@ -169,20 +185,28 @@ export async function configureRepositorySettings(plan, {
           `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
           resumeCommand
         );
+        reportProgress(onProgress, "secret:app", "done");
         output.write(`Set ${APP_SECRET} from the selected PEM file.\n`);
         continue;
       }
+      providerProgressStarted = true;
+      reportProgress(onProgress, "secret:provider", "active", `${secret.name} — ${SECRET_PURPOSES[secret.name]}`);
       output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. If it already exists, this deliberately replaces it. This single-line value goes directly to gh; press Ctrl-D when finished.\n`);
-      await runMutation(
-        runner,
-        "gh",
-        ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
-        { cwd: plan.root, stdio: "inherit", timeoutMs: null },
-        `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
-        resumeCommand
+      await withInteractiveTerminal(
+        () => runMutation(
+          runner,
+          "gh",
+          ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
+          { cwd: plan.root, stdio: "inherit", timeoutMs: null },
+          `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
+          resumeCommand
+        ),
+        Object.freeze({ name: secret.name, purpose: SECRET_PURPOSES[secret.name] })
       );
     }
+    if (providerProgressStarted && !providerProgressFinished) reportProgress(onProgress, "secret:provider", "done");
 
+    reportProgress(onProgress, "variables:configure", "active");
     for (const variable of remainingVariables) {
       await runMutation(
         runner,
@@ -193,6 +217,7 @@ export async function configureRepositorySettings(plan, {
         resumeCommand
       );
     }
+    reportProgress(onProgress, "variables:configure", "done");
   } finally {
     try {
       appInput.close();
@@ -205,10 +230,12 @@ export async function configureRepositorySettings(plan, {
 export async function createSetupCommit(plan, {
   runner,
   fsImpl = { lstat, mkdir, readFile, readdir, unlink, writeFile },
+  onProgress,
   resumeCommand = "codekeeper init",
   platform = process.platform
 }) {
   const paths = plan.files.map((file) => file.path);
+  reportProgress(onProgress, "git:commit", "active");
   await runMutation(
     runner,
     "git",
@@ -302,7 +329,9 @@ export async function createSetupCommit(plan, {
         resume: statusCommand(platform)
       });
     }
-    return await requireSuccess(runner, "git", ["rev-parse", "HEAD"], { cwd: plan.root }, "Could not read the setup commit.");
+    const commit = await requireSuccess(runner, "git", ["rev-parse", "HEAD"], { cwd: plan.root }, "Could not read the setup commit.");
+    reportProgress(onProgress, "git:commit", "done");
+    return commit;
   } catch (error) {
     if (error instanceof InstallerError && !error.resume) {
       error.resume = formatCommand("git", ["show", "--stat", "--oneline", "HEAD"], platform);
@@ -344,10 +373,11 @@ async function assertRemoteSetupCommit(plan, commit, runner, platform, pullReque
   }
 }
 
-export async function pushAndOpenSetupPullRequest(plan, commit, { runner, platform = process.platform }) {
+export async function pushAndOpenSetupPullRequest(plan, commit, { runner, onProgress, platform = process.platform }) {
   if (!/^[0-9a-f]{40}$/.test(commit)) {
     throw new InstallerError("Verified setup commit is not a full Git commit SHA.", { code: "COMMIT_SHA_INVALID" });
   }
+  reportProgress(onProgress, "git:push", "active");
   await runMutation(
     runner,
     "git",
@@ -357,7 +387,9 @@ export async function pushAndOpenSetupPullRequest(plan, commit, { runner, platfo
     `${pushCommand(plan, commit, platform)}\nThen: ${pullRequestCreateCommand(plan, platform)}`
   );
   await assertRemoteSetupCommit(plan, commit, runner, platform);
+  reportProgress(onProgress, "git:push", "done");
 
+  reportProgress(onProgress, "github:pull-request", "active");
   const url = await runMutation(
     runner,
     "gh",
@@ -380,6 +412,7 @@ export async function pushAndOpenSetupPullRequest(plan, commit, { runner, platfo
     });
   }
   await assertRemoteSetupCommit(plan, commit, runner, platform, url);
+  reportProgress(onProgress, "github:pull-request", "done");
   return url;
 }
 
