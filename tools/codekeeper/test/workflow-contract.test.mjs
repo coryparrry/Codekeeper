@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "0fc3b5253d93eb2b0ac22ac43f933c8f04f026ad37f31dfa0200dde540a64f1c";
+const toolingManifestSha256 = "dbc7de18f7d6b6b9b795faf632eb70b72877e44bebd922cae05b8f741de7c581";
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -249,12 +249,19 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(publish, /\$GITHUB_API_URL\/users\/\$\{APP_SLUG\}\[bot\]/);
     assert.doesNotMatch(publish, /\$GITHUB_API_URL\/user(?:["']|\))/);
     assert.match(publish, /codekeeper-artifact/);
-    assert.match(
-      publish,
-      /ref: \$\{\{ github\.event\.repository\.default_branch \}\}[\s\S]*?path: repository/
-    );
-    assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/);
+    if (mode === "fix") {
+      assert.match(publish, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}[\s\S]*?path: policy/);
+      assert.match(publish, /ref: \$\{\{ needs\.analyze\.outputs\.base_sha \}\}[\s\S]*?path: repository/);
+      assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/policy\/\.github\/codekeeper\.json/);
+    } else {
+      assert.match(
+        publish,
+        /ref: \$\{\{ github\.event\.repository\.default_branch \}\}[\s\S]*?path: repository/
+      );
+      assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/);
+    }
     assert.match(publish, /--config "\$CONFIG"/);
+    assert.match(publish, /--agent-profile "\$AGENT_PROFILE"/);
     assert.match(publish, /--expected-manifest-sha "\$MANIFEST_SHA256"/);
     assert.doesNotMatch(publish, /openai\/codex-action@|validate-|seal-/);
   }
@@ -298,6 +305,19 @@ test("maintenance and fix dry runs do not require App credentials, but publicati
     assert.match(caller, /app_client_id: \$\{\{ vars\.CODEKEEPER_APP_CLIENT_ID \}\}/);
     assert.match(caller, /app_private_key: \$\{\{ secrets\.CODEKEEPER_APP_PRIVATE_KEY \}\}/);
   }
+});
+
+test("maintenance repair requires a frozen configured-owner authorization on each manual run", async () => {
+  const source = await workflow("maintain");
+  const caller = await repositoryFile("examples/workflows/codekeeper-maintain.yml.example");
+  const workspace = jobSection(source, "workspace", "analyze");
+
+  assert.match(source, /repair_authorized:\n\s+description:[^\n]*\n\s+required: false\n\s+default: false\n\s+type: boolean/);
+  assert.match(workspace, /--actor "\$GITHUB_ACTOR"/);
+  assert.match(workspace, /--repair-authorized "\$REPAIR_AUTHORIZED"/);
+  assert.match(workspace, /--mutation-authorized "\$REPAIR_AUTHORIZED"/);
+  assert.match(caller, /repair_authorized:\n\s+description:[^\n]*\n\s+required: true\n\s+type: boolean\n\s+default: false/);
+  assert.match(caller, /repair_authorized: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.repair_authorized \|\| false \}\}/);
 });
 
 test("review and issue-triage retain mandatory App credentials", async () => {
@@ -347,10 +367,27 @@ test("issue triage allows only bounded automatic events while owner commands and
   assert.match(caller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \}\}"/);
 
   assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
-  assert.match(fix, /startsWith\(github\.event\.comment\.body, '\/codekeeper fix '\)/);
+  assert.doesNotMatch(fix, /startsWith\(github\.event\.comment\.body, '\/codekeeper fix '\)/);
   assert.match(fix, /github\.event\.comment\.author_association == 'OWNER'/);
   assert.match(fix, /allow-users: \$\{\{ github\.actor \}\}/);
+  assert.match(fix, /--target-number "\$TARGET_NUMBER"/);
+  assert.match(fix, /fromJSON\(steps\.prepare\.outputs\.result\)\.baseSha/);
+  assert.match(fix, /ref: \$\{\{ needs\.analyze\.outputs\.base_sha \}\}/);
+  assert.match(fix, /Check out frozen repair target/);
   assert.doesNotMatch(fix, /github\.event_name == 'issues'/);
+});
+
+test("owner-commanded pull request repair can update only the frozen existing head", async () => {
+  const fix = await workflow("fix");
+  const publisher = await repositoryFile("tools/codekeeper/src/lib/pr-repair.mjs");
+  assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
+  assert.doesNotMatch(fix, /!github\.event\.issue\.pull_request/);
+  assert.match(fix, /target_kind: \$\{\{ fromJSON\(steps\.prepare\.outputs\.result\)\.target\.kind \}\}/);
+  assert.equal([...fix.matchAll(/Check out frozen repair target/g)].length, 4);
+  assert.match(publisher, /createCommitOnCurrentHead/);
+  assert.match(publisher, /pushHeadToBranch\(target\.headRef/);
+  assert.match(publisher, /expectedHeadSha: commitSha/);
+  assert.doesNotMatch(publisher, /createPull|createBranchAndCommit|pushBranch|enableAutoMerge|updateIssue|deleteBranch/);
 });
 
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {

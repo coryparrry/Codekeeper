@@ -174,12 +174,18 @@ export function issueSchema(config) {
     });
 }
 
-export function fixSchema() {
+export function fixSchema(target = null) {
+  const targetKind = target?.kind;
+  const targetNumber = target?.number;
+  if (target !== null && (!["issue", "pull_request"].includes(targetKind) || !Number.isSafeInteger(targetNumber) || targetNumber <= 0)) {
+    throw new Error("Fix schema requires a valid frozen target");
+  }
   return object({
       mode: { const: "fix" },
       summary: stringSchema({ maxLength: LIMITS.summary }),
       risk: { enum: ["low", "medium", "high"] },
-      issueNumber: { type: "integer", minimum: 1 },
+      targetKind: target ? { const: targetKind } : { enum: ["issue", "pull_request"] },
+      targetNumber: target ? { const: targetNumber } : { type: "integer", minimum: 1 },
       changedSummary: stringSchema({ minLength: 0, maxLength: LIMITS.body }),
       testsRun: {
         type: "array",
@@ -371,14 +377,20 @@ export function validateIssueResult(result, config) {
   return result;
 }
 
-export function validateFixResult(result, issueNumber) {
+export function validateFixResult(result, target) {
   assertExactKeys(result, [
-    "mode", "summary", "risk", "issueNumber", "changedSummary", "testsRun", "readyForReview", "noChangeReason"
+    "mode", "summary", "risk", "targetKind", "targetNumber", "changedSummary", "testsRun", "readyForReview", "noChangeReason"
   ], "result");
   assert(result.mode === "fix", "mode must be fix");
   assertString(result.summary, "summary", { maxLength: LIMITS.summary });
   assertEnum(result.risk, ["low", "medium", "high"], "risk");
-  assert(result.issueNumber === issueNumber, "issueNumber does not match requested issue");
+  assertEnum(result.targetKind, ["issue", "pull_request"], "targetKind");
+  assert(Number.isSafeInteger(result.targetNumber) && result.targetNumber > 0, "targetNumber must be a positive integer");
+  if (target !== undefined) {
+    assert(target && typeof target === "object" && !Array.isArray(target), "trusted target must be an object");
+    assert(result.targetKind === target.kind, "targetKind does not match requested target");
+    assert(result.targetNumber === target.number, "targetNumber does not match requested target");
+  }
   assertString(result.changedSummary, "changedSummary", { allowEmpty: true, maxLength: LIMITS.body });
   assert(Array.isArray(result.testsRun), "testsRun must be an array");
   assert(result.testsRun.length <= 20, "testsRun has too many entries");

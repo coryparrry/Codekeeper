@@ -262,6 +262,34 @@ export function createBranchAndCommit({ branch, message, cwd = process.cwd() }) 
   return currentHead(cwd);
 }
 
+export function createCommitOnCurrentHead({ expectedParent, message, paths, cwd = process.cwd() }) {
+  if (!/^[0-9a-f]{40}$/i.test(String(expectedParent ?? ""))) {
+    throw new Error("An exact parent commit SHA is required");
+  }
+  if (currentHead(cwd) !== expectedParent) {
+    throw new Error(`Checkout HEAD moved from ${expectedParent} to ${currentHead(cwd)}`);
+  }
+  const stagePaths = [...new Set(paths ?? [])];
+  if (stagePaths.length === 0 || stagePaths.some((file) => typeof file !== "string" || file.length === 0)) {
+    throw new Error("At least one validated path is required to create a repair commit");
+  }
+  git(["add", "--all", "--", ...stagePaths], { cwd });
+  const staged = splitNul(git(["diff", "--cached", "--name-only", "-z"], { cwd, encoding: null }).stdout);
+  if (staged.length === 0) throw new Error("Patch produced no staged changes");
+  const unstaged = splitNul(git(["diff", "--name-only", "-z"], { cwd, encoding: null }).stdout);
+  const untracked = splitNul(git(["ls-files", "--others", "--exclude-standard", "-z"], { cwd, encoding: null }).stdout);
+  if (unstaged.length > 0 || untracked.length > 0) {
+    throw new Error(`Repair commit left unvalidated worktree changes: ${[...unstaged, ...untracked].join(", ")}`);
+  }
+  git(["commit", "-m", message], { cwd });
+  const commit = currentHead(cwd);
+  const ancestry = gitText(["rev-list", "--parents", "-n", "1", commit], { cwd }).split(/\s+/);
+  if (ancestry.length !== 2 || ancestry[1] !== expectedParent) {
+    throw new Error(`Repair commit ${commit} is not a single commit atop ${expectedParent}`);
+  }
+  return commit;
+}
+
 export function pushBranch(branch, token, cwd = process.cwd()) {
   if (!token) throw new Error("A GitHub token is required to push the automation branch");
   const origin = gitText(["remote", "get-url", "origin"], { cwd });
@@ -284,6 +312,32 @@ export function pushBranch(branch, token, cwd = process.cwd()) {
       GIT_TERMINAL_PROMPT: "0"
     }
   });
+}
+
+export function pushHeadToBranch(branch, token, cwd = process.cwd()) {
+  if (!token) throw new Error("A GitHub token is required to update the pull request branch");
+  git(["check-ref-format", "--branch", branch], { cwd });
+  const origin = gitText(["remote", "get-url", "origin"], { cwd });
+  let endpoint;
+  try {
+    endpoint = new URL(origin);
+  } catch {
+    throw new Error(`Pull request repair requires an HTTPS origin, found: ${origin}`);
+  }
+  if (endpoint.protocol !== "https:") {
+    throw new Error(`Pull request repair requires an HTTPS origin, found: ${origin}`);
+  }
+  const authorization = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+  git(["push", "--porcelain", "--no-force", "origin", `HEAD:refs/heads/${branch}`], {
+    cwd,
+    env: {
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: `http.${endpoint.origin}/.extraheader`,
+      GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${authorization}`,
+      GIT_TERMINAL_PROMPT: "0"
+    }
+  });
+  return currentHead(cwd);
 }
 
 export function changedFilesBetween(base, head, cwd = process.cwd()) {

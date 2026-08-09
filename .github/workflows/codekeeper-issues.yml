@@ -38,7 +38,7 @@ permissions:
   issues: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 0fc3b5253d93eb2b0ac22ac43f933c8f04f026ad37f31dfa0200dde540a64f1c
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: dbc7de18f7d6b6b9b795faf632eb70b72877e44bebd922cae05b8f741de7c581
 
 concurrency:
   group: codekeeper-issue-${{ github.event.issue.number }}
@@ -121,6 +121,7 @@ jobs:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
           TRIAGE_MODE: ${{ github.event_name == 'issues' && 'automatic' || 'manual' }}
@@ -131,9 +132,12 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
+          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-issue \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
             --event "$GITHUB_EVENT_PATH" \
             --actor "$GITHUB_ACTOR" \
             --triage-mode "$TRIAGE_MODE" \
@@ -253,6 +257,7 @@ jobs:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
           TRIAGE_MODE: ${{ github.event_name == 'issues' && 'automatic' || 'manual' }}
@@ -263,9 +268,12 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
+          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-issue \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
             --event "$GITHUB_EVENT_PATH" \
             --actor "$GITHUB_ACTOR" \
             --triage-mode "$TRIAGE_MODE" \
@@ -476,9 +484,11 @@ jobs:
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
           node tools/codekeeper/src/cli.mjs publish-issue \
             --config "$CONFIG" \
+            --agent-profile "$AGENT_PROFILE" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"

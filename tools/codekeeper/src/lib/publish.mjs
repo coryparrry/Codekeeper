@@ -1,11 +1,13 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
+import { publishPullRequestRepair } from "./pr-repair.mjs";
 import { renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
@@ -29,11 +31,11 @@ function validateArtifactResult(mode, result, context, config) {
   if (mode === "review") return validateReviewResult(result, config);
   if (mode === "audit") return validateAuditResult(result, config);
   if (mode === "issue") return validateIssueResult(result, config);
-  if (mode === "fix") return validateFixResult(result, context.issue?.number);
+  if (mode === "fix") return validateFixResult(result, context.target);
   throw new Error(`Unsupported artifact mode: ${mode}`);
 }
 
-async function loadArtifact(artifactDirectory, expectedMode, config, configSha256, expectedManifestSha256) {
+async function loadArtifact(artifactDirectory, expectedMode, config, configSha256, expectedManifestSha256, agentProfilePath) {
   if (!/^[a-f0-9]{64}$/i.test(String(expectedManifestSha256 ?? ""))) {
     throw new Error("Publisher requires the trusted sealed manifest SHA-256");
   }
@@ -48,17 +50,19 @@ async function loadArtifact(artifactDirectory, expectedMode, config, configSha25
     throw new Error("Publisher requires the SHA-256 of its frozen configuration");
   }
 
-  const [contextBytes, resultBytes, configBytes, validationBytes] = await Promise.all([
+  const [contextBytes, resultBytes, configBytes, validationBytes, agentProfileBytes] = await Promise.all([
     readRegularFile(path.join(artifactDirectory, "context.json")),
     readRegularFile(path.join(artifactDirectory, "result.json")),
     readRegularFile(path.join(artifactDirectory, "config.json")),
-    readRegularFile(path.join(artifactDirectory, "validation.json"))
+    readRegularFile(path.join(artifactDirectory, "validation.json")),
+    readRegularFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE))
   ]);
   if (
     sha256(contextBytes) !== manifest.contextSha256 ||
     sha256(resultBytes) !== manifest.resultSha256 ||
     sha256(configBytes) !== manifest.configFileSha256 ||
-    sha256(validationBytes) !== manifest.validationSha256
+    sha256(validationBytes) !== manifest.validationSha256 ||
+    sha256(agentProfileBytes) !== manifest.agentProfileSha256
   ) {
     throw new Error("Sealed artifact component changed after sealing");
   }
@@ -82,6 +86,17 @@ async function loadArtifact(artifactDirectory, expectedMode, config, configSha25
   }
   if (JSON.stringify(manifest.validation) !== JSON.stringify(validation)) {
     throw new Error("Artifact validation does not match its trusted manifest");
+  }
+  if (sha256(agentProfileBytes) !== context.agentProfile?.sha256) {
+    throw new Error("Sealed artifact agent profile does not match its frozen context");
+  }
+  const liveProfile = await loadTrustedAgentProfile({
+    mode: expectedMode,
+    sourcePath: agentProfilePath,
+    sourceSha: context.agentProfile?.sourceSha
+  });
+  if (liveProfile.metadata.path !== context.agentProfile?.path || liveProfile.metadata.sha256 !== context.agentProfile?.sha256) {
+    throw new Error("Agent profile changed after preparation; stale action will not publish");
   }
   if (manifest.patch?.valid) {
     const patchBytes = await readRegularFile(path.join(artifactDirectory, "patch.diff"));
@@ -253,8 +268,8 @@ async function currentReviewPull(github, context, config) {
   return pull;
 }
 
-export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
-  const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256);
+export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
+  const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
   const pull = await currentReviewPull(github, context, config);
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
@@ -347,8 +362,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, blocking };
 }
 
-export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
-  const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256);
+export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
+  const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
   let expectedUpdatedAt = context.issue.updatedAt;
   const currentIssue = () => currentOpenIssue(github, { ...context.issue, updatedAt: expectedUpdatedAt }, "analysis");
@@ -686,8 +701,14 @@ async function publishPatchPullRequest({
     : { created: false, reason: "Existing repair PR", pullRequest: pull.number, url: pull.html_url };
 }
 
-export async function publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
-  const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", config, configSha256, expectedManifestSha256);
+export async function publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
+  const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", config, configSha256, expectedManifestSha256, agentProfilePath);
+  if (typeof context.repairAuthorized !== "boolean") {
+    throw new Error("Trusted audit artifact is missing explicit repair authorization");
+  }
+  if (result.repair.requested && (!config.audit.repair.enabled || !context.repairAuthorized)) {
+    throw new Error("Audit repair publication lacks frozen explicit repair authorization");
+  }
   const liveHead = currentHead();
   if (liveHead !== context.baseSha) {
     throw new Error(`Default branch moved from ${context.baseSha} to ${liveHead}; stale audit will not publish`);
@@ -734,9 +755,28 @@ export async function publishAudit({ artifactDirectory, config, configSha256, ex
   return { findings, repair, dryRun };
 }
 
-export async function publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
-  const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", config, configSha256, expectedManifestSha256);
+export async function publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false, prRepairGit }) {
+  const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
+  if (context.target?.kind === "pull_request") {
+    return publishPullRequestRepair({
+      github,
+      artifactDirectory,
+      manifest,
+      context,
+      result,
+      config,
+      automationIdentity: expectedAutomationIdentity(),
+      dryRun,
+      ...(prRepairGit ? { gitOperations: prRepairGit } : {})
+    });
+  }
+  if (context.target?.kind !== "issue" || !Number.isSafeInteger(context.target.number) || context.target.number <= 0) {
+    throw new Error("Frozen fix context has no valid issue or pull request target");
+  }
+  if (context.issue?.number !== context.target.number) {
+    throw new Error("Frozen issue fix context does not match its target");
+  }
   const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started");
   const issue = await currentIssue();
 

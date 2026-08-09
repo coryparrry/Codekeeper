@@ -1,5 +1,6 @@
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
@@ -39,7 +40,7 @@ function ensureSameRepositoryPullRequest(event, repository) {
   return pull;
 }
 
-async function writeBundle({ directory, context, prompt, schema }) {
+async function writeBundle({ directory, context, prompt, schema, agentProfile }) {
   assertRunnerOwnedDirectory(directory);
   await mkdir(path.dirname(directory), { recursive: true });
   try {
@@ -48,9 +49,18 @@ async function writeBundle({ directory, context, prompt, schema }) {
     if (error.code === "EEXIST") throw new Error(`Runner-owned bundle directory already exists: ${directory}`);
     throw error;
   }
+  await writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), agentProfile.bytes, { flag: "wx" });
   await writeJson(path.join(directory, "context.json"), context);
   await writeText(path.join(directory, "prompt.md"), `${prompt}\n`);
   await writeJson(path.join(directory, "schema.json"), providerCompatibleJsonSchema(schema));
+}
+
+function trustedAgentProfile(mode, agentProfilePath, agentProfileSourceSha) {
+  return loadTrustedAgentProfile({
+    mode,
+    sourcePath: agentProfilePath,
+    sourceSha: agentProfileSourceSha
+  });
 }
 
 function runMetadata({ toolingSha = process.env.CODEKEEPER_TOOLING_SHA ?? "", configSha256 = "" } = {}) {
@@ -62,7 +72,8 @@ function runMetadata({ toolingSha = process.env.CODEKEEPER_TOOLING_SHA ?? "", co
   };
 }
 
-export async function prepareReview({ eventPath, directory, config, toolingSha, configSha256 }) {
+export async function prepareReview({ eventPath, directory, config, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+  const agentProfile = await trustedAgentProfile("review", agentProfilePath, agentProfileSourceSha);
   const event = await readJson(eventPath);
   const repository = repositoryFromEvent(event);
   const pull = ensureSameRepositoryPullRequest(event, repository);
@@ -70,6 +81,7 @@ export async function prepareReview({ eventPath, directory, config, toolingSha, 
     mode: "review",
     repository,
     ...runMetadata({ toolingSha, configSha256 }),
+    agentProfile: agentProfile.metadata,
     runUrl: runUrl(repository),
     pullRequest: {
       number: pull.number,
@@ -109,32 +121,46 @@ export async function prepareReview({ eventPath, directory, config, toolingSha, 
   await writeBundle({
     directory,
     context,
-    prompt: buildReviewPrompt(context, config),
-    schema: reviewSchema(config)
+    prompt: buildReviewPrompt(context, config, agentProfile.text),
+    schema: reviewSchema(config),
+    agentProfile
   });
   return context;
 }
 
-export async function prepareAudit({ directory, config, toolingSha, configSha256 }) {
+export async function prepareAudit({ directory, config, toolingSha, configSha256, actor, repairAuthorized = false, agentProfilePath, agentProfileSourceSha }) {
+  if (typeof repairAuthorized !== "boolean") throw new Error("Maintenance repair authorization must be a boolean");
+  if (repairAuthorized && !config.audit.repair.enabled) {
+    throw new Error("Maintenance repair was authorized while audit.repair.enabled=false");
+  }
+  if (repairAuthorized && !isConfiguredOwner(config, actor)) {
+    throw new Error(`Actor ${actor || "unknown"} is not authorised to request a Codekeeper maintenance repair`);
+  }
+  const agentProfile = await trustedAgentProfile("audit", agentProfilePath, agentProfileSourceSha);
   const repository = process.env.GITHUB_REPOSITORY;
   const context = {
     mode: "audit",
     repository,
     ...runMetadata({ toolingSha, configSha256 }),
+    agentProfile: agentProfile.metadata,
     runUrl: runUrl(repository),
     baseSha: currentHead(),
-    defaultBranch: config.repository.defaultBranch
+    defaultBranch: config.repository.defaultBranch,
+    repairAuthorized,
+    repairAuthorizedBy: repairAuthorized ? actor : null
   };
   await writeBundle({
     directory,
     context,
-    prompt: buildAuditPrompt(context, config),
-    schema: auditSchema(config)
+    prompt: buildAuditPrompt(context, config, agentProfile.text),
+    schema: auditSchema(config),
+    agentProfile
   });
   return context;
 }
 
-export async function prepareIssue({ eventPath, actor, triageMode, directory, config, token, toolingSha, configSha256 }) {
+export async function prepareIssue({ eventPath, actor, triageMode, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+  const agentProfile = await trustedAgentProfile("issue", agentProfilePath, agentProfileSourceSha);
   if (triageMode !== "automatic" && triageMode !== "manual") {
     throw new Error("Issue triage mode must be automatic or manual");
   }
@@ -152,6 +178,7 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
     triageMode,
     repository,
     ...runMetadata({ toolingSha, configSha256 }),
+    agentProfile: agentProfile.metadata,
     runUrl: runUrl(repository),
     issue: {
       number: issue.number,
@@ -172,53 +199,109 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   await writeBundle({
     directory,
     context,
-    prompt: buildIssuePrompt(context, config),
-    schema: issueSchema(config)
+    prompt: buildIssuePrompt(context, config, agentProfile.text),
+    schema: issueSchema(config),
+    agentProfile
   });
   return context;
 }
 
-export async function prepareFix({ issueNumber, actor, directory, config, token, toolingSha, configSha256 }) {
-  if (!config.issues.allowAiImplementation) {
-    throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
-  }
+export async function prepareFix({ targetNumber, actor, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+  const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha);
   if (!isConfiguredOwner(config, actor)) {
-    throw new Error(`Actor ${actor || "unknown"} is not authorised to request an Codekeeper fix`);
+    throw new Error(`Actor ${actor || "unknown"} is not authorised to request a Codekeeper fix`);
   }
   const repository = process.env.GITHUB_REPOSITORY;
   const github = new GitHubClient({ token, repository });
-  const issue = await github.getIssue(issueNumber);
-  if (issue.pull_request) throw new Error(`#${issueNumber} is a pull request, not an issue`);
-  if (issue.state !== "open") throw new Error(`#${issueNumber} is not open`);
-  const comments = await github.listIssueComments(issueNumber);
+  const issue = await github.getIssue(targetNumber);
+  if (issue.number !== targetNumber) throw new Error(`GitHub returned an unexpected target for #${targetNumber}`);
+  if (issue.state !== "open") throw new Error(`#${targetNumber} is not open`);
+  const comments = await github.listIssueComments(targetNumber);
+  let target;
+  let baseSha;
+  let subject;
+  if (issue.pull_request) {
+    const pull = await github.getPull(targetNumber);
+    if (pull.number !== targetNumber || pull.state !== "open") throw new Error(`PR #${targetNumber} is not open`);
+    if (pull.draft) throw new Error(`PR #${targetNumber} is a draft`);
+    if (pull.head?.repo?.full_name !== repository || pull.base?.repo?.full_name !== repository) {
+      throw new Error(`PR #${targetNumber} is not a same-repository pull request`);
+    }
+    if (pull.base?.ref !== config.repository.defaultBranch) {
+      throw new Error(`PR #${targetNumber} does not target ${config.repository.defaultBranch}`);
+    }
+    if (pull.head?.ref === config.repository.defaultBranch) {
+      throw new Error(`PR #${targetNumber} uses the default branch as its head`);
+    }
+    if (!/^[0-9a-f]{40}$/i.test(String(pull.head?.sha ?? "")) || !/^[0-9a-f]{40}$/i.test(String(pull.base?.sha ?? ""))) {
+      throw new Error(`PR #${targetNumber} is missing full head or base commit SHAs`);
+    }
+    target = {
+      kind: "pull_request",
+      number: targetNumber,
+      headRef: pull.head.ref,
+      headSha: pull.head.sha,
+      headRepository: pull.head.repo.full_name,
+      baseRef: pull.base.ref,
+      baseSha: pull.base.sha,
+      baseRepository: pull.base.repo.full_name
+    };
+    baseSha = target.headSha;
+    subject = {
+      pullRequest: {
+        number: targetNumber,
+        title: boundedText(pull.title, 512, "…"),
+        body: boundedText(pull.body, 30000),
+        author: boundedText(pull.user?.login, 256, "…"),
+        url: boundedText(pull.html_url, 2048, "…"),
+        comments: comments.slice(-20).map((comment) => ({
+          author: boundedText(comment.user?.login, 256, "…"),
+          body: boundedText(comment.body, 12000),
+          createdAt: comment.created_at ?? ""
+        }))
+      }
+    };
+  } else {
+    if (!config.issues.allowAiImplementation) {
+      throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
+    }
+    target = { kind: "issue", number: targetNumber };
+    baseSha = currentHead();
+    subject = {
+      issue: {
+        number: issue.number,
+        title: boundedText(issue.title, 512, "…"),
+        body: boundedText(issue.body, 30000),
+        author: boundedText(issue.user?.login, 256, "…"),
+        url: boundedText(issue.html_url, 2048, "…"),
+        updatedAt: issue.updated_at ?? "",
+        labels: boundedLabels(issue.labels),
+        comments: comments.slice(-20).map((comment) => ({
+          author: boundedText(comment.user?.login, 256, "…"),
+          body: boundedText(comment.body, 12000),
+          createdAt: comment.created_at ?? ""
+        }))
+      }
+    };
+  }
   const context = {
     mode: "fix",
     repository,
     ...runMetadata({ toolingSha, configSha256 }),
+    agentProfile: agentProfile.metadata,
     runUrl: runUrl(repository),
-    baseSha: currentHead(),
+    baseSha,
     defaultBranch: config.repository.defaultBranch,
     requestedBy: actor,
-    issue: {
-      number: issue.number,
-      title: boundedText(issue.title, 512, "…"),
-      body: boundedText(issue.body, 30000),
-      author: boundedText(issue.user?.login, 256, "…"),
-      url: boundedText(issue.html_url, 2048, "…"),
-      updatedAt: issue.updated_at ?? "",
-      labels: boundedLabels(issue.labels),
-      comments: comments.slice(-20).map((comment) => ({
-        author: boundedText(comment.user?.login, 256, "…"),
-        body: boundedText(comment.body, 12000),
-        createdAt: comment.created_at ?? ""
-      }))
-    }
+    target,
+    ...subject
   };
   await writeBundle({
     directory,
     context,
-    prompt: buildFixPrompt(context, config),
-    schema: fixSchema()
+    prompt: buildFixPrompt(context, config, agentProfile.text),
+    schema: fixSchema(target),
+    agentProfile
   });
   return context;
 }

@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/lib/github.mjs";
+import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
+import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
 import { findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
 import {
   isTrustedMaintenanceIssue,
   isTrustedRepairPull,
-  publishAudit,
-  publishFix,
-  publishIssue,
-  publishReview,
+  publishAudit as publishAuditProduction,
+  publishFix as publishFixProduction,
+  publishIssue as publishIssueProduction,
+  publishReview as publishReviewProduction,
   reconcileAutoMerge,
   repairBranch
 } from "../src/lib/publish.mjs";
@@ -20,6 +22,34 @@ import {
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
 );
+const profileFixtureRoot = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-profiles-"));
+const profilePaths = {};
+const profileBytes = {};
+for (const [mode, relativePath] of Object.entries(AGENT_PROFILE_PATHS)) {
+  const filePath = path.join(profileFixtureRoot, relativePath);
+  const bytes = Buffer.from(`# Test ${mode} profile\n\nUse frozen evidence only.\n`);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, bytes);
+  profilePaths[mode] = filePath;
+  profileBytes[mode] = bytes;
+}
+test.after(() => rm(profileFixtureRoot, { recursive: true, force: true }));
+
+function publishReview(options) {
+  return publishReviewProduction({ agentProfilePath: profilePaths.review, ...options });
+}
+
+function publishAudit(options) {
+  return publishAuditProduction({ agentProfilePath: profilePaths.audit, ...options });
+}
+
+function publishIssue(options) {
+  return publishIssueProduction({ agentProfilePath: profilePaths.issue, ...options });
+}
+
+function publishFix(options) {
+  return publishFixProduction({ agentProfilePath: profilePaths.fix, ...options });
+}
 const ambientGitHubEnvironment = ["GITHUB_REPOSITORY", "GITHUB_GRAPHQL_URL"].map((name) => [name, process.env[name]]);
 for (const [name] of ambientGitHubEnvironment) delete process.env[name];
 test.after(() => {
@@ -55,15 +85,23 @@ function matches(pull) {
 async function writeSealedArtifact(artifactDirectory, {
   mode, context, result, configSha256, patch = null, validation = { checks: [] }, artifactConfig = config
 }) {
+  const agentProfile = profileBytes[mode];
+  context.agentProfile ??= {
+    path: AGENT_PROFILE_PATHS[mode],
+    sha256: sha256(agentProfile),
+    sourceSha: "a".repeat(40)
+  };
   const components = {
     context: Buffer.from(JSON.stringify(context)),
     result: Buffer.from(JSON.stringify(result)),
     config: Buffer.from(JSON.stringify(artifactConfig)),
-    validation: Buffer.from(JSON.stringify(validation))
+    validation: Buffer.from(JSON.stringify(validation)),
+    [AGENT_PROFILE_BUNDLE_FILE]: agentProfile
   };
-  await Promise.all(Object.entries(components).map(([name, bytes]) =>
-    writeFile(path.join(artifactDirectory, `${name}.json`), bytes)
-  ));
+  await Promise.all(Object.entries(components).map(([name, bytes]) => writeFile(
+    path.join(artifactDirectory, name === AGENT_PROFILE_BUNDLE_FILE ? name : `${name}.json`),
+    bytes
+  )));
   const patchBytes = patch?.valid ? await readFile(path.join(artifactDirectory, "patch.diff")) : null;
   const manifest = {
     version: 2,
@@ -78,6 +116,7 @@ async function writeSealedArtifact(artifactDirectory, {
     resultSha256: sha256(components.result),
     configFileSha256: sha256(components.config),
     validationSha256: sha256(components.validation),
+    agentProfileSha256: sha256(agentProfile),
     patchSha256: patchBytes ? sha256(patchBytes) : null
   };
   const manifestBytes = Buffer.from(JSON.stringify(manifest));
@@ -688,11 +727,12 @@ test("fix publication does not create a repair PR after the issue changes", asyn
 
     const context = {
       mode: "fix", repository: "owner/repository", configSha256, baseSha,
-      defaultBranch: config.repository.defaultBranch, issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
+      defaultBranch: config.repository.defaultBranch, target: { kind: "issue", number: 7 },
+      issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
     };
     const result = {
       mode: "fix", summary: "Repair the documentation.", changedSummary: "Adds the missing repair guidance.",
-      risk: "low", issueNumber: 7, testsRun: [], readyForReview: true, noChangeReason: null
+      risk: "low", targetKind: "issue", targetNumber: 7, testsRun: [], readyForReview: true, noChangeReason: null
     };
     const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "fix",
@@ -718,6 +758,247 @@ test("fix publication does not create a repair PR after the issue changes", asyn
     else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
     await rm(repository, { recursive: true, force: true });
     await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), runId = "7001" }) {
+  return {
+    mode: "fix",
+    repository: "owner/repository",
+    configSha256,
+    runId,
+    baseSha: headSha,
+    defaultBranch: config.repository.defaultBranch,
+    target: {
+      kind: "pull_request",
+      number: 42,
+      headRef: "feature/repair",
+      headSha,
+      headRepository: "owner/repository",
+      baseRef: config.repository.defaultBranch,
+      baseSha,
+      baseRepository: "owner/repository"
+    },
+    pullRequest: { number: 42, title: "Repair this change" }
+  };
+}
+
+function liveRepairPull(context, overrides = {}) {
+  const target = context.target;
+  return {
+    number: target.number,
+    state: "open",
+    draft: false,
+    html_url: "https://example.test/pull/42",
+    head: { ref: target.headRef, sha: target.headSha, repo: { full_name: target.headRepository } },
+    base: { ref: target.baseRef, sha: target.baseSha, repo: { full_name: target.baseRepository } },
+    ...overrides
+  };
+}
+
+function pullRepairResult() {
+  return {
+    mode: "fix",
+    summary: "Repair the existing pull request.",
+    risk: "low",
+    targetKind: "pull_request",
+    targetNumber: 42,
+    changedSummary: "Adds the missing regression coverage.",
+    testsRun: [{ command: "git diff --check", result: "passed" }],
+    readyForReview: true,
+    noChangeReason: null
+  };
+}
+
+test("owner-commanded PR repair adds one App commit to the existing head and fails closed on push rejection", async () => {
+  const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-pr-repair-test-"));
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-pr-repair-artifact-"));
+  const originalDirectory = process.cwd();
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  const configSha256 = "2".repeat(64);
+  let liveHead;
+  let pushes = 0;
+  let createPullCalls = 0;
+  let rejectPush = false;
+  const failureComments = [];
+  try {
+    await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
+    git(repository, ["init", "-q", "-b", "feature/repair"]);
+    git(repository, ["config", "user.name", "Test"]);
+    git(repository, ["config", "user.email", "test@example.com"]);
+    git(repository, ["add", "README.md"]);
+    git(repository, ["commit", "-qm", "initial PR head"]);
+    const headSha = git(repository, ["rev-parse", "HEAD"]);
+    liveHead = headSha;
+    await writeFile(path.join(repository, "README.md"), "# Example\n\nRegression covered.\n", "utf8");
+    const patch = execFileSync("git", ["diff", "--binary", "--full-index", "HEAD"], { cwd: repository });
+    await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
+    git(repository, ["checkout", "--", "README.md"]);
+    const context = pullRepairContext({ configSha256, headSha });
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "fix",
+      context,
+      result: pullRepairResult(),
+      configSha256,
+      patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: ["README.md"] }
+    });
+    const restoreGitHub = replaceGitHubMethods({
+      async getPull() {
+        return liveRepairPull(context, {
+          head: { ref: context.target.headRef, sha: liveHead, repo: { full_name: context.repository } }
+        });
+      },
+      async getBranch() { return { protected: false, commit: { sha: liveHead } }; },
+      async createPull() { createPullCalls += 1; throw new Error("must not create a second pull request"); },
+      async updateIssue() { throw new Error("must not close or mutate an issue"); },
+      async enableAutoMerge() { throw new Error("must not enable auto-merge"); },
+      async upsertMarkerComment(number, marker, body, authorIdentity) {
+        if (!rejectPush) throw new Error("successful PR repair should not publish a failure comment");
+        failureComments.push({ number, marker, body, authorIdentity });
+      }
+    });
+    try {
+      process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+      process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+      process.chdir(repository);
+      const repair = await publishFix({
+        artifactDirectory,
+        config,
+        configSha256,
+        ...integrity,
+        token: "token",
+        prRepairGit: {
+          configureAutomationIdentity() {
+            git(repository, ["config", "user.name", identity.login]);
+            git(repository, ["config", "user.email", `${identity.id}+codekeeper@users.noreply.github.com`]);
+          },
+          createCommitOnCurrentHead,
+          pushHeadToBranch(branch) {
+            assert.equal(branch, context.target.headRef);
+            if (rejectPush) throw new Error("non-fast-forward update rejected");
+            pushes += 1;
+            liveHead = git(repository, ["rev-parse", "HEAD"]);
+            return liveHead;
+          }
+        }
+      });
+      assert.equal(repair.updated, true);
+      assert.equal(repair.previousHeadSha, headSha);
+      assert.equal(repair.headSha, liveHead);
+      assert.equal(pushes, 1);
+      assert.equal(createPullCalls, 0);
+      assert.equal(git(repository, ["rev-parse", "HEAD^"]), headSha);
+      assert.equal(git(repository, ["rev-list", "--count", `${headSha}..HEAD`]), "1");
+      assert.equal(git(repository, ["branch", "--show-current"]), "feature/repair");
+
+      git(repository, ["reset", "--hard", headSha]);
+      liveHead = headSha;
+      rejectPush = true;
+      await assert.rejects(
+        publishFix({
+          artifactDirectory,
+          config,
+          configSha256,
+          ...integrity,
+          token: "token",
+          prRepairGit: {
+            configureAutomationIdentity() {},
+            createCommitOnCurrentHead,
+            pushHeadToBranch() { throw new Error("non-fast-forward update rejected"); }
+          }
+        }),
+        /non-fast-forward update rejected/
+      );
+      assert.equal(pushes, 1);
+      assert.equal(createPullCalls, 0);
+      assert.equal(failureComments.length, 1);
+      assert.equal(failureComments[0].number, context.target.number);
+      assert.equal(failureComments[0].marker, fixRunMarker(context.runId));
+      assert.deepEqual(failureComments[0].authorIdentity, identity);
+    } finally {
+      restoreGitHub();
+    }
+  } finally {
+    process.chdir(originalDirectory);
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(repository, { recursive: true, force: true });
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("PR repair rejects changed, forked, draft, closed, retargeted, and protected targets with one App comment", async (t) => {
+  const cases = [
+    ["closed", (pull) => ({ ...pull, state: "closed" }), /not open/],
+    ["draft", (pull) => ({ ...pull, draft: true }), /is a draft/],
+    ["stale head", (pull) => ({ ...pull, head: { ...pull.head, sha: "c".repeat(40) } }), /head SHA changed/],
+    ["fork", (pull) => ({ ...pull, head: { ...pull.head, repo: { full_name: "fork/repository" } } }), /head repository changed/],
+    ["retargeted", (pull) => ({ ...pull, base: { ...pull.base, ref: "release" } }), /base branch changed/],
+    ["base moved", (pull) => ({ ...pull, base: { ...pull.base, sha: "d".repeat(40) } }), /base SHA changed/],
+    ["protected", (pull) => pull, /is protected/, { protected: true }],
+    ["branch moved", (pull) => pull, /head branch moved/, { protected: false, commit: { sha: "e".repeat(40) } }]
+  ];
+  for (const [name, mutate, expected, branchOverride] of cases) {
+    await t.test(name, async () => {
+      const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-pr-repair-negative-"));
+      const configSha256 = "3".repeat(64);
+      const context = pullRepairContext({ configSha256, headSha: "a".repeat(40), runId: `negative-${name}` });
+      const patch = Buffer.from("not reached");
+      await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
+      const integrity = await writeSealedArtifact(artifactDirectory, {
+        mode: "fix",
+        context,
+        result: pullRepairResult(),
+        configSha256,
+        patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: ["README.md"] }
+      });
+      const comments = [];
+      let createPullCalls = 0;
+      const restoreGitHub = replaceGitHubMethods({
+        async getPull() { return mutate(liveRepairPull(context)); },
+        async getBranch() { return branchOverride ?? { protected: false, commit: { sha: context.target.headSha } }; },
+        async createPull() { createPullCalls += 1; },
+        async upsertMarkerComment(number, marker, body, authorIdentity) {
+          comments.push({ number, marker, body, authorIdentity });
+        }
+      });
+      const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+      const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+      try {
+        process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+        process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+        await assert.rejects(
+          publishFix({
+            artifactDirectory,
+            config,
+            configSha256,
+            ...integrity,
+            token: "token",
+            prRepairGit: {
+              configureAutomationIdentity() { throw new Error("must not configure git"); },
+              createCommitOnCurrentHead() { throw new Error("must not commit"); },
+              pushHeadToBranch() { throw new Error("must not push"); }
+            }
+          }),
+          expected
+        );
+        assert.equal(createPullCalls, 0);
+        assert.equal(comments.length, 1);
+        assert.equal(comments[0].number, context.target.number);
+        assert.equal(comments[0].marker, fixRunMarker(context.runId));
+        assert.deepEqual(comments[0].authorIdentity, identity);
+      } finally {
+        restoreGitHub();
+        if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+        else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+        if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+        else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+        await rm(artifactDirectory, { recursive: true, force: true });
+      }
+    });
   }
 });
 
@@ -758,7 +1039,7 @@ test("maintenance publication adopts an App-created issue after response loss", 
     git(repository, ["add", "README.md"]);
     git(repository, ["commit", "-qm", "initial"]);
     const baseSha = git(repository, ["rev-parse", "HEAD"]);
-    const context = { mode: "audit", repository: "owner/repository", configSha256, baseSha, runUrl: "https://example.test/run" };
+    const context = { mode: "audit", repository: "owner/repository", configSha256, baseSha, runUrl: "https://example.test/run", repairAuthorized: false };
     const result = {
       mode: "audit",
       summary: "One maintenance finding.",
@@ -806,6 +1087,8 @@ test("maintenance repair notification remains singular after response loss", asy
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   const notifications = [];
   let notificationAttempts = 0;
+  const auditConfig = structuredClone(config);
+  auditConfig.audit.repair.enabled = true;
   try {
     await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
     git(repository, ["init", "-q", "-b", "main"]);
@@ -819,7 +1102,7 @@ test("maintenance repair notification remains singular after response loss", asy
       owningPath: "README.md", category: "docs", priority: "p2", problemKey: "missing-guide", labels: []
     };
     const repairFingerprint = findingFingerprint(finding);
-    const context = { mode: "audit", repository: "owner/repository", configSha256, baseSha, runUrl: "https://example.test/run" };
+    const context = { mode: "audit", repository: "owner/repository", configSha256, baseSha, runUrl: "https://example.test/run", repairAuthorized: true };
     const result = {
       mode: "audit",
       summary: "One maintenance finding.",
@@ -836,6 +1119,7 @@ test("maintenance repair notification remains singular after response loss", asy
       context,
       result,
       configSha256,
+      artifactConfig: auditConfig,
       patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: [] }
     });
     const maintenanceIssue = {
@@ -849,7 +1133,7 @@ test("maintenance repair notification remains singular after response loss", asy
       html_url: "https://example.test/pull/12",
       body: `Repair\n${repairMarker(repairFingerprint)}`,
       user: { login: identity.login, id: Number(identity.id), type: "Bot" },
-      head: { ref: repairBranch(config, "audit", repairFingerprint), repo: { full_name: context.repository } },
+      head: { ref: repairBranch(auditConfig, "audit", repairFingerprint), repo: { full_name: context.repository } },
       base: { repo: { full_name: context.repository } }
     };
     const restoreGitHub = replaceGitHubMethods({
@@ -874,10 +1158,10 @@ test("maintenance repair notification remains singular after response loss", asy
       process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
       process.chdir(repository);
       await assert.rejects(
-        publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+        publishAudit({ artifactDirectory, config: auditConfig, configSha256, ...integrity, token: "token" }),
         /connection lost after repair notification/
       );
-      await publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
+      await publishAudit({ artifactDirectory, config: auditConfig, configSha256, ...integrity, token: "token" });
       assert.equal(notificationAttempts, 2);
       assert.deepEqual(notifications, [
         `A repair pull request was opened: ${repairPull.html_url}\n${repairNotificationMarker(repairFingerprint)}`
@@ -909,11 +1193,12 @@ test("fix repair notification remains singular after response loss", async () =>
     await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
     const context = {
       mode: "fix", repository: "owner/repository", configSha256, baseSha: "base",
-      defaultBranch: config.repository.defaultBranch, issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
+      defaultBranch: config.repository.defaultBranch, target: { kind: "issue", number: 7 },
+      issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
     };
     const result = {
       mode: "fix", summary: "Repair the documentation.", changedSummary: "Adds the missing repair guidance.",
-      risk: "low", issueNumber: 7, testsRun: [], readyForReview: true, noChangeReason: null
+      risk: "low", targetKind: "issue", targetNumber: 7, testsRun: [], readyForReview: true, noChangeReason: null
     };
     const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "fix",
@@ -984,11 +1269,12 @@ test("fix no-patch notification remains singular after response loss", async () 
   try {
     const context = {
       mode: "fix", repository: "owner/repository", configSha256, runId: "12345",
+      target: { kind: "issue", number: 7 },
       issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
     };
     const result = {
       mode: "fix", summary: "No change is safe.", changedSummary: "",
-      risk: "low", issueNumber: 7, testsRun: [], readyForReview: false, noChangeReason: "No valid repair was produced."
+      risk: "low", targetKind: "issue", targetNumber: 7, testsRun: [], readyForReview: false, noChangeReason: "No valid repair was produced."
     };
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "fix", context, result, configSha256 });
     const restoreGitHub = replaceGitHubMethods({
@@ -1059,11 +1345,12 @@ test("fix publication adopts an exact orphan repair branch", async () => {
 
     const context = {
       mode: "fix", repository: "owner/repository", configSha256, baseSha,
-      defaultBranch: config.repository.defaultBranch, issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
+      defaultBranch: config.repository.defaultBranch, target: { kind: "issue", number: 7 },
+      issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
     };
     const result = {
       mode: "fix", summary: "Repair the documentation.", changedSummary: "Adds the missing repair guidance.",
-      risk: "low", issueNumber: 7, testsRun: [], readyForReview: true, noChangeReason: null
+      risk: "low", targetKind: "issue", targetNumber: 7, testsRun: [], readyForReview: true, noChangeReason: null
     };
     const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "fix",
@@ -1139,7 +1426,7 @@ test("publication rejects sealed artifacts with a tampered configuration hash", 
   ]) {
     const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-test-"));
     try {
-      const context = { mode: "audit", repository: "owner/repository", configSha256: contextConfigSha256 };
+      const context = { mode: "audit", repository: "owner/repository", configSha256: contextConfigSha256, repairAuthorized: false };
       const integrity = await writeSealedArtifact(artifactDirectory, {
         mode: "audit", context, result: { mode: "audit" }, configSha256: manifestConfigSha256
       });
@@ -1150,6 +1437,49 @@ test("publication rejects sealed artifacts with a tampered configuration hash", 
     } finally {
       await rm(artifactDirectory, { recursive: true, force: true });
     }
+  }
+});
+
+test("publication rejects a changed trusted-default agent profile before GitHub access", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-profile-stale-artifact-"));
+  const liveRoot = await mkdtemp(path.join(os.tmpdir(), "codekeeper-profile-stale-live-"));
+  const configSha256 = "4".repeat(64);
+  let githubAccessed = false;
+  const restoreGitHub = replaceGitHubMethods({
+    async getIssue() { githubAccessed = true; throw new Error("GitHub must not be accessed"); }
+  });
+  try {
+    const context = {
+      mode: "issue",
+      repository: "owner/repository",
+      configSha256,
+      issue: { number: 7, updatedAt: "2026-08-05T10:00:00Z" },
+      existingOpenIssues: []
+    };
+    const result = {
+      mode: "issue", summary: "Ready for triage.", type: "bug", priority: "p3", labels: [], actionable: true,
+      missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+    };
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
+    const liveProfile = path.join(liveRoot, AGENT_PROFILE_PATHS.issue);
+    await mkdir(path.dirname(liveProfile), { recursive: true });
+    await writeFile(liveProfile, "# Changed after preparation\n", "utf8");
+    await assert.rejects(
+      publishIssueProduction({
+        artifactDirectory,
+        config,
+        configSha256,
+        ...integrity,
+        agentProfilePath: liveProfile,
+        token: "token"
+      }),
+      /Agent profile changed after preparation/
+    );
+    assert.equal(githubAccessed, false);
+  } finally {
+    restoreGitHub();
+    await rm(artifactDirectory, { recursive: true, force: true });
+    await rm(liveRoot, { recursive: true, force: true });
   }
 });
 

@@ -12,6 +12,11 @@ on:
         required: false
         default: true
         type: boolean
+      repair_authorized:
+        description: Explicit per-run repair authorization; accepted only from a configured owner.
+        required: false
+        default: false
+        type: boolean
       app_client_id:
         description: GitHub App client ID. Required only when dry_run=false.
         required: false
@@ -38,7 +43,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 0fc3b5253d93eb2b0ac22ac43f933c8f04f026ad37f31dfa0200dde540a64f1c
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: dbc7de18f7d6b6b9b795faf632eb70b72877e44bebd922cae05b8f741de7c581
 
 concurrency:
   group: codekeeper-maintenance-${{ github.repository }}
@@ -106,7 +111,9 @@ jobs:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/repository-auditor.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPAIR_AUTHORIZED: ${{ inputs.repair_authorized }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -114,9 +121,14 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
+          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-audit \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
+            --actor "$GITHUB_ACTOR" \
+            --repair-authorized "$REPAIR_AUTHORIZED" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {
             echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
@@ -126,10 +138,12 @@ jobs:
         working-directory: repository
         env:
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
+          REPAIR_AUTHORIZED: ${{ inputs.repair_authorized }}
         run: |
           node ../tooling/tools/codekeeper/src/cli.mjs agent-settings \
             --config "$CONFIG" \
-            --mode audit
+            --mode audit \
+            --mutation-authorized "$REPAIR_AUTHORIZED"
       - name: Require optional workspace specialist key
         if: steps.settings.outputs.workspace_enabled == 'true'
         env:
@@ -242,7 +256,9 @@ jobs:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/repository-auditor.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPAIR_AUTHORIZED: ${{ inputs.repair_authorized }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -250,9 +266,14 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
+          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-audit \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
+            --actor "$GITHUB_ACTOR" \
+            --repair-authorized "$REPAIR_AUTHORIZED" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {
             echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
@@ -546,9 +567,11 @@ jobs:
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/repository-auditor.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
           node ../tooling/tools/codekeeper/src/cli.mjs publish-audit \
             --config "$CONFIG" \
+            --agent-profile "$AGENT_PROFILE" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"
