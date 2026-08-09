@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
-import { GitHubClient } from "./github.mjs";
+import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, findingFingerprint, findingMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
@@ -263,13 +263,15 @@ function matchesAutomationActor(actor, identity) {
   );
 }
 
-export function isTrustedMaintenanceIssue(issue, { marker, botLogin, botId }) {
+export function isTrustedMaintenanceIssue(issue, comments, { marker, botLogin, botId }) {
   const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
   return Boolean(
     identity &&
     matchesAutomationActor(issue?.user, identity) &&
     typeof issue?.body === "string" &&
-    issue.body.endsWith(marker)
+    issue.body.endsWith(marker) &&
+    Array.isArray(comments) &&
+    comments.some((comment) => isOwnedMarkerComment(comment, marker, identity))
   );
 }
 
@@ -282,7 +284,9 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
     const marker = findingMarker(fingerprint);
     let match;
     for (const issue of existing) {
-      if (isTrustedMaintenanceIssue(issue, {
+      if (typeof issue?.body !== "string" || !issue.body.endsWith(marker)) continue;
+      const comments = await github.listIssueComments(issue.number);
+      if (isTrustedMaintenanceIssue(issue, comments, {
         marker,
         botLogin: automationIdentity.login,
         botId: automationIdentity.id
@@ -310,6 +314,7 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
       published.push({ fingerprint, state: "updated", issueNumber: match.number });
     } else {
       const created = await github.createIssue({ title, body, labels });
+      await github.createComment(created.number, marker);
       published.push({ fingerprint, state: "created", issueNumber: created.number });
       existing.push(created);
     }
