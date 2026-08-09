@@ -1,6 +1,6 @@
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
-import { KNOWN_TARGETS, SETUP_BRANCH } from "./constants.mjs";
+import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODES, SETUP_BRANCH } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 import { requireSuccess } from "./command-runner.mjs";
 
@@ -101,6 +101,31 @@ export async function assertNoInstallationFiles(root, {
   const policyEntry = caseEntry(githubEntries, "codekeeper.json");
   if (policyEntry) throw new InstallerError("A Codekeeper policy or case-colliding path already exists.", { code: "EXISTING_INSTALLATION" });
 
+  const codekeeperEntry = caseEntry(githubEntries, "codekeeper");
+  if (codekeeperEntry) {
+    if (codekeeperEntry.name !== "codekeeper" || codekeeperEntry.isSymbolicLink() || !codekeeperEntry.isDirectory()) {
+      throw new InstallerError("A case-colliding or symlinked .github/codekeeper path already exists.", { code: "PATH_COLLISION" });
+    }
+    const codekeeperRoot = path.join(githubRoot, "codekeeper");
+    const codekeeperEntries = await safeDirectoryEntries(fsImpl, codekeeperRoot);
+    const agentsEntry = caseEntry(codekeeperEntries, "agents");
+    if (agentsEntry) {
+      if (agentsEntry.name !== "agents" || agentsEntry.isSymbolicLink() || !agentsEntry.isDirectory()) {
+        throw new InstallerError("A case-colliding or symlinked Codekeeper agents path already exists.", { code: "PATH_COLLISION" });
+      }
+      const agentsRoot = path.join(codekeeperRoot, "agents");
+      const agentEntries = await safeDirectoryEntries(fsImpl, agentsRoot);
+      const knownProfileNames = new Set(AGENT_PROFILE_IDS.map((profile) => path.basename(AGENT_PROFILES[profile].target).toLowerCase()));
+      for (const entry of agentEntries) {
+        if (!knownProfileNames.has(entry.name.toLowerCase())) continue;
+        if (entry.isSymbolicLink()) {
+          throw new InstallerError("A symlinked Codekeeper agent profile already exists.", { code: "PATH_COLLISION" });
+        }
+        throw new InstallerError("A Codekeeper agent profile or case-colliding path already exists.", { code: "EXISTING_INSTALLATION" });
+      }
+    }
+  }
+
   const workflowsEntry = caseEntry(githubEntries, "workflows");
   if (!workflowsEntry) return;
   if (workflowsEntry.name !== "workflows" || workflowsEntry.isSymbolicLink() || !workflowsEntry.isDirectory()) {
@@ -109,7 +134,7 @@ export async function assertNoInstallationFiles(root, {
 
   const workflowsRoot = path.join(githubRoot, "workflows");
   const workflowEntries = await safeDirectoryEntries(fsImpl, workflowsRoot);
-  const knownWorkflowNames = new Set(KNOWN_TARGETS.slice(1).map((target) => path.basename(target).toLowerCase()));
+  const knownWorkflowNames = new Set(MODE_IDS.map((mode) => path.basename(MODES[mode].target).toLowerCase()));
   for (const entry of workflowEntries) {
     if (knownWorkflowNames.has(entry.name.toLowerCase())) {
       throw new InstallerError("A Codekeeper caller or case-colliding workflow already exists.", { code: "EXISTING_INSTALLATION" });

@@ -150,6 +150,45 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     await symlink(outside, path.join(root, ".github", "workflows"));
     await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
   });
+  await t.test("existing agent profile fails", async (t) => {
+    const root = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
+    await writeFile(path.join(root, ".github", "codekeeper", "agents", "pr-reviewer.md"), "# Existing\n");
+    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "EXISTING_INSTALLATION"));
+  });
+  await t.test("case-colliding agent profile fails", async (t) => {
+    const root = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
+    await writeFile(path.join(root, ".github", "codekeeper", "agents", "Issue-Triager.MD"), "# Existing\n");
+    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "EXISTING_INSTALLATION"));
+  });
+  await t.test("case-colliding Codekeeper profile parent fails", async (t) => {
+    const root = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "CodeKeeper", "agents"), { recursive: true });
+    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
+  });
+  await t.test("symlinked Codekeeper profile parent fails", async (t) => {
+    const root = await temporaryDirectory(t);
+    const outside = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github"));
+    await symlink(outside, path.join(root, ".github", "codekeeper"));
+    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
+  });
+  await t.test("symlinked agents parent fails", async (t) => {
+    const root = await temporaryDirectory(t);
+    const outside = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "codekeeper"), { recursive: true });
+    await symlink(outside, path.join(root, ".github", "codekeeper", "agents"));
+    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
+  });
+  await t.test("symlinked agent profile fails", async (t) => {
+    const root = await temporaryDirectory(t);
+    const outside = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
+    await writeFile(path.join(outside, "profile.md"), "# Outside\n");
+    await symlink(path.join(outside, "profile.md"), path.join(root, ".github", "codekeeper", "agents", "maintenance-planner.md"));
+    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
+  });
   await t.test("renamed caller invoking Codekeeper fails", async (t) => {
     const root = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
@@ -160,6 +199,12 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     const root = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
     await writeFile(path.join(root, ".github", "workflows", "ci.yml"), "name: CI\n");
+    await assertNoInstallationFiles(root);
+  });
+  await t.test("unrelated profile file passes", async (t) => {
+    const root = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
+    await writeFile(path.join(root, ".github", "codekeeper", "agents", "team-notes.md"), "# Notes\n");
     await assertNoInstallationFiles(root);
   });
 });

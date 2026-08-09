@@ -23,10 +23,11 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and proof sequence. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/1938cd9efc3930d61b78d9e42189d1db3e3e3e9c/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/4df3b5e08a1dee5c0fad908e0c905d602b97f3b5/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and disabled safety controls. | Before merging the setup PR and whenever policy changes. |
+| Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Versioned coordinator profiles](https://github.com/coryparrry/Codekeeper/tree/1938cd9efc3930d61b78d9e42189d1db3e3e3e9c/tools/codekeeper/agents) | Decision rules used by review, issue triage, audit, and fix coordinators. | When reviewing how Codekeeper reaches decisions. |
+| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/4df3b5e08a1dee5c0fad908e0c905d602b97f3b5/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
@@ -43,14 +44,29 @@ The `openai` preset uses one OpenAI Platform provider key for every selected wor
 
 After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
-1. Generates only `.github/codekeeper.json` and the selected caller workflows.
-2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `1938cd9efc3930d61b78d9e42189d1db3e3e3e9c`.
+1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, and only the selected caller workflows.
+2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `4df3b5e08a1dee5c0fad908e0c905d602b97f3b5`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
 4. Before the final confirmation, opens a metadata-only file picker at Downloads (or the home folder fallback) that shows only real directories and nonempty regular `.pem` files within GitHub's 48 KB secret limit. It ignores symlinks, never reads PEM contents, and never prints the selected path.
 5. Forces `CODEKEEPER_ENABLED=false`, invokes inherited-terminal `gh secret set` for each single-line provider or trace key, and feeds only the App PEM descriptor to `gh` through non-terminal standard input. An existing same-named secret is deliberately replaced only after its new input is supplied.
 6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add disabled setup`, pushes the branch, and opens a setup PR.
 
 It never merges the PR, enables automation, publishes an npm package, copies the runtime, or creates a hosted service.
+
+## Editable agent behavior
+
+Every installation includes these fixed, versioned starter files:
+
+- `.github/codekeeper/agents/pr-reviewer.md`
+- `.github/codekeeper/agents/repository-auditor.md`
+- `.github/codekeeper/agents/issue-triager.md`
+- `.github/codekeeper/agents/maintenance-planner.md`
+
+Edit and review these Markdown files through an ordinary pull request. After merge, their trusted default-branch versions tune future decisions: evidence and confidence thresholds, introduced-versus-pre-existing findings, severity and priority, test adequacy, duplicate criteria, risk calibration, and when the right result is no action or manual review.
+
+Profiles are guidance inside an immutable security envelope. They cannot enable a workflow, change an event trigger, grant workspace writes, expand allowed paths, remove protected paths, authorize a repair, choose a branch, create or merge a pull request, close an issue, expose a secret, or change GitHub App permissions. Those powers remain in the pinned runtime, caller workflows, `.github/codekeeper.json`, and GitHub repository settings.
+
+In particular, issue triage does not authorize implementation. Issue repair requires an explicit configured-owner command and its separate policy gate. Maintenance remains report-only unless an owner explicitly commands a repair after the runtime supporting that command is installed. A repair requested on an existing same-repository pull request belongs on that pull request's current head branch; it must not open a second pull request. These mutation guarantees are runtime rules, not promises that profile prose can grant or waive.
 
 ## Preflight and safe failure
 
@@ -59,6 +75,8 @@ It never merges the PR, enables automation, publishes an npm package, copies the
 - a missing or unauthenticated `gh`, GitHub Enterprise Server, or missing repository admin access;
 - a dirty checkout, detached `HEAD`, stale local checkout, or a `HEAD` that is not the remote default branch;
 - an existing Codekeeper policy or caller, an existing `codekeeper/setup` branch, or a generated-file collision.
+
+The same collision checks cover all four agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
 
 If App registration, a secret prompt, push, or PR creation fails after setup begins, `CODEKEEPER_ENABLED` remains false and recoverable branch or PR state is preserved. Follow the exact command sequence printed by the installed binary; it never resolves an unpublished package from the npm registry. On Windows, printed recovery commands use PowerShell syntax. Do not merge or enable a partial setup.
 
@@ -85,6 +103,8 @@ Caller triggers can still start their unconditional pinned-bootstrap jobs after 
 When pull-request review is installed, PR events also run the fail-closed `Codekeeper review gate`. It intentionally fails while `CODEKEEPER_ENABLED=false`. Do not add it to branch protection until a controlled review has passed with Codekeeper deliberately enabled.
 
 Review protected paths, allowed repair paths, deterministic validation commands, owner logins, and `git diff --check` before merging. Enabling one control never implicitly enables another.
+
+Review all four generated agent profiles as well. They are the intended quick-edit surface for judgment and writing behavior, but cannot weaken any deterministic control above.
 
 ## Change models
 

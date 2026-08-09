@@ -751,6 +751,7 @@ test("Ink completion renders the canonical proof instructions and review warning
   const normalized = (value) => value.replace(/\s+/g, " ").trim();
   const rendered = semanticText(tui.output.lastSemanticFrame());
   assert.ok(rendered.includes(normalized(guidance.heading)), `missing completion heading: ${rendered}`);
+  assert.ok(rendered.includes(normalized(guidance.profileGuidance)), `missing profile guidance: ${rendered}`);
   for (const proof of guidance.proofs) {
     assert.ok(rendered.includes(normalized(`- ${proof.mode}: ${proof.instruction}`)), `missing ${proof.mode} proof`);
   }
@@ -778,15 +779,17 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
   const reviewMarkers = [
     ["Workflows", "Pull request review"],
     ["Models (editable", "gpt-5.6"],
-    ["Document map", ".github/codekeeper.json"],
+    ["Policy and caller documents", ".github/codekeeper.json"],
+    ["Editable agent profiles"],
     ["Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
     ["Safety", "CODEKEEPER_ENABLED remains false"],
     [guidance.reviewGateWarning, "Create setup", "› Cancel"]
   ];
   const completionMarkers = [
-    ["Document map", ".github/codekeeper.json"],
+    ["Policy and caller documents", ".github/codekeeper.json"],
+    ["Editable agent profiles"],
     ["Next proofs", ...guidance.proofs.map((proof) => `- ${proof.mode}: ${proof.instruction}`)],
-    [guidance.reviewGateWarning, guidance.closing]
+    [guidance.profileGuidance, guidance.reviewGateWarning, guidance.closing]
   ];
   for (const dimensions of [
     { columns: 40, rows: 24 },
@@ -825,7 +828,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
       kind: "review",
       markers: [
         ["Workflows", "Models (editable", "gpt-5.6"],
-        ["Document map", "Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
+        ["Document map", ".github/codekeeper/agents/pr-reviewer.md", "Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
         ["Safety", guidance.reviewGateWarning, "Create setup", "› Cancel"]
       ],
       ...dimensions
@@ -842,6 +845,8 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
       kind: "completion",
       markers: [[
         "Document map",
+        ".github/codekeeper/agents/maintenance-planner.md",
+        guidance.profileGuidance,
         "Next proofs",
         ...guidance.proofs.map((proof) => `- ${proof.mode}: ${proof.instruction}`),
         guidance.reviewGateWarning,
@@ -933,9 +938,9 @@ test("NO_COLOR and narrow terminals retain visible selection semantics without o
   });
   const review = tui.prompt.reviewInstallPlan(plan);
   const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  for (let page = 1; page <= 6; page += 1) {
-    await tui.waitForText(`Review the disabled setup · ${page} of 6`);
-    if (page < 6) await tui.send("\r");
+  for (let page = 1; page <= 7; page += 1) {
+    await tui.waitForText(`Review the disabled setup · ${page} of 7`);
+    if (page < 7) await tui.send("\r");
   }
   assert.match(tui.output.lastSemanticFrame(), /› Cancel/);
   await tui.send("\u001b[D");

@@ -358,7 +358,15 @@ test("publication refuses invalid SHA, push failure, remote mismatch, PR failure
 
 test("real Git integration creates one exact generated-only commit without broad staging", async (t) => {
   const { root, head } = await committedRepository(t);
-  const plan = simplePlan(root, head);
+  const plan = await completePlan({
+    snapshot: {
+      root,
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: head,
+      viewerLogin: "cory"
+    }
+  });
   const actual = isolatedCommandRunner(root);
   const calls = [];
   const progressEvents = [];
@@ -379,6 +387,12 @@ test("real Git integration creates one exact generated-only commit without broad
   assert.equal(git(root, ["branch", "--show-current"]).trim(), "codekeeper/setup");
   assert.equal(git(root, ["rev-parse", "HEAD^"]).trim(), head);
   assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), plan.files.map((file) => file.path).sort());
+  assert.deepEqual(plan.files.filter((file) => file.path.startsWith(".github/codekeeper/agents/")).map((file) => file.path), [
+    ".github/codekeeper/agents/pr-reviewer.md",
+    ".github/codekeeper/agents/repository-auditor.md",
+    ".github/codekeeper/agents/issue-triager.md",
+    ".github/codekeeper/agents/maintenance-planner.md"
+  ]);
   assert.equal(git(root, ["status", "--porcelain=v1"]), "");
   assert.deepEqual(calls.find((call) => call.command === "git" && call.args[0] === "add").args, [
     "add", "--", ...plan.files.map((file) => file.path)

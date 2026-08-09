@@ -416,6 +416,7 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 function reviewData(plan) {
   const policyFile = plan.files.find((file) => file.path === ".github/codekeeper.json");
   const policy = JSON.parse(policyFile.contents);
+  const documents = documentMap(plan.files);
   return {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
@@ -425,8 +426,9 @@ function reviewData(plan) {
       const agent = policy.ai.agents[MODES[mode].policyAgent];
       return `${MODES[mode].label}: ${agent.provider} / ${agent.model} / ${agent.effort}`;
     }),
-    documents: documentMap(plan.files).map((item) => `${item.path} — ${item.purpose}`),
-    documentPaths: documentMap(plan.files).map((item) => item.path),
+    documents: documents.map((item) => `${item.path} — ${item.purpose}`),
+    setupDocumentPaths: documents.filter((item) => !item.path.includes("/agents/")).map((item) => item.path),
+    profileDocumentPaths: documents.filter((item) => item.path.includes("/agents/")).map((item) => item.path),
     secrets: plan.secrets.map((secret) => `${secret.name} — ${SECRET_PURPOSES[secret.name]}`),
     reviewGateWarning: completionGuidance(plan.modes).reviewGateWarning
   };
@@ -439,7 +441,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const { stdout } = useStdout();
   const pagedDetail = usesPagedDetailLayout(stdout);
   const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
-  const lastPage = pagedDetail ? 5 : 2;
+  const lastPage = pagedDetail ? 6 : 2;
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
   usePaste(() => {});
   useInput((input, key) => {
@@ -455,9 +457,9 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.backspace) setPage(Math.max(0, lastPage - 1));
     if (key.return) onSubmit(confirmed);
   });
-  const section = (title, lines) => h(
+  const section = (title, lines, marginTop = 1) => h(
     Box,
-    { key: title, flexDirection: "column", marginTop: 1 },
+    { key: title, flexDirection: "column", marginTop },
     h(Text, { bold: true }, title),
     ...lines.map((line, index) => h(Text, { key: `${title}-${index}`, dimColor: true }, `  ${line}`))
   );
@@ -511,13 +513,14 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       h(Text, null, data.repository),
       h(Text, { dimColor: true }, data.identity),
       h(Text, { dimColor: true }, data.preset),
-      section("Workflows", data.workflows)
+      section("Workflows", data.workflows, 0)
     ) : null,
-    pagedDetail && page === 1 ? section("Models (editable in .github/codekeeper.json)", data.models) : null,
-    pagedDetail && page === 2 ? section("Document map", data.documentPaths) : null,
-    pagedDetail && page === 3 ? section("Secrets requested through GitHub CLI", data.secrets) : null,
-    pagedDetail && page === 4 ? section("Safety", CONSERVATIVE_BOUNDARIES) : null,
-    pagedDetail && page === 5 ? h(
+    pagedDetail && page === 1 ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
+    pagedDetail && page === 2 ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
+    pagedDetail && page === 3 ? section("Editable agent profiles", data.profileDocumentPaths, 0) : null,
+    pagedDetail && page === 4 ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
+    pagedDetail && page === 5 ? section("Safety", CONSERVATIVE_BOUNDARIES, 0) : null,
+    pagedDetail && page === 6 ? h(
       Box,
       { flexDirection: "column" },
       data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
@@ -565,7 +568,7 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const { stdout } = useStdout();
   const pagedDetail = usesPagedDetailLayout(stdout);
   const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
-  const lastPage = pagedDetail ? 2 : 0;
+  const lastPage = pagedDetail ? 3 : 0;
   usePaste(() => {});
   useInput((input, key) => {
     cancel(input, key);
@@ -581,6 +584,8 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.return) onSubmit(true);
   });
   const documents = documentMap(spec.plan.files);
+  const setupDocuments = documents.filter((item) => !item.path.includes("/agents/"));
+  const profileDocuments = documents.filter((item) => item.path.includes("/agents/"));
   const guidance = completionGuidance(spec.plan.modes);
   return h(
     Shell,
@@ -592,7 +597,9 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
           ? spec.receipt.pullRequestUrl
           : page === 1
             ? `Pinned source: ${spec.plan.source.repository}@${spec.plan.source.commit}`
-            : "Codekeeper remains disabled until a bounded proof is deliberately enabled."]
+            : page === 2
+              ? "Codekeeper remains disabled until a bounded proof is deliberately enabled."
+              : "Editable profiles tune judgment inside deterministic runtime boundaries."]
         : [
           spec.receipt.pullRequestUrl,
           `Pinned source: ${spec.plan.source.repository}@${spec.plan.source.commit}`
@@ -610,6 +617,7 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       { flexDirection: "column" },
       h(Text, { bold: true }, "Document map"),
       ...documents.map((item) => h(Text, { key: item.path, dimColor: true }, `  ${item.path} — ${item.purpose}`)),
+      h(Text, { dimColor: true }, guidance.profileGuidance),
       h(Box, { marginTop: 1 }, h(Text, { bold: true }, "Next proofs")),
       h(Text, { dimColor: true }, guidance.heading),
       ...guidance.proofs.map((item) => h(Text, { key: item.mode, dimColor: true }, `  - ${item.mode}: ${item.instruction}`)),
@@ -619,19 +627,26 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     pagedDetail && page === 0 ? h(
       Box,
       { flexDirection: "column" },
-      h(Text, { bold: true }, "Document map"),
-      ...documents.map((item) => h(Text, { key: item.path, dimColor: true }, `  ${item.path}`))
+      h(Text, { bold: true }, "Policy and caller documents"),
+      ...setupDocuments.map((item) => h(Text, { key: item.path, dimColor: true }, `  ${item.path}`))
     ) : null,
     pagedDetail && page === 1 ? h(
+      Box,
+      { flexDirection: "column" },
+      h(Text, { bold: true }, "Editable agent profiles"),
+      ...profileDocuments.map((item) => h(Text, { key: item.path, dimColor: true }, `  ${item.path}`))
+    ) : null,
+    pagedDetail && page === 2 ? h(
       Box,
       { flexDirection: "column" },
       h(Text, { bold: true }, "Next proofs"),
       h(Text, { dimColor: true }, guidance.heading),
       ...guidance.proofs.map((item) => h(Text, { key: item.mode, dimColor: true }, `  - ${item.mode}: ${item.instruction}`))
     ) : null,
-    pagedDetail && page === 2 ? h(
+    pagedDetail && page === 3 ? h(
       Box,
       { flexDirection: "column" },
+      h(Text, { dimColor: true }, guidance.profileGuidance),
       guidance.reviewGateWarning ? h(Text, { dimColor: true }, guidance.reviewGateWarning) : null,
       h(Text, { dimColor: true }, guidance.closing)
     ) : null

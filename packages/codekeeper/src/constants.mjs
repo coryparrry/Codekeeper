@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "1938cd9efc3930d61b78d9e42189d1db3e3e3e9c";
+export const SOURCE_COMMIT = "4df3b5e08a1dee5c0fad908e0c905d602b97f3b5";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add disabled setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add disabled setup";
@@ -47,17 +47,46 @@ export const MODES = Object.freeze({
 });
 
 export const MODE_IDS = Object.freeze(Object.keys(MODES));
+export const AGENT_PROFILES = Object.freeze({
+  "pr-reviewer": Object.freeze({
+    id: "pr-reviewer",
+    target: ".github/codekeeper/agents/pr-reviewer.md",
+    asset: "agents/pr-reviewer.md",
+    purpose: "Editable pull-request review judgment rules"
+  }),
+  "repository-auditor": Object.freeze({
+    id: "repository-auditor",
+    target: ".github/codekeeper/agents/repository-auditor.md",
+    asset: "agents/repository-auditor.md",
+    purpose: "Editable repository-audit judgment rules"
+  }),
+  "issue-triager": Object.freeze({
+    id: "issue-triager",
+    target: ".github/codekeeper/agents/issue-triager.md",
+    asset: "agents/issue-triager.md",
+    purpose: "Editable issue-triage judgment rules"
+  }),
+  "maintenance-planner": Object.freeze({
+    id: "maintenance-planner",
+    target: ".github/codekeeper/agents/maintenance-planner.md",
+    asset: "agents/maintenance-planner.md",
+    purpose: "Editable owner-commanded repair judgment rules"
+  })
+});
+export const AGENT_PROFILE_IDS = Object.freeze(Object.keys(AGENT_PROFILES));
 export const PRESET_IDS = Object.freeze(["mixed", "openai"]);
 export const RECOMMENDED_MODES = Object.freeze(["review", "maintain"]);
 export const RECOMMENDED_PRESET = "openai";
 export const POLICY_TARGET = ".github/codekeeper.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
+  ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].target),
   ...MODE_IDS.map((mode) => MODES[mode].target)
 ]);
 export const ASSET_KEYS = Object.freeze([
   "policies/mixed.json",
   "policies/openai.json",
+  ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].asset),
   ...MODE_IDS.map((mode) => MODES[mode].asset)
 ].sort());
 
@@ -79,6 +108,7 @@ export const SECRET_PURPOSES = Object.freeze({
 export const CONSERVATIVE_BOUNDARIES = Object.freeze([
   "Codekeeper is installed disabled; CODEKEEPER_ENABLED remains false.",
   "Repository repair, AI issue implementation, and automatic merge remain disabled.",
+  "Editable Markdown profiles tune judgment only; they cannot grant writes, merge, branch, trigger, or authorization permissions.",
   "Generated workflows use an immutable full source commit SHA.",
   "Protected paths and git diff --check remain enforced.",
   "The installer never merges a pull request or dispatches a workflow."

@@ -135,6 +135,10 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   const expected = [
     "LICENSE",
     "README.md",
+    "assets/agents/issue-triager.md",
+    "assets/agents/maintenance-planner.md",
+    "assets/agents/pr-reviewer.md",
+    "assets/agents/repository-auditor.md",
     "assets/metadata.json",
     "assets/policies/mixed.json",
     "assets/policies/openai.json",

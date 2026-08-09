@@ -3,6 +3,8 @@ import { readFile, lstat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AGENT_PROFILE_IDS,
+  AGENT_PROFILES,
   ASSET_KEYS,
   MODE_IDS,
   MODES,
@@ -174,6 +176,12 @@ export function renderInstallFiles(bundle, { modes, preset, displayName, default
     path: POLICY_TARGET,
     contents: renderPolicy(bundle.contents[`policies/${preset}.json`], { displayName, defaultBranch, ownerLogins })
   }];
+  for (const profile of AGENT_PROFILE_IDS) {
+    rendered.push({
+      path: AGENT_PROFILES[profile].target,
+      contents: bundle.contents[AGENT_PROFILES[profile].asset]
+    });
+  }
   for (const mode of modes) {
     rendered.push({
       path: MODES[mode].target,

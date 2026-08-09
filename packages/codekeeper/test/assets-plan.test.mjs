@@ -11,6 +11,8 @@ import {
   sha256
 } from "../src/assets.mjs";
 import {
+  AGENT_PROFILE_IDS,
+  AGENT_PROFILES,
   APP_SECRET,
   ASSET_KEYS,
   DEEPSEEK_SECRET,
@@ -42,15 +44,23 @@ import {
 } from "./helpers.mjs";
 
 const EXPECTED_ASSETS = Object.freeze({
+  "agents/issue-triager.md": "866e45a5431d9e08fe036d47d3334106f0e0734dfeef0421bd5465a1f472b5d2",
+  "agents/maintenance-planner.md": "8ff0abe5c7b232b595f6e4f43c947314e7d0cce5c15d1b7cd0884f7526e17479",
+  "agents/pr-reviewer.md": "9b90b3ae1d2ac501924b0a38d4a559c8fb8e7e84ab309a41fc5b33739a40ce76",
+  "agents/repository-auditor.md": "82af520eee898bb55136d448116cf68308645c714f9626c0b099850a2e94b7ff",
   "policies/mixed.json": "37e32105ba2300e465af8132b241633833130394eb5c15a300c0a6bf1c1f589d",
   "policies/openai.json": "753741a11159d48a9c6bd7d938edd3310b1e9d0d242e86098715db0e499faad0",
   "workflows/fix.yml": "5fbe5f521c95050b5b695d74f1a119b7301229e43a594554e3b333c090a3209e",
   "workflows/issues.yml": "499f550427c88bfce685f7be0f8b923b52c0edebeb066c4a35626096029e0ca0",
-  "workflows/maintain.yml": "6f6645a87e00442070a1ff61fb473b51ede872910e3a19cc7e31e71d43634f36",
+  "workflows/maintain.yml": "634ef7a32235861584ca3a30c01685e2564aa0ad6e582865ac27f9610abc0377",
   "workflows/review.yml": "c4a5717051e1b634d1ab863ee6307752fe050cb3cb131acbb6637772fdd00f5d"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
+  "agents/issue-triager.md": "tools/codekeeper/agents/issue-triager.md",
+  "agents/maintenance-planner.md": "tools/codekeeper/agents/maintenance-planner.md",
+  "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
+  "agents/repository-auditor.md": "tools/codekeeper/agents/repository-auditor.md",
   "policies/mixed.json": ".github/codekeeper.json",
   "workflows/fix.yml": "examples/workflows/codekeeper-fix.yml.example",
   "workflows/issues.yml": "examples/workflows/codekeeper-issues.yml.example",
@@ -80,7 +90,7 @@ function answers(overrides = {}) {
   };
 }
 
-test("the six bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
+test("the ten bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
   const bundle = await loadVerifiedAssets();
   assert.equal(bundle.metadata.source.repository, SOURCE_REPOSITORY);
   assert.equal(bundle.metadata.source.commit, SOURCE_COMMIT);
@@ -100,7 +110,7 @@ test("the six bundled assets have immutable release inventory, provenance, byte 
   assert.ok(Object.isFrozen(bundle.metadata.assets));
 });
 
-test("checkpoint-backed policy and workflow assets are byte-for-byte source release files", async () => {
+test("checkpoint-backed assets are byte-for-byte source release files", async () => {
   const bundle = await loadVerifiedAssets();
   for (const [asset, sourcePath] of Object.entries(CHECKPOINT_PATHS)) {
     const source = execFileSync("git", ["show", `${PINNED_COMMIT}:${sourcePath}`], {
@@ -109,6 +119,26 @@ test("checkpoint-backed policy and workflow assets are byte-for-byte source rele
     });
     assert.equal(bundle.contents[asset], source, `${asset} differs from ${sourcePath} at the pinned checkpoint`);
   }
+});
+
+test("bundled starter profiles are byte-for-byte canonical current-branch profiles", async () => {
+  const bundle = await loadVerifiedAssets();
+  for (const profile of AGENT_PROFILE_IDS) {
+    const definition = AGENT_PROFILES[profile];
+    const canonical = await readFile(path.join(REPOSITORY_ROOT, "tools", "codekeeper", "agents", `${profile}.md`), "utf8");
+    assert.equal(bundle.contents[definition.asset], canonical, definition.target);
+  }
+});
+
+test("bundled starter profiles preserve the deterministic mutation boundary", async () => {
+  const { contents } = await loadVerifiedAssets();
+  assert.match(contents["agents/repository-auditor.md"], /report-only unless the frozen trusted context explicitly records/);
+  assert.match(contents["agents/issue-triager.md"], /Triage never starts or authorizes implementation/);
+  assert.match(contents["agents/issue-triager.md"], /exact `\/codekeeper fix` command from a configured owner/);
+  assert.match(contents["agents/maintenance-planner.md"], /exact open same-repository pull request's frozen head branch/);
+  assert.match(contents["agents/maintenance-planner.md"], /Never propose a sibling branch, a replacement or follow-up pull request/);
+  assert.match(contents["agents/pr-reviewer.md"], /Review is not repair authorization/);
+  assert.match(contents["agents/pr-reviewer.md"], /it must never open a second pull request/);
 });
 
 test("asset verification rejects an altered inventory or a single changed byte", async () => {
@@ -243,7 +273,7 @@ test("each rendered workflow contains exactly the paired immutable bootstrap and
   assert.doesNotMatch(openaiIssue, /secrets\.DEEPSEEK_API_KEY/);
 });
 
-test("renderInstallFiles emits only the policy and selected callers with verified output digests", async () => {
+test("renderInstallFiles emits policy, every profile, and only selected callers with verified output digests", async () => {
   const bundle = await loadVerifiedAssets();
   const files = renderInstallFiles(bundle, {
     modes: ["review", "issues"],
@@ -254,6 +284,10 @@ test("renderInstallFiles emits only the policy and selected callers with verifie
   });
   assert.deepEqual(files.map((file) => file.path), [
     ".github/codekeeper.json",
+    ".github/codekeeper/agents/pr-reviewer.md",
+    ".github/codekeeper/agents/repository-auditor.md",
+    ".github/codekeeper/agents/issue-triager.md",
+    ".github/codekeeper/agents/maintenance-planner.md",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml"
   ]);
@@ -261,6 +295,10 @@ test("renderInstallFiles emits only the policy and selected callers with verifie
     assert.equal(file.bytes, Buffer.byteLength(file.contents));
     assert.equal(file.sha256, sha256(file.contents));
     assert.ok(Object.isFrozen(file));
+  }
+  for (const profile of AGENT_PROFILE_IDS) {
+    const definition = AGENT_PROFILES[profile];
+    assert.equal(files.find((file) => file.path === definition.target).contents, bundle.contents[definition.asset]);
   }
 });
 
@@ -292,6 +330,8 @@ test("install plan is frozen, disabled first, and documents selected workflows w
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers() });
   assert.ok(Object.isFrozen(plan));
+  assert.ok(Object.isFrozen(plan.files));
+  assert.ok(plan.files.every(Object.isFrozen));
   assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "false" });
   assert.deepEqual(plan.variables.slice(1), [
     { name: "CODEKEEPER_APP_CLIENT_ID", value: "Iv123456789012345678" },
@@ -303,11 +343,18 @@ test("install plan is frozen, disabled first, and documents selected workflows w
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
   assert.match(plan.pullRequest.body, /\| Mode \| Trigger \| Policy agent \|/);
   assert.match(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
+  assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune evidence thresholds/);
+  assert.match(plan.pullRequest.body, /cannot grant writes, change triggers or branches, authorize repairs, close issues, or enable merge/);
+  assert.match(plan.pullRequest.body, /Maintenance remains report-only unless an owner explicitly commands a repair/);
   assert.match(plan.pullRequest.body, /Review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`/);
   assert.match(plan.pullRequest.body, /Do not make that gate required until the controlled review proof passes/);
   assert.match(plan.pullRequest.body, /did not merge.*enable Codekeeper.*dispatch a workflow/s);
   assert.doesNotMatch(plan.pullRequest.body, /PRIVATE KEY|sk-[A-Za-z0-9]/i);
   assert.deepEqual(documentMap(plan.files).map((item) => item.path), plan.files.map((file) => file.path));
+  assert.deepEqual(
+    documentMap(plan.files).filter((item) => item.path.startsWith(".github/codekeeper/agents/")).map((item) => item.purpose),
+    AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].purpose)
+  );
   assert.deepEqual(workflowMap(plan.modes).map((item) => item.mode), MODE_IDS);
   assert.equal(setupPullRequestBody(plan), plan.pullRequest.body);
 });
@@ -323,6 +370,10 @@ test("recommended starter plan selects review and maintenance with separate Open
   assert.equal(plan.preset, "openai");
   assert.deepEqual(plan.files.map((file) => file.path), [
     ".github/codekeeper.json",
+    ".github/codekeeper/agents/pr-reviewer.md",
+    ".github/codekeeper/agents/repository-auditor.md",
+    ".github/codekeeper/agents/issue-triager.md",
+    ".github/codekeeper/agents/maintenance-planner.md",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml"
   ]);

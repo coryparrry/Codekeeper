@@ -1,5 +1,7 @@
 import path from "node:path";
 import {
+  AGENT_PROFILE_IDS,
+  AGENT_PROFILES,
   APP_SECRET,
   BOT_LOGIN_VARIABLE,
   CLIENT_ID_VARIABLE,
@@ -99,7 +101,9 @@ export function documentMap(files) {
     path: file.path,
     purpose: file.path.endsWith("codekeeper.json")
       ? "Conservative policy, model choices, protected paths, and disabled release controls"
-      : MODES[MODE_IDS.find((mode) => MODES[mode].target === file.path)]?.label ?? "Codekeeper setup"
+      : AGENT_PROFILES[AGENT_PROFILE_IDS.find((profile) => AGENT_PROFILES[profile].target === file.path)]?.purpose
+        ?? MODES[MODE_IDS.find((mode) => MODES[mode].target === file.path)]?.label
+        ?? "Codekeeper setup"
   }));
 }
 
@@ -119,7 +123,7 @@ export function completionGuidance(modes) {
     mode: item.mode,
     label: item.label,
     instruction: item.mode === "maintain"
-      ? "manual workflow_dispatch with dry_run=true"
+      ? "manual workflow_dispatch with dry_run=true; report-only unless an owner explicitly commands repair through a supporting runtime"
       : item.mode === "review"
         ? "controlled same-repository pull request"
         : item.mode === "issues"
@@ -128,6 +132,7 @@ export function completionGuidance(modes) {
   }));
   return Object.freeze({
     heading: "Next proofs after the setup PR merges: keep CODEKEEPER_ENABLED=false until ready, deliberately set it true for one bounded proof, then restore it to false.",
+    profileGuidance: "Edit .github/codekeeper/agents/*.md to tune judgment. Profiles cannot grant writes, triggers, branch choice, repair authority, issue closure, or merge.",
     proofs: Object.freeze(proofs),
     reviewGateWarning: proofs.some((item) => item.mode === "review")
       ? "Do not make the Codekeeper review gate required until its controlled review proof passes."
@@ -187,6 +192,8 @@ Required secrets: ${plan.secrets.map((item) => `\`${item.name}\``).join(", ")}. 
 ## After merge
 
 Keep \`CODEKEEPER_ENABLED=false\` until the repository is ready for a bounded proof. For each selected proof, deliberately set it to \`true\`, run only that controlled scenario, then restore it to \`false\`:
+
+Edit \`.github/codekeeper/agents/*.md\` to tune evidence thresholds, risk judgment, and no-action decisions. These profiles cannot grant writes, change triggers or branches, authorize repairs, close issues, or enable merge. Maintenance remains report-only unless an owner explicitly commands a repair after the supporting runtime is installed.
 
 ${proofs.map((item) => `- ${item}`).join("\n")}
 

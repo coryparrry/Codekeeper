@@ -82,6 +82,7 @@ function preview(plan, output) {
   }
   output.write("  Files:\n");
   for (const file of plan.files) output.write(`    - ${file.path}\n`);
+  output.write("  Agent profiles in .github/codekeeper/agents are editable judgment guidance; they cannot grant mutation or authorization permissions.\n");
   output.write(`  Variables: ${plan.variables.map((item) => item.name).join(", ")}\n`);
   output.write("  Secrets supplied later through GitHub CLI (values are not shown or stored here):\n");
   for (const secret of plan.secrets) output.write(`    - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
@@ -98,6 +99,7 @@ function printCompletion(plan, receipt, output) {
   output.write("\nDocument map\n");
   for (const item of documentMap(plan.files)) output.write(`  - ${item.path}: ${item.purpose}\n`);
   const guidance = completionGuidance(plan.modes);
+  output.write(`\n${guidance.profileGuidance}\n`);
   output.write(`\n${guidance.heading}\n`);
   for (const item of guidance.proofs) output.write(`  - ${item.mode}: ${item.instruction}\n`);
   if (guidance.reviewGateWarning) output.write(`${guidance.reviewGateWarning}\n`);

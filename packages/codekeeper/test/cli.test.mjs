@@ -508,6 +508,10 @@ test("successful init revalidates three snapshots and orders settings, exact com
     git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(),
     [
       ".github/codekeeper.json",
+      ".github/codekeeper/agents/issue-triager.md",
+      ".github/codekeeper/agents/maintenance-planner.md",
+      ".github/codekeeper/agents/pr-reviewer.md",
+      ".github/codekeeper/agents/repository-auditor.md",
       ".github/workflows/codekeeper-maintain.yml",
       ".github/workflows/codekeeper-review.yml"
     ]
@@ -521,12 +525,16 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.doesNotMatch(output.toString(), /DEEPSEEK_API_KEY:/);
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-review\.yml/);
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-maintain\.yml/);
+  assert.match(output.toString(), /\.github\/codekeeper\/agents\/pr-reviewer\.md/);
+  assert.match(output.toString(), /Agent profiles in \.github\/codekeeper\/agents are editable judgment guidance/);
+  assert.match(output.toString(), /Profiles cannot grant writes, triggers, branch choice, repair authority, issue closure, or merge/);
   assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
   assert.match(output.toString(), /After merge, PR events intentionally show a failed Codekeeper review gate while disabled/);
   assert.match(output.toString(), /Do not make the Codekeeper review gate required until its controlled review proof passes/);
   assert.match(output.toString(), /Created disabled setup PR: https:\/\/github\.com\/acme\/widget\/pull\/42/);
   assert.match(output.toString(), /did not enable Codekeeper, dispatch a workflow, or merge the PR/);
   const guidance = completionGuidance(["review", "maintain"]);
+  assert.match(output.toString(), new RegExp(guidance.profileGuidance.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   for (const proof of guidance.proofs) {
     assert.match(output.toString(), new RegExp(`  - ${proof.mode}: ${proof.instruction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   }
