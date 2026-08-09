@@ -9,12 +9,14 @@ mkdir -p /absolute/path/outside/source-checkout/codekeeper-dist
 cd packages/codekeeper
 npm pack --pack-destination /absolute/path/outside/source-checkout/codekeeper-dist
 cd /absolute/path/to/adopter-repository
-npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.1.0.tgz -- codekeeper init
+npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.1.1.tgz -- codekeeper init
 ```
 
 The installer generates a disabled setup PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Review the generated policy and callers before merging. If the installer cannot be used, the numbered steps below remain the manual fallback.
 
 If you are unsure which options to choose, accept the recommended starter setup: pull-request review plus repository maintenance, the `openai` preset, the repository name as the comment display name, and your authenticated GitHub login as the owner-command user. Issue triage and the separately gated fix path can be added later through a reviewed policy/workflow change.
+
+After the installer's final confirmation, give it the absolute path to the newly downloaded GitHub App `.pem` file. Do not paste the PEM contents into the terminal. The installer opens the file read-only and passes its descriptor directly to GitHub CLI; it does not read the key into Node.js memory or expose it through argv, environment variables, logs, generated files, or snapshots.
 
 After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller also retains its schedule, although only its pinned bootstrap can run while disabled.
 
@@ -77,6 +79,12 @@ OPENAI_API_KEY=<OpenAI coordinator/workspace key>              # Actions secret 
 DEEPSEEK_API_KEY=<DeepSeek coordinator key>                    # Actions secret for the starter issue mode
 OPENAI_TRACE_API_KEY=<dedicated OpenAI trace-export key>       # Actions secret; never a model/provider key
 CODEKEEPER_ENABLED=false                                   # Actions variable initially
+```
+
+For the manual fallback, submit the App PEM from its file instead of pasting it into an interactive prompt:
+
+```bash
+gh secret set CODEKEEPER_APP_PRIVATE_KEY --app actions --repo OWNER/REPOSITORY < /absolute/path/to/downloaded-private-key.pem
 ```
 
 The App token is present only in publication jobs. Maintenance and fix callers may map empty App values for `dry_run=true`; their reusable contracts do not require an App client ID or private key until `dry_run=false` selects publication, where both are checked before token minting. Review and issue-triage always publish, so their App mappings remain required. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The starter policy enables Agents SDK tracing with `includeSensitiveData=false`; every caller maps a separate `trace_api_key`. View runs at [OpenAI Platform Traces](https://platform.openai.com/traces) under **Logs > Traces**. This remains true for the DeepSeek issue mode: never map the DeepSeek provider key to `trace_api_key`.

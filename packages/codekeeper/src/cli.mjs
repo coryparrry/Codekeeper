@@ -7,6 +7,7 @@ import {
   appRegistrationUrl,
   buildInstallPlan,
   collectAppAnswers,
+  collectAppPrivateKeyPath,
   collectSetupAnswers,
   documentMap,
   workflowMap
@@ -82,8 +83,9 @@ function preview(plan, output) {
   output.write("  Files:\n");
   for (const file of plan.files) output.write(`    - ${file.path}\n`);
   output.write(`  Variables: ${plan.variables.map((item) => item.name).join(", ")}\n`);
-  output.write("  Secrets entered later through GitHub CLI (not shown or stored here):\n");
+  output.write("  Secrets supplied later through GitHub CLI (values are not shown or stored here):\n");
   for (const secret of plan.secrets) output.write(`    - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
+  output.write("  The GitHub App PEM is supplied from its downloaded file, never pasted into a terminal prompt.\n");
   output.write("  Automation remains disabled and the setup PR will not be merged.\n");
   if (plan.modes.includes("review")) {
     output.write("  After merge, PR events intentionally show a failed Codekeeper review gate while disabled. Do not make that gate required until the controlled review proof passes.\n");
@@ -171,10 +173,11 @@ export async function runCli({
     preview(plan, output);
     const confirmed = await prompt.confirm({ message: "Create this disabled setup?", defaultValue: false });
     if (!confirmed) throw new InstallerError("Setup was cancelled before repository mutation.", { code: "USER_CANCELLED" });
+    const appPrivateKeyPath = await collectAppPrivateKeyPath({ prompt, output });
 
     const beforeSettings = await inspect({ runner, cwd: snapshot.root, interactive });
     assertSameSnapshot(snapshot, beforeSettings, resumeCommand);
-    await configureRepositorySettings(plan, { runner, output, resumeCommand });
+    await configureRepositorySettings(plan, { runner, output, appPrivateKeyPath, resumeCommand });
     const beforeGit = await inspect({ runner, cwd: snapshot.root, interactive });
     assertSameSnapshot(snapshot, beforeGit, resumeCommand);
     const receipt = await installPlan(plan, { runner, resumeCommand, platform });

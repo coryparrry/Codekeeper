@@ -1,11 +1,11 @@
 import { lstat, mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertNoInstallationFiles } from "./preflight.mjs";
-import { requireSuccess } from "./command-runner.mjs";
+import { openSafeStdinFile, requireSuccess } from "./command-runner.mjs";
 import { InstallerError } from "./errors.mjs";
 import { sha256 } from "./assets.mjs";
 import { formatCommand } from "./shell-command.mjs";
-import { SECRET_PURPOSES } from "./constants.mjs";
+import { APP_SECRET, SECRET_PURPOSES } from "./constants.mjs";
 
 const PR_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/;
 
@@ -110,52 +110,95 @@ async function rollbackPreCommit(plan, { runner, fsImpl }) {
 }
 
 async function runMutation(runner, command, args, options, message, resume) {
-  const result = await runner.run(command, args, options);
+  let result;
+  try {
+    result = await runner.run(command, args, options);
+  } catch (cause) {
+    throw new InstallerError(message, { code: "EXTERNAL_MUTATION_FAILED", resume, cause });
+  }
   if (result.status !== 0 || result.timedOut || result.truncated) {
     throw new InstallerError(message, { code: "EXTERNAL_MUTATION_FAILED", resume });
   }
   return result.stdout.trim();
 }
 
-export async function configureRepositorySettings(plan, { runner, output, resumeCommand = "codekeeper init" }) {
+export async function configureRepositorySettings(plan, {
+  runner,
+  output,
+  appPrivateKeyPath,
+  openInputFile = openSafeStdinFile,
+  resumeCommand = "codekeeper init"
+}) {
   const [enabledVariable, ...remainingVariables] = plan.variables;
   if (enabledVariable?.name !== "CODEKEEPER_ENABLED" || enabledVariable.value !== "false") {
     throw new InstallerError("Install plan does not force Codekeeper into the disabled state.", { code: "PLAN_INVALID" });
   }
-  await runMutation(
-    runner,
-    "gh",
-    ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
-    { cwd: plan.root },
-    "GitHub CLI could not force CODEKEEPER_ENABLED=false; no secret or file mutation was attempted.",
-    resumeCommand
-  );
-
-  output.write("\nRequired GitHub Actions secrets\n");
-  output.write("Setup makes no model call. Each value below goes directly from your terminal to GitHub CLI without entering the installer Node process; GitHub Actions supplies it later only to selected jobs.\n");
-  for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
-
-  for (const secret of plan.secrets) {
-    output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. If it already exists, this deliberately replaces it. Secret input goes directly to gh; press Ctrl-D when finished.\n`);
-    await runMutation(
-      runner,
-      "gh",
-      ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
-      { cwd: plan.root, stdio: "inherit", timeoutMs: null },
-      `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
-      resumeCommand
-    );
+  if (plan.secrets.filter((secret) => secret.name === APP_SECRET).length !== 1) {
+    throw new InstallerError("Install plan must contain exactly one GitHub App private-key secret.", { code: "PLAN_INVALID" });
   }
 
-  for (const variable of remainingVariables) {
+  const appInput = openInputFile(appPrivateKeyPath);
+  if (!Number.isInteger(appInput?.descriptor) || appInput.descriptor < 3 || typeof appInput.close !== "function") {
+    throw new InstallerError("The selected private-key input could not be prepared safely.", {
+      code: "SECRET_INPUT_FILE_INVALID"
+    });
+  }
+
+  try {
     await runMutation(
       runner,
       "gh",
-      ["variable", "set", variable.name, "--body", variable.value, "--repo", plan.repository],
+      ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
       { cwd: plan.root },
-      `GitHub CLI did not set ${variable.name}. Automation remains disabled.`,
+      "GitHub CLI could not force CODEKEEPER_ENABLED=false; no secret or file mutation was attempted.",
       resumeCommand
     );
+
+    output.write("\nRequired GitHub Actions secrets\n");
+    output.write("Setup makes no model call. Provider and trace values go directly from the terminal to GitHub CLI. The App PEM is supplied to GitHub CLI from its opened file descriptor; the installer never reads or displays its contents. GitHub Actions supplies the stored secrets later only to selected jobs.\n");
+    for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
+
+    for (const secret of plan.secrets) {
+      if (secret.name === APP_SECRET) {
+        output.write(`\nSetting ${APP_SECRET} from the selected PEM file through non-terminal GitHub CLI input. Its path and contents are not displayed. If the secret already exists, this deliberately replaces it.\n`);
+        await runMutation(
+          runner,
+          "gh",
+          ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
+          { cwd: plan.root, stdio: "ignore", stdinFd: appInput.descriptor, timeoutMs: null },
+          `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
+          resumeCommand
+        );
+        output.write(`Set ${APP_SECRET} from the selected PEM file.\n`);
+        continue;
+      }
+      output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. If it already exists, this deliberately replaces it. This single-line value goes directly to gh; press Ctrl-D when finished.\n`);
+      await runMutation(
+        runner,
+        "gh",
+        ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
+        { cwd: plan.root, stdio: "inherit", timeoutMs: null },
+        `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
+        resumeCommand
+      );
+    }
+
+    for (const variable of remainingVariables) {
+      await runMutation(
+        runner,
+        "gh",
+        ["variable", "set", variable.name, "--body", variable.value, "--repo", plan.repository],
+        { cwd: plan.root },
+        `GitHub CLI did not set ${variable.name}. Automation remains disabled.`,
+        resumeCommand
+      );
+    }
+  } finally {
+    try {
+      appInput.close();
+    } catch {
+      // The descriptor is process-local and contains no buffered secret bytes.
+    }
   }
 }
 
