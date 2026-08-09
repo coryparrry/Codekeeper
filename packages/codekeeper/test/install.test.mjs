@@ -22,13 +22,6 @@ import {
 
 const COMMIT_SHA = "c".repeat(40);
 const SECRET_CANARY = "sk-secret-value-must-never-appear";
-const APP_PRIVATE_KEY_PATH = "/tmp/codekeeper-test-app.pem";
-const APP_PRIVATE_KEY_FD = 37;
-
-function openAppPrivateKey(inputPath) {
-  assert.equal(inputPath, APP_PRIVATE_KEY_PATH);
-  return { descriptor: APP_PRIVATE_KEY_FD, close() {} };
-}
 
 async function completePlan(overrides = {}) {
   const bundle = await loadVerifiedAssets();
@@ -116,11 +109,31 @@ test("repository settings force disablement first and pass every secret directly
   };
   const output = textSink();
   const runner = createRecordingRunner(() => result());
+  const privateKeyPath = "/private/tmp/codekeeper-secret-path-canary.pem";
+  let closed = 0;
+  const progressEvents = [];
+  const suspendedSecrets = [];
+  const suspendedNotices = [];
+  const openInputFile = (selectedPath) => {
+    assert.equal(selectedPath, privateKeyPath);
+    return { descriptor: 37, close() { closed += 1; } };
+  };
   await configureRepositorySettings(plan, {
     runner,
     output,
-    appPrivateKeyPath: APP_PRIVATE_KEY_PATH,
-    openInputFile: openAppPrivateKey,
+    appPrivateKeyPath: privateKeyPath,
+    openInputFile,
+    onProgress(event) {
+      progressEvents.push(event);
+    },
+    async withInteractiveTerminal(callback, notice) {
+      const before = runner.calls.length;
+      suspendedNotices.push(notice);
+      const value = await callback();
+      assert.equal(runner.calls.length, before + 1);
+      suspendedSecrets.push(runner.calls.at(-1).args[2]);
+      return value;
+    },
     resumeCommand: "'node' 'codekeeper.mjs' 'init'"
   });
 
@@ -136,22 +149,52 @@ test("repository settings force disablement first and pass every secret directly
     "OPENAI_TRACE_API_KEY",
     "CODEKEEPER_APP_PRIVATE_KEY"
   ]);
-  for (const call of secretCalls) {
+  for (const call of secretCalls.filter((call) => call.args[2] !== "CODEKEEPER_APP_PRIVATE_KEY")) {
     assert.deepEqual(call.args.slice(0, 2), ["secret", "set"]);
     assert.deepEqual(call.args.slice(3), ["--app", "actions", "--repo", "acme/widget"]);
-    assert.deepEqual(call.options, call.args[2] === "CODEKEEPER_APP_PRIVATE_KEY"
-      ? { cwd: "/tmp/widget", stdio: "ignore", stdinFd: APP_PRIVATE_KEY_FD, timeoutMs: null }
-      : { cwd: "/tmp/widget", stdio: "inherit", timeoutMs: null });
+    assert.deepEqual(call.options, { cwd: "/tmp/widget", stdio: "inherit", timeoutMs: null });
     assert.ok(!Object.hasOwn(call.options, "env"));
     assert.ok(!Object.hasOwn(call.options, "input"));
     assert.ok(!call.args.includes("--body"));
   }
+  const appSecretCall = secretCalls.find((call) => call.args[2] === "CODEKEEPER_APP_PRIVATE_KEY");
+  assert.deepEqual(appSecretCall.options, {
+    cwd: "/tmp/widget",
+    stdio: "ignore",
+    stdinFd: 37,
+    timeoutMs: null
+  });
+  assert.equal(closed, 1);
+  assert.deepEqual(suspendedSecrets, ["OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_TRACE_API_KEY"]);
+  assert.deepEqual(suspendedNotices.map((notice) => notice.name), suspendedSecrets);
+  assert.ok(suspendedNotices.every((notice) => typeof notice.purpose === "string" && notice.purpose.length > 20));
+  assert.equal(suspendedNotices.some((notice) => notice.name === "CODEKEEPER_APP_PRIVATE_KEY"), false);
+  assert.equal(suspendedSecrets.includes("CODEKEEPER_APP_PRIVATE_KEY"), false);
+  const providerDone = progressEvents.findIndex((event) => event.id === "secret:provider" && event.status === "done");
+  const appActive = progressEvents.findIndex((event) => event.id === "secret:app" && event.status === "active");
+  assert.ok(providerDone >= 0 && providerDone < appActive, "provider prompts must complete before App fd progress starts");
+  assert.deepEqual(
+    progressEvents.filter((event) => ["settings:disable", "secret:app", "variables:configure"].includes(event.id)),
+    [
+      { id: "settings:disable", status: "active" },
+      { id: "settings:disable", status: "done" },
+      {
+        id: "secret:app",
+        status: "active",
+        detail: "CODEKEEPER_APP_PRIVATE_KEY — downloaded GitHub App PEM private key used to mint App installation tokens"
+      },
+      { id: "secret:app", status: "done" },
+      { id: "variables:configure", status: "active" },
+      { id: "variables:configure", status: "done" }
+    ]
+  );
   assert.deepEqual(runner.calls.slice(1 + secretCalls.length).map((call) => call.args.slice(0, 4)), [
     ["variable", "set", "CODEKEEPER_APP_CLIENT_ID", "--body"],
     ["variable", "set", "CODEKEEPER_AUTOMATION_BOT_LOGIN", "--body"]
   ]);
   const transcript = JSON.stringify(runner.calls) + output.toString();
   assert.doesNotMatch(transcript, new RegExp(SECRET_CANARY));
+  assert.doesNotMatch(transcript, /codekeeper-secret-path-canary/);
   assert.ok(runner.calls.every((call) => !call.args.includes("true")));
 });
 
@@ -160,36 +203,46 @@ test("invalid plans and disable-first failure stop before all secret and file mu
   const invalid = { ...valid, variables: [{ name: "CODEKEEPER_ENABLED", value: "true" }, ...valid.variables.slice(1)] };
   const invalidRunner = createRecordingRunner(() => result());
   await assert.rejects(
-    configureRepositorySettings(invalid, { runner: invalidRunner, output: textSink() }),
+    configureRepositorySettings(invalid, {
+      runner: invalidRunner,
+      output: textSink(),
+      appPrivateKeyPath: "/private/tmp/unused.pem",
+      openInputFile() {
+        throw new Error("invalid plan must be rejected before opening the key");
+      }
+    }),
     assertInstallerCode(assert, "PLAN_INVALID")
   );
   assert.deepEqual(invalidRunner.calls, []);
 
   const runner = createRecordingRunner((call) => call.args.includes("CODEKEEPER_ENABLED") ? result("", { status: 1 }) : result());
+  let closed = 0;
   await assert.rejects(
     configureRepositorySettings(valid, {
       runner,
       output: textSink(),
-      appPrivateKeyPath: APP_PRIVATE_KEY_PATH,
-      openInputFile: openAppPrivateKey,
+      appPrivateKeyPath: "/private/tmp/codekeeper-test.pem",
+      openInputFile: () => ({ descriptor: 38, close() { closed += 1; } }),
       resumeCommand: "safe resume"
     }),
     (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume === "safe resume"
   );
   assert.equal(runner.calls.length, 1);
   assert.ok(runner.calls[0].args.includes("CODEKEEPER_ENABLED"));
+  assert.equal(closed, 1);
 });
 
 test("secret or variable failure leaves automation disabled and stops later settings", async () => {
   const plan = await completePlan();
   for (const failedName of ["DEEPSEEK_API_KEY", "CODEKEEPER_APP_CLIENT_ID"]) {
     const runner = createRecordingRunner((call) => call.args.includes(failedName) ? result("", { status: 1 }) : result());
+    let closed = 0;
     await assert.rejects(
       configureRepositorySettings(plan, {
         runner,
         output: textSink(),
-        appPrivateKeyPath: APP_PRIVATE_KEY_PATH,
-        openInputFile: openAppPrivateKey,
+        appPrivateKeyPath: "/private/tmp/codekeeper-test.pem",
+        openInputFile: () => ({ descriptor: 39, close() { closed += 1; } }),
         resumeCommand: "resume exactly"
       }),
       (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume === "resume exactly"
@@ -198,12 +251,14 @@ test("secret or variable failure leaves automation disabled and stops later sett
     const failedIndex = runner.calls.findIndex((call) => call.args.includes(failedName));
     assert.equal(failedIndex, runner.calls.length - 1);
     assert.ok(runner.calls.every((call) => !call.args.includes("true")));
+    assert.equal(closed, 1);
   }
 });
 
 test("push uses the verified full SHA and verifies the remote branch both before and after PR creation", async () => {
   const plan = simplePlan("/tmp/widget", HEAD_SHA);
   let remoteReads = 0;
+  const progressEvents = [];
   const runner = createRecordingRunner((call) => {
     if (call.command === "git" && call.args[0] === "push") return result();
     if (call.command === "git" && call.args[0] === "ls-remote") {
@@ -213,7 +268,13 @@ test("push uses the verified full SHA and verifies the remote branch both before
     if (call.command === "gh" && call.args[0] === "pr") return result("https://github.com/acme/widget/pull/42\n");
     throw new Error(`Unexpected publication call: ${call.command} ${call.args.join(" ")}`);
   });
-  const url = await pushAndOpenSetupPullRequest(plan, COMMIT_SHA, { runner, platform: "linux" });
+  const url = await pushAndOpenSetupPullRequest(plan, COMMIT_SHA, {
+    runner,
+    platform: "linux",
+    onProgress(event) {
+      progressEvents.push(event);
+    }
+  });
   assert.equal(url, "https://github.com/acme/widget/pull/42");
   assert.equal(remoteReads, 2);
   assert.deepEqual(runner.calls.map((call) => [call.command, ...call.args.slice(0, 2)]), [
@@ -223,6 +284,12 @@ test("push uses the verified full SHA and verifies the remote branch both before
     ["git", "ls-remote", "--refs"]
   ]);
   assert.deepEqual(runner.calls[0].args, ["push", "origin", `${COMMIT_SHA}:refs/heads/codekeeper/setup`]);
+  assert.deepEqual(progressEvents, [
+    { id: "git:push", status: "active" },
+    { id: "git:push", status: "done" },
+    { id: "github:pull-request", status: "active" },
+    { id: "github:pull-request", status: "done" }
+  ]);
   const serialized = JSON.stringify(runner.calls);
   assert.doesNotMatch(serialized, /--force|--set-upstream|\bmerge\b|workflow.*run|dispatch|CODEKEEPER_ENABLED|enable/i);
 });
@@ -294,13 +361,20 @@ test("real Git integration creates one exact generated-only commit without broad
   const plan = simplePlan(root, head);
   const actual = isolatedCommandRunner(root);
   const calls = [];
+  const progressEvents = [];
   const runner = {
     async run(command, args, options) {
       calls.push({ command, args: [...args], options: { ...options } });
       return actual.run(command, args, options);
     }
   };
-  const commit = await createSetupCommit(plan, { runner, resumeCommand: "codekeeper init" });
+  const commit = await createSetupCommit(plan, {
+    runner,
+    resumeCommand: "codekeeper init",
+    onProgress(event) {
+      progressEvents.push(event);
+    }
+  });
   assert.match(commit, /^[0-9a-f]{40}$/);
   assert.equal(git(root, ["branch", "--show-current"]).trim(), "codekeeper/setup");
   assert.equal(git(root, ["rev-parse", "HEAD^"]).trim(), head);
@@ -311,6 +385,10 @@ test("real Git integration creates one exact generated-only commit without broad
   ]);
   assert.deepEqual(calls.find((call) => call.command === "git" && call.args[0] === "commit").args, [
     "commit", "--only", "-m", plan.commitMessage, "--", ...plan.files.map((file) => file.path)
+  ]);
+  assert.deepEqual(progressEvents, [
+    { id: "git:commit", status: "active" },
+    { id: "git:commit", status: "done" }
   ]);
   assert.ok(calls.every((call) => !call.args.includes("-A") && !call.args.includes("--all") && !call.args.includes("--force")));
 });

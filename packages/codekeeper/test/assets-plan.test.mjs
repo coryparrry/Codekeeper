@@ -312,7 +312,7 @@ test("install plan is frozen, disabled first, and documents selected workflows w
   assert.equal(setupPullRequestBody(plan), plan.pullRequest.body);
 });
 
-test("recommended starter plan selects only review and maintenance with one OpenAI provider key", async () => {
+test("recommended starter plan selects review and maintenance with separate OpenAI model and trace keys", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
     bundle,

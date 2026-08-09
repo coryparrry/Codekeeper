@@ -8,3 +8,7 @@ updates:
     directory: /tools/codekeeper
     schedule:
       interval: weekly
+  - package-ecosystem: npm
+    directory: /packages/codekeeper
+    schedule:
+      interval: weekly

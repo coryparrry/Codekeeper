@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
 import { PACKAGE_ROOT, temporaryDirectory } from "./helpers.mjs";
 
@@ -59,6 +61,38 @@ test("the real command runner does not forward secret environment variables to c
   }
 });
 
+test("the real command runner maps an App PEM descriptor only to child stdin", async () => {
+  let spawnCall;
+  const runner = createCommandRunner({
+    environment: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      ...SECRET_CANARIES
+    },
+    spawnImpl(command, args, options) {
+      spawnCall = { command, args: [...args], options: { ...options } };
+      const child = new EventEmitter();
+      child.kill = () => true;
+      queueMicrotask(() => child.emit("close", 0, null));
+      return child;
+    }
+  });
+  const result = await runner.run(
+    "gh",
+    ["secret", "set", "CODEKEEPER_APP_PRIVATE_KEY", "--app", "actions", "--repo", "acme/widget"],
+    { cwd: "/tmp/widget", stdio: "ignore", stdinFd: 45, timeoutMs: null }
+  );
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(spawnCall.options.stdio, [45, "ignore", "ignore"]);
+  assert.equal(spawnCall.options.shell, false);
+  assert.ok(spawnCall.args.every((argument) => !argument.includes(".pem")));
+  for (const [name, value] of Object.entries(SECRET_CANARIES)) {
+    assert.equal(spawnCall.options.env[name], undefined);
+    assert.doesNotMatch(JSON.stringify(spawnCall), new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
 test("command runner bounds captured output and requireSuccess rejects failure, timeout, or truncation", async () => {
   const runner = createCommandRunner();
   const large = await runner.run(process.execPath, ["-e", "process.stdout.write('x'.repeat(140000))"]);
@@ -79,21 +113,22 @@ test("command runner bounds captured output and requireSuccess rejects failure, 
   );
 });
 
-test("npm tarball dry-run contains only the dependency-light runtime and the entrypoint works offline", async (t) => {
+test("npm tarball contains only the declared runtime and its local entrypoint works without registry access", async (t) => {
   const npmCache = await temporaryDirectory(t, "codekeeper-npm-cache-");
   const packDestination = await temporaryDirectory(t, "codekeeper-pack-");
   const installRoot = await temporaryDirectory(t, "codekeeper-install-");
   const npmEnvironment = {
     ...process.env,
     npm_config_cache: npmCache,
+    npm_config_offline: "true",
     npm_config_update_notifier: "false",
     npm_config_audit: "false",
     npm_config_fund: "false"
   };
+  const npmOptions = { encoding: "utf8", env: npmEnvironment, timeout: 60_000 };
   const output = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: PACKAGE_ROOT,
-    encoding: "utf8",
-    env: npmEnvironment
+    ...npmOptions
   });
   const report = JSON.parse(output)[0];
   const files = report.files.map((file) => file.path).sort();
@@ -117,35 +152,76 @@ test("npm tarball dry-run contains only the dependency-light runtime and the ent
     "src/install.mjs",
     "src/plan.mjs",
     "src/preflight.mjs",
+    "src/private-key-input.mjs",
     "src/prompts.mjs",
-    "src/shell-command.mjs"
+    "src/shell-command.mjs",
+    "src/tui.mjs"
   ].sort();
   assert.equal(report.name, "codekeeper");
-  assert.equal(report.version, "0.1.1");
+  assert.equal(report.version, "0.2.0");
   assert.deepEqual(files, expected);
   assert.ok(files.every((file) => !file.startsWith("test/") && !file.includes("package-lock")));
 
   const packed = JSON.parse(execFileSync("npm", [
     "pack", "--json", "--ignore-scripts", "--pack-destination", packDestination
-  ], { cwd: PACKAGE_ROOT, encoding: "utf8", env: npmEnvironment }))[0];
+  ], { cwd: PACKAGE_ROOT, ...npmOptions }))[0];
   assert.deepEqual(packed.files.map((file) => file.path).sort(), expected);
   const tarball = path.join(packDestination, packed.filename);
-  await writeFile(path.join(installRoot, "package.json"), "{\"private\":true}\n");
-  execFileSync("npm", [
-    "install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", installRoot, tarball
-  ], { cwd: installRoot, encoding: "utf8", env: npmEnvironment });
-  const installedPackage = JSON.parse(await readFile(path.join(installRoot, "node_modules", "codekeeper", "package.json"), "utf8"));
+  const modulesRoot = path.join(installRoot, "node_modules");
+  const installedRoot = path.join(modulesRoot, "codekeeper");
+  await mkdir(installedRoot, { recursive: true });
+  execFileSync("tar", ["-xzf", tarball, "-C", installedRoot, "--strip-components=1"], {
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  for (const dependency of ["ink", "react"]) {
+    await symlink(
+      path.join(PACKAGE_ROOT, "node_modules", dependency),
+      path.join(modulesRoot, dependency),
+      process.platform === "win32" ? "junction" : "dir"
+    );
+  }
+  const binDirectory = path.join(modulesRoot, ".bin");
+  await mkdir(binDirectory);
+  const shim = path.join(binDirectory, process.platform === "win32" ? "codekeeper.cmd" : "codekeeper");
+  if (process.platform === "win32") {
+    await writeFile(shim, `@ECHO off\r\n"${process.execPath}" "%~dp0\\..\\codekeeper\\bin\\codekeeper.mjs" %*\r\n`);
+  } else {
+    await symlink("../codekeeper/bin/codekeeper.mjs", shim);
+    await chmod(path.join(installedRoot, "bin", "codekeeper.mjs"), 0o755);
+  }
+  const installedPackage = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8"));
   assert.deepEqual(installedPackage.bin, { codekeeper: "bin/codekeeper.mjs" });
-  const shim = path.join(installRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper.cmd" : "codekeeper");
+  assert.deepEqual(installedPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
   const shimEnvironment = Object.fromEntries(Object.entries({
     PATH: process.env.PATH,
     SystemRoot: process.env.SystemRoot
   }).filter(([, value]) => typeof value === "string"));
   const invoke = (args) => process.platform === "win32"
-    ? execFileSync("cmd.exe", ["/d", "/s", "/c", shim, ...args], { encoding: "utf8", env: shimEnvironment })
-    : execFileSync(shim, args, { encoding: "utf8", env: shimEnvironment });
+    ? execFileSync("cmd.exe", ["/d", "/s", "/c", shim, ...args], { encoding: "utf8", env: shimEnvironment, timeout: 10_000 })
+    : execFileSync(shim, args, { encoding: "utf8", env: shimEnvironment, timeout: 10_000 });
   const help = invoke(["--help"]);
   const version = invoke(["--version"]);
+  const npmExecHelp = execFileSync("npm", [
+    "exec", "--prefix", installRoot, "--", "codekeeper", "--help"
+  ], { cwd: installRoot, ...npmOptions });
+  const npxHelp = execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", [
+    "--offline", "--prefix", installRoot, "--", "codekeeper", "--help"
+  ], { cwd: installRoot, ...npmOptions });
+  const installedTui = await import(pathToFileURL(path.join(
+    installedRoot,
+    "src",
+    "tui.mjs"
+  )).href);
   assert.match(help, /^Usage:\n  codekeeper init/m);
-  assert.equal(version, "0.1.1\n");
+  assert.match(npmExecHelp, /^Usage:\n  codekeeper init/m);
+  assert.match(npxHelp, /^Usage:\n  codekeeper init/m);
+  assert.equal(version, "0.2.0\n");
+  assert.equal(typeof installedTui.createInkPrompter, "function");
+  assert.equal(installedTui.shouldUseInkTui({
+    interactive: true,
+    input: { isTTY: true, setRawMode() {} },
+    output: { isTTY: true },
+    environment: { TERM: "xterm-256color" }
+  }), true);
 });
