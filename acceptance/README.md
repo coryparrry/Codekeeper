@@ -2,11 +2,12 @@
 
 This package is a dependency-free Node 22+ harness for a deliberately named, pre-existing **private** GitHub.com fixture repository. It is not a repository creator, installer, credential manager, cleanup tool, or production service. It never reads secret values and never invokes `gh secret set`, `gh variable set`, repository creation/deletion, App creation, or credential configuration.
 
-The harness has one read-only command and four explicitly acknowledged scenarios:
+The harness has two GitHub-read-only commands and four explicitly acknowledged scenarios. Recovery writes only the requested local evidence file:
 
 | Command | Purpose | Trigger ownership |
 |---|---|---|
 | `preflight` | Verify GitHub.com authentication, explicit private target, and fixture naming. | Read-only |
+| `recover-controlled-fix` | Recover bounded evidence for one already completed controlled fix from its retained tag, explicit run, and explicit PR. | Read-only |
 | `maintenance-dry-run` | Dispatch the adopter's maintenance workflow with `dry_run=true`; require a successful run and skipped publication. | Harness |
 | `review-introduced-defect` | Verify the run for a manually opened same-repository defect PR. | GitHub PR event |
 | `issue-triage-related` | Verify the run for a manually opened related, non-duplicate issue. | GitHub issue event |
@@ -48,7 +49,7 @@ node bin/codekeeper-acceptance.mjs review-introduced-defect \
   --acknowledge-private-acceptance \
   --fixture-checkout /absolute/path/to/codekeeper-acceptance-NAME \
   --evidence /absolute/path/to/private-evidence/review.json \
-  --pr 12 --run-id 345678 --app-login codekeeper-acceptance[bot] --app-id 123456
+  --pr 12 --run-id 345678 --app-login 'codekeeper-acceptance[bot]' --app-id 123456
 ```
 
 ```sh
@@ -58,7 +59,7 @@ node bin/codekeeper-acceptance.mjs issue-triage-related \
   --acknowledge-private-acceptance \
   --fixture-checkout /absolute/path/to/codekeeper-acceptance-NAME \
   --evidence /absolute/path/to/private-evidence/issue.json \
-  --issue 13 --run-id 345679 --app-login codekeeper-acceptance[bot] --app-id 123456
+  --issue 13 --run-id 345679 --app-login 'codekeeper-acceptance[bot]' --app-id 123456
 ```
 
 ```sh
@@ -68,10 +69,28 @@ node bin/codekeeper-acceptance.mjs controlled-fix \
   --acknowledge-private-acceptance \
   --fixture-checkout /absolute/path/to/codekeeper-acceptance-NAME \
   --evidence /absolute/path/to/private-evidence/fix.json \
-  --issue 14 --app-login codekeeper-acceptance[bot] --app-id 123456
+  --issue 14 --app-login 'codekeeper-acceptance[bot]' --app-id 123456
 ```
 
-No scenario accepts a branch or tag in place of `--source-sha`. Each caller must have exactly two active Codekeeper source pins in the supported job shape: `jobs.bootstrap.steps[*].uses` for the direct `tools/codekeeper` action and `jobs.<scenario-job>.uses` for the matching reusable workflow (`maintain`, `fix`, `review`, or `triage`). The expected bootstrap job, its exact action step, and the scenario reusable job must not have an `if` gate; the scenario job must contain exactly the literal scalar `needs: bootstrap`. Block scalars, anchors, aliases, expressions, nested or misplaced `uses`, duplicate jobs, ref names, mismatches, and extra active `uses` entries fail closed, so another action cannot substitute for either required pin. The `tools/codekeeper` and `.github/workflows/codekeeper-*.yml` path components are case-sensitive; GitHub repository owner/name and hexadecimal SHA comparisons are normalized case-insensitively because GitHub repository identity and commit identifiers are case-insensitive. For maintenance and controlled fixes, after preflight the harness resolves the default-branch SHA and prevalidates those paired caller pins (and fix policy) at that exact SHA before creating any tag. It then creates one unique retained `codekeeper-acceptance/dispatch-...` tag, verifies it, re-reads those inputs through both the tag and SHA, and dispatches with that tag as `--ref`. It never deletes the tag: the retained ref is bounded evidence for the later run. It revalidates every baseline workflow after every polling list and again after selected-run completion; it refuses overlapping or rerun baselines, ambiguous new runs, old automation-prefix PRs, or missing exact-run App publication evidence. Event scenarios read the caller at the actual run head SHA. New dispatch discovery remains bounded to 20 checks at three-second intervals. Once the exact uniquely attributed run is selected, completion is polled every five seconds for at most ten minutes (121 checks, including the initial check), which accommodates the observed three-minute specialist workflow while remaining fail-closed. Every `gh` command has its own deadline with process termination escalation. It does not retain workflow logs, comments, diffs, model prompts, or provider output, and operational failures are reported generically rather than echoing `gh` output.
+If the controlled-fix workflow and PR already succeeded but evidence collection was interrupted, recover the evidence without dispatching another workflow or making another model call:
+
+```sh
+node bin/codekeeper-acceptance.mjs recover-controlled-fix \
+  --repo OWNER/codekeeper-acceptance-NAME \
+  --source-sha 0123456789abcdef0123456789abcdef01234567 \
+  --acknowledge-private-acceptance \
+  --fixture-checkout /absolute/path/to/codekeeper-acceptance-NAME \
+  --evidence /absolute/path/to/private-evidence/fix-recovered.json \
+  --issue 14 --run-id 345680 --pr 15 \
+  --dispatch-ref codekeeper-acceptance/dispatch-controlled-fix-fedcba987654-00000000-0000-4000-8000-000000000000 \
+  --app-login 'codekeeper-acceptance[bot]' --app-id 123456
+```
+
+No scenario accepts a branch or tag in place of `--source-sha`. Each caller must have exactly two active Codekeeper source pins in the supported job shape: `jobs.bootstrap.steps[*].uses` for the direct `tools/codekeeper` action and `jobs.<scenario-job>.uses` for the matching reusable workflow (`maintain`, `fix`, `review`, or `triage`). The expected bootstrap job, its exact action step, and the scenario reusable job must not have an `if` gate; the scenario job must contain exactly the literal scalar `needs: bootstrap`. Block scalars, anchors, aliases, expressions, nested or misplaced `uses`, duplicate jobs, ref names, mismatches, and extra active `uses` entries fail closed, so another action cannot substitute for either required pin. The `tools/codekeeper` and `.github/workflows/codekeeper-*.yml` path components are case-sensitive; GitHub repository owner/name and hexadecimal SHA comparisons are normalized case-insensitively because GitHub repository identity and commit identifiers are case-insensitive. For maintenance and controlled fixes, after preflight the harness resolves the default-branch SHA and prevalidates those paired caller pins (and fix policy) at that exact SHA before creating any tag. It then creates one unique retained `codekeeper-acceptance/dispatch-...` tag, verifies it, re-reads those inputs through both the tag and SHA, and dispatches with that tag as `--ref`. It never deletes the tag: the retained ref is bounded evidence for the later run. It revalidates every baseline workflow after every polling list and again after selected-run completion; it refuses overlapping or rerun baselines, ambiguous new runs, old automation-prefix PRs, or missing exact-run App publication evidence. Event scenarios read the caller at the actual run head SHA. New dispatch discovery remains bounded to 20 checks at three-second intervals. Once the exact uniquely attributed run is selected, completion is polled every five seconds for at most ten minutes (121 checks, including the initial check), which accommodates the observed three-minute specialist workflow while remaining fail-closed.
+
+Recovery is a separate path and does not weaken or enter the original `controlled-fix` dispatch path. Run it while authenticated as the original GitHub dispatcher who launched the retained run. It requires every immutable identity explicitly, refuses non-private targets, resolves the exact retained tag, and requires the original successful workflow-dispatch attempt with the exact workflow name, title, run ID, tag ref, run SHA, dispatcher identity, and unique ref attribution. It re-reads the pinned caller and disabled-auto-merge fix policy through both the tag and run SHA, then verifies the explicit App-owned PR is open, non-draft, same-repository, targets the default branch frozen in that policy snapshot, and has an immutable head. That head must be the sole PR commit, authored and committed by the supplied App identity within the selected run window. Recovery also verifies the canonical repair marker and branch, the exact App-owned issue notification containing that PR URL, bounded single-page marker and job metadata, bounded changed paths, one successful implementation-verification job, and no auto-merge request. It never creates or deletes a tag, dispatches a workflow, mutates GitHub state, or reads workflow logs.
+
+Every `gh` command has its own deadline with process termination escalation. The harness does not retain workflow logs, comments, diffs, model prompts, or provider output, and operational failures are reported generically rather than echoing `gh` output.
 
 ## Exact offline checks
 

@@ -23,6 +23,8 @@ export const WORKFLOW_COMPLETION_TIMEOUT_MS = 10 * 60_000;
 export const WORKFLOW_COMPLETION_POLL_ATTEMPTS = (WORKFLOW_COMPLETION_TIMEOUT_MS / WORKFLOW_COMPLETION_POLL_INTERVAL_MS) + 1;
 const ACCEPTANCE_TAG_PREFIX = "codekeeper-acceptance/dispatch-";
 const MAX_ACCEPTANCE_TAG_LENGTH = 160;
+const CONTROLLED_FIX_RECOVERY_COMMAND = "recover-controlled-fix";
+const CONTROLLED_FIX_DISPATCH_REF = /^codekeeper-acceptance\/dispatch-controlled-fix-([0-9a-f]{12})-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const REVIEW_MARKER = "<!-- codekeeper:review -->";
 const ISSUE_TRIAGE_MARKER = "<!-- codekeeper:issue-triage -->";
 const MUTATING_SCENARIOS = new Set([
@@ -86,6 +88,20 @@ function branchSlug(value) {
     .replace(/[^a-z0-9._/-]+/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/^[-/.]+|[-/.]+$/g, "");
+}
+
+function validBranchName(value) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 255
+    && !/[\x00-\x20\x7f~^:?*\[\\]/.test(value)
+    && !value.includes("..")
+    && !value.includes("@{")
+    && !value.includes("//")
+    && !value.startsWith("/")
+    && !value.endsWith("/")
+    && !value.endsWith(".")
+    && value.split("/").every((component) => component.length > 0 && !component.startsWith(".") && !component.endsWith(".lock"));
 }
 
 export function redact(value) {
@@ -220,6 +236,10 @@ function happensOnOrAfter(value, boundary) {
   return validTimestamp(value) && validTimestamp(boundary) && Date.parse(value) >= Date.parse(boundary);
 }
 
+function happensOnOrBefore(value, boundary) {
+  return validTimestamp(value) && validTimestamp(boundary) && Date.parse(value) <= Date.parse(boundary);
+}
+
 function normaliseLogin(value) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -245,6 +265,11 @@ function validateSourceSha(sourceSha) {
 function validatePositiveInteger(value, option) {
   assert(typeof value === "string" && POSITIVE_INTEGER.test(value), `${option} must be a positive integer`);
   return Number(value);
+}
+
+function validateControlledFixDispatchRef(value) {
+  assert(typeof value === "string" && value.length <= MAX_ACCEPTANCE_TAG_LENGTH && CONTROLLED_FIX_DISPATCH_REF.test(value), "--dispatch-ref must be the exact retained controlled-fix acceptance tag");
+  return value;
 }
 
 function validateAppIdentity(options) {
@@ -787,7 +812,7 @@ async function dispatchAndWait({ repo, scenario, issue, preflight, snapshot, gh,
 async function runJobs({ repo, runId, gh }) {
   const { stdout } = await callGh(gh, ["api", "--hostname", "github.com", `repos/${repo}/actions/runs/${runId}/jobs?per_page=100`]);
   const payload = parseJson(stdout, "Workflow jobs");
-  assert(Array.isArray(payload.jobs) && payload.jobs.length <= 100, "Workflow jobs returned invalid metadata");
+  assert(Number.isInteger(payload?.total_count) && payload.total_count >= 0 && payload.total_count <= 100 && Array.isArray(payload?.jobs) && payload.jobs.length === payload.total_count, "Workflow jobs exceeded the safe single-page bound or returned invalid metadata");
   return payload.jobs;
 }
 
@@ -821,18 +846,18 @@ async function graphql({ gh, query, variables }) {
   return parseJson(stdout, "GitHub metadata");
 }
 
-async function currentMarkerComment({ repo, kind, number, marker, app, expectedRunUrl = null, notBefore = null, gh }) {
+async function currentMarkerComment({ repo, kind, number, marker, app, expectedRunUrl = null, expectedBody = null, notBefore = null, notAfter = null, gh }) {
   const [owner, name] = repo.split("/");
   const object = kind === "issue" ? "issue" : "pullRequest";
-  const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){${object}(number:$number){comments(last:100){nodes{body updatedAt author{login ... on Bot{databaseId}}} pageInfo{hasNextPage}}}}}`;
+  const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){${object}(number:$number){comments(last:100){nodes{body updatedAt author{login ... on Bot{databaseId}}} pageInfo{hasPreviousPage hasNextPage}}}}}`;
   const payload = await graphql({ gh, query, variables: { owner, name, number } });
   const comments = payload?.data?.repository?.[object]?.comments;
-  assert(Array.isArray(comments?.nodes) && comments.nodes.length <= 100 && comments?.pageInfo?.hasNextPage === false, "Marker-comment metadata exceeded its safe bound");
+  assert(Array.isArray(comments?.nodes) && comments.nodes.length <= 100 && comments?.pageInfo?.hasPreviousPage === false && comments?.pageInfo?.hasNextPage === false, "Marker-comment metadata exceeded its safe single-page bound");
   const expectedEvidence = expectedRunUrl === null ? null : runEvidenceLine(expectedRunUrl);
   const owned = comments.nodes
-    .filter((comment) => canonicalAppBotLogin(comment?.author?.login) === app.login && String(comment?.author?.databaseId ?? "") === app.id && typeof comment?.body === "string" && comment.body.endsWith(marker) && (expectedEvidence === null || comment.body.includes(expectedEvidence)))
+    .filter((comment) => canonicalAppBotLogin(comment?.author?.login) === app.login && String(comment?.author?.databaseId ?? "") === app.id && typeof comment?.body === "string" && comment.body.endsWith(marker) && (expectedEvidence === null || comment.body.includes(expectedEvidence)) && (expectedBody === null || comment.body === expectedBody))
     .map((comment) => ({ updatedAt: comment.updatedAt }));
-  assert(owned.length === 1 && validTimestamp(owned[0].updatedAt) && (notBefore === null || happensOnOrAfter(owned[0].updatedAt, notBefore)), "Current App publication marker lacks a unique current App-owned publication record");
+  assert(owned.length === 1 && validTimestamp(owned[0].updatedAt) && (notBefore === null || happensOnOrAfter(owned[0].updatedAt, notBefore)) && (notAfter === null || happensOnOrBefore(owned[0].updatedAt, notAfter)), "Current App publication marker lacks a unique current App-owned publication record within the selected run window");
   return owned[0];
 }
 
@@ -845,12 +870,60 @@ async function changedPullRequestPaths({ repo, number, gh }) {
   return files.nodes.map((file) => file?.path).filter((file) => typeof file === "string");
 }
 
-async function fixedPullRequestMetadata({ repo, number, gh }) {
+async function fixedPullRequestMetadata({ repo, number, defaultBranch, gh }) {
   const [owner, name] = repo.split("/");
-  const query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number url state mergedAt autoMergeRequest headRefName createdAt body author{login ... on Bot{databaseId}}}}}";
+  const query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number url state isDraft baseRefName headRefOid headRefName headRepository{nameWithOwner} mergedAt autoMergeRequest{enabledAt} createdAt body author{login ... on Bot{databaseId}}}}}";
   const pull = (await graphql({ gh, query, variables: { owner, name, number } }))?.data?.repository?.pullRequest;
   assert(Number(pull?.number) === number && isBoundedGitHubUrl(pull?.url, `https://github.com/${repo}/pull/`) && pull.url === `https://github.com/${repo}/pull/${number}` && validTimestamp(pull?.createdAt), "Fix pull request metadata did not match the candidate");
+  assert(pull?.isDraft === false && pull?.baseRefName === defaultBranch && typeof pull?.headRefOid === "string" && SHA.test(pull.headRefOid) && typeof pull?.headRefName === "string" && pull.headRefName.length > 0 && normaliseLogin(pull?.headRepository?.nameWithOwner) === normaliseLogin(repo), "Fix pull request must be non-draft, same-repository, target the default branch, and retain an immutable head");
   return pull;
+}
+
+async function fixedPullRequestCommits({ repo, number, gh }) {
+  const { stdout } = await callGh(gh, ["api", "--hostname", "github.com", `repos/${repo}/pulls/${number}/commits?per_page=2`]);
+  const commits = parseJson(stdout, "Fix pull request commits");
+  assert(Array.isArray(commits) && commits.length === 1, "Fix pull request must contain exactly one publication commit");
+  return commits[0];
+}
+
+function isAppOwnedPublicationCommit({ commit, pull, app, run }) {
+  const appActor = (actor) => canonicalAppBotLogin(actor?.login) === app.login
+    && String(actor?.id ?? "") === app.id
+    && actor?.type === "Bot";
+  const authorDate = commit?.commit?.author?.date;
+  const committerDate = commit?.commit?.committer?.date;
+  return commit?.sha === pull.headRefOid
+    && appActor(commit?.author)
+    && appActor(commit?.committer)
+    && happensOnOrAfter(authorDate, run.startedAt)
+    && happensOnOrBefore(authorDate, run.updatedAt)
+    && happensOnOrAfter(committerDate, run.startedAt)
+    && happensOnOrBefore(committerDate, run.updatedAt);
+}
+
+async function uniquelyAttributedControlledFixRun({ repo, dispatchRef, run, expectedActorLogin, gh }) {
+  const detail = SCENARIO_DETAILS["controlled-fix"];
+  const endpoint = `repos/${repo}/actions/workflows/${detail.workflow}/runs?event=${detail.event}&branch=${encodeURIComponent(dispatchRef)}&per_page=100`;
+  const { stdout } = await callGh(gh, ["api", "--hostname", "github.com", endpoint]);
+  const payload = parseJson(stdout, "Controlled-fix workflow runs");
+  assert(Number.isInteger(payload?.total_count) && payload.total_count === 1 && Array.isArray(payload?.workflow_runs) && payload.workflow_runs.length === 1, "Retained dispatch ref does not have unique controlled-fix run attribution");
+  const attributed = payload.workflow_runs[0];
+  assert(
+    String(attributed?.id) === String(run.databaseId)
+      && attributed?.name === detail.workflowName
+      && attributed?.display_title === dispatchRunTitle("controlled-fix")
+      && attributed?.event === detail.event
+      && attributed?.status === "completed"
+      && attributed?.conclusion === "success"
+      && attributed?.head_sha === run.headSha
+      && attributed?.head_branch === dispatchRef
+      && attributed?.run_attempt === run.attempt
+      && attributed?.created_at === run.createdAt
+      && attributed?.updated_at === run.updatedAt
+      && normaliseLogin(attributed?.actor?.login) === expectedActorLogin,
+    "Explicit controlled-fix run does not match the uniquely attributed retained dispatch"
+  );
+  return attributed;
 }
 
 async function configuredFixPolicy({ repo, revision, snapshot, expectedSource, gh }) {
@@ -859,12 +932,15 @@ async function configuredFixPolicy({ repo, revision, snapshot, expectedSource, g
     : await repositoryFile({ repo, file: ".github/codekeeper.json", ref: revision, gh });
   const config = parseJson(source, "Codekeeper policy");
   const prefix = config?.repository?.automationBranchPrefix;
+  const defaultBranch = config?.repository?.defaultBranch;
   const repair = config?.audit?.repair;
   assert(typeof prefix === "string" && SAFE_PREFIX.test(prefix), "Target Codekeeper policy has no safe automation branch prefix");
+  assert(validBranchName(defaultBranch), "Target Codekeeper policy has no safe default branch");
   assert(config?.issues?.allowAiImplementation === true, "Target Codekeeper policy does not explicitly enable controlled issue implementation");
-  assert(Array.isArray(repair?.allowedPaths) && repair.allowedPaths.length === FIXTURE_ALLOWED_FIX_PATHS.length && repair.allowedPaths.every((item) => FIXTURE_ALLOWED_FIX_PATHS.includes(item)), "Target Codekeeper policy must allow exactly the bounded fixture paths");
+  assert(Array.isArray(repair?.allowedPaths) && repair.allowedPaths.length === FIXTURE_ALLOWED_FIX_PATHS.length && new Set(repair.allowedPaths).size === FIXTURE_ALLOWED_FIX_PATHS.length && repair.allowedPaths.every((item) => FIXTURE_ALLOWED_FIX_PATHS.includes(item)), "Target Codekeeper policy must allow exactly the bounded fixture paths");
   assert(Array.isArray(repair?.validationCommands) && repair.validationCommands.includes("node --test test/*.test.mjs"), "Target Codekeeper policy must configure the deterministic fixture test command");
-  return { prefix, source };
+  assert(config?.merge?.enabled === false, "Target Codekeeper policy must keep auto-merge disabled for controlled fixes");
+  return { prefix, defaultBranch, source };
 }
 
 async function listOpenPulls({ repo, gh }) {
@@ -908,6 +984,26 @@ function validateScenarioOptions(scenario, options) {
     result.app = validateAppIdentity(options);
   }
   return result;
+}
+
+function validateControlledFixRecoveryOptions(options) {
+  const permitted = new Set(["repo", "source-sha", "acknowledge-private-acceptance", "evidence", "fixture-checkout", "issue", "run-id", "pr", "dispatch-ref", "app-login", "app-id"]);
+  assert(Object.keys(options).length === permitted.size && Object.keys(options).every((option) => permitted.has(option)), "Controlled-fix recovery requires every explicit recovery option and no others");
+  const request = {
+    repo: validateRepositoryName(options.repo),
+    sourceSha: validateSourceSha(options["source-sha"]),
+    evidencePath: options.evidence,
+    fixtureCheckout: options["fixture-checkout"],
+    issue: validatePositiveInteger(options.issue, "--issue"),
+    runId: validatePositiveInteger(options["run-id"], "--run-id"),
+    pr: validatePositiveInteger(options.pr, "--pr"),
+    dispatchRef: validateControlledFixDispatchRef(options["dispatch-ref"]),
+    app: validateAppIdentity(options)
+  };
+  assert(options["acknowledge-private-acceptance"] === true, "--acknowledge-private-acceptance is required before controlled-fix recovery");
+  assert(typeof request.evidencePath === "string" && request.evidencePath.length > 0, "An explicit --evidence PATH is required");
+  assert(typeof request.fixtureCheckout === "string" && request.fixtureCheckout.length > 0, "An explicit --fixture-checkout PATH is required to keep evidence out of the target checkout");
+  return request;
 }
 
 export async function preflight({ repo, gh }) {
@@ -986,7 +1082,7 @@ async function verifyFix({ request, preflightResult, gh, sleep, now, recordDispa
   const assertions = [];
   const prevalidated = await prevalidateDispatchSnapshot({ repo: request.repo, scenario: "controlled-fix", sourceSha: request.sourceSha, preflight: preflightResult, gh });
   const snapshot = await createImmutableDispatchSnapshot({ repo: request.repo, scenario: "controlled-fix", sourceSha: request.sourceSha, prevalidated, gh, onSnapshot: ({ dispatchRef }) => recordDispatchRef(dispatchRef) });
-  const { prefix } = await configuredFixPolicy({ repo: request.repo, snapshot, expectedSource: prevalidated.fixPolicy.source, gh });
+  const { prefix, defaultBranch } = await configuredFixPolicy({ repo: request.repo, snapshot, expectedSource: prevalidated.fixPolicy.source, gh });
   const existing = (await listOpenPulls({ repo: request.repo, gh })).filter((pull) => String(pull?.headRefName ?? "").startsWith(prefix));
   assert(existing.length === 0, "Target has an existing automation-prefix pull request; refusing an ambiguous fix scenario");
   const existingIds = new Set(existing.map((pull) => String(pull.number)));
@@ -996,20 +1092,96 @@ async function verifyFix({ request, preflightResult, gh, sleep, now, recordDispa
   assert(candidates.length === 1, "Expected exactly one newly created open Codekeeper fix pull request on the configured prefix");
   const candidate = candidates[0];
   const fingerprint = sha256(`issue|${request.repo}|${request.issue}`);
-  const [pull, paths, jobs, marker] = await Promise.all([
-    fixedPullRequestMetadata({ repo: request.repo, number: Number(candidate.number), gh }),
+  const [pull, commit, paths, jobs, marker] = await Promise.all([
+    fixedPullRequestMetadata({ repo: request.repo, number: Number(candidate.number), defaultBranch, gh }),
+    fixedPullRequestCommits({ repo: request.repo, number: Number(candidate.number), gh }),
     changedPullRequestPaths({ repo: request.repo, number: Number(candidate.number), gh }),
     runJobs({ repo: request.repo, runId: run.databaseId, gh }),
-    currentMarkerComment({ repo: request.repo, kind: "issue", number: request.issue, marker: repairNotificationMarker(fingerprint), app: request.app, notBefore: run.startedAt, gh })
+    currentMarkerComment({ repo: request.repo, kind: "issue", number: request.issue, marker: repairNotificationMarker(fingerprint), app: request.app, notBefore: run.startedAt, notAfter: run.updatedAt, gh })
   ]);
   const expectedBranch = branchSlug(`${prefix}fix-${fingerprint}`);
   expect(assertions, "controlled fix workflow completed successfully", run.conclusion === "success");
   expect(assertions, "fix pull request is open, App-owned, and not auto-merged", pull.state === "OPEN" && !pull.mergedAt && pull.autoMergeRequest == null && canonicalAppBotLogin(pull?.author?.login) === request.app.login && String(pull?.author?.databaseId ?? "") === request.app.id);
-  expect(assertions, "fix pull request is the canonical repair for the requested issue", pull.headRefName === expectedBranch && typeof pull.body === "string" && pull.body.includes(`Closes #${request.issue}`) && pull.body.endsWith(repairMarker(fingerprint)) && happensOnOrAfter(marker.updatedAt, run.startedAt));
+  expect(assertions, "fix pull request is the canonical repair for the requested issue", pull.headRefName === expectedBranch && typeof pull.body === "string" && pull.body.includes(`Closes #${request.issue}`) && pull.body.endsWith(repairMarker(fingerprint)) && happensOnOrAfter(pull.createdAt, run.startedAt) && happensOnOrBefore(pull.createdAt, run.updatedAt) && happensOnOrAfter(marker.updatedAt, run.startedAt) && happensOnOrBefore(marker.updatedAt, run.updatedAt));
+  expect(assertions, "fix pull request head is the single App-authored and App-committed publication within the selected run", isAppOwnedPublicationCommit({ commit, pull, app: request.app, run }));
   expect(assertions, "fix changed only bounded fixture paths", paths.length > 0 && paths.every((changedPath) => FIXTURE_ALLOWED_FIX_PATHS.includes(changedPath)));
   expect(assertions, "fixture tests passed in Codekeeper verification", jobs.some((job) => String(job?.name ?? "").toLowerCase().includes("implementation verification") && job?.conclusion === "success"));
   expect(assertions, `controlled fix dispatch retained immutable acceptance tag ${snapshot.dispatchRef}`, true);
   return { assertions, workflow: workflowEvidence(run), resource: resourceEvidence("pull_request", pull), dispatchRef: snapshot.dispatchRef, passed: assertions.every((assertion) => assertion.passed) };
+}
+
+async function verifyRecoveredFix({ request, preflightResult, gh, now }) {
+  const assertions = [];
+  const detail = SCENARIO_DETAILS["controlled-fix"];
+  const run = await waitForRun({
+    repo: request.repo,
+    runId: request.runId,
+    expectedEvent: detail.event,
+    expectedWorkflowName: detail.workflowName,
+    expectedDisplayTitle: dispatchRunTitle("controlled-fix"),
+    gh,
+    sleep: async () => {},
+    now,
+    attempts: 1
+  });
+  assert(run.conclusion === "success" && run.attempt === 1, "Controlled-fix recovery requires the original successful workflow attempt");
+  assert(run.actorLogin === preflightResult.actorLogin, "Controlled-fix run actor did not match the currently authenticated dispatcher");
+  const dispatchMatch = CONTROLLED_FIX_DISPATCH_REF.exec(request.dispatchRef);
+  assert(dispatchMatch?.[1] === run.headSha.slice(0, 12).toLowerCase() && run.headBranch === request.dispatchRef, "Controlled-fix run did not use the supplied retained dispatch tag");
+  assert(await acceptanceTagRef({ repo: request.repo, tag: request.dispatchRef, gh }) === run.headSha.toLowerCase(), "Retained controlled-fix acceptance tag does not resolve to the run head SHA");
+  await uniquelyAttributedControlledFixRun({ repo: request.repo, dispatchRef: request.dispatchRef, run, expectedActorLogin: preflightResult.actorLogin, gh });
+
+  const snapshot = { headSha: run.headSha.toLowerCase(), dispatchRef: request.dispatchRef };
+  const [, policy] = await Promise.all([
+    assertPinnedSource({ repo: request.repo, scenario: "controlled-fix", sourceSha: request.sourceSha, snapshot, gh }),
+    configuredFixPolicy({ repo: request.repo, snapshot, gh })
+  ]);
+  const fingerprint = sha256(`issue|${request.repo}|${request.issue}`);
+  const expectedBranch = branchSlug(`${policy.prefix}fix-${fingerprint}`);
+  const expectedRepairMarker = repairMarker(fingerprint);
+  const expectedIssueMarker = repairNotificationMarker(fingerprint);
+  const [pull, commit, paths, jobs, issueMarker] = await Promise.all([
+    fixedPullRequestMetadata({ repo: request.repo, number: request.pr, defaultBranch: policy.defaultBranch, gh }),
+    fixedPullRequestCommits({ repo: request.repo, number: request.pr, gh }),
+    changedPullRequestPaths({ repo: request.repo, number: request.pr, gh }),
+    runJobs({ repo: request.repo, runId: run.databaseId, gh }),
+    currentMarkerComment({
+      repo: request.repo,
+      kind: "issue",
+      number: request.issue,
+      marker: expectedIssueMarker,
+      app: request.app,
+      expectedBody: `Codekeeper opened a repair pull request: https://github.com/${request.repo}/pull/${request.pr}\n${expectedIssueMarker}`,
+      notBefore: run.startedAt,
+      notAfter: run.updatedAt,
+      gh
+    })
+  ]);
+  const repairMarkerCount = typeof pull.body === "string" ? pull.body.split(expectedRepairMarker).length - 1 : 0;
+  const appOwnedOpenPull = pull.state === "OPEN"
+    && !pull.mergedAt
+    && pull.autoMergeRequest == null
+    && canonicalAppBotLogin(pull?.author?.login) === request.app.login
+    && String(pull?.author?.databaseId ?? "") === request.app.id;
+  const canonicalRepair = pull.headRefName === expectedBranch
+    && typeof pull.body === "string"
+    && pull.body.includes(`Closes #${request.issue}`)
+    && pull.body.endsWith(expectedRepairMarker)
+    && repairMarkerCount === 1
+    && happensOnOrAfter(pull.createdAt, run.startedAt)
+    && happensOnOrBefore(pull.createdAt, run.updatedAt);
+  const implementationVerification = jobs.filter((job) => job?.name === "fix / Codekeeper implementation verification");
+
+  expect(assertions, "explicit completed run has unique retained controlled-fix attribution", true);
+  expect(assertions, `controlled fix retained exact immutable acceptance tag ${request.dispatchRef}`, true);
+  expect(assertions, "caller source pins and bounded fix policy match at the run SHA and retained tag", true);
+  expect(assertions, "fix pull request is open, App-owned, unmerged, and has no auto-merge request", appOwnedOpenPull);
+  expect(assertions, `explicit pull request is the single-marker canonical repair for issue #${request.issue}`, canonicalRepair);
+  expect(assertions, "explicit pull request head is the single App-authored and App-committed publication within the selected run", isAppOwnedPublicationCommit({ commit, pull, app: request.app, run }));
+  expect(assertions, `issue #${request.issue} has the exact current App-owned repair notification for the explicit pull request`, Boolean(issueMarker));
+  expect(assertions, "fix changed only bounded fixture paths", paths.length > 0 && paths.every((changedPath) => FIXTURE_ALLOWED_FIX_PATHS.includes(changedPath)));
+  expect(assertions, "fixture tests passed in exactly one Codekeeper implementation-verification job", implementationVerification.length === 1 && implementationVerification[0]?.conclusion === "success");
+  return { assertions, workflow: workflowEvidence(run), resource: resourceEvidence("pull_request", pull), dispatchRef: request.dispatchRef, passed: assertions.every((assertion) => assertion.passed) };
 }
 
 export async function runScenario({ scenario, options, gh, now = () => new Date(), sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
@@ -1051,10 +1223,45 @@ export async function runScenario({ scenario, options, gh, now = () => new Date(
   return { passed: result.passed, evidence, evidencePath };
 }
 
+export async function recoverControlledFix({ options, gh, now = () => new Date() }) {
+  const request = validateControlledFixRecoveryOptions(options);
+  const destination = await prepareEvidenceDestination({ evidencePath: request.evidencePath, fixtureCheckout: request.fixtureCheckout });
+  const startedAt = currentIso(now);
+  let result = {
+    assertions: [{ expectation: "controlled-fix evidence recovery completed without an unredacted operational error", passed: false }],
+    workflow: null,
+    resource: null,
+    dispatchRef: request.dispatchRef,
+    passed: false
+  };
+  try {
+    const preflightResult = await preflight({ repo: request.repo, gh });
+    result = await verifyRecoveredFix({ request, preflightResult, gh, now });
+    result.passed = result.passed !== false;
+  } catch {
+    result.passed = false;
+  }
+  const evidence = {
+    schemaVersion: 1,
+    targetRepository: request.repo,
+    scenario: "controlled-fix",
+    sourceSha: request.sourceSha,
+    dispatchRef: request.dispatchRef,
+    workflow: result.workflow,
+    resource: result.resource,
+    assertions: result.assertions,
+    passed: result.passed,
+    startedAt,
+    completedAt: currentIso(now)
+  };
+  const evidencePath = await writeEvidenceAtomically({ evidence, destination });
+  return { passed: result.passed, evidence, evidencePath };
+}
+
 export function parseCommandLine(argv) {
   if (argv.length === 0 || argv[0] === "help" || argv[0] === "--help") return { command: "help", options: {} };
   const [command, ...tokens] = argv;
-  assert(command === "preflight" || MUTATING_SCENARIOS.has(command), `Unknown command: ${command}`);
+  assert(command === "preflight" || command === CONTROLLED_FIX_RECOVERY_COMMAND || MUTATING_SCENARIOS.has(command), `Unknown command: ${command}`);
   const options = {};
   const booleanFlags = new Set(["acknowledge-private-acceptance"]);
   for (let index = 0; index < tokens.length; index += 1) {
@@ -1075,12 +1282,12 @@ export function parseCommandLine(argv) {
     assert(Object.keys(options).length === 1 && typeof options.repo === "string", "preflight requires exactly --repo OWNER/REPOSITORY");
     return { command, options };
   }
-  const permitted = new Set(["repo", "source-sha", "acknowledge-private-acceptance", "evidence", "fixture-checkout", "pr", "issue", "run-id", "app-login", "app-id"]);
+  const permitted = new Set(["repo", "source-sha", "acknowledge-private-acceptance", "evidence", "fixture-checkout", "pr", "issue", "run-id", "dispatch-ref", "app-login", "app-id"]);
   assert(Object.keys(options).every((option) => permitted.has(option)), "Scenario command received an unsupported option");
   return { command, options };
 }
 
 export function formatUsage() {
   const fixture = path.dirname(fileURLToPath(import.meta.url));
-  return `Codekeeper private acceptance harness (Node >=22)\n\nRead-only:\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} preflight --repo OWNER/codekeeper-acceptance-NAME\n\nScenario commands require --repo, --source-sha (40-character commit),\n--acknowledge-private-acceptance, --fixture-checkout, and --evidence PATH.\nReview, issue, and fix verification also require the configured App bot login\nand immutable numeric --app-id.\n\nMaintenance and fix dispatch create one retained unique acceptance tag at the\npreflight default-branch SHA; GitHub workflow_dispatch receives that tag, never\na raw SHA. The evidence records the tag and the harness never deletes it.\n\n  maintenance-dry-run\n  review-introduced-defect --pr NUMBER --run-id NUMBER --app-login APP[bot] --app-id NUMBER\n  issue-triage-related --issue NUMBER --run-id NUMBER --app-login APP[bot] --app-id NUMBER\n  controlled-fix --issue NUMBER --app-login APP[bot] --app-id NUMBER`;
+  return `Codekeeper private acceptance harness (Node >=22)\n\nRead-only GitHub verification:\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} preflight --repo OWNER/codekeeper-acceptance-NAME\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} recover-controlled-fix --repo OWNER/codekeeper-acceptance-NAME --source-sha SHA --acknowledge-private-acceptance --fixture-checkout PATH --evidence PATH --issue NUMBER --run-id NUMBER --pr NUMBER --dispatch-ref TAG --app-login 'APP[bot]' --app-id NUMBER\n\nScenario commands require --repo, --source-sha (40-character commit),\n--acknowledge-private-acceptance, --fixture-checkout, and --evidence PATH.\nReview, issue, and fix verification also require the configured App bot login\nand immutable numeric --app-id.\n\nMaintenance and fix dispatch create one retained unique acceptance tag at the\npreflight default-branch SHA; GitHub workflow_dispatch receives that tag, never\na raw SHA. The evidence records the tag and the harness never deletes it.\nRecovery only reads that retained tag and an explicit completed run and PR.\n\n  maintenance-dry-run\n  review-introduced-defect --pr NUMBER --run-id NUMBER --app-login 'APP[bot]' --app-id NUMBER\n  issue-triage-related --issue NUMBER --run-id NUMBER --app-login 'APP[bot]' --app-id NUMBER\n  controlled-fix --issue NUMBER --app-login 'APP[bot]' --app-id NUMBER`;
 }
