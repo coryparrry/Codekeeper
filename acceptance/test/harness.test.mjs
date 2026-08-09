@@ -22,7 +22,7 @@ import { EvidenceError, prepareEvidenceDestination, validateEvidence, writeEvide
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const HEAD = "fedcba9876543210fedcba9876543210fedcba98";
 const REPO = "owner/codekeeper-acceptance-fixture";
-const APP = { login: "codekeeper-acceptance[bot]", id: "99" };
+const APP = { login: "codekeeper-acceptance[bot]", graphqlLogin: "codekeeper-acceptance", id: "99" };
 const NOW = "2026-08-08T00:00:00.000Z";
 const RUN_CREATED = "2026-08-08T00:00:00.001Z";
 const RUN_STARTED = "2026-08-08T00:00:00.002Z";
@@ -120,7 +120,7 @@ function fakeClock(start = NOW) {
   };
 }
 
-function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
+function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
   const calls = [];
   let workflowListCount = 0;
   let runViewCount = 0;
@@ -254,7 +254,7 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
         updatedAt: SUBJECT_UPDATED
       });
     }
-    if (args[0] === "pr" && args[1] === "checks") return response([{ name: "Codekeeper review gate", bucket: "fail" }]);
+    if (args[0] === "pr" && args[1] === "checks") return response([{ name: wrongReviewGateName ? "Codekeeper review gate" : "review / Codekeeper review gate", bucket: "fail" }]);
     if (args[0] === "issue" && args[1] === "view") return response({ number: scenario === "issue-triage-related" ? 13 : issueNumber, url: `https://github.com/${REPO}/issues/${scenario === "issue-triage-related" ? 13 : issueNumber}`, state: "OPEN", labels: [{ name: "codekeeper:ready" }], updatedAt: SUBJECT_UPDATED });
     if (args[0] === "pr" && args[1] === "list") {
       pullListCount += 1;
@@ -273,7 +273,7 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
             repository: {
               [object]: {
                 comments: {
-                  nodes: [{ body: `summary${runEvidence}\n${marker}`, updatedAt: staleMarker ? RUN_CREATED : MARKER_UPDATED, author: { login: APP.login, databaseId: foreignAppMarker ? 100 : Number(APP.id) } }],
+                  nodes: [{ body: `summary${runEvidence}\n${marker}`, updatedAt: staleMarker ? RUN_CREATED : MARKER_UPDATED, author: { login: APP.graphqlLogin, databaseId: foreignAppMarker ? 100 : Number(APP.id) } }],
                   pageInfo: { hasNextPage: false }
                 }
               }
@@ -305,7 +305,7 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
                 headRefName: branch,
                 createdAt: SUBJECT_UPDATED,
                 body: `Closes #${issueNumber}\n<!-- codekeeper:repair=${wrongRepairMarker ? "0".repeat(64) : fingerprint} -->`,
-                author: { login: APP.login, databaseId: Number(APP.id) }
+                author: { login: APP.graphqlLogin, databaseId: Number(APP.id) }
               }
             }
           }
@@ -397,11 +397,13 @@ test("scenario gates reject acknowledgements, non-SHAs, missing App identity, an
   const missingAcknowledgement = await scenarioOptions({ "acknowledge-private-acceptance": false });
   const branchRef = await scenarioOptions({ "source-sha": "main" });
   const missingAppId = await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login });
+  const nonBotAppLogin = await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.graphqlLogin, "app-id": APP.id });
   const missingParent = await scenarioOptions({ evidence: path.join(TEMP_ROOT, "not-created-parent", "evidence.json") });
   const oversizedRepository = await scenarioOptions({ repo: `${"o".repeat(40)}/codekeeper-acceptance-fixture` });
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: missingAcknowledgement, gh: never }), /acknowledge/);
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: branchRef, gh: never }), /40-character/);
   await assert.rejects(() => runScenario({ scenario: "review-introduced-defect", options: missingAppId, gh: never }), /--app-id/);
+  await assert.rejects(() => runScenario({ scenario: "review-introduced-defect", options: nonBotAppLogin, gh: never }), /ending in \[bot\]/);
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: missingParent, gh: never }), /output parent must already exist/);
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: oversizedRepository, gh: never }), /bounded repository limits/);
 });
@@ -533,7 +535,7 @@ test("review requires a current App-owned canonical marker and immutable current
   const foreign = fakeGh({ scenario: "review-introduced-defect", foreignAppMarker: true });
   const foreignResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: foreign.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(foreignResult.passed, false);
-  for (const option of [{ wrongDisplayTitle: true }, { reviewDraft: true }, { reviewRetarget: true }, { reviewHeadChanges: true }]) {
+  for (const option of [{ wrongDisplayTitle: true }, { wrongReviewGateName: true }, { reviewDraft: true }, { reviewRetarget: true }, { reviewHeadChanges: true }]) {
     const falsePositive = fakeGh({ scenario: "review-introduced-defect", ...option });
     const result = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: falsePositive.runner, now: () => new Date(NOW), sleep: async () => {} });
     assert.equal(result.passed, false);
