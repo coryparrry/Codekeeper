@@ -16,6 +16,11 @@ const MAX_GITHUB_URL_LENGTH = 2048;
 const MAX_GH_OUTPUT_BYTES = 128 * 1024;
 const DEFAULT_GH_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_GH_KILL_GRACE_MS = 1_000;
+const DISPATCH_DISCOVERY_POLL_INTERVAL_MS = 3_000;
+const DISPATCH_DISCOVERY_POLL_ATTEMPTS = 20;
+export const WORKFLOW_COMPLETION_POLL_INTERVAL_MS = 5_000;
+export const WORKFLOW_COMPLETION_TIMEOUT_MS = 10 * 60_000;
+export const WORKFLOW_COMPLETION_POLL_ATTEMPTS = (WORKFLOW_COMPLETION_TIMEOUT_MS / WORKFLOW_COMPLETION_POLL_INTERVAL_MS) + 1;
 const ACCEPTANCE_TAG_PREFIX = "codekeeper-acceptance/dispatch-";
 const MAX_ACCEPTANCE_TAG_LENGTH = 160;
 const REVIEW_MARKER = "<!-- codekeeper:review -->";
@@ -623,13 +628,27 @@ async function workflowRunMetadata({ repo, runId, gh }) {
   };
 }
 
-async function waitForRun({ repo, runId, expectedEvent, expectedWorkflowName, expectedDisplayTitle, gh, sleep, boundary = null, attempts = 20 }) {
+async function waitForRun({ repo, runId, expectedEvent, expectedWorkflowName, expectedDisplayTitle, gh, sleep, now = () => new Date(), boundary = null, beforePoll = null, timeoutMs = WORKFLOW_COMPLETION_TIMEOUT_MS, attempts = WORKFLOW_COMPLETION_POLL_ATTEMPTS }) {
   assert(typeof expectedDisplayTitle === "string" && expectedDisplayTitle.length > 0, "An expected workflow display title is required");
+  assert(Number.isInteger(timeoutMs) && timeoutMs > 0, "Workflow completion timeout must be positive");
+  assert(Number.isInteger(attempts) && attempts > 0, "Workflow completion polling must have a positive bounded attempt count");
+  const startedAt = now().getTime();
+  assert(Number.isFinite(startedAt), "Workflow completion clock is invalid");
+  const elapsedWithinDeadline = () => {
+    const elapsed = now().getTime() - startedAt;
+    assert(Number.isFinite(elapsed) && elapsed >= 0, "Workflow completion clock moved backwards or became invalid");
+    assert(elapsed <= timeoutMs, "Workflow run did not complete within the bounded acceptance wait");
+    return elapsed;
+  };
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    elapsedWithinDeadline();
+    if (beforePoll) await beforePoll();
+    elapsedWithinDeadline();
     const { stdout } = await callGh(gh, [
       "run", "view", String(runId), "--repo", repo,
       "--json", "databaseId,url,conclusion,status,workflowName,headSha,headBranch,createdAt,startedAt,updatedAt,attempt,displayTitle"
     ]);
+    elapsedWithinDeadline();
     const view = parseJson(stdout, "Workflow run");
     assert(String(view.databaseId) === String(runId), "Workflow run did not match the explicit run identifier");
     assert(view.workflowName === expectedWorkflowName, "Workflow run did not match the expected Codekeeper workflow");
@@ -637,6 +656,7 @@ async function waitForRun({ repo, runId, expectedEvent, expectedWorkflowName, ex
     assert(Number.isInteger(view.attempt) && view.attempt > 0, "Workflow run has an invalid attempt");
     if (view.status === "completed") {
       const metadata = await workflowRunMetadata({ repo, runId, gh });
+      elapsedWithinDeadline();
       assert(metadata.event === expectedEvent, "Workflow run event did not match the acceptance scenario");
       assert(view.url === metadata.url, "Workflow run URL did not match GitHub metadata");
       assert(view.headSha === metadata.headSha && view.headBranch === metadata.headBranch && view.displayTitle === metadata.displayTitle && view.attempt === metadata.attempt && view.status === metadata.status && view.updatedAt === metadata.updatedAt, "Workflow run view did not match immutable GitHub metadata");
@@ -647,9 +667,11 @@ async function waitForRun({ repo, runId, expectedEvent, expectedWorkflowName, ex
         assert(happensOnOrAfter(run.createdAt, boundary.dispatchedAt), "Workflow run predates the recorded dispatch boundary");
         assert(run.actorLogin === boundary.actorLogin, "Workflow run actor did not match the authenticated dispatcher");
       }
+      elapsedWithinDeadline();
       return run;
     }
-    if (attempt < attempts - 1) await sleep(3000);
+    const elapsed = elapsedWithinDeadline();
+    if (attempt < attempts - 1 && elapsed < timeoutMs) await sleep(Math.min(WORKFLOW_COMPLETION_POLL_INTERVAL_MS, timeoutMs - elapsed));
   }
   throw new AcceptanceError("Workflow run did not complete within the bounded acceptance wait");
 }
@@ -729,20 +751,30 @@ async function dispatchAndWait({ repo, scenario, issue, preflight, snapshot, gh,
   await callGh(gh, ["workflow", "run", detail.workflow, "--repo", repo, "--ref", snapshot.dispatchRef, ...inputs]);
   assert(await acceptanceTagRef({ repo, tag: snapshot.dispatchRef, gh }) === snapshot.headSha, "Acceptance tag changed after workflow dispatch");
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  let selectedRunId = null;
+  const observeDispatchRuns = async () => {
     const runs = await listWorkflowRuns({ repo, workflow: detail.workflow, event: detail.event, gh });
     await revalidateBaselineRuns({ repo, baseline, observedRuns: runs, dispatchedAt: boundary.dispatchedAt, gh });
     const candidates = runs.filter((run) => !boundary.baselineIds.has(String(run.databaseId)) && matchesDispatchBoundary(run, boundary));
     assert(candidates.length <= 1, "Concurrent workflow runs made dispatch attribution ambiguous");
-    if (candidates.length === 1) {
-      const candidate = candidates[0];
-      const run = await waitForRun({ repo, runId: candidate.databaseId, expectedEvent: detail.event, expectedWorkflowName: detail.workflowName, expectedDisplayTitle: boundary.displayTitle, gh, sleep, boundary });
-      const completedRuns = await listWorkflowRuns({ repo, workflow: detail.workflow, event: detail.event, gh });
-      await revalidateBaselineRuns({ repo, baseline, observedRuns: completedRuns, dispatchedAt: boundary.dispatchedAt, gh });
+    if (selectedRunId === null) {
+      if (candidates.length === 0) return null;
+      selectedRunId = String(candidates[0].databaseId);
+      return candidates[0];
+    }
+    assert(candidates.length === 1 && String(candidates[0].databaseId) === selectedRunId, "Selected workflow run no longer has unique dispatch attribution");
+    return candidates[0];
+  };
+
+  for (let attempt = 0; attempt < DISPATCH_DISCOVERY_POLL_ATTEMPTS; attempt += 1) {
+    const candidate = await observeDispatchRuns();
+    if (candidate) {
+      const run = await waitForRun({ repo, runId: candidate.databaseId, expectedEvent: detail.event, expectedWorkflowName: detail.workflowName, expectedDisplayTitle: boundary.displayTitle, gh, sleep, now, boundary, beforePoll: observeDispatchRuns });
+      await observeDispatchRuns();
       assert(await acceptanceTagRef({ repo, tag: snapshot.dispatchRef, gh }) === snapshot.headSha, "Acceptance tag changed while waiting for the workflow run");
       return run;
     }
-    if (attempt < 19) await sleep(3000);
+    if (attempt < DISPATCH_DISCOVERY_POLL_ATTEMPTS - 1) await sleep(DISPATCH_DISCOVERY_POLL_INTERVAL_MS);
   }
   throw new AcceptanceError("A unique dispatched workflow run was not observed within the bounded acceptance wait");
 }

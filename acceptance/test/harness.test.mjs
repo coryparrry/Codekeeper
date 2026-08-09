@@ -6,6 +6,8 @@ import { mkdtemp, readFile, readdir, stat, symlink } from "node:fs/promises";
 import path from "node:path";
 import {
   FIXTURE_ALLOWED_FIX_PATHS,
+  WORKFLOW_COMPLETION_POLL_ATTEMPTS,
+  WORKFLOW_COMPLETION_TIMEOUT_MS,
   createGhRunner,
   parseCommandLine,
   parseEventCallerRunName,
@@ -107,9 +109,21 @@ function createRepairFingerprint(issueNumber) {
   return createHash("sha256").update(`issue|${REPO}|${issueNumber}`).digest("hex");
 }
 
-function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concurrentDispatch = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false } = {}) {
+function fakeClock(start = NOW) {
+  const started = Date.parse(start);
+  let current = started;
+  return {
+    now: () => new Date(current),
+    sleep: async (milliseconds) => { current += milliseconds; },
+    advance: (milliseconds) => { current += milliseconds; },
+    elapsed: () => current - started
+  };
+}
+
+function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
   const calls = [];
   let workflowListCount = 0;
+  let runViewCount = 0;
   let pullListCount = 0;
   let pullViewCount = 0;
   let tag;
@@ -179,16 +193,18 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
       if (workflowListCount === 1) return response(baselineRun || baselineRerun ? [runEntry(66, { createdAt: "2026-08-07T23:59:59.000Z", updatedAt: "2026-08-07T23:59:59.001Z", headBranch: "main" })] : []);
       const runs = [runEntry()];
       if (baselineRun || baselineRerun) runs.unshift(runEntry(66, { createdAt: "2026-08-07T23:59:59.000Z", updatedAt: baselineRerun ? RUN_UPDATED : "2026-08-07T23:59:59.001Z", headBranch: "main", attempt: baselineRerun ? 2 : 1 }));
-      if (concurrentDispatch) runs.push(runEntry(78));
+      if (concurrentDispatch || (concurrentDispatchAfterCompletion && runViewCount > 0)) runs.push(runEntry(78));
       return response(runs);
     }
     if (args[0] === "workflow" && args[1] === "run") return response("");
     if (args[0] === "run" && args[1] === "view") {
+      runViewCount += 1;
+      const completed = !neverCompletes && runViewCount > completionAfterRunView;
       return response({
         databaseId: 77,
         url: `https://github.com/${REPO}/actions/runs/77`,
-        status: "completed",
-        conclusion: scenario === "review-introduced-defect" ? "failure" : "success",
+        status: completed ? "completed" : "in_progress",
+        conclusion: completed ? (scenario === "review-introduced-defect" ? "failure" : "success") : null,
         workflowName: detail[1],
         headSha: runHead,
         headBranch: runBranch(),
@@ -202,6 +218,7 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
     if (new RegExp(`^api --hostname github\\.com repos/${REPO}/actions/runs/(?:66|77)$`).test(text)) {
       const runId = Number(text.slice(text.lastIndexOf("/") + 1));
       const baseline = runId === 66;
+      if (!baseline && onRunMetadata) await onRunMetadata();
       return response({
         id: runId,
         html_url: `https://github.com/${REPO}/actions/runs/${runId}`,
@@ -297,7 +314,12 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
     }
     throw new Error(`Unexpected fake gh command: ${text}`);
   };
-  return { runner, calls };
+  return {
+    runner,
+    calls,
+    get runViewCount() { return runViewCount; },
+    get workflowListCount() { return workflowListCount; }
+  };
 }
 
 test("source pin parser requires exact matching bootstrap and reusable workflow pins", () => {
@@ -449,10 +471,52 @@ test("maintenance dry-run uses a quiescent, actor-bound dispatch boundary and on
 });
 
 test("dispatch revalidates stable baseline runs after every poll and after selected completion", async () => {
-  const { runner, calls } = fakeGh({ scenario: "maintenance-dry-run", baselineRun: true });
-  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: runner, now: () => new Date(NOW), sleep: async () => {} });
+  const clock = fakeClock();
+  const fake = fakeGh({ scenario: "maintenance-dry-run", baselineRun: true, completionAfterRunView: 2 });
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: clock.now, sleep: clock.sleep });
   assert.equal(result.passed, true);
-  assert.equal(calls.filter((args) => args[3] === `repos/${REPO}/actions/runs/66`).length, 2);
+  assert.equal(fake.runViewCount, 3);
+  assert.equal(fake.calls.filter((args) => args[3] === `repos/${REPO}/actions/runs/66`).length, fake.workflowListCount - 1);
+  assert.equal(fake.calls.filter((args) => args[3] === `repos/${REPO}/actions/runs/66`).length, fake.runViewCount + 2);
+});
+
+test("maintenance accepts a selected run that completes after the former 60-second wait", async () => {
+  const clock = fakeClock();
+  const fake = fakeGh({ scenario: "maintenance-dry-run", completionAfterRunView: 13 });
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: clock.now, sleep: clock.sleep });
+  assert.equal(result.passed, true);
+  assert.equal(fake.runViewCount, 14);
+  assert.equal(clock.elapsed(), 65_000);
+});
+
+test("maintenance fails closed when selected workflow completion exceeds the bounded wait", async () => {
+  const clock = fakeClock();
+  const fake = fakeGh({ scenario: "maintenance-dry-run", neverCompletes: true });
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: clock.now, sleep: clock.sleep });
+  assert.equal(result.passed, false);
+  assert.equal(fake.runViewCount, WORKFLOW_COMPLETION_POLL_ATTEMPTS);
+  assert.equal(clock.elapsed(), WORKFLOW_COMPLETION_TIMEOUT_MS);
+});
+
+test("maintenance rejects completion metadata that crosses the bounded deadline", async () => {
+  const clock = fakeClock();
+  const fake = fakeGh({
+    scenario: "maintenance-dry-run",
+    completionAfterRunView: WORKFLOW_COMPLETION_POLL_ATTEMPTS - 1,
+    onRunMetadata: async () => clock.advance(1)
+  });
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: clock.now, sleep: clock.sleep });
+  assert.equal(result.passed, false);
+  assert.equal(fake.runViewCount, WORKFLOW_COMPLETION_POLL_ATTEMPTS);
+  assert.equal(clock.elapsed(), WORKFLOW_COMPLETION_TIMEOUT_MS + 1);
+});
+
+test("maintenance rejects a second matching run that appears after completion", async () => {
+  const clock = fakeClock();
+  const fake = fakeGh({ scenario: "maintenance-dry-run", concurrentDispatchAfterCompletion: true });
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: clock.now, sleep: clock.sleep });
+  assert.equal(result.passed, false);
+  assert.equal(fake.runViewCount, 1);
 });
 
 test("review requires a current App-owned canonical marker and immutable current-head linkage", async () => {
