@@ -17,6 +17,8 @@ import {
   MODE_IDS,
   MODES,
   OPENAI_SECRET,
+  RECOMMENDED_MODES,
+  RECOMMENDED_PRESET,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY,
   TRACE_SECRET
@@ -301,11 +303,44 @@ test("install plan is frozen, disabled first, and documents selected workflows w
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
   assert.match(plan.pullRequest.body, /\| Mode \| Trigger \| Policy agent \|/);
   assert.match(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
+  assert.match(plan.pullRequest.body, /Review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`/);
+  assert.match(plan.pullRequest.body, /Do not make that gate required until the controlled review proof passes/);
   assert.match(plan.pullRequest.body, /did not merge.*enable Codekeeper.*dispatch a workflow/s);
   assert.doesNotMatch(plan.pullRequest.body, /PRIVATE KEY|sk-[A-Za-z0-9]/i);
   assert.deepEqual(documentMap(plan.files).map((item) => item.path), plan.files.map((file) => file.path));
   assert.deepEqual(workflowMap(plan.modes).map((item) => item.mode), MODE_IDS);
   assert.equal(setupPullRequestBody(plan), plan.pullRequest.body);
+});
+
+test("recommended starter plan selects only review and maintenance with one OpenAI provider key", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET })
+  });
+  assert.deepEqual(plan.modes, ["review", "maintain"]);
+  assert.equal(plan.preset, "openai");
+  assert.deepEqual(plan.files.map((file) => file.path), [
+    ".github/codekeeper.json",
+    ".github/workflows/codekeeper-review.yml",
+    ".github/workflows/codekeeper-maintain.yml"
+  ]);
+  assert.deepEqual(plan.secrets.map((secret) => secret.name), [
+    "OPENAI_API_KEY",
+    "OPENAI_TRACE_API_KEY",
+    "CODEKEEPER_APP_PRIVATE_KEY"
+  ]);
+  assert.equal(plan.secrets.some((secret) => secret.name === "DEEPSEEK_API_KEY"), false);
+  const policy = JSON.parse(plan.files[0].contents);
+  assert.deepEqual(
+    [policy.ai.agents.review.provider, policy.ai.agents.review.model, policy.ai.agents.review.effort],
+    ["openai", "gpt-5.6-sol", "high"]
+  );
+  assert.deepEqual(
+    [policy.ai.agents.audit.provider, policy.ai.agents.audit.model, policy.ai.agents.audit.effort],
+    ["openai", "gpt-5.6-sol", "high"]
+  );
 });
 
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {

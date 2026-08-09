@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadVerifiedAssets } from "../src/assets.mjs";
 import { currentResumeCommand, parseCliArgs, runCli, USAGE } from "../src/cli.mjs";
@@ -8,26 +8,29 @@ import { createCommandRunner } from "../src/command-runner.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
 import { createRecordingRunner, git, HEAD_SHA, result, temporaryDirectory, textSink } from "./helpers.mjs";
 
-function guidedPrompt(confirmations = [true, true, true, true]) {
+function guidedPrompt(confirmations = [true, true, true, true, true]) {
   const answers = [...confirmations];
-  return {
-    async confirm() {
+  const prompt = {
+    confirmations: [],
+    async confirm(options) {
+      prompt.confirmations.push(options);
       return answers.shift();
     },
     async multiselect() {
-      return ["review"];
+      throw new Error("recommended setup must not ask for custom workflows");
     },
     async select() {
-      return "mixed";
+      throw new Error("recommended setup must not ask for a custom preset");
     },
     async inputText({ message }) {
-      if (message.startsWith("Repository")) return "Widget";
-      if (message.startsWith("Owner")) return "cory";
+      if (message.startsWith("Human-readable")) return "Widget";
+      if (message.startsWith("GitHub users")) return "cory";
       if (message.startsWith("GitHub App Client")) return "Iv123456789012345678";
       if (message.startsWith("GitHub App bot")) return "codekeeper-widget[bot]";
       throw new Error(`Unexpected prompt: ${message}`);
     }
   };
+  return prompt;
 }
 
 function repositorySnapshot(root, headSha) {
@@ -101,21 +104,7 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   const runner = createRecordingRunner(() => {
     throw new Error("no external command is expected before the App confirmation");
   });
-  const confirmations = [true, true, false];
-  const prompt = {
-    async confirm() {
-      return confirmations.shift();
-    },
-    async multiselect() {
-      return ["review"];
-    },
-    async select() {
-      return "mixed";
-    },
-    async inputText({ message }) {
-      return message.startsWith("Repository") ? "Acme Widget" : "coryparrry";
-    }
-  };
+  const prompt = guidedPrompt([true, true, true, false]);
   const snapshot = Object.freeze({
     root: "/tmp/acme widget",
     originUrl: "https://github.com/acme/widget.git",
@@ -149,7 +138,129 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   assert.match(output.toString(), new RegExp(openedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(errorOutput.toString(), /Complete GitHub App creation/);
   assert.match(errorOutput.toString(), new RegExp(resumeCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(prompt.confirmations.length, 4);
   assert.deepEqual(runner.calls, []);
+});
+
+test("declining the repository confirmation performs no mutation or App navigation", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  const runner = createRecordingRunner(() => {
+    throw new Error("no external command is expected before repository confirmation");
+  });
+  const prompt = guidedPrompt([false]);
+  let opens = 0;
+  const status = await runCli({
+    argv: ["init"],
+    output,
+    errorOutput,
+    runner,
+    prompt,
+    interactive: true,
+    inspect: async () => repositorySnapshot("/tmp/widget", HEAD_SHA),
+    openUrl: async () => {
+      opens += 1;
+    }
+  });
+  assert.equal(status, 1);
+  assert.equal(opens, 0);
+  assert.deepEqual(prompt.confirmations, [
+    { message: "Install into acme/widget on default branch main?", defaultValue: false }
+  ]);
+  assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("declining conservative boundaries on the recommended path performs no mutation or App navigation", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  const runner = createRecordingRunner(() => {
+    throw new Error("no external mutation is expected before boundary confirmation");
+  });
+  const prompt = guidedPrompt([true, true, false]);
+  let opens = 0;
+  const snapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
+  const status = await runCli({
+    argv: ["init"],
+    output,
+    errorOutput,
+    runner,
+    prompt,
+    interactive: true,
+    inspect: async () => snapshot,
+    openUrl: async () => {
+      opens += 1;
+    }
+  });
+  assert.equal(status, 1);
+  assert.equal(opens, 0);
+  assert.deepEqual(prompt.confirmations, [
+    { message: "Install into acme/widget on default branch main?", defaultValue: false },
+    { message: "Use the recommended starter setup?", defaultValue: true },
+    { message: "Continue with these disabled-by-default boundaries?", defaultValue: false }
+  ]);
+  assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("declining final setup confirmation leaves settings, Git, and files untouched", async (t) => {
+  const root = await temporaryDirectory(t, "codekeeper-cli-final-abort-");
+  git(root, ["init", "--template=", "--initial-branch=main"]);
+  git(root, ["config", "user.name", "Codekeeper Test"]);
+  git(root, ["config", "user.email", "codekeeper@example.test"]);
+  git(root, ["config", "commit.gpgsign", "false"]);
+  git(root, ["config", "core.hooksPath", ".git/hooks"]);
+  git(root, ["config", "core.fsmonitor", "false"]);
+  await mkdir(path.join(root, ".git", "hooks"), { recursive: true });
+  await writeFile(path.join(root, "README.md"), "# Widget\n");
+  git(root, ["add", "README.md"]);
+  git(root, ["commit", "-m", "initial"]);
+  const head = git(root, ["rev-parse", "HEAD"]).trim();
+  const branch = git(root, ["branch", "--show-current"]).trim();
+  const statusBefore = git(root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+  const snapshot = repositorySnapshot(root, head);
+  const output = textSink();
+  const errorOutput = textSink();
+  const runner = createRecordingRunner(() => {
+    throw new Error("no repository setting, GitHub, or Git command is expected before final confirmation");
+  });
+  const prompt = guidedPrompt([true, true, true, true, false]);
+  let inspections = 0;
+  let openedUrl = null;
+  const status = await runCli({
+    argv: ["init"],
+    cwd: root,
+    output,
+    errorOutput,
+    runner,
+    prompt,
+    interactive: true,
+    inspect: async () => {
+      inspections += 1;
+      return snapshot;
+    },
+    openUrl: async (url) => {
+      openedUrl = url;
+    }
+  });
+
+  assert.equal(status, 1);
+  assert.equal(inspections, 1);
+  assert.match(openedUrl, /^https:\/\/github\.com\/settings\/apps\/new\?/);
+  assert.deepEqual(prompt.confirmations, [
+    { message: "Install into acme/widget on default branch main?", defaultValue: false },
+    { message: "Use the recommended starter setup?", defaultValue: true },
+    { message: "Continue with these disabled-by-default boundaries?", defaultValue: false },
+    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: false },
+    { message: "Create this disabled setup?", defaultValue: false }
+  ]);
+  assert.match(output.toString(), /Setup preview/);
+  assert.match(errorOutput.toString(), /Setup was cancelled before repository mutation/);
+  assert.deepEqual(runner.calls, []);
+  assert.equal(git(root, ["rev-parse", "HEAD"]).trim(), head);
+  assert.equal(git(root, ["branch", "--show-current"]).trim(), branch);
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), statusBefore);
+  await assert.rejects(access(path.join(root, ".github")), (error) => error?.code === "ENOENT");
 });
 
 test("resume command formatting is executable on POSIX and PowerShell", () => {
@@ -206,13 +317,14 @@ test("successful init revalidates three snapshots and orders settings, exact com
   let opened = null;
   const output = textSink();
   const errorOutput = textSink();
+  const prompt = guidedPrompt();
   const status = await runCli({
     argv: ["init"],
     cwd: root,
     output,
     errorOutput,
     runner,
-    prompt: guidedPrompt(),
+    prompt,
     interactive: true,
     inspect: async () => {
       inspections += 1;
@@ -226,6 +338,13 @@ test("successful init revalidates three snapshots and orders settings, exact com
   });
   assert.equal(status, 0, errorOutput.toString());
   assert.equal(inspections, 3);
+  assert.deepEqual(prompt.confirmations, [
+    { message: "Install into acme/widget on default branch main?", defaultValue: false },
+    { message: "Use the recommended starter setup?", defaultValue: true },
+    { message: "Continue with these disabled-by-default boundaries?", defaultValue: false },
+    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: false },
+    { message: "Create this disabled setup?", defaultValue: false }
+  ]);
   assert.match(opened, /^https:\/\/github\.com\/settings\/apps\/new\?/);
   assert.match(pushedCommit, /^[0-9a-f]{40}$/);
   assert.equal(git(root, ["rev-parse", "HEAD"]).trim(), pushedCommit);
@@ -239,6 +358,31 @@ test("successful init revalidates three snapshots and orders settings, exact com
   const prIndex = indexOf((call) => call.command === "gh" && call.args[0] === "pr");
   assert.ok([disableIndex, secretIndex, branchIndex, commitIndex, pushIndex, prIndex].every((index) => index >= 0));
   assert.ok(disableIndex < secretIndex && secretIndex < branchIndex && branchIndex < commitIndex && commitIndex < pushIndex && pushIndex < prIndex);
+  assert.deepEqual(
+    calls.filter((call) => call.command === "gh" && call.args[0] === "secret").map((call) => call.args[2]),
+    ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]
+  );
+  assert.equal(calls.some((call) => call.args.includes("DEEPSEEK_API_KEY")), false);
+  assert.deepEqual(
+    git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(),
+    [
+      ".github/codekeeper.json",
+      ".github/workflows/codekeeper-maintain.yml",
+      ".github/workflows/codekeeper-review.yml"
+    ]
+  );
+  assert.match(output.toString(), /Provider preset: openai \(one OpenAI provider key\)/);
+  assert.match(output.toString(), /Pull request review: openai \/ gpt-5\.6-sol \/ high effort/);
+  assert.match(output.toString(), /Repository maintenance: openai \/ gpt-5\.6-sol \/ high effort/);
+  assert.match(output.toString(), /OPENAI_API_KEY: OpenAI Platform API key for model calls after enablement; this is not a ChatGPT subscription/);
+  assert.match(output.toString(), /OPENAI_TRACE_API_KEY: separate OpenAI Platform API key for trace export; do not reuse the model-provider key/);
+  assert.match(output.toString(), /CODEKEEPER_APP_PRIVATE_KEY: downloaded GitHub App PEM private key used to mint App installation tokens/);
+  assert.doesNotMatch(output.toString(), /DEEPSEEK_API_KEY:/);
+  assert.match(output.toString(), /\.github\/workflows\/codekeeper-review\.yml/);
+  assert.match(output.toString(), /\.github\/workflows\/codekeeper-maintain\.yml/);
+  assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
+  assert.match(output.toString(), /After merge, PR events intentionally show a failed Codekeeper review gate while disabled/);
+  assert.match(output.toString(), /Do not make the Codekeeper review gate required until its controlled review proof passes/);
   assert.match(output.toString(), /Created disabled setup PR: https:\/\/github\.com\/acme\/widget\/pull\/42/);
   assert.match(output.toString(), /did not enable Codekeeper, dispatch a workflow, or merge the PR/);
   assert.equal(errorOutput.toString(), "");
