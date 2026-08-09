@@ -224,6 +224,11 @@ function normaliseLogin(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function canonicalAppBotLogin(value) {
+  const login = normaliseLogin(value);
+  return login.endsWith("[bot]") ? login.slice(0, -"[bot]".length) : login;
+}
+
 function validateRepositoryName(repo) {
   assert(typeof repo === "string" && repo.length <= MAX_REPOSITORY_LENGTH && REPOSITORY.test(repo), "An explicit --repo OWNER/REPOSITORY is required; implicit or current repositories are rejected");
   const [owner, name] = repo.split("/");
@@ -243,9 +248,9 @@ function validatePositiveInteger(value, option) {
 }
 
 function validateAppIdentity(options) {
-  const login = normaliseLogin(options["app-login"]);
-  assert(/^[a-z0-9](?:[a-z0-9-]{0,38}\[bot\])?$/.test(login), "--app-login must be an explicit GitHub App bot login");
-  return { login, id: String(validatePositiveInteger(options["app-id"], "--app-id")) };
+  const suppliedLogin = normaliseLogin(options["app-login"]);
+  assert(/^[a-z0-9](?:[a-z0-9-]{0,38})?\[bot\]$/.test(suppliedLogin), "--app-login must be an explicit GitHub App bot login ending in [bot]");
+  return { login: canonicalAppBotLogin(suppliedLogin), id: String(validatePositiveInteger(options["app-id"], "--app-id")) };
 }
 
 function expect(assertions, expectation, passed) {
@@ -825,7 +830,7 @@ async function currentMarkerComment({ repo, kind, number, marker, app, expectedR
   assert(Array.isArray(comments?.nodes) && comments.nodes.length <= 100 && comments?.pageInfo?.hasNextPage === false, "Marker-comment metadata exceeded its safe bound");
   const expectedEvidence = expectedRunUrl === null ? null : runEvidenceLine(expectedRunUrl);
   const owned = comments.nodes
-    .filter((comment) => normaliseLogin(comment?.author?.login) === app.login && String(comment?.author?.databaseId ?? "") === app.id && typeof comment?.body === "string" && comment.body.endsWith(marker) && (expectedEvidence === null || comment.body.includes(expectedEvidence)))
+    .filter((comment) => canonicalAppBotLogin(comment?.author?.login) === app.login && String(comment?.author?.databaseId ?? "") === app.id && typeof comment?.body === "string" && comment.body.endsWith(marker) && (expectedEvidence === null || comment.body.includes(expectedEvidence)))
     .map((comment) => ({ updatedAt: comment.updatedAt }));
   assert(owned.length === 1 && validTimestamp(owned[0].updatedAt) && (notBefore === null || happensOnOrAfter(owned[0].updatedAt, notBefore)), "Current App publication marker lacks a unique current App-owned publication record");
   return owned[0];
@@ -957,7 +962,7 @@ async function verifyReview({ request, preflightResult, gh, sleep }) {
   expect(assertions, "introduced-defect pull request remains open, non-draft, same-repository, and targets the default branch", true);
   expect(assertions, "review run title and immutable head are bound to the requested pull request", run.headSha === pull.headRefOid && run.headBranch === pull.headRefName && run.displayTitle === reviewRunTitle(request.pr, pull.headRefOid));
   expect(assertions, "review workflow completed with the expected blocking conclusion", run.conclusion === "failure");
-  expect(assertions, "blocking review state is accompanied by publisher evidence for this exact run", labelsFrom(pull).includes("codekeeper:blocked") && hasExactCheck(checks, "Codekeeper review gate", "fail"));
+  expect(assertions, "blocking review state is accompanied by publisher evidence for this exact run", labelsFrom(pull).includes("codekeeper:blocked") && hasExactCheck(checks, "review / Codekeeper review gate", "fail"));
   expect(assertions, "review publication has one current canonical App marker correlated to the selected run URL", Boolean(marker));
   return { assertions, workflow: workflowEvidence(run), resource: resourceEvidence("pull_request", pull), passed: assertions.every((assertion) => assertion.passed) };
 }
@@ -999,7 +1004,7 @@ async function verifyFix({ request, preflightResult, gh, sleep, now, recordDispa
   ]);
   const expectedBranch = branchSlug(`${prefix}fix-${fingerprint}`);
   expect(assertions, "controlled fix workflow completed successfully", run.conclusion === "success");
-  expect(assertions, "fix pull request is open, App-owned, and not auto-merged", pull.state === "OPEN" && !pull.mergedAt && pull.autoMergeRequest == null && normaliseLogin(pull?.author?.login) === request.app.login && String(pull?.author?.databaseId ?? "") === request.app.id);
+  expect(assertions, "fix pull request is open, App-owned, and not auto-merged", pull.state === "OPEN" && !pull.mergedAt && pull.autoMergeRequest == null && canonicalAppBotLogin(pull?.author?.login) === request.app.login && String(pull?.author?.databaseId ?? "") === request.app.id);
   expect(assertions, "fix pull request is the canonical repair for the requested issue", pull.headRefName === expectedBranch && typeof pull.body === "string" && pull.body.includes(`Closes #${request.issue}`) && pull.body.endsWith(repairMarker(fingerprint)) && happensOnOrAfter(marker.updatedAt, run.startedAt));
   expect(assertions, "fix changed only bounded fixture paths", paths.length > 0 && paths.every((changedPath) => FIXTURE_ALLOWED_FIX_PATHS.includes(changedPath)));
   expect(assertions, "fixture tests passed in Codekeeper verification", jobs.some((job) => String(job?.name ?? "").toLowerCase().includes("implementation verification") && job?.conclusion === "success"));
