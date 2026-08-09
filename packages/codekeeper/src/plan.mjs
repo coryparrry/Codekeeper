@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   APP_SECRET,
   BOT_LOGIN_VARIABLE,
@@ -33,6 +34,13 @@ function deepFreeze(value) {
 
 function validDisplayName(value) {
   return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 100 && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function validPrivateKeyPath(value) {
+  return typeof value === "string"
+    && path.isAbsolute(value)
+    && value.trim() === value
+    && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
 export function normalizeModes(modes) {
@@ -262,7 +270,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   });
 
   output.write("\nCredentials this setup will request later through GitHub CLI\n");
-  output.write("Setup itself makes no model call. The installer never reads these values; GitHub Actions supplies them later only to the selected jobs.\n");
+  output.write("Setup itself makes no model call. Provider and trace values go directly to GitHub CLI; the App PEM will be supplied from its downloaded file without the installer reading its contents. GitHub Actions supplies the stored secrets later only to selected jobs.\n");
   for (const name of requiredSecretNames({ modes, preset })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
 
   const policy = JSON.parse(bundle.contents[`policies/${preset}.json`]);
@@ -295,4 +303,13 @@ export async function collectAppAnswers({ prompt, modes, output }) {
     });
   }
   return Object.freeze({ appClientId, automationBotLogin: automationBotLogin?.toLowerCase() ?? null });
+}
+
+export async function collectAppPrivateKeyPath({ prompt, output }) {
+  output.write("\nGitHub App private-key file\n");
+  output.write("Use the newly downloaded .pem file. Do not open it or paste its contents. The installer opens the file read-only and gives its descriptor directly to GitHub CLI; its path and contents are not displayed later.\n");
+  return prompt.inputText({
+    message: "Full absolute path to the downloaded GitHub App private-key PEM",
+    validate: (value) => validPrivateKeyPath(value) || "Enter the full absolute path to the downloaded .pem file, not the key contents."
+  });
 }

@@ -5,7 +5,7 @@
 The package is currently **unpublished** while private acceptance is in progress. Exercise the exact local tarball from a clean adopter checkout:
 
 ```bash
-npm exec --package /absolute/path/to/codekeeper-0.1.0.tgz -- codekeeper init
+npm exec --package /absolute/path/to/codekeeper-0.1.1.tgz -- codekeeper init
 ```
 
 The v1 CLI surface is:
@@ -46,8 +46,9 @@ After choosing the starter or custom path, the flow explains that the display na
 1. Generates only `.github/codekeeper.json` and the selected caller workflows.
 2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `1938cd9efc3930d61b78d9e42189d1db3e3e3e9c`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
-4. Forces `CODEKEEPER_ENABLED=false`, invokes inherited-terminal `gh secret set` for every required secret, and sets the remaining non-secret Actions variables. An existing same-named secret is deliberately replaced only after you enter its new value directly into `gh`.
-5. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add disabled setup`, pushes the branch, and opens a setup PR.
+4. After the final confirmation, asks for the absolute path to the downloaded App PEM, opens that file read-only, and validates the same opened descriptor as a nonempty regular file within GitHub's 48 KB secret limit.
+5. Forces `CODEKEEPER_ENABLED=false`, invokes inherited-terminal `gh secret set` for each single-line provider or trace key, and feeds only the App PEM descriptor to `gh` through non-terminal standard input. An existing same-named secret is deliberately replaced only after its new input is supplied.
+6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add disabled setup`, pushes the branch, and opens a setup PR.
 
 It never merges the PR, enables automation, publishes an npm package, copies the runtime, or creates a hosted service.
 
@@ -65,7 +66,7 @@ If App registration, a secret prompt, push, or PR creation fails after setup beg
 
 The GitHub App needs contents, issues, and pull requests read-write plus metadata read-only, with webhooks disabled. Its settings page shows both a numeric **App ID** and a string **Client ID**. Codekeeper uses the **Client ID** (typically beginning `Iv`) for `CODEKEEPER_APP_CLIENT_ID`; the numeric App ID is not a substitute.
 
-The App settings page also shows the App slug. Its publication login is `<app-slug>[bot]`; review setup asks for that login so App-authored automation pull requests can be identified. The private key and provider keys are entered only at the inherited `gh secret set` terminal prompt. Secret values are not passed in command arguments or environment variables and are not read into installer Node.js memory, generated files, logs, or snapshots. GitHub CLI handles the local secret submission. Never paste a key into `.github/codekeeper.json`.
+The App settings page also shows the App slug. Its publication login is `<app-slug>[bot]`; review setup asks for that login so App-authored automation pull requests can be identified. Provider and trace keys are single-line values entered at inherited `gh secret set` prompts. The App private key is different: never paste the multiline PEM into a prompt. After the final setup confirmation, enter only the downloaded file's absolute path. The installer opens it read-only and passes the file descriptor directly to `gh secret set` with child output suppressed. PEM bytes are not put in command arguments, environment variables, installer buffers, generated files, terminal output, logs, plans, receipts, or snapshots. GitHub CLI reads the secret from standard input and encrypts it locally before submission. Never paste a key into `.github/codekeeper.json` or this installer.
 
 The selected modes determine which provider secrets are requested. The `mixed` preset uses OpenAI for review, audit, and fix and DeepSeek for issue triage. The `openai` preset uses OpenAI for all selected modes. The bundled policies enable tracing, so both require a separate OpenAI trace key; a trace key is not the coordinator's provider key.
 

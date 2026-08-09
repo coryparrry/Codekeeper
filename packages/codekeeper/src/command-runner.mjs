@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process";
+import { closeSync, constants as fsConstants, fstatSync, openSync } from "node:fs";
+import path from "node:path";
 import { InstallerError } from "./errors.mjs";
 
 const OUTPUT_LIMIT = 128 * 1024;
+const STDIN_FILE_LIMIT = 48 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const KILL_GRACE_MS = 1_000;
 const SAFE_ENV_NAMES = new Set([
@@ -22,6 +25,68 @@ export function sanitizedEnvironment(environment = process.env) {
   return sanitized;
 }
 
+const DEFAULT_FILE_OPERATIONS = Object.freeze({
+  closeSync,
+  fstatSync,
+  openSync
+});
+
+function validateStdinFilePath(stdinFilePath) {
+  if (
+    typeof stdinFilePath !== "string"
+    || !path.isAbsolute(stdinFilePath)
+    || stdinFilePath.trim() !== stdinFilePath
+    || /[\u0000-\u001f\u007f]/.test(stdinFilePath)
+  ) {
+    throw new InstallerError("The selected private-key file path must be an absolute path.", {
+      code: "SECRET_INPUT_FILE_INVALID"
+    });
+  }
+}
+
+export function openSafeStdinFile(stdinFilePath, { fileOperations = DEFAULT_FILE_OPERATIONS } = {}) {
+  validateStdinFilePath(stdinFilePath);
+  let descriptor = null;
+  let closed = false;
+  try {
+    descriptor = fileOperations.openSync(
+      stdinFilePath,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0)
+    );
+    const opened = fileOperations.fstatSync(descriptor);
+    if (
+      !opened.isFile()
+      || opened.size <= 0
+      || opened.size > STDIN_FILE_LIMIT
+    ) {
+      throw new InstallerError("The selected private-key input must be a nonempty regular file no larger than 48 KB.", {
+        code: "SECRET_INPUT_FILE_INVALID"
+      });
+    }
+    return Object.freeze({
+      descriptor,
+      close() {
+        if (closed) return;
+        closed = true;
+        fileOperations.closeSync(descriptor);
+      }
+    });
+  } catch (cause) {
+    if (descriptor !== null) {
+      try {
+        fileOperations.closeSync(descriptor);
+      } catch {
+        // Preserve the safe generic error below without exposing local path data.
+      }
+    }
+    if (cause instanceof InstallerError) throw cause;
+    throw new InstallerError("The selected private-key file could not be opened safely.", {
+      code: "SECRET_INPUT_FILE_INVALID",
+      cause
+    });
+  }
+}
+
 function appendBounded(chunks, chunk, state) {
   const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
   const remaining = OUTPUT_LIMIT - state.bytes;
@@ -34,7 +99,10 @@ function appendBounded(chunks, chunk, state) {
   if (buffer.length > remaining) state.truncated = true;
 }
 
-export function createCommandRunner({ spawnImpl = spawn, environment = process.env } = {}) {
+export function createCommandRunner({
+  spawnImpl = spawn,
+  environment = process.env
+} = {}) {
   return Object.freeze({
     run(command, args = [], options = {}) {
       if (typeof command !== "string" || !command) throw new TypeError("command must be a non-empty string");
@@ -44,6 +112,10 @@ export function createCommandRunner({ spawnImpl = spawn, environment = process.e
       const timeoutMs = options.timeoutMs === null ? null : (options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
       if (timeoutMs !== null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
         throw new TypeError("timeoutMs must be a positive finite number or null");
+      }
+      const stdinFd = options.stdinFd ?? null;
+      if (stdinFd !== null && (!Number.isInteger(stdinFd) || stdinFd < 3)) {
+        throw new TypeError("stdinFd must be an open non-standard file descriptor");
       }
       const env = options.env ?? sanitizedEnvironment(environment);
 
@@ -57,11 +129,16 @@ export function createCommandRunner({ spawnImpl = spawn, environment = process.e
         let killTimer = null;
         let child;
         try {
+          const childStdio = stdio === "capture"
+            ? [stdinFd ?? "ignore", "pipe", "pipe"]
+            : stdinFd === null
+              ? stdio
+              : [stdinFd, stdio, stdio];
           child = spawnImpl(command, args, {
             cwd: options.cwd,
             env,
             shell: false,
-            stdio: stdio === "capture" ? ["ignore", "pipe", "pipe"] : stdio
+            stdio: childStdio
           });
         } catch (cause) {
           reject(new InstallerError(`Could not start ${command}.`, { code: "COMMAND_START_FAILED", cause }));
