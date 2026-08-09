@@ -343,7 +343,7 @@ async function verifyPatchCandidate({ mode, candidateDirectory, expectedCandidat
   }
   const policy = validatePatch(initial.changes, config);
   if (!policy.valid) throw new Error(`Fresh verification patch failed policy: ${policy.reasons.join("; ")}`);
-  runValidationCommands(config.audit.repair.validationCommands);
+  await runValidationCommands(config.audit.repair.validationCommands);
   if (currentHead() !== context.baseSha) {
     throw new Error(`Validation commands changed checkout HEAD from ${context.baseSha} to ${currentHead()}`);
   }

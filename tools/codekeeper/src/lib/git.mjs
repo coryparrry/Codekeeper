@@ -205,27 +205,33 @@ export function applyPatch(patchPath, cwd = process.cwd()) {
   git(["apply", "--whitespace=error-all", patchPath], { cwd });
 }
 
-export function runValidationCommands(commands, cwd = process.cwd()) {
+export async function runValidationCommands(commands, cwd = process.cwd()) {
   const environment = {};
   for (const key of ["PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "TEMP", "TMP"]) {
     if (process.env[key] !== undefined) environment[key] = process.env[key];
   }
-  const results = [];
-  for (const command of commands) {
-    const result = run("bash", ["-c", command], { cwd, allowFailure: true, env: environment, replaceEnv: true });
-    results.push({
-      command,
-      success: result.status === 0,
-      stdout: result.stdout.toString("utf8").slice(-12000),
-      stderr: result.stderr.toString("utf8").slice(-12000)
-    });
-    if (result.status !== 0) {
-      const error = new Error(`Validation command failed: ${command}`);
-      error.validationResults = results;
-      throw error;
+  const home = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-home-"));
+  environment.HOME = home;
+  try {
+    const results = [];
+    for (const command of commands) {
+      const result = run("bash", ["-c", command], { cwd, allowFailure: true, env: environment, replaceEnv: true });
+      results.push({
+        command,
+        success: result.status === 0,
+        stdout: result.stdout.toString("utf8").slice(-12000),
+        stderr: result.stderr.toString("utf8").slice(-12000)
+      });
+      if (result.status !== 0) {
+        const error = new Error(`Validation command failed: ${command}`);
+        error.validationResults = results;
+        throw error;
+      }
     }
+    return results;
+  } finally {
+    await rm(home, { recursive: true, force: true });
   }
-  return results;
 }
 
 export function configureAutomationIdentity({ login, id, cwd = process.cwd() } = {}) {

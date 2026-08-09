@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, lstat, mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
+import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges, runValidationCommands } from "../src/lib/git.mjs";
 import { prepareIssue } from "../src/lib/prepare.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +31,10 @@ function digest(value) {
 
 function bundle(root, name = "bundle") {
   return `${root}-${name}`;
+}
+
+function shellLiteral(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
 function auditResult({ repair = false } = {}) {
@@ -333,6 +337,41 @@ test("audit candidate validation preserves caller changes and exposes only safe 
     }
   );
   assert.match(await readFile(path.join(verifier, "README.md"), "utf8"), /Updated guidance/);
+});
+
+test("validation commands receive a usable disposable home directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-home-test-"));
+  const successfulHomeRecord = path.join(root, "successful-home");
+  const failedHomeRecord = path.join(root, "failed-home");
+  const inheritedHome = process.env.HOME;
+  const usableHome = [
+    'test -n "$HOME"',
+    'test -d "$HOME"',
+    inheritedHome === undefined ? "true" : `test "$HOME" != ${shellLiteral(inheritedHome)}`,
+    "git config --global user.name codekeeper-verifier",
+    'test "$(git config --global user.name)" = codekeeper-verifier'
+  ].join(" && ");
+  try {
+    const successful = await runValidationCommands([
+      `${usableHome} && printf '%s' "$HOME" > ${shellLiteral(successfulHomeRecord)}`
+    ], root);
+    assert.equal(successful[0].success, true);
+    const successfulHome = (await readFile(successfulHomeRecord, "utf8")).trim();
+    assert.notEqual(successfulHome, inheritedHome);
+    await assert.rejects(lstat(successfulHome), { code: "ENOENT" });
+
+    await assert.rejects(
+      runValidationCommands([
+        `${usableHome} && printf '%s' "$HOME" > ${shellLiteral(failedHomeRecord)} && false`
+      ], root),
+      /Validation command failed/
+    );
+    const failedHome = (await readFile(failedHomeRecord, "utf8")).trim();
+    assert.notEqual(failedHome, inheritedHome);
+    await assert.rejects(lstat(failedHome), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("seal rejects a candidate altered after secretless validation", async () => {
