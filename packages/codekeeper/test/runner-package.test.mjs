@@ -118,6 +118,7 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   const packDestination = await temporaryDirectory(t, "codekeeper-pack-");
   const installRoot = await temporaryDirectory(t, "codekeeper-install-");
   const npmInstallRoot = await temporaryDirectory(t, "codekeeper-npm-install-");
+  const dependencyTarballs = await temporaryDirectory(t, "codekeeper-dependency-tarballs-");
   const npmEnvironment = {
     ...process.env,
     npm_config_cache: npmCache,
@@ -180,8 +181,11 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     if (!packagePath.startsWith("node_modules/")) continue;
     assert.equal(typeof metadata.version, "string", `${packagePath} is version-locked`);
     assert.match(metadata.integrity, /^sha512-/, `${packagePath} is integrity-locked`);
+    const dependencyTarball = JSON.parse(execFileSync("npm", [
+      "pack", "--json", "--ignore-scripts", "--pack-destination", dependencyTarballs
+    ], { cwd: path.join(PACKAGE_ROOT, packagePath), ...npmOptions }))[0];
     delete metadata.integrity;
-    metadata.resolved = `file:${path.join(PACKAGE_ROOT, packagePath)}`;
+    metadata.resolved = `file:${path.join(dependencyTarballs, dependencyTarball.filename)}`;
   }
   installerLock.packages[""] = {
     name: "codekeeper-install-test",
