@@ -121,7 +121,7 @@ test("npm tarball dry-run contains only the dependency-light runtime and the ent
     "src/shell-command.mjs"
   ].sort();
   assert.equal(report.name, "codekeeper");
-  assert.equal(report.version, "0.1.0");
+  assert.equal(report.version, "0.1.1");
   assert.deepEqual(files, expected);
   assert.ok(files.every((file) => !file.startsWith("test/") && !file.includes("package-lock")));
 
@@ -147,5 +147,5 @@ test("npm tarball dry-run contains only the dependency-light runtime and the ent
   const help = invoke(["--help"]);
   const version = invoke(["--version"]);
   assert.match(help, /^Usage:\n  codekeeper init/m);
-  assert.equal(version, "0.1.0\n");
+  assert.equal(version, "0.1.1\n");
 });

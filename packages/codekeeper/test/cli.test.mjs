@@ -8,7 +8,7 @@ import { createCommandRunner } from "../src/command-runner.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
 import { createRecordingRunner, git, HEAD_SHA, result, temporaryDirectory, textSink } from "./helpers.mjs";
 
-function guidedPrompt(confirmations = [true, true, true, true, true]) {
+function guidedPrompt(confirmations = [true, true, true, true, true], privateKeyPath = "/tmp/codekeeper-test-app.pem") {
   const answers = [...confirmations];
   const prompt = {
     confirmations: [],
@@ -27,6 +27,7 @@ function guidedPrompt(confirmations = [true, true, true, true, true]) {
       if (message.startsWith("GitHub users")) return "cory";
       if (message.startsWith("GitHub App Client")) return "Iv123456789012345678";
       if (message.startsWith("GitHub App bot")) return "codekeeper-widget[bot]";
+      if (message.startsWith("Full absolute path")) return privateKeyPath;
       throw new Error(`Unexpected prompt: ${message}`);
     }
   };
@@ -61,7 +62,7 @@ test("help, version, and rejected arguments perform no installer side effects", 
   for (const [argv, expectedStatus, expected] of [
     [["--help"], 0, USAGE],
     [[], 0, USAGE],
-    [["--version"], 0, "0.1.0\n"],
+    [["--version"], 0, "0.1.1\n"],
     [["init", "--non-interactive"], 2, "Unsupported command or option"]
   ]) {
     const output = textSink();
@@ -278,6 +279,9 @@ test("resume command formatting is executable on POSIX and PowerShell", () => {
 
 test("successful init revalidates three snapshots and orders settings, exact commit publication, and completion", async (t) => {
   const root = await temporaryDirectory(t, "codekeeper-cli-");
+  const keyRoot = await temporaryDirectory(t, "codekeeper-key-");
+  const privateKeyPath = path.join(keyRoot, "app.pem");
+  await writeFile(privateKeyPath, "test private key\n", { mode: 0o600 });
   git(root, ["init", "--template=", "--initial-branch=main"]);
   git(root, ["config", "user.name", "Codekeeper Test"]);
   git(root, ["config", "user.email", "codekeeper@example.test"]);
@@ -317,7 +321,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
   let opened = null;
   const output = textSink();
   const errorOutput = textSink();
-  const prompt = guidedPrompt();
+  const prompt = guidedPrompt(undefined, privateKeyPath);
   const status = await runCli({
     argv: ["init"],
     cwd: root,

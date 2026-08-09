@@ -22,6 +22,13 @@ import {
 
 const COMMIT_SHA = "c".repeat(40);
 const SECRET_CANARY = "sk-secret-value-must-never-appear";
+const APP_PRIVATE_KEY_PATH = "/tmp/codekeeper-test-app.pem";
+const APP_PRIVATE_KEY_FD = 37;
+
+function openAppPrivateKey(inputPath) {
+  assert.equal(inputPath, APP_PRIVATE_KEY_PATH);
+  return { descriptor: APP_PRIVATE_KEY_FD, close() {} };
+}
 
 async function completePlan(overrides = {}) {
   const bundle = await loadVerifiedAssets();
@@ -109,7 +116,13 @@ test("repository settings force disablement first and pass every secret directly
   };
   const output = textSink();
   const runner = createRecordingRunner(() => result());
-  await configureRepositorySettings(plan, { runner, output, resumeCommand: "'node' 'codekeeper.mjs' 'init'" });
+  await configureRepositorySettings(plan, {
+    runner,
+    output,
+    appPrivateKeyPath: APP_PRIVATE_KEY_PATH,
+    openInputFile: openAppPrivateKey,
+    resumeCommand: "'node' 'codekeeper.mjs' 'init'"
+  });
 
   assert.deepEqual(runner.calls[0], {
     command: "gh",
@@ -126,7 +139,9 @@ test("repository settings force disablement first and pass every secret directly
   for (const call of secretCalls) {
     assert.deepEqual(call.args.slice(0, 2), ["secret", "set"]);
     assert.deepEqual(call.args.slice(3), ["--app", "actions", "--repo", "acme/widget"]);
-    assert.deepEqual(call.options, { cwd: "/tmp/widget", stdio: "inherit", timeoutMs: null });
+    assert.deepEqual(call.options, call.args[2] === "CODEKEEPER_APP_PRIVATE_KEY"
+      ? { cwd: "/tmp/widget", stdio: "ignore", stdinFd: APP_PRIVATE_KEY_FD, timeoutMs: null }
+      : { cwd: "/tmp/widget", stdio: "inherit", timeoutMs: null });
     assert.ok(!Object.hasOwn(call.options, "env"));
     assert.ok(!Object.hasOwn(call.options, "input"));
     assert.ok(!call.args.includes("--body"));
@@ -152,7 +167,13 @@ test("invalid plans and disable-first failure stop before all secret and file mu
 
   const runner = createRecordingRunner((call) => call.args.includes("CODEKEEPER_ENABLED") ? result("", { status: 1 }) : result());
   await assert.rejects(
-    configureRepositorySettings(valid, { runner, output: textSink(), resumeCommand: "safe resume" }),
+    configureRepositorySettings(valid, {
+      runner,
+      output: textSink(),
+      appPrivateKeyPath: APP_PRIVATE_KEY_PATH,
+      openInputFile: openAppPrivateKey,
+      resumeCommand: "safe resume"
+    }),
     (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume === "safe resume"
   );
   assert.equal(runner.calls.length, 1);
@@ -164,7 +185,13 @@ test("secret or variable failure leaves automation disabled and stops later sett
   for (const failedName of ["DEEPSEEK_API_KEY", "CODEKEEPER_APP_CLIENT_ID"]) {
     const runner = createRecordingRunner((call) => call.args.includes(failedName) ? result("", { status: 1 }) : result());
     await assert.rejects(
-      configureRepositorySettings(plan, { runner, output: textSink(), resumeCommand: "resume exactly" }),
+      configureRepositorySettings(plan, {
+        runner,
+        output: textSink(),
+        appPrivateKeyPath: APP_PRIVATE_KEY_PATH,
+        openInputFile: openAppPrivateKey,
+        resumeCommand: "resume exactly"
+      }),
       (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume === "resume exactly"
     );
     assert.ok(runner.calls[0].args.includes("CODEKEEPER_ENABLED"));
