@@ -1,5 +1,19 @@
 # Install in a GitHub.com repository
 
+## Guided installer status
+
+The separate dependency-light [`codekeeper` installer](packages/codekeeper/README.md) is the preferred guided path, but it remains private and unpublished during acceptance. Do not assume `npx codekeeper init` resolves to this project from the public npm registry yet. Build a local tarball from this checkout and invoke that exact file instead:
+
+```bash
+mkdir -p /absolute/path/outside/source-checkout/codekeeper-dist
+cd packages/codekeeper
+npm pack --pack-destination /absolute/path/outside/source-checkout/codekeeper-dist
+cd /absolute/path/to/adopter-repository
+npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.1.0.tgz -- codekeeper init
+```
+
+The installer generates a disabled setup PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Review the generated policy and callers before merging. If the installer cannot be used, the numbered steps below remain the manual fallback.
+
 ## 1. Add policy and caller workflows
 
 Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter repository's default branch. Copy only the caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/`, remove `.example`, and replace both placeholders in every caller:

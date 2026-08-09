@@ -1,0 +1,36 @@
+# Copy to .github/workflows/codekeeper-issues.yml, then replace OWNER/REPOSITORY
+# and FULL_COMMIT_SHA with the published maintainer repository and release commit.
+name: Codekeeper issue triage
+run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"
+
+on:
+  issues:
+    types: [opened, reopened, edited]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  bootstrap:
+    name: Codekeeper pinned tooling bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
+        with:
+          artifact-name: codekeeper-tooling-${{ github.run_id }}-${{ github.run_attempt }}
+  triage:
+    needs: bootstrap
+    uses: OWNER/REPOSITORY/.github/workflows/codekeeper-issues.yml@FULL_COMMIT_SHA
+    with:
+      enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
+      auto_triage: true
+      app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
+    secrets:
+      # Match this secret to ai.agents.issue.provider in .github/codekeeper.json.
+      model_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+      # Traces still export to OpenAI, so this must not be the DeepSeek key.
+      trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
+      app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}

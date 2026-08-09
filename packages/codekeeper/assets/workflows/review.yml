@@ -1,0 +1,37 @@
+# Copy to .github/workflows/codekeeper-review.yml, then replace OWNER/REPOSITORY
+# and FULL_COMMIT_SHA with the published maintainer repository and release commit.
+name: Codekeeper review
+run-name: "Codekeeper review #${{ github.event.pull_request.number }} @${{ github.event.pull_request.head.sha }}"
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  bootstrap:
+    name: Codekeeper pinned tooling bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
+        with:
+          artifact-name: codekeeper-tooling-${{ github.run_id }}-${{ github.run_attempt }}
+  review:
+    needs: bootstrap
+    uses: OWNER/REPOSITORY/.github/workflows/codekeeper-review.yml@FULL_COMMIT_SHA
+    with:
+      enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
+      auto_review: true
+      automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
+      app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
+    secrets:
+      # Match this secret to ai.agents.review.provider in .github/codekeeper.json.
+      model_api_key: ${{ secrets.OPENAI_API_KEY }}
+      # Required while this mode keeps workspace.enabled=true.
+      workspace_api_key: ${{ secrets.OPENAI_API_KEY }}
+      # Always a separate OpenAI trace-export key, never the model-provider key.
+      trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
+      app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}
