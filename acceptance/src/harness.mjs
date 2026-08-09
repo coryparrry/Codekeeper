@@ -892,9 +892,15 @@ function isAppOwnedPublicationCommit({ commit, pull, app, run }) {
     && actor?.type === "Bot";
   const authorDate = commit?.commit?.author?.date;
   const committerDate = commit?.commit?.committer?.date;
+  const parents = commit?.parents;
   return commit?.sha === pull.headRefOid
     && appActor(commit?.author)
     && appActor(commit?.committer)
+    && Array.isArray(parents)
+    && parents.length === 1
+    && typeof parents[0]?.sha === "string"
+    && SHA.test(parents[0].sha)
+    && parents[0].sha.toLowerCase() === run.headSha.toLowerCase()
     && happensOnOrAfter(authorDate, run.startedAt)
     && happensOnOrBefore(authorDate, run.updatedAt)
     && happensOnOrAfter(committerDate, run.startedAt)
@@ -1050,13 +1056,15 @@ async function verifyReview({ request, preflightResult, gh, sleep }) {
   await assertPinnedSource({ repo: request.repo, scenario: "review-introduced-defect", sourceSha: request.sourceSha, revision: run.headSha, gh });
   const pull = await pullRequest({ repo: request.repo, number: request.pr, gh });
   assertSupportedReviewShape(pull, preflightResult.defaultBranch);
-  assert(run.displayTitle === reviewRunTitle(request.pr, pull.headRefOid) && run.headSha === pull.headRefOid, "Review run no longer matches the PR's current immutable head");
+  const matchesCurrentPull = run.displayTitle === reviewRunTitle(request.pr, pull.headRefOid)
+    && run.headBranch === preflightResult.defaultBranch;
+  assert(matchesCurrentPull, "Review run no longer matches the PR's current immutable head");
   const [marker, checks] = await Promise.all([
     currentMarkerComment({ repo: request.repo, kind: "pull_request", number: request.pr, marker: REVIEW_MARKER, app: request.app, expectedRunUrl: expectedRunUrl(request.repo, run.databaseId), gh }),
     pullRequestChecks({ repo: request.repo, number: request.pr, gh })
   ]);
   expect(assertions, "introduced-defect pull request remains open, non-draft, same-repository, and targets the default branch", true);
-  expect(assertions, "review run title and immutable head are bound to the requested pull request", run.headSha === pull.headRefOid && run.headBranch === pull.headRefName && run.displayTitle === reviewRunTitle(request.pr, pull.headRefOid));
+  expect(assertions, "review run title and immutable head are bound to the requested pull request", matchesCurrentPull);
   expect(assertions, "review workflow completed with the expected blocking conclusion", run.conclusion === "failure");
   expect(assertions, "blocking review state is accompanied by publisher evidence for this exact run", labelsFrom(pull).includes("codekeeper:blocked") && hasExactCheck(checks, "review / Codekeeper review gate", "fail"));
   expect(assertions, "review publication has one current canonical App marker correlated to the selected run URL", Boolean(marker));

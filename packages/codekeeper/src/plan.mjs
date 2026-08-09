@@ -26,7 +26,7 @@ import { InstallerError } from "./errors.mjs";
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const BOT_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,99})\[bot\]$/;
 const APP_SLUG = /^[a-z0-9](?:[a-z0-9-]{0,99})$/;
-const CLIENT_ID = /^Iv[A-Za-z0-9]{18,253}$/;
+const CLIENT_ID = /^(?:Iv[A-Za-z0-9]{18,253}|Iv1\.[A-Za-z0-9]{16,253})$/;
 
 function tuiOptions(prompt, plain, tui) {
   return prompt?.kind === "ink" ? { ...plain, ...tui } : plain;
@@ -48,6 +48,12 @@ function validPrivateKeyPath(value) {
     && path.isAbsolute(value)
     && value.trim() === value
     && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function validClientId(value) {
+  return typeof value === "string"
+    && !/[\s\u0000-\u001f\u007f]/.test(value)
+    && CLIENT_ID.test(value);
 }
 
 export function normalizeModes(modes) {
@@ -79,8 +85,11 @@ export function requiredSecretNames({ modes, preset }) {
   return Object.freeze(names);
 }
 
-export function appRegistrationUrl({ repository, displayName }) {
+export function appRegistrationUrl({ repository, displayName, ownerType = "User" }) {
   const [owner] = repository.split("/");
+  if (ownerType !== "User" && ownerType !== "Organization") {
+    throw new InstallerError("GitHub App registration requires a personal or organization repository owner.", { code: "PLAN_INVALID" });
+  }
   const name = `Codekeeper ${displayName}`.slice(0, 34);
   const parameters = new URLSearchParams({
     name,
@@ -93,7 +102,10 @@ export function appRegistrationUrl({ repository, displayName }) {
     pull_requests: "write",
     metadata: "read"
   });
-  return `https://github.com/settings/apps/new?${parameters.toString()}#codekeeper-${owner.toLowerCase()}`;
+  const registrationPath = ownerType === "Organization"
+    ? `/organizations/${encodeURIComponent(owner)}/settings/apps/new`
+    : "/settings/apps/new";
+  return `https://github.com${registrationPath}?${parameters.toString()}#codekeeper-${owner.toLowerCase()}`;
 }
 
 export function documentMap(files) {
@@ -206,7 +218,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (!PRESET_IDS.includes(answers.preset)) throw new InstallerError(`Unsupported preset: ${answers.preset}`, { code: "PLAN_INVALID" });
   if (!validDisplayName(answers.displayName)) throw new InstallerError("Repository display name is invalid.", { code: "PLAN_INVALID" });
   const ownerLogins = normalizeOwnerLogins(answers.ownerLogins);
-  if (!CLIENT_ID.test(answers.appClientId ?? "")) throw new InstallerError("GitHub App Client ID is invalid.", { code: "PLAN_INVALID" });
+  if (!validClientId(answers.appClientId)) throw new InstallerError("GitHub App Client ID is invalid.", { code: "PLAN_INVALID" });
   const automationBotLogin = modes.includes("review") ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
   if (modes.includes("review") && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const files = renderInstallFiles(bundle, {
@@ -377,7 +389,7 @@ export async function collectAppAnswers({ prompt, modes, output }) {
   if (modes.includes("review")) output.write("  - Bot login: <app-slug>[bot], used to recognize App-authored review output\n");
   const appClientId = await prompt.inputText(tuiOptions(prompt, {
     message: "GitHub App Client ID (starts with Iv; not the numeric App ID)",
-    validate: (value) => CLIENT_ID.test(value) || "Enter the App Client ID shown in GitHub App settings."
+    validate: (value) => validClientId(value) || "Enter the App Client ID shown in GitHub App settings."
   }, {
     step: "GitHub App",
     description: [

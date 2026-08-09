@@ -117,6 +117,7 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   const npmCache = await temporaryDirectory(t, "codekeeper-npm-cache-");
   const packDestination = await temporaryDirectory(t, "codekeeper-pack-");
   const installRoot = await temporaryDirectory(t, "codekeeper-install-");
+  const npmInstallRoot = await temporaryDirectory(t, "codekeeper-npm-install-");
   const npmEnvironment = {
     ...process.env,
     npm_config_cache: npmCache,
@@ -171,6 +172,38 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   ], { cwd: PACKAGE_ROOT, ...npmOptions }))[0];
   assert.deepEqual(packed.files.map((file) => file.path).sort(), expected);
   const tarball = path.join(packDestination, packed.filename);
+  const packageLock = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package-lock.json"), "utf8"));
+  const packageManifest = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
+  assert.deepEqual(packageLock.packages[""].dependencies, packageManifest.dependencies);
+  const installerLock = structuredClone(packageLock);
+  for (const [packagePath, metadata] of Object.entries(installerLock.packages)) {
+    if (!packagePath.startsWith("node_modules/")) continue;
+    assert.equal(typeof metadata.version, "string", `${packagePath} is version-locked`);
+    assert.match(metadata.integrity, /^sha512-/, `${packagePath} is integrity-locked`);
+    delete metadata.integrity;
+    metadata.resolved = `file:${path.join(PACKAGE_ROOT, packagePath)}`;
+  }
+  installerLock.packages[""] = {
+    name: "codekeeper-install-test",
+    private: true,
+    dependencies: { codekeeper: `file:${tarball}` }
+  };
+  installerLock.packages["node_modules/codekeeper"] = {
+    version: packageManifest.version,
+    resolved: `file:${tarball}`,
+    bin: packageManifest.bin,
+    dependencies: packageManifest.dependencies
+  };
+  await writeFile(path.join(npmInstallRoot, "package.json"), JSON.stringify(installerLock.packages[""]));
+  await writeFile(path.join(npmInstallRoot, "package-lock.json"), JSON.stringify(installerLock));
+  execFileSync("npm", [
+    "install", "--offline", "--ignore-scripts", "--prefix", npmInstallRoot
+  ], { cwd: npmInstallRoot, ...npmOptions });
+  const npmInstalledRoot = path.join(npmInstallRoot, "node_modules", "codekeeper");
+  const npmInstalledPackage = JSON.parse(await readFile(path.join(npmInstalledRoot, "package.json"), "utf8"));
+  assert.deepEqual(npmInstalledPackage.bin, { codekeeper: "bin/codekeeper.mjs" });
+  assert.deepEqual(npmInstalledPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
+  const npmShim = path.join(npmInstallRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper.cmd" : "codekeeper");
   const modulesRoot = path.join(installRoot, "node_modules");
   const installedRoot = path.join(modulesRoot, "codekeeper");
   await mkdir(installedRoot, { recursive: true });
@@ -201,11 +234,13 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     PATH: process.env.PATH,
     SystemRoot: process.env.SystemRoot
   }).filter(([, value]) => typeof value === "string"));
-  const invoke = (args) => process.platform === "win32"
-    ? execFileSync("cmd.exe", ["/d", "/s", "/c", shim, ...args], { encoding: "utf8", env: shimEnvironment, timeout: 10_000 })
-    : execFileSync(shim, args, { encoding: "utf8", env: shimEnvironment, timeout: 10_000 });
-  const help = invoke(["--help"]);
-  const version = invoke(["--version"]);
+  const invoke = (command, args) => process.platform === "win32"
+    ? execFileSync("cmd.exe", ["/d", "/s", "/c", command, ...args], { encoding: "utf8", env: shimEnvironment, timeout: 10_000 })
+    : execFileSync(command, args, { encoding: "utf8", env: shimEnvironment, timeout: 10_000 });
+  const help = invoke(shim, ["--help"]);
+  const version = invoke(shim, ["--version"]);
+  const npmInstallHelp = invoke(npmShim, ["--help"]);
+  const npmInstallVersion = invoke(npmShim, ["--version"]);
   const npmExecHelp = execFileSync("npm", [
     "exec", "--prefix", installRoot, "--", "codekeeper", "--help"
   ], { cwd: installRoot, ...npmOptions });
@@ -218,9 +253,11 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "tui.mjs"
   )).href);
   assert.match(help, /^Usage:\n  codekeeper init/m);
+  assert.match(npmInstallHelp, /^Usage:\n  codekeeper init/m);
   assert.match(npmExecHelp, /^Usage:\n  codekeeper init/m);
   assert.match(npxHelp, /^Usage:\n  codekeeper init/m);
   assert.equal(version, "0.2.0\n");
+  assert.equal(npmInstallVersion, "0.2.0\n");
   assert.equal(typeof installedTui.createInkPrompter, "function");
   assert.equal(installedTui.shouldUseInkTui({
     interactive: true,

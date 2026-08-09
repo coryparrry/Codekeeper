@@ -117,7 +117,7 @@ export async function runCli({
   interactive = input.isTTY === true && output.isTTY === true,
   environment = process.env,
   platform = process.platform,
-  openUrl = (url) => bestEffortOpen(url, { runner, platform }),
+  openUrl = null,
   loadAssets = loadVerifiedAssets,
   inspect = inspectRepository,
   resumeCommand = currentResumeCommand(process.execPath, process.argv[1], platform)
@@ -140,6 +140,9 @@ export async function runCli({
 
   let activePrompt = prompt;
   try {
+    if (typeof runner.resolveTrustedCommands === "function") {
+      runner = await runner.resolveTrustedCommands({ cwd });
+    }
     const bundle = await loadAssets();
     if (!activePrompt) {
       const likelyTui = interactive
@@ -164,10 +167,15 @@ export async function runCli({
     const presentationOutput = activePrompt.kind === "ink" ? activePrompt.notices : output;
     const snapshot = await inspect({ runner, cwd, interactive });
     const setupAnswers = await collectSetupAnswers({ prompt: activePrompt, snapshot, bundle, output: presentationOutput });
-    const registrationUrl = appRegistrationUrl({ repository: snapshot.repository, displayName: setupAnswers.displayName });
+    const registrationUrl = appRegistrationUrl({
+      repository: snapshot.repository,
+      displayName: setupAnswers.displayName,
+      ownerType: snapshot.ownerType
+    });
+    const safelyOpenUrl = openUrl ?? ((url) => bestEffortOpen(url, { runner, platform }));
     presentationOutput.write(`\nUse an adopter-owned GitHub App installed only on ${snapshot.repository}. The link creates one with the required permissions; if your test App is already installed here, close the page and use that App instead.\n${registrationUrl}\n`);
     try {
-      await openUrl(registrationUrl);
+      await safelyOpenUrl(registrationUrl);
     } catch {
       // Opening the browser is best-effort; the printed URL is always authoritative.
     }

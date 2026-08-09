@@ -397,7 +397,8 @@ test("recommended starter plan selects review and maintenance with separate Open
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {
   const url = new URL(appRegistrationUrl({
     repository: "Acme/Widget",
-    displayName: "Widget App"
+    displayName: "Widget App",
+    ownerType: "User"
   }).split("#")[0]);
   assert.equal(url.origin, "https://github.com");
   assert.equal(url.pathname, "/settings/apps/new");
@@ -414,7 +415,34 @@ test("GitHub App registration URL is private, webhook-free, repository-owned, an
   });
   const longNameUrl = new URL(appRegistrationUrl({
     repository: "Acme/Widget",
-    displayName: "A very long repository display name that must be bounded"
+    displayName: "A very long repository display name that must be bounded",
+    ownerType: "User"
   }).split("#")[0]);
   assert.equal(longNameUrl.searchParams.get("name").length, 34);
+
+  const organizationUrl = new URL(appRegistrationUrl({
+    repository: "Acme/Widget",
+    displayName: "Widget App",
+    ownerType: "Organization"
+  }).split("#")[0]);
+  assert.equal(organizationUrl.pathname, "/organizations/Acme/settings/apps/new");
+  assert.throws(
+    () => appRegistrationUrl({ repository: "Acme/Widget", displayName: "Widget App", ownerType: "Bot" }),
+    assertInstallerCode(assert, "PLAN_INVALID")
+  );
+});
+
+test("GitHub App client IDs accept the documented dotted form and reject whitespace or controls", async () => {
+  const bundle = await loadVerifiedAssets();
+  assert.doesNotThrow(() => buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ appClientId: "Iv1.ab1112223334445c" })
+  }));
+  for (const appClientId of ["Iv1.ab1112223334445c ", " Iv1.ab1112223334445c", "Iv1.ab1112223334445c\n", "Iv1.ab1112223334445c\u0000", "Iv1.ab1112223334445c-unsafe"]) {
+    assert.throws(
+      () => buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers({ appClientId }) }),
+      assertInstallerCode(assert, "PLAN_INVALID")
+    );
+  }
 });

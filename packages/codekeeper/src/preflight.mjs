@@ -245,6 +245,10 @@ export async function inspectRepository({
   if (typeof repository !== "string" || repository.toLowerCase() !== origin.repository.toLowerCase()) {
     throw new InstallerError("The GitHub repository does not match origin.", { code: "REPOSITORY_MISMATCH" });
   }
+  const ownerType = repositoryData.owner?.type;
+  if (!["User", "Organization"].includes(ownerType)) {
+    throw new InstallerError("GitHub returned an unsupported repository owner type.", { code: "PREFLIGHT_INVALID_RESPONSE" });
+  }
   if (repositoryData.permissions?.admin !== true) throw new InstallerError("Repository admin access is required.", { code: "ADMIN_REQUIRED" });
   if (repositoryData.archived || repositoryData.disabled) throw new InstallerError("Archived or disabled repositories are not supported.", { code: "UNSUPPORTED_REPOSITORY" });
   const actionsPermissions = parseJson(await requireSuccess(
@@ -287,6 +291,7 @@ export async function inspectRepository({
     root,
     originUrl,
     repository,
+    ownerType,
     defaultBranch,
     currentBranch,
     headSha,

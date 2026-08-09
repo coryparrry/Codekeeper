@@ -26,6 +26,7 @@ function preflightRunner(root, options = {}) {
     repositoryData: {
       full_name: "acme/widget",
       default_branch: "main",
+      owner: { type: "Organization" },
       permissions: { admin: true },
       archived: false,
       disabled: false
@@ -234,6 +235,7 @@ test("repository preflight returns a frozen snapshot only after every local and 
     root: resolvedRoot,
     originUrl: "https://github.com/acme/widget.git",
     repository: "acme/widget",
+    ownerType: "Organization",
     defaultBranch: "main",
     currentBranch: "main",
     headSha: HEAD_SHA,
@@ -260,11 +262,11 @@ test("repository preflight rejects the v1 negative matrix before installation mu
     ["detached HEAD", {}, { failures: new Map([[detachedKey, 1]]) }, "COMMAND_FAILED"],
     ["dirty checkout", {}, { status: "?? notes.txt\n" }, "DIRTY_CHECKOUT"],
     ["stale checkout", {}, { remoteSha: OTHER_SHA }, "STALE_CHECKOUT"],
-    ["not admin", {}, { repositoryData: { full_name: "acme/widget", default_branch: "main", permissions: { admin: false } } }, "ADMIN_REQUIRED"],
-    ["origin/API mismatch", {}, { repositoryData: { full_name: "other/widget", default_branch: "main", permissions: { admin: true } } }, "REPOSITORY_MISMATCH"],
+    ["not admin", {}, { repositoryData: { full_name: "acme/widget", default_branch: "main", owner: { type: "Organization" }, permissions: { admin: false } } }, "ADMIN_REQUIRED"],
+    ["origin/API mismatch", {}, { repositoryData: { full_name: "other/widget", default_branch: "main", owner: { type: "Organization" }, permissions: { admin: true } } }, "REPOSITORY_MISMATCH"],
     ["actions disabled", {}, { actions: { enabled: false } }, "ACTIONS_DISABLED"],
     ["wrong branch", {}, { currentBranch: "feature" }, "WRONG_BRANCH"],
-    ["archived repository", {}, { repositoryData: { full_name: "acme/widget", default_branch: "main", permissions: { admin: true }, archived: true } }, "UNSUPPORTED_REPOSITORY"],
+    ["archived repository", {}, { repositoryData: { full_name: "acme/widget", default_branch: "main", owner: { type: "Organization" }, permissions: { admin: true }, archived: true } }, "UNSUPPORTED_REPOSITORY"],
     ["sparse checkout", {}, { sparseStatus: 0, sparseValue: "true" }, "UNSUPPORTED_CHECKOUT"],
     ["missing git identity", {}, { userEmail: "" }, "GIT_IDENTITY_REQUIRED"],
     ["setup branch exists", {}, { localRefs: "refs/heads/codekeeper/setup\n" }, "SETUP_BRANCH_EXISTS"]
@@ -279,4 +281,25 @@ test("repository preflight rejects the v1 negative matrix before installation mu
       assert.ok(runner.calls.every((call) => !["push", "commit", "secret", "variable"].some((token) => call.args.includes(token))));
     });
   }
+});
+
+test("repository preflight accepts personal and organization owners and fails closed for an unknown owner type", async (t) => {
+  const root = await temporaryDirectory(t);
+  const personal = await inspectRepository({
+    runner: preflightRunner(root, { repositoryData: { full_name: "acme/widget", default_branch: "main", owner: { type: "User" }, permissions: { admin: true } } }),
+    cwd: root,
+    nodeVersion: "22.0.0",
+    interactive: true
+  });
+  assert.equal(personal.ownerType, "User");
+
+  await assert.rejects(
+    inspectRepository({
+      runner: preflightRunner(root, { repositoryData: { full_name: "acme/widget", default_branch: "main", owner: { type: "Bot" }, permissions: { admin: true } } }),
+      cwd: root,
+      nodeVersion: "22.0.0",
+      interactive: true
+    }),
+    assertInstallerCode(assert, "PREFLIGHT_INVALID_RESPONSE")
+  );
 });

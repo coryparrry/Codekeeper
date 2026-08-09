@@ -20,6 +20,7 @@ const actionPins = {
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
 const toolingManifestSha256 = "9ea59dc54288186c0d4f84d24c86de9c6485900e876d1d3a03ceb6126fc87596";
+const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -79,9 +80,14 @@ test("caller bootstrap fetches the same immutable private action release as its 
       .map((match) => match[1]);
     assert.deepEqual(pins, [releaseSha, releaseSha], `${mode} caller must pin bootstrap and reusable workflow identically`);
     assert.match(template, /bootstrap:\n\s+name: Codekeeper pinned tooling bootstrap\n\s+runs-on: ubuntu-latest/);
-    assert.match(template, /artifact-name: codekeeper-tooling-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
     assert.match(template, new RegExp(`(?:maintain|fix|triage|review):\\n\\s+needs: bootstrap\\n\\s+uses: OWNER/REPOSITORY/\\.github/workflows/codekeeper-${mode}\\.yml@FULL_COMMIT_SHA`));
     const bootstrap = template.slice(template.indexOf("  bootstrap:\n"), template.indexOf(`  ${mode === "issues" ? "triage" : mode === "maintain" ? "maintain" : mode}:\n`));
+    const bootstrapArtifactNames = [...bootstrap.matchAll(/^ {10}artifact-name: ([^\n]+)$/gm)].map((match) => match[1]);
+    assert.deepEqual(
+      bootstrapArtifactNames,
+      [bootstrapToolingArtifactName],
+      `${mode} caller must produce exactly the run-scoped bootstrap artifact`
+    );
     assert.doesNotMatch(bootstrap, /secrets:|GITHUB_TOKEN|GH_TOKEN|APP_PRIVATE_KEY/);
   }
 });
@@ -112,7 +118,21 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
     );
     assert.doesNotMatch(source, /^\s*import \{ join \} from "node:path";$/m);
     assert.doesNotMatch(source, /\$\{(?:root|label)\}/);
-    assert.match(source, /name: codekeeper-tooling-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
+    const bootstrapArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-tooling-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    assert.deepEqual(
+      bootstrapArtifactNames,
+      Array(count).fill(bootstrapToolingArtifactName),
+      `${mode} must consume the caller bootstrap artifact by run ID only so failed-job reruns reuse verified tooling`
+    );
+    const workspaceArtifactName = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-workspace-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    const workspaceArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-workspace-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    assert.deepEqual(
+      workspaceArtifactNames,
+      [workspaceArtifactName, workspaceArtifactName],
+      `${mode} workspace handoff must remain attempt-scoped`
+    );
     assert.doesNotMatch(source, /job\.workflow_repository/);
     assert.doesNotMatch(source, /repository: \$\{\{ job\.workflow_repository \}\}/);
   }
@@ -129,6 +149,8 @@ test("private-action bootstrap stages only the production runtime and retains it
   assert.match(action, /if find "\$target" -type l -print -quit \| grep -q \.; then/);
   assert.doesNotMatch(action, /grep -q \. &&/);
   assert.match(action, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
+  assert.match(action, /description: Exact run-scoped bootstrap artifact name derived from github\.run_id; reruns replace this verified tooling artifact\./);
+  assert.match(action, /name: \$\{\{ inputs\.artifact-name \}\}\n\s+path: \$\{\{ runner\.temp \}\}\/codekeeper-tooling\n\s+retention-days: 1\n\s+if-no-files-found: error\n\s+overwrite: true/);
   assert.match(action, /retention-days: 1/);
   assert.doesNotMatch(action, /secrets\.|GITHUB_TOKEN|GH_TOKEN|actions\/checkout/);
 });
@@ -267,11 +289,27 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
   }
 });
 
-test("candidate and sealed artifact names include run id and retry attempt", async () => {
+test("candidate and sealed artifact handoffs retain exact run-and-attempt names", async () => {
   for (const mode of modes) {
     const source = await workflow(mode);
-    assert.match(source, new RegExp(`codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-candidate-\\$\\{\\{ github\\.run_id \\}\\}-\\$\\{\\{ github\\.run_attempt \\}\\}`));
-    assert.match(source, new RegExp(`codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-artifact-\\$\\{\\{ github\\.run_id \\}\\}-\\$\\{\\{ github\\.run_attempt \\}\\}`));
+    const artifactPrefix = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}`;
+    const candidateArtifactName = `${artifactPrefix}-candidate-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    const sealedArtifactName = `${artifactPrefix}-artifact-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    const candidateHandoffCount = mode === "maintain" || mode === "fix" ? 3 : 2;
+    const candidateArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-candidate-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    const sealedArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-artifact-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    assert.deepEqual(
+      candidateArtifactNames,
+      Array(candidateHandoffCount).fill(candidateArtifactName),
+      `${mode} candidate producer and consumer must use the same run-and-attempt artifact name`
+    );
+    assert.deepEqual(
+      sealedArtifactNames,
+      [sealedArtifactName, sealedArtifactName],
+      `${mode} sealed artifact producer and consumer must use the same run-and-attempt artifact name`
+    );
   }
 });
 

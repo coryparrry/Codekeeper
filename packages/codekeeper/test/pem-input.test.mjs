@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { constants as fsConstants } from "node:fs";
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { fstatSync } from "node:fs";
 import path from "node:path";
-import { openSafeStdinFile, STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
+import { createCommandRunner, openSafeStdinFile, STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
 import { configureRepositorySettings } from "../src/install.mjs";
 import { createRecordingRunner, result, temporaryDirectory, textSink } from "./helpers.mjs";
 
@@ -47,11 +48,31 @@ test("safe PEM input validates metadata without reading or retaining file bytes"
   assert.equal(input.descriptor, 41);
   assert.equal(Object.hasOwn(input, "path"), false);
   assert.equal(Object.hasOwn(input, "contents"), false);
-  assert.equal(operations[0][2], fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  assert.equal(operations[0][2], fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
   assert.deepEqual(operations.slice(0, 2).map(([operation]) => operation), ["open", "fstat"]);
   input.close();
   input.close();
   assert.deepEqual(operations.map(([operation]) => operation), ["open", "fstat", "close"]);
+});
+
+test("safe PEM input requests nonblocking FIFO-safe open flags", () => {
+  let flags = null;
+  assert.throws(
+    () => openSafeStdinFile(`/private/tmp/${PRIVATE_KEY_PATH_FRAGMENT}.fifo`, {
+      fileOperations: {
+        openSync(_selectedPath, requestedFlags) {
+          flags = requestedFlags;
+          return 47;
+        },
+        fstatSync() {
+          return { isFile: () => false, size: 0 };
+        },
+        closeSync() {}
+      }
+    }),
+    (error) => error.code === "SECRET_INPUT_FILE_INVALID"
+  );
+  if (fsConstants.O_NONBLOCK) assert.notEqual(flags & fsConstants.O_NONBLOCK, 0);
 });
 
 test("safe PEM input rejects unsafe paths and nonregular metadata with generic errors", () => {
@@ -182,4 +203,55 @@ test("App PEM uses fd-only child input, closes on failure, and leaks no path or 
   assert.doesNotMatch(observable, new RegExp(PRIVATE_KEY_PATH_FRAGMENT));
   assert.doesNotMatch(observable, new RegExp(PRIVATE_KEY_BYTES));
   assert.ok(runner.calls.every((call) => !Object.hasOwn(call.options, "env")));
+});
+
+test("a real PEM file is supplied to GitHub CLI stdin and its descriptor closes after success and failure", { skip: process.platform === "win32" }, async (t) => {
+  const root = await temporaryDirectory(t, "codekeeper-pem-child-");
+  const selectedPath = path.join(root, "real-child-input.pem");
+  const bin = path.join(root, "bin");
+  const gh = path.join(bin, "gh");
+  await writeFile(selectedPath, `${PRIVATE_KEY_BYTES}\n`);
+  await mkdir(bin);
+  await writeFile(gh, [
+    "#!/usr/bin/env node",
+    "const fs = require(\"node:fs\");",
+    "if (process.argv[2] !== \"secret\") process.exit(0);",
+    "const chunks = [];",
+    "process.stdin.on(\"data\", (chunk) => chunks.push(chunk));",
+    "process.stdin.on(\"end\", () => {",
+    `  fs.writeFileSync(${JSON.stringify(path.join(root, "captured.pem"))}, Buffer.concat(chunks));`,
+    `  process.exit(fs.existsSync(${JSON.stringify(path.join(root, "fail-app-secret"))}) ? 23 : 0);`,
+    "});",
+    ""
+  ].join("\n"));
+  await chmod(gh, 0o700);
+  const runner = createCommandRunner({
+    environment: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HOME: root, XDG_CONFIG_HOME: root, LANG: "C" }
+  });
+  const plan = { ...settingsPlan(root), secrets: [{ name: "CODEKEEPER_APP_PRIVATE_KEY" }] };
+  const capturedPath = path.join(root, "captured.pem");
+
+  for (const [label, fail] of [["success", false], ["failure", true]]) {
+    if (fail) await writeFile(path.join(root, "fail-app-secret"), "1");
+    await writeFile(capturedPath, "");
+    let descriptor = null;
+    const configure = configureRepositorySettings(plan, {
+      runner,
+      output: textSink(),
+      appPrivateKeyPath: selectedPath,
+      openInputFile(pathArgument) {
+        const input = openSafeStdinFile(pathArgument);
+        descriptor = input.descriptor;
+        return input;
+      },
+      resumeCommand: "safe resume"
+    });
+    if (fail) {
+      await assert.rejects(configure, (error) => error.code === "EXTERNAL_MUTATION_FAILED");
+    } else {
+      await configure;
+    }
+    assert.equal((await readFile(capturedPath, "utf8")), `${PRIVATE_KEY_BYTES}\n`, `${label} child stdin`);
+    assert.throws(() => fstatSync(descriptor), { code: "EBADF" }, `${label} input descriptor must close`);
+  }
 });

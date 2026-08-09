@@ -137,7 +137,7 @@ function fakeClock(start = NOW) {
   };
 }
 
-function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = false, publicRepository = false, currentDefaultBranch = "main", markerHasPreviousPage = false, fixDraft = false, fixFork = false, fixRetarget = false, invalidFixHead = false, alteredFixHead = false, multipleFixCommits = false, foreignFixCommit = false, lateFixCommit = false, lateFixPull = false, lateMarker = false, wrongRunActor = false, wrongAttributedActor = false, jobTotalCount = null, staleMarker = false, crossReviewHead = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
+function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = false, publicRepository = false, currentDefaultBranch = "main", markerHasPreviousPage = false, fixDraft = false, fixFork = false, fixRetarget = false, invalidFixHead = false, alteredFixHead = false, multipleFixCommits = false, foreignFixCommit = false, lateFixCommit = false, lateFixPull = false, lateMarker = false, missingPublicationParent = false, multiplePublicationParents = false, malformedPublicationParent = false, mismatchedPublicationParent = false, wrongRunActor = false, wrongAttributedActor = false, jobTotalCount = null, staleMarker = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, wrongReviewRunBaseBranch = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
   const calls = [];
   let workflowListCount = 0;
   let runViewCount = 0;
@@ -153,14 +153,19 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
   const issueNumber = 14;
   const fingerprint = createRepairFingerprint(issueNumber);
   const branch = `codekeeper/fix/fix-${fingerprint}`;
-  const reviewHead = reviewHeadChanges ? SHA : HEAD;
+  const reviewHead = SHA;
+  const reviewHeadBranch = "codekeeper/review-introduced-defect";
   const displayTitle = scenario === "review-introduced-defect"
     ? `Codekeeper review #12 @${reviewHead}`
     : scenario === "issue-triage-related"
       ? "Codekeeper issue triage #13"
       : detail[1];
-  const runHead = crossReviewHead ? SHA : HEAD;
-  const runBranch = scenario === "maintenance-dry-run" || scenario === "controlled-fix" ? () => tag : () => "main";
+  const runHead = HEAD;
+  const runBranch = scenario === "maintenance-dry-run" || scenario === "controlled-fix"
+    ? () => tag
+    : scenario === "review-introduced-defect"
+      ? () => (wrongReviewRunBaseBranch ? "release" : "main")
+      : () => "main";
   const runEntry = (id = 77, overrides = {}) => ({
     databaseId: id,
     attempt: 1,
@@ -213,7 +218,14 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
           committer: { date: lateFixCommit ? LATE_PUBLICATION : SUBJECT_UPDATED }
         },
         author: actor,
-        committer: actor
+        committer: actor,
+        ...(missingPublicationParent ? {} : {
+          parents: malformedPublicationParent
+            ? [{ sha: "main" }]
+            : multiplePublicationParents
+              ? [{ sha: HEAD }, { sha: SHA }]
+              : [{ sha: mismatchedPublicationParent ? SHA : HEAD }]
+        })
       };
       return response(multipleFixCommits ? [publication, { ...publication, sha: SHA }] : [publication]);
     }
@@ -298,8 +310,8 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
         isDraft: reviewDraft,
         isCrossRepository: false,
         baseRefName: reviewRetarget ? "release" : "main",
-        headRefOid: reviewHeadChanges && pullViewCount > 1 ? SHA : HEAD,
-        headRefName: "main",
+        headRefOid: reviewHeadChanges && pullViewCount > 1 ? HEAD : reviewHead,
+        headRefName: reviewHeadBranch,
         labels: [{ name: "codekeeper:blocked" }],
         updatedAt: SUBJECT_UPDATED
       });
@@ -579,7 +591,7 @@ test("maintenance rejects a second matching run that appears after completion", 
   assert.equal(fake.runViewCount, 1);
 });
 
-test("review requires a current App-owned canonical marker and immutable current-head linkage", async () => {
+test("review accepts a pull_request_target base SHA while binding the current PR head through title evidence and the run to the base branch", async () => {
   const good = fakeGh({ scenario: "review-introduced-defect" });
   const pass = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(pass.passed, true);
@@ -587,13 +599,10 @@ test("review requires a current App-owned canonical marker and immutable current
   const stale = fakeGh({ scenario: "review-introduced-defect", staleMarker: true });
   const staleResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: stale.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(staleResult.passed, false);
-  const cross = fakeGh({ scenario: "review-introduced-defect", crossReviewHead: true });
-  const crossResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: cross.runner, now: () => new Date(NOW), sleep: async () => {} });
-  assert.equal(crossResult.passed, false);
   const foreign = fakeGh({ scenario: "review-introduced-defect", foreignAppMarker: true });
   const foreignResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: foreign.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(foreignResult.passed, false);
-  for (const option of [{ wrongDisplayTitle: true }, { wrongReviewGateName: true }, { reviewDraft: true }, { reviewRetarget: true }, { reviewHeadChanges: true }]) {
+  for (const option of [{ wrongDisplayTitle: true }, { wrongReviewGateName: true }, { reviewDraft: true }, { reviewRetarget: true }, { reviewHeadChanges: true }, { wrongReviewRunBaseBranch: true }]) {
     const falsePositive = fakeGh({ scenario: "review-introduced-defect", ...option });
     const result = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: falsePositive.runner, now: () => new Date(NOW), sleep: async () => {} });
     assert.equal(result.passed, false);
@@ -632,14 +641,14 @@ test("controlled fix rejects concurrent runs and accepts exactly one current can
   const rerunResult = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: rerun.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(rerunResult.passed, false);
   assert.equal(rerun.calls.some((args) => args[0] === "workflow" && args[1] === "run"), true);
-  for (const option of [{ fixDraft: true }, { fixFork: true }, { fixRetarget: true }, { invalidFixHead: true }, { alteredFixHead: true }, { multipleFixCommits: true }, { foreignFixCommit: true }, { lateFixCommit: true }, { lateFixPull: true }, { lateMarker: true }]) {
+  for (const option of [{ fixDraft: true }, { fixFork: true }, { fixRetarget: true }, { invalidFixHead: true }, { alteredFixHead: true }, { multipleFixCommits: true }, { foreignFixCommit: true }, { lateFixCommit: true }, { lateFixPull: true }, { lateMarker: true }, { missingPublicationParent: true }, { multiplePublicationParents: true }, { malformedPublicationParent: true }, { mismatchedPublicationParent: true }]) {
     const unsafeShape = fakeGh({ scenario: "controlled-fix", ...option });
     const unsafeResult = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: unsafeShape.runner, now: () => new Date(NOW), sleep: async () => {} });
     assert.equal(unsafeResult.passed, false);
   }
 });
 
-test("controlled-fix recovery proves retained evidence without dispatch, mutation, or log reads", async () => {
+test("controlled-fix recovery proves retained evidence with a parent anchored to the run SHA, without dispatch, mutation, or log reads", async () => {
   const fake = fakeGh({ scenario: "controlled-fix", recoveryDispatchRef: DISPATCH_REF, currentDefaultBranch: "release" });
   const result = await recoverControlledFix({ options: await recoveryOptions(), gh: fake.runner, now: () => new Date(NOW) });
   assert.equal(result.passed, true);
@@ -675,6 +684,10 @@ test("controlled-fix recovery fails closed for non-private targets and wrong ret
     { fake: { lateFixCommit: true }, options: {} },
     { fake: { lateFixPull: true }, options: {} },
     { fake: { lateMarker: true }, options: {} },
+    { fake: { missingPublicationParent: true }, options: {} },
+    { fake: { multiplePublicationParents: true }, options: {} },
+    { fake: { malformedPublicationParent: true }, options: {} },
+    { fake: { mismatchedPublicationParent: true }, options: {} },
     { fake: { wrongRunActor: true }, options: {} },
     { fake: { wrongAttributedActor: true }, options: {} },
     { fake: { jobTotalCount: 2 }, options: {} },

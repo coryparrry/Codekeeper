@@ -3,7 +3,7 @@ description: Stage the pinned production Codekeeper runtime as a short-lived wor
 
 inputs:
   artifact-name:
-    description: Exact artifact name derived from the current workflow run and attempt.
+    description: Exact run-scoped bootstrap artifact name derived from github.run_id; reruns replace this verified tooling artifact.
     required: true
 
 runs:
@@ -65,3 +65,4 @@ runs:
         path: ${{ runner.temp }}/codekeeper-tooling
         retention-days: 1
         if-no-files-found: error
+        overwrite: true
