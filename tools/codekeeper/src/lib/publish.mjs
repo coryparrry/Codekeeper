@@ -263,13 +263,19 @@ function matchesAutomationActor(actor, identity) {
   );
 }
 
-export function isTrustedMaintenanceIssue(issue, comments, { marker, botLogin, botId }) {
-  const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
+function isRecoverableMaintenanceIssue(issue, marker, identity) {
   return Boolean(
     identity &&
     matchesAutomationActor(issue?.user, identity) &&
     typeof issue?.body === "string" &&
-    issue.body.endsWith(marker) &&
+    issue.body.endsWith(marker)
+  );
+}
+
+export function isTrustedMaintenanceIssue(issue, comments, { marker, botLogin, botId }) {
+  const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
+  return Boolean(
+    isRecoverableMaintenanceIssue(issue, marker, identity) &&
     Array.isArray(comments) &&
     comments.some((comment) => isOwnedMarkerComment(comment, marker, identity))
   );
@@ -283,29 +289,41 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
     const fingerprint = findingFingerprint(finding);
     const marker = findingMarker(fingerprint);
     let match;
+    const recoverable = [];
     for (const issue of existing) {
       if (typeof issue?.body !== "string" || !issue.body.endsWith(marker)) continue;
       const comments = await github.listIssueComments(issue.number);
-      if (isTrustedMaintenanceIssue(issue, comments, {
+      const ownership = {
         marker,
         botLogin: automationIdentity.login,
         botId: automationIdentity.id
-      })) {
+      };
+      if (isTrustedMaintenanceIssue(issue, comments, ownership)) {
         match = issue;
         break;
       }
+      if (isRecoverableMaintenanceIssue(issue, marker, automationIdentity)) recoverable.push(issue);
     }
+    if (!match && recoverable.length > 1) {
+      throw new Error(`Ambiguous maintenance issue recovery for ${fingerprint}; refusing to choose among ${recoverable.length} unmarked App-authored issues`);
+    }
+    const recovery = match ? null : recoverable[0];
     const labels = [...new Set([...findingLabels(finding), `codekeeper:priority-${finding.priority}`])];
     const title = singleLine(`[AI maintenance] ${finding.title}`) || "[AI maintenance] Repository finding";
     const body = renderMaintenanceIssue(finding, fingerprint, runUrl);
 
-    if (match?.state === "closed") {
-      published.push({ fingerprint, state: "acknowledged", issueNumber: match.number });
+    if ((match ?? recovery)?.state === "closed") {
+      if (recovery && !dryRun) await github.createComment(recovery.number, marker);
+      published.push({ fingerprint, state: "acknowledged", issueNumber: (match ?? recovery).number });
       continue;
     }
     if (dryRun) {
-      published.push({ fingerprint, state: match ? "would-update" : "would-create", issueNumber: match?.number ?? null });
+      published.push({ fingerprint, state: (match ?? recovery) ? "would-update" : "would-create", issueNumber: match?.number ?? recovery?.number ?? null });
       continue;
+    }
+    if (recovery) {
+      await github.createComment(recovery.number, marker);
+      match = recovery;
     }
     await github.ensureLabels(config.labels, labels);
     if (match) {
