@@ -281,7 +281,7 @@ test("automatic issue preparation records trusted mode without an owner command"
   }
 });
 
-test("audit candidate validation preserves caller changes and clears repository credentials for commands", async () => {
+test("audit candidate validation preserves caller changes and exposes only safe environment variables to commands", async () => {
   const root = await createRepository();
   const directory = bundle(root, "input");
   const candidate = bundle(root, "candidate");
@@ -289,7 +289,9 @@ test("audit candidate validation preserves caller changes and clears repository 
   const configPath = path.join(root, ".github/codekeeper.json");
   const config = JSON.parse(await readFile(configPath, "utf8"));
   config.audit.repair.enabled = true;
-  config.audit.repair.validationCommands = ["test -z \"$GITHUB_TOKEN\" && test -z \"$OPENAI_API_KEY\" && test -z \"$ACTIONS_RUNTIME_TOKEN\""];
+  config.audit.repair.validationCommands = [
+    "test -n \"$PATH\" && test -z \"$GITHUB_TOKEN\" && test -z \"$OPENAI_API_KEY\" && test -z \"$ACTIONS_RUNTIME_TOKEN\" && test -z \"$CUSTOM_PROVIDER_KEY\" && test -z \"$NPM_TOKEN\""
+  ];
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   run("git", ["add", ".github/codekeeper.json"], root);
   run("git", ["commit", "-qm", "configure validation"], root);
@@ -301,7 +303,14 @@ test("audit candidate validation preserves caller changes and clears repository 
     "node",
     [cli, "validate-audit", "--config", ".github/codekeeper.json", "--directory", directory, "--result", path.join(directory, "codex-result.json"), "--artifact", candidate],
     root,
-    { GITHUB_REPOSITORY: "acme/example", GITHUB_TOKEN: "write-token", OPENAI_API_KEY: "model-secret", ACTIONS_RUNTIME_TOKEN: "runner-token" }
+    {
+      GITHUB_REPOSITORY: "acme/example",
+      GITHUB_TOKEN: "write-token",
+      OPENAI_API_KEY: "model-secret",
+      ACTIONS_RUNTIME_TOKEN: "runner-token",
+      CUSTOM_PROVIDER_KEY: "provider-secret",
+      NPM_TOKEN: "registry-secret"
+    }
   );
 
   const candidateMetadata = JSON.parse(await readFile(path.join(candidate, "candidate.json"), "utf8"));
@@ -314,7 +323,14 @@ test("audit candidate validation preserves caller changes and clears repository 
     "node",
     [cli, "verify-audit", "--config", ".github/codekeeper.json", "--candidate", candidate, "--expected-candidate-sha", digest(await readFile(path.join(candidate, "candidate.json")))],
     verifier,
-    { GITHUB_REPOSITORY: "acme/example", GITHUB_TOKEN: "write-token", OPENAI_API_KEY: "model-secret", ACTIONS_RUNTIME_TOKEN: "runner-token" }
+    {
+      GITHUB_REPOSITORY: "acme/example",
+      GITHUB_TOKEN: "write-token",
+      OPENAI_API_KEY: "model-secret",
+      ACTIONS_RUNTIME_TOKEN: "runner-token",
+      CUSTOM_PROVIDER_KEY: "provider-secret",
+      NPM_TOKEN: "registry-secret"
+    }
   );
   assert.match(await readFile(path.join(verifier, "README.md"), "utf8"), /Updated guidance/);
 });

@@ -206,20 +206,9 @@ export function applyPatch(patchPath, cwd = process.cwd()) {
 }
 
 export function runValidationCommands(commands, cwd = process.cwd()) {
-  const environment = { ...process.env };
-  for (const key of [
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "GITHUB_PAT",
-    "OPENAI_API_KEY",
-    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-    "ACTIONS_ID_TOKEN_REQUEST_URL",
-    "ACTIONS_RUNTIME_TOKEN",
-    "ACTIONS_RUNTIME_URL",
-    "ACTIONS_RESULTS_URL",
-    "ACTIONS_CACHE_URL"
-  ]) {
-    delete environment[key];
+  const environment = {};
+  for (const key of ["PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "TEMP", "TMP"]) {
+    if (process.env[key] !== undefined) environment[key] = process.env[key];
   }
   const results = [];
   for (const command of commands) {
