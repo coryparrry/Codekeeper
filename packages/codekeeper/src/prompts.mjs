@@ -54,11 +54,16 @@ export function createTerminalPrompter({ input = defaultInput, output = defaultO
       });
       return choices[Number(selected) - 1].value;
     },
-    async multiselect({ message, choices }) {
+    async multiselect({ message, choices, defaultValues = [] }) {
       output.write(`${message}\n`);
       choices.forEach((choice, index) => output.write(`  ${index + 1}. ${choice.label}\n`));
+      const defaultNumbers = defaultValues.map((value) => choices.findIndex((choice) => choice.value === value) + 1);
+      if (defaultNumbers.some((number) => number < 1)) {
+        throw new InstallerError("A multi-select default is not one of the available choices.", { code: "PROMPT_INVALID" });
+      }
       const selected = await this.inputText({
         message: "Choose one or more comma-separated numbers",
+        defaultValue: defaultNumbers.join(", "),
         validate(value) {
           const numbers = value.split(",").map((item) => Number(item.trim()));
           return numbers.length > 0 && numbers.every((number) => Number.isInteger(number) && choices[number - 1])

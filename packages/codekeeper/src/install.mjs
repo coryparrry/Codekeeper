@@ -5,6 +5,7 @@ import { requireSuccess } from "./command-runner.mjs";
 import { InstallerError } from "./errors.mjs";
 import { sha256 } from "./assets.mjs";
 import { formatCommand } from "./shell-command.mjs";
+import { SECRET_PURPOSES } from "./constants.mjs";
 
 const PR_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/;
 
@@ -129,6 +130,10 @@ export async function configureRepositorySettings(plan, { runner, output, resume
     "GitHub CLI could not force CODEKEEPER_ENABLED=false; no secret or file mutation was attempted.",
     resumeCommand
   );
+
+  output.write("\nRequired GitHub Actions secrets\n");
+  output.write("Setup makes no model call. Each value below goes directly from your terminal to GitHub CLI without entering the installer Node process; GitHub Actions supplies it later only to selected jobs.\n");
+  for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
 
   for (const secret of plan.secrets) {
     output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. If it already exists, this deliberately replaces it. Secret input goes directly to gh; press Ctrl-D when finished.\n`);

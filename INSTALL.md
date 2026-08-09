@@ -14,6 +14,10 @@ npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codeke
 
 The installer generates a disabled setup PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Review the generated policy and callers before merging. If the installer cannot be used, the numbered steps below remain the manual fallback.
 
+If you are unsure which options to choose, accept the recommended starter setup: pull-request review plus repository maintenance, the `openai` preset, the repository name as the comment display name, and your authenticated GitHub login as the owner-command user. Issue triage and the separately gated fix path can be added later through a reviewed policy/workflow change.
+
+After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller also retains its schedule, although only its pinned bootstrap can run while disabled.
+
 ## 1. Add policy and caller workflows
 
 Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter repository's default branch. Copy only the caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/`, remove `.example`, and replace both placeholders in every caller:
