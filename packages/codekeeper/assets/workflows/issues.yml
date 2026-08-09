@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
         with:
-          artifact-name: codekeeper-tooling-${{ github.run_id }}-${{ github.run_attempt }}
+          artifact-name: codekeeper-tooling-${{ github.run_id }}
   triage:
     needs: bootstrap
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-issues.yml@FULL_COMMIT_SHA
