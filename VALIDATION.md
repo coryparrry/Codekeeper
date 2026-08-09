@@ -5,9 +5,11 @@ Run these checks before publishing a source release or changing reusable workflo
 ```bash
 node tools/codekeeper/src/cli.mjs check-config
 cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
+cd ../../packages/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
+cd ../../acceptance && npm run check
 ```
 
-`npm run check` also regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. The manifest's SHA-256 is deliberately embedded in the four source workflows: release changes to the production tooling must update the generated manifest and its four pinned workflow digests together. The top-level release manifest remains a separate release-owner responsibility.
+The maintainer `npm run check` also regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. The manifest's SHA-256 is deliberately embedded in the four source workflows: release changes to the production tooling must update the generated manifest and its four pinned workflow digests together. The installer suite covers generated assets, preflight failures, secret boundaries, Git recovery, the Ink terminal flow, and the packed entrypoint. The acceptance suite remains offline and uses only its deterministic fixture. The top-level release manifest remains a separate release-owner responsibility.
 
 ## Decision-quality evaluation
 
@@ -54,7 +56,7 @@ bash scripts/release-source.sh --verify
 
 This proves only the source archive. It does not prove that a GitHub release has been created, staged, made visible, or that a caller pins the intended commit; verify those GitHub-side facts separately.
 
-The repository workflow also runs the Node test suite, Actionlint, and YAML parsing for every tracked-file pull request and push.
+The repository workflow runs the maintainer suite, the installer suite on the pinned Node 22 and 24 LTS releases, the offline acceptance-harness suite, Actionlint, and YAML parsing for every tracked-file pull request and push.
 
 The tests cover provider selection, versioned coordinator-profile loading, separate tracing credentials, contract-invalid agent retry, bounded automatic issue triage plus configured-owner manual triage and fix authorization, policy and label ownership, bounded prompt context, artifact sealing, patch limits, fresh-checkout verification, current PR identity, App-owned markers, auto-merge eligibility, reusable-workflow contracts, and source-release manifest integrity. Regenerate and verify `MANIFEST.sha256` when release files change.
 
