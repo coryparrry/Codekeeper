@@ -1,5 +1,5 @@
 export const PACKAGE_NAME = "codekeeper";
-export const PACKAGE_VERSION = "0.1.1";
+export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
 export const SOURCE_COMMIT = "1938cd9efc3930d61b78d9e42189d1db3e3e3e9c";

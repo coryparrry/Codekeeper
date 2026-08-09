@@ -2,21 +2,21 @@
 
 ## Guided installer status
 
-The separate dependency-light [`codekeeper` installer](packages/codekeeper/README.md) is the preferred guided path, but it remains private and unpublished during acceptance. Do not assume `npx codekeeper init` resolves to this project from the public npm registry yet. Build a local tarball from this checkout and invoke that exact file instead:
+The separate [`codekeeper` installer](packages/codekeeper/README.md) is the preferred guided path. It opens a keyboard-driven terminal UI on Node.js 22+, but remains private and unpublished during acceptance. Do not assume `npx codekeeper init` resolves to this project from the public npm registry yet. Build a local tarball from this checkout and invoke that exact file instead:
 
 ```bash
 mkdir -p /absolute/path/outside/source-checkout/codekeeper-dist
 cd packages/codekeeper
 npm pack --pack-destination /absolute/path/outside/source-checkout/codekeeper-dist
 cd /absolute/path/to/adopter-repository
-npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.1.1.tgz -- codekeeper init
+npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.2.0.tgz -- codekeeper init
 ```
 
 The installer generates a disabled setup PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Review the generated policy and callers before merging. If the installer cannot be used, the numbered steps below remain the manual fallback.
 
 If you are unsure which options to choose, accept the recommended starter setup: pull-request review plus repository maintenance, the `openai` preset, the repository name as the comment display name, and your authenticated GitHub login as the owner-command user. Issue triage and the separately gated fix path can be added later through a reviewed policy/workflow change.
 
-After the installer's final confirmation, give it the absolute path to the newly downloaded GitHub App `.pem` file. Do not paste the PEM contents into the terminal. The installer opens the file read-only and passes its descriptor directly to GitHub CLI; it does not read the key into Node.js memory or expose it through argv, environment variables, logs, generated files, or snapshots.
+Before the installer's final confirmation, choose the newly downloaded GitHub App `.pem` file in its metadata-only picker. Do not open or paste the PEM contents. The picker ignores symlinks and does not read the file; after confirmation, the installer opens it read-only and passes its descriptor directly to GitHub CLI. It does not expose the path or key through terminal output, argv, environment variables, logs, generated files, or snapshots.
 
 After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller also retains its schedule, although only its pinned bootstrap can run while disabled.
 

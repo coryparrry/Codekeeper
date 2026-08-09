@@ -4,7 +4,7 @@ import path from "node:path";
 import { InstallerError } from "./errors.mjs";
 
 const OUTPUT_LIMIT = 128 * 1024;
-const STDIN_FILE_LIMIT = 48 * 1024;
+export const STDIN_FILE_LIMIT_BYTES = 48 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const KILL_GRACE_MS = 1_000;
 const SAFE_ENV_NAMES = new Set([
@@ -57,7 +57,7 @@ export function openSafeStdinFile(stdinFilePath, { fileOperations = DEFAULT_FILE
     if (
       !opened.isFile()
       || opened.size <= 0
-      || opened.size > STDIN_FILE_LIMIT
+      || opened.size > STDIN_FILE_LIMIT_BYTES
     ) {
       throw new InstallerError("The selected private-key input must be a nonempty regular file no larger than 48 KB.", {
         code: "SECRET_INPUT_FILE_INVALID"

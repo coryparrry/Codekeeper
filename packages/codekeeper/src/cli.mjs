@@ -9,8 +9,8 @@ import {
   collectAppAnswers,
   collectAppPrivateKeyPath,
   collectSetupAnswers,
+  completionGuidance,
   documentMap,
-  workflowMap
 } from "./plan.mjs";
 import { configureRepositorySettings, installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
@@ -71,7 +71,7 @@ function preview(plan, output) {
   output.write(`  Default branch: ${plan.defaultBranch}\n`);
   output.write(`  Comment display name: ${plan.displayName}\n`);
   output.write(`  Owner-command users: ${plan.ownerLogins.join(", ")}\n`);
-  output.write(`  Provider preset: ${plan.preset}${plan.preset === "openai" ? " (one OpenAI provider key)" : " (DeepSeek issue triage; OpenAI otherwise)"}\n`);
+  output.write(`  Provider preset: ${plan.preset}${plan.preset === "openai" ? " (one OpenAI model-provider key plus a separate OpenAI trace key)" : " (provider keys vary by workflow, plus a separate OpenAI trace key)"}\n`);
   output.write(`  Setup branch: ${plan.branch}\n`);
   output.write("  Workflows:\n");
   for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);
@@ -97,19 +97,11 @@ function printCompletion(plan, receipt, output) {
   output.write(`Pinned source: ${plan.source.repository}@${plan.source.commit}\n`);
   output.write("\nDocument map\n");
   for (const item of documentMap(plan.files)) output.write(`  - ${item.path}: ${item.purpose}\n`);
-  output.write("\nNext proofs after the setup PR merges: keep CODEKEEPER_ENABLED=false until ready, deliberately set it true for one bounded proof, then restore it to false.\n");
-  for (const item of workflowMap(plan.modes)) {
-    const proof = item.mode === "maintain"
-      ? "manual workflow_dispatch with dry_run=true"
-      : item.mode === "review"
-        ? "controlled same-repository pull request"
-        : item.mode === "issues"
-          ? "controlled issue event"
-          : "owner-authorized command only after issue implementation is deliberately enabled";
-    output.write(`  - ${item.mode}: ${proof}\n`);
-  }
-  if (plan.modes.includes("review")) output.write("Do not make the Codekeeper review gate required until its controlled review proof passes.\n");
-  output.write("The installer did not enable Codekeeper, dispatch a workflow, or merge the PR.\n");
+  const guidance = completionGuidance(plan.modes);
+  output.write(`\n${guidance.heading}\n`);
+  for (const item of guidance.proofs) output.write(`  - ${item.mode}: ${item.instruction}\n`);
+  if (guidance.reviewGateWarning) output.write(`${guidance.reviewGateWarning}\n`);
+  output.write(`${guidance.closing}\n`);
 }
 
 export async function runCli({
@@ -119,8 +111,9 @@ export async function runCli({
   output = stdout,
   errorOutput = stderr,
   runner = createCommandRunner(),
-  prompt = createTerminalPrompter({ input, output }),
+  prompt = null,
   interactive = input.isTTY === true && output.isTTY === true,
+  environment = process.env,
   platform = process.platform,
   openUrl = (url) => bestEffortOpen(url, { runner, platform }),
   loadAssets = loadVerifiedAssets,
@@ -143,20 +136,53 @@ export async function runCli({
     return 0;
   }
 
+  let activePrompt = prompt;
   try {
     const bundle = await loadAssets();
+    if (!activePrompt) {
+      const likelyTui = interactive
+        && input?.isTTY === true
+        && output?.isTTY === true
+        && typeof input?.setRawMode === "function"
+        && String(environment?.TERM ?? "").toLowerCase() !== "dumb";
+      if (likelyTui) {
+        let tui;
+        try {
+          tui = await import("./tui.mjs");
+        } catch (cause) {
+          throw new InstallerError("The interactive terminal UI could not be loaded.", { code: "TUI_UNAVAILABLE", cause });
+        }
+        activePrompt = tui.shouldUseInkTui({ interactive, input, output, environment })
+          ? await tui.createInkPrompter({ input, output, errorOutput, environment })
+          : createTerminalPrompter({ input, output });
+      } else {
+        activePrompt = createTerminalPrompter({ input, output });
+      }
+    }
+    const presentationOutput = activePrompt.kind === "ink" ? activePrompt.notices : output;
     const snapshot = await inspect({ runner, cwd, interactive });
-    const setupAnswers = await collectSetupAnswers({ prompt, snapshot, bundle, output });
+    const setupAnswers = await collectSetupAnswers({ prompt: activePrompt, snapshot, bundle, output: presentationOutput });
     const registrationUrl = appRegistrationUrl({ repository: snapshot.repository, displayName: setupAnswers.displayName });
-    output.write(`\nUse an adopter-owned GitHub App installed only on ${snapshot.repository}. The link creates one with the required permissions; if your test App is already installed here, close the page and use that App instead.\n${registrationUrl}\n`);
+    presentationOutput.write(`\nUse an adopter-owned GitHub App installed only on ${snapshot.repository}. The link creates one with the required permissions; if your test App is already installed here, close the page and use that App instead.\n${registrationUrl}\n`);
     try {
       await openUrl(registrationUrl);
     } catch {
       // Opening the browser is best-effort; the printed URL is always authoritative.
     }
-    const appReady = await prompt.confirm({
+    const appReady = await activePrompt.confirm({
       message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
-      defaultValue: false
+      defaultValue: false,
+      ...(activePrompt.kind === "ink" ? {
+        step: "GitHub App",
+        description: [
+          `Required for: ${snapshot.repository}`,
+          "The App needs contents, issues, and pull requests read-write; metadata read-only; webhooks disabled.",
+          "Create or inspect the App in the browser, install it only on this repository, then download a new private key.",
+          registrationUrl
+        ],
+        yesLabel: "App and key ready",
+        noLabel: "Stop for now"
+      } : {})
     });
     if (!appReady) {
       throw new InstallerError("Complete GitHub App creation and installation, then rerun init.", {
@@ -164,26 +190,55 @@ export async function runCli({
         resume: resumeCommand
       });
     }
-    const appAnswers = await collectAppAnswers({ prompt, modes: setupAnswers.modes, output });
+    const appAnswers = await collectAppAnswers({ prompt: activePrompt, modes: setupAnswers.modes, output: presentationOutput });
     const plan = buildInstallPlan({
       bundle,
       snapshot,
       answers: { ...setupAnswers, ...appAnswers }
     });
-    preview(plan, output);
-    const confirmed = await prompt.confirm({ message: "Create this disabled setup?", defaultValue: false });
+    const appPrivateKeyPath = await collectAppPrivateKeyPath({ prompt: activePrompt, output: presentationOutput });
+    let confirmed;
+    if (typeof activePrompt.reviewInstallPlan === "function") {
+      confirmed = await activePrompt.reviewInstallPlan(plan);
+    } else {
+      preview(plan, output);
+      confirmed = await activePrompt.confirm({ message: "Create this disabled setup?", defaultValue: false });
+    }
     if (!confirmed) throw new InstallerError("Setup was cancelled before repository mutation.", { code: "USER_CANCELLED" });
-    const appPrivateKeyPath = await collectAppPrivateKeyPath({ prompt, output });
 
+    activePrompt.progress?.start();
+    activePrompt.progress?.update({ id: "repository:verify", status: "active" });
     const beforeSettings = await inspect({ runner, cwd: snapshot.root, interactive });
     assertSameSnapshot(snapshot, beforeSettings, resumeCommand);
-    await configureRepositorySettings(plan, { runner, output, appPrivateKeyPath, resumeCommand });
+    activePrompt.progress?.update({ id: "repository:verify", status: "done" });
+    await configureRepositorySettings(plan, {
+      runner,
+      output: presentationOutput,
+      appPrivateKeyPath,
+      onProgress: activePrompt.progress?.update,
+      withInteractiveTerminal: typeof activePrompt.suspendTerminal === "function"
+        ? (callback, notice) => activePrompt.suspendTerminal(callback, notice)
+        : (callback) => callback(),
+      resumeCommand
+    });
     const beforeGit = await inspect({ runner, cwd: snapshot.root, interactive });
     assertSameSnapshot(snapshot, beforeGit, resumeCommand);
-    const receipt = await installPlan(plan, { runner, resumeCommand, platform });
-    printCompletion(plan, receipt, output);
+    const receipt = await installPlan(plan, {
+      runner,
+      onProgress: activePrompt.progress?.update,
+      resumeCommand,
+      platform
+    });
+    if (typeof activePrompt.showCompletion === "function") await activePrompt.showCompletion(plan, receipt);
+    else printCompletion(plan, receipt, output);
+    await activePrompt.dispose?.();
     return 0;
   } catch (error) {
+    try {
+      await activePrompt?.dispose?.();
+    } catch {
+      // Report the original installer error after best-effort terminal cleanup.
+    }
     errorOutput.write(`${formatInstallerError(error)}\n`);
     return error?.code === "CLI_USAGE" ? 2 : 1;
   }
