@@ -9,10 +9,12 @@ import {
   WORKFLOW_COMPLETION_POLL_ATTEMPTS,
   WORKFLOW_COMPLETION_TIMEOUT_MS,
   createGhRunner,
+  formatUsage,
   parseCommandLine,
   parseEventCallerRunName,
   parsePinnedWorkflowUses,
   preflight,
+  recoverControlledFix,
   redact,
   runScenario,
   safeEnvironment
@@ -21,14 +23,16 @@ import { EvidenceError, prepareEvidenceDestination, validateEvidence, writeEvide
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const HEAD = "fedcba9876543210fedcba9876543210fedcba98";
+const DISPATCH_REF = `codekeeper-acceptance/dispatch-controlled-fix-${HEAD.slice(0, 12)}-9b635c89-b4c7-4316-b704-af6a81585ddb`;
 const REPO = "owner/codekeeper-acceptance-fixture";
 const APP = { login: "codekeeper-acceptance[bot]", graphqlLogin: "codekeeper-acceptance", id: "99" };
 const NOW = "2026-08-08T00:00:00.000Z";
 const RUN_CREATED = "2026-08-08T00:00:00.001Z";
 const RUN_STARTED = "2026-08-08T00:00:00.002Z";
-const RUN_UPDATED = "2026-08-08T00:00:00.003Z";
+const SUBJECT_UPDATED = "2026-08-08T00:00:00.003Z";
 const MARKER_UPDATED = "2026-08-08T00:00:00.004Z";
-const SUBJECT_UPDATED = "2026-08-08T00:00:00.005Z";
+const RUN_UPDATED = "2026-08-08T00:00:00.005Z";
+const LATE_PUBLICATION = "2026-08-08T00:00:00.006Z";
 const TEMP_ROOT = "/private/tmp";
 const FIXTURE = await mkdtemp(path.join(TEMP_ROOT, "codekeeper-acceptance-fixture-"));
 
@@ -105,6 +109,18 @@ async function scenarioOptions(extra = {}) {
   };
 }
 
+async function recoveryOptions(extra = {}) {
+  return scenarioOptions({
+    issue: "14",
+    "run-id": "77",
+    pr: "14",
+    "dispatch-ref": DISPATCH_REF,
+    "app-login": APP.login,
+    "app-id": APP.id,
+    ...extra
+  });
+}
+
 function createRepairFingerprint(issueNumber) {
   return createHash("sha256").update(`issue|${REPO}|${issueNumber}`).digest("hex");
 }
@@ -120,13 +136,13 @@ function fakeClock(start = NOW) {
   };
 }
 
-function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
+function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = false, publicRepository = false, currentDefaultBranch = "main", markerHasPreviousPage = false, fixDraft = false, fixFork = false, fixRetarget = false, invalidFixHead = false, alteredFixHead = false, multipleFixCommits = false, foreignFixCommit = false, lateFixCommit = false, lateFixPull = false, lateMarker = false, wrongRunActor = false, wrongAttributedActor = false, jobTotalCount = null, staleMarker = false, crossReviewHead = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
   const calls = [];
   let workflowListCount = 0;
   let runViewCount = 0;
   let pullListCount = 0;
   let pullViewCount = 0;
-  let tag;
+  let tag = recoveryDispatchRef;
   const detail = {
     "maintenance-dry-run": ["codekeeper-maintain.yml", "Codekeeper maintenance", "workflow_dispatch"],
     "review-introduced-defect": ["codekeeper-review.yml", "Codekeeper review", "pull_request_target"],
@@ -160,7 +176,7 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
     const text = args.join(" ");
     if (commandFailure) return response("ghp_abcdefghi token=leak https://user:password@example.invalid", 1, "GH_TOKEN=leak");
     if (text === "auth status --hostname github.com") return response("");
-    if (text === `api --hostname github.com repos/${REPO}`) return response(metadata());
+    if (text === `api --hostname github.com repos/${REPO}`) return response(publicRepository ? { ...metadata(), private: false, visibility: "public", default_branch: currentDefaultBranch } : { ...metadata(), default_branch: currentDefaultBranch });
     if (text === "api --hostname github.com user --jq .login") return response("dispatcher\n");
     if (text === `api --hostname github.com repos/${REPO}/git/ref/heads/main`) return response({ object: { sha: HEAD } });
     if (args[0] === "api" && args.includes("--method") && args.includes("POST") && args.includes(`repos/${REPO}/git/refs`)) {
@@ -179,10 +195,43 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
     if (text.includes(`/contents/.github/workflows/${detail?.[0]}`)) return response(workflowSource ? encoded(workflowSource) : workflowPin(detail[0]));
     if (text.includes("/contents/.github/codekeeper.json")) {
       return response(encoded(JSON.stringify({
-        repository: { automationBranchPrefix: "codekeeper/fix/" },
+        repository: { defaultBranch: "main", automationBranchPrefix: "codekeeper/fix/" },
         issues: { allowAiImplementation: !invalidFixPolicy },
-        audit: { repair: { allowedPaths: invalidFixPolicy ? ["README.md"] : [...FIXTURE_ALLOWED_FIX_PATHS], validationCommands: invalidFixPolicy ? [] : ["node --test test/*.test.mjs"] } }
+        audit: { repair: { allowedPaths: invalidFixPolicy ? ["README.md"] : [...FIXTURE_ALLOWED_FIX_PATHS], validationCommands: invalidFixPolicy ? [] : ["node --test test/*.test.mjs"] } },
+        merge: { enabled: false }
       })));
+    }
+    if (new RegExp(`^api --hostname github\\.com repos/${REPO}/pulls/\\d+/commits\\?per_page=2$`).test(text)) {
+      const actor = foreignFixCommit
+        ? { login: "other-app[bot]", id: 100, type: "Bot" }
+        : { login: APP.login, id: Number(APP.id), type: "Bot" };
+      const publication = {
+        sha: HEAD,
+        commit: {
+          author: { date: lateFixCommit ? LATE_PUBLICATION : SUBJECT_UPDATED },
+          committer: { date: lateFixCommit ? LATE_PUBLICATION : SUBJECT_UPDATED }
+        },
+        author: actor,
+        committer: actor
+      };
+      return response(multipleFixCommits ? [publication, { ...publication, sha: SHA }] : [publication]);
+    }
+    if (text === `api --hostname github.com repos/${REPO}/actions/workflows/codekeeper-fix.yml/runs?event=workflow_dispatch&branch=${encodeURIComponent(tag)}&per_page=100`) {
+      const recovered = {
+        id: 77,
+        name: detail[1],
+        display_title: wrongDisplayTitle ? `${displayTitle} stale` : displayTitle,
+        event: detail[2],
+        status: "completed",
+        conclusion: "success",
+        head_sha: runHead,
+        head_branch: runBranch(),
+        run_attempt: 1,
+        created_at: RUN_CREATED,
+        updated_at: RUN_UPDATED,
+        actor: { login: wrongAttributedActor ? "other-dispatcher" : "dispatcher" }
+      };
+      return response({ total_count: duplicateRecoveredRun ? 2 : 1, workflow_runs: duplicateRecoveredRun ? [recovered, { ...recovered, id: 78 }] : [recovered] });
     }
     if (args[0] === "run" && args[1] === "list") {
       workflowListCount += 1;
@@ -230,14 +279,14 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
         run_attempt: baseline ? (baselineRerun ? 2 : 1) : 1,
         status: "completed",
         display_title: baseline ? displayTitle : (wrongDisplayTitle ? `${displayTitle} stale` : displayTitle),
-        actor: { login: "dispatcher" }
+        actor: { login: wrongRunActor ? "other-dispatcher" : "dispatcher" }
       });
     }
     if (text.includes("/actions/runs/77/jobs")) {
       const jobs = scenario === "maintenance-dry-run"
         ? [{ name: "publish", conclusion: "skipped" }]
-        : [{ name: "Codekeeper implementation verification", conclusion: "success" }];
-      return response({ jobs });
+        : [{ name: "fix / Codekeeper implementation verification", conclusion: "success" }];
+      return response({ total_count: jobTotalCount ?? jobs.length, jobs });
     }
     if (args[0] === "pr" && args[1] === "view") {
       pullViewCount += 1;
@@ -258,23 +307,25 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
     if (args[0] === "issue" && args[1] === "view") return response({ number: scenario === "issue-triage-related" ? 13 : issueNumber, url: `https://github.com/${REPO}/issues/${scenario === "issue-triage-related" ? 13 : issueNumber}`, state: "OPEN", labels: [{ name: "codekeeper:ready" }], updatedAt: SUBJECT_UPDATED });
     if (args[0] === "pr" && args[1] === "list") {
       pullListCount += 1;
-      return response(pullListCount === 1 ? [] : [{ number: 14, url: `https://github.com/${REPO}/pull/14`, headRefName: branch, createdAt: SUBJECT_UPDATED }]);
+      return response(pullListCount === 1 ? [] : [{ number: 14, url: `https://github.com/${REPO}/pull/14`, headRefName: branch, createdAt: lateFixPull ? LATE_PUBLICATION : SUBJECT_UPDATED }]);
     }
     if (args[0] === "api" && args[1] === "graphql") {
       if (text.includes("comments(last:100)")) {
+        assert.match(text, /pageInfo\{hasPreviousPage hasNextPage\}/);
         const isReview = text.includes("pullRequest(number:$number)");
         const marker = isReview ? "<!-- codekeeper:review -->" : scenario === "controlled-fix" ? `<!-- codekeeper:repair-notification=${wrongRepairMarker ? "0".repeat(64) : fingerprint} -->` : "<!-- codekeeper:issue-triage -->";
         const object = isReview ? "pullRequest" : "issue";
         const runEvidence = (isReview || scenario === "issue-triage-related")
           ? `\n<sub>Codekeeper workflow run: https://github.com/${REPO}/actions/runs/${staleMarker ? 78 : 77}</sub>`
           : "";
+        const controlledFixBody = `Codekeeper opened a repair pull request: https://github.com/${REPO}/pull/14\n${marker}`;
         return response({
           data: {
             repository: {
               [object]: {
                 comments: {
-                  nodes: [{ body: `summary${runEvidence}\n${marker}`, updatedAt: staleMarker ? RUN_CREATED : MARKER_UPDATED, author: { login: APP.graphqlLogin, databaseId: foreignAppMarker ? 100 : Number(APP.id) } }],
-                  pageInfo: { hasNextPage: false }
+                  nodes: [{ body: scenario === "controlled-fix" ? controlledFixBody : `summary${runEvidence}\n${marker}`, updatedAt: staleMarker ? RUN_CREATED : lateMarker ? LATE_PUBLICATION : MARKER_UPDATED, author: { login: APP.graphqlLogin, databaseId: foreignAppMarker ? 100 : Number(APP.id) } }],
+                  pageInfo: { hasPreviousPage: markerHasPreviousPage, hasNextPage: false }
                 }
               }
             }
@@ -293,6 +344,8 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
         });
       }
       if (text.includes("body author")) {
+        assert.match(text, /autoMergeRequest\{enabledAt\}/);
+        assert.match(text, /isDraft baseRefName headRefOid headRefName headRepository\{nameWithOwner\}/);
         return response({
           data: {
             repository: {
@@ -300,10 +353,14 @@ function fakeGh({ scenario, staleMarker = false, crossReviewHead = false, concur
                 number: 14,
                 url: `https://github.com/${REPO}/pull/14`,
                 state: "OPEN",
+                isDraft: fixDraft,
+                baseRefName: fixRetarget ? "release" : "main",
+                headRefOid: invalidFixHead ? "main" : alteredFixHead ? SHA : HEAD,
+                headRepository: { nameWithOwner: fixFork ? "owner/codekeeper-acceptance-other" : REPO },
                 mergedAt: null,
                 autoMergeRequest: null,
                 headRefName: branch,
-                createdAt: SUBJECT_UPDATED,
+                createdAt: lateFixPull ? LATE_PUBLICATION : SUBJECT_UPDATED,
                 body: `Closes #${issueNumber}\n<!-- codekeeper:repair=${wrongRepairMarker ? "0".repeat(64) : fingerprint} -->`,
                 author: { login: APP.graphqlLogin, databaseId: Number(APP.id) }
               }
@@ -559,7 +616,7 @@ test("controlled fix rejects concurrent runs and accepts exactly one current can
   const good = fakeGh({ scenario: "controlled-fix" });
   const pass = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(pass.passed, true);
-  assert.deepEqual(pass.evidence.assertions.map((item) => item.passed), [true, true, true, true, true, true]);
+  assert.deepEqual(pass.evidence.assertions.map((item) => item.passed), [true, true, true, true, true, true, true]);
   assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/codekeeper.json?ref=${encodeURIComponent(pass.evidence.dispatchRef)}`));
   assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/codekeeper.json?ref=${HEAD}`));
   assert.ok(good.calls.findIndex((args) => args[3] === `repos/${REPO}/contents/.github/codekeeper.json?ref=${HEAD}`) < good.calls.findIndex((args) => args.includes(`repos/${REPO}/git/refs`)));
@@ -574,6 +631,85 @@ test("controlled fix rejects concurrent runs and accepts exactly one current can
   const rerunResult = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: rerun.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(rerunResult.passed, false);
   assert.equal(rerun.calls.some((args) => args[0] === "workflow" && args[1] === "run"), true);
+  for (const option of [{ fixDraft: true }, { fixFork: true }, { fixRetarget: true }, { invalidFixHead: true }, { alteredFixHead: true }, { multipleFixCommits: true }, { foreignFixCommit: true }, { lateFixCommit: true }, { lateFixPull: true }, { lateMarker: true }]) {
+    const unsafeShape = fakeGh({ scenario: "controlled-fix", ...option });
+    const unsafeResult = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: unsafeShape.runner, now: () => new Date(NOW), sleep: async () => {} });
+    assert.equal(unsafeResult.passed, false);
+  }
+});
+
+test("controlled-fix recovery proves retained evidence without dispatch, mutation, or log reads", async () => {
+  const fake = fakeGh({ scenario: "controlled-fix", recoveryDispatchRef: DISPATCH_REF, currentDefaultBranch: "release" });
+  const result = await recoverControlledFix({ options: await recoveryOptions(), gh: fake.runner, now: () => new Date(NOW) });
+  assert.equal(result.passed, true);
+  assert.equal(result.evidence.scenario, "controlled-fix");
+  assert.equal(result.evidence.dispatchRef, DISPATCH_REF);
+  assert.equal(result.evidence.workflow.id, 77);
+  assert.equal(result.evidence.resource.number, 14);
+  assert.deepEqual(result.evidence.assertions.map((item) => item.passed), Array(9).fill(true));
+  assert.ok(fake.calls.some((args) => args[3] === `repos/${REPO}/git/ref/tags/${encodeURIComponent(DISPATCH_REF)}`));
+  assert.ok(fake.calls.some((args) => args[3] === `repos/${REPO}/actions/workflows/codekeeper-fix.yml/runs?event=workflow_dispatch&branch=${encodeURIComponent(DISPATCH_REF)}&per_page=100`));
+  assert.ok(fake.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-fix.yml?ref=${encodeURIComponent(DISPATCH_REF)}`));
+  assert.ok(fake.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-fix.yml?ref=${HEAD}`));
+  assert.equal(fake.calls.some((args) => args[0] === "workflow" || args.includes("POST") || args.includes("PATCH") || args.includes("PUT") || args.includes("DELETE")), false);
+  assert.equal(fake.calls.some((args) => args.some((argument) => /(?:^|\/)logs(?:$|\?)/.test(argument)) || args.includes("--log")), false);
+});
+
+test("controlled-fix recovery fails closed for non-private targets and wrong retained evidence", async () => {
+  const cases = [
+    { fake: { publicRepository: true }, options: {} },
+    { fake: { tagMismatch: true }, options: {} },
+    { fake: {}, options: { "run-id": "78" } },
+    { fake: {}, options: { pr: "15" } },
+    { fake: { wrongRepairMarker: true }, options: {} },
+    { fake: { duplicateRecoveredRun: true }, options: {} },
+    { fake: { markerHasPreviousPage: true }, options: {} },
+    { fake: { fixDraft: true }, options: {} },
+    { fake: { fixFork: true }, options: {} },
+    { fake: { fixRetarget: true }, options: {} },
+    { fake: { invalidFixHead: true }, options: {} },
+    { fake: { alteredFixHead: true }, options: {} },
+    { fake: { multipleFixCommits: true }, options: {} },
+    { fake: { foreignFixCommit: true }, options: {} },
+    { fake: { lateFixCommit: true }, options: {} },
+    { fake: { lateFixPull: true }, options: {} },
+    { fake: { lateMarker: true }, options: {} },
+    { fake: { wrongRunActor: true }, options: {} },
+    { fake: { wrongAttributedActor: true }, options: {} },
+    { fake: { jobTotalCount: 2 }, options: {} },
+    { fake: { jobTotalCount: 101 }, options: {} }
+  ];
+  for (const item of cases) {
+    const fake = fakeGh({ scenario: "controlled-fix", recoveryDispatchRef: DISPATCH_REF, ...item.fake });
+    const result = await recoverControlledFix({ options: await recoveryOptions(item.options), gh: fake.runner, now: () => new Date(NOW) });
+    assert.equal(result.passed, false);
+    assert.equal(result.evidence.scenario, "controlled-fix");
+    assert.equal(result.evidence.dispatchRef, DISPATCH_REF);
+    assert.equal(fake.calls.some((args) => args[0] === "workflow" || args.includes("POST") || args.includes("PATCH") || args.includes("PUT") || args.includes("DELETE")), false);
+    assert.equal(fake.calls.some((args) => args.some((argument) => /(?:^|\/)logs(?:$|\?)/.test(argument)) || args.includes("--log")), false);
+  }
+});
+
+test("controlled-fix recovery requires every explicit immutable identity before gh", async () => {
+  const required = ["repo", "source-sha", "acknowledge-private-acceptance", "fixture-checkout", "evidence", "issue", "run-id", "pr", "dispatch-ref", "app-login", "app-id"];
+  for (const option of required) {
+    const options = await recoveryOptions();
+    delete options[option];
+    let called = false;
+    await assert.rejects(() => recoverControlledFix({ options, gh: async () => { called = true; return response(""); } }));
+    assert.equal(called, false, option);
+  }
+  const malformed = await recoveryOptions({ "dispatch-ref": "main" });
+  await assert.rejects(() => recoverControlledFix({ options: malformed, gh: async () => { throw new Error("gh must not run"); } }), /exact retained controlled-fix acceptance tag/);
+  for (const dispatchRef of [
+    DISPATCH_REF.replace("-4316-", "-5316-"),
+    DISPATCH_REF.replace("-b704-", "-7704-")
+  ]) {
+    const malformedUuid = await recoveryOptions({ "dispatch-ref": dispatchRef });
+    await assert.rejects(() => recoverControlledFix({ options: malformedUuid, gh: async () => { throw new Error("gh must not run"); } }), /exact retained controlled-fix acceptance tag/);
+  }
+  const recoveryOnlyOptions = await recoveryOptions();
+  await assert.rejects(() => runScenario({ scenario: "controlled-fix", options: recoveryOnlyOptions, gh: async () => { throw new Error("gh must not run"); } }), /does not apply/);
 });
 
 test("evidence rejects fixture containment and an external-directory symlink into the fixture, then writes atomically with private permissions", async () => {
@@ -676,6 +812,10 @@ test("evidence schema remains bounded and command parsing requires explicit opti
     assertions: Array.from({ length: 12 }, () => ({ expectation: "x".repeat(180), passed: true }))
   }), /serialized size/);
   assert.deepEqual(parseCommandLine(["preflight", "--repo", REPO]), { command: "preflight", options: { repo: REPO } });
+  assert.equal(parseCommandLine(["recover-controlled-fix", "--repo", REPO]).command, "recover-controlled-fix");
+  const usage = formatUsage();
+  assert.equal(usage.match(/--app-login 'APP\[bot\]'/g)?.length, 4);
+  assert.doesNotMatch(usage, /--app-login APP\[bot\]/);
   assert.throws(() => parseCommandLine(["maintenance-dry-run", "--repo", REPO, "--repo", REPO]), /Duplicate/);
   assert.throws(() => parseCommandLine(["maintenance-dry-run", "--current-repo", "true"]), /unsupported/);
 });

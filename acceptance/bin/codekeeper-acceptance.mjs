@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createGhRunner, formatUsage, parseCommandLine, preflight, runScenario } from "../src/harness.mjs";
+import { createGhRunner, formatUsage, parseCommandLine, preflight, recoverControlledFix, runScenario } from "../src/harness.mjs";
 
 async function main() {
   let parsed;
@@ -23,11 +23,9 @@ async function main() {
       return 0;
     }
 
-    const result = await runScenario({
-      scenario: parsed.command,
-      options: parsed.options,
-      gh
-    });
+    const result = parsed.command === "recover-controlled-fix"
+      ? await recoverControlledFix({ options: parsed.options, gh })
+      : await runScenario({ scenario: parsed.command, options: parsed.options, gh });
     process.stdout.write(`${result.passed ? "Passed" : "Failed"} ${parsed.command}; bounded evidence: ${result.evidencePath}\n`);
     return result.passed ? 0 : 1;
   } catch (error) {
