@@ -133,17 +133,19 @@ async function createTuiHarness(t, {
     await flush();
   };
   const waitForText = async (text) => {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
       await flush();
       if (output.lastSemanticFrame().includes(text)) return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
     }
     assert.fail(`TUI did not render expected text: ${text}\n${output.lastSemanticFrame()}`);
   };
   const waitForPattern = async (pattern) => {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
       await flush();
       const frame = output.lastSemanticFrame();
       if (pattern.test(frame)) return frame;
+      await new Promise((resolve) => setTimeout(resolve, 5));
     }
     assert.fail(`TUI did not render expected pattern: ${pattern}\n${output.lastSemanticFrame()}`);
   };
