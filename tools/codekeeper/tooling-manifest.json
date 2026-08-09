@@ -79,7 +79,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "c158cd505c9cca4179c64ac1afff03e4d23fb9d4a806c54d369e84ce17046bc3"
+      "sha256": "e4c684946eacfd9ede77bfd4550968caf83ad70d8a3706f40dec6436af3e0fdc"
     },
     {
       "path": "src/lib/render.mjs",

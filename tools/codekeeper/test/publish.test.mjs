@@ -410,14 +410,22 @@ test("issue publication does not close a duplicate after the triaged issue chang
   let triageCommentPublished = false;
   let duplicateCommentPublished = false;
   let issueClosed = false;
+  let updatedAt = context.issue.updatedAt;
+  let labels = [];
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
       if (number === 9) return { number, state: "open" };
-      return { number, state: "open", updated_at: triageCommentPublished ? "2026-08-05T10:01:00Z" : context.issue.updatedAt, labels: [] };
+      return { number, state: "open", updated_at: updatedAt, labels };
     },
     async ensureLabels() {},
-    async replaceManagedLabels() {},
-    async upsertMarkerComment() { triageCommentPublished = true; },
+    async replaceManagedLabels(_number, desiredLabels) {
+      labels = desiredLabels.map((name) => ({ name }));
+      updatedAt = "2026-08-05T10:00:30Z";
+    },
+    async upsertMarkerComment() {
+      triageCommentPublished = true;
+      updatedAt = "2026-08-05T10:01:00Z";
+    },
     async createComment(_number, body) { duplicateCommentPublished ||= body.includes("Closing as a duplicate"); },
     async updateIssue() { issueClosed = true; }
   });
@@ -431,6 +439,7 @@ test("issue publication does not close a duplicate after the triaged issue chang
       publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
       /changed after analysis/
     );
+    assert.equal(triageCommentPublished, true);
     assert.equal(duplicateCommentPublished, false);
     assert.equal(issueClosed, false);
   } finally {
@@ -440,6 +449,210 @@ test("issue publication does not close a duplicate after the triaged issue chang
     if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
     else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
     await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("issue publication accepts its exact managed-label mutation before publishing the App marker", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-label-revision-test-"));
+  const configSha256 = "c".repeat(64);
+  const issueConfig = structuredClone(config);
+  const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7003", runUrl: "https://github.com/owner/repository/actions/runs/7003", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
+  const result = {
+    mode: "issue", summary: "Ready for triage.", type: "bug", priority: "p3", labels: [], actionable: true,
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "ai-ready", comment: "Thanks for the report."
+  };
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  let updatedAt = context.issue.updatedAt;
+  let labels = [{ name: "external" }, { name: "codekeeper:priority-p1" }];
+  let markerPublished = false;
+  const issue = () => ({
+    number: 7, title: "Report", body: "Details", state: "open", updated_at: updatedAt,
+    html_url: "https://github.com/owner/repository/issues/7",
+    user: { id: 1, login: "reporter", type: "User" }, labels
+  });
+  const restoreGitHub = replaceGitHubMethods({
+    async getIssue() { return issue(); },
+    async ensureLabels() {},
+    async replaceManagedLabels(_number, desiredLabels) {
+      labels = [{ name: "external" }, ...desiredLabels.map((name) => ({ name }))];
+      updatedAt = "2026-08-05T10:01:00Z";
+    },
+    async upsertMarkerComment() { markerPublished = true; }
+  });
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256, artifactConfig: issueConfig });
+    await publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" });
+    assert.equal(markerPublished, true);
+    assert.deepEqual(labels.map((label) => label.name).sort(), ["codekeeper:priority-p3", "codekeeper:ready", "codekeeper:type-bug", "external"].sort());
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("issue publication rejects subject drift during its managed-label mutation", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-label-drift-test-"));
+  const configSha256 = "d".repeat(64);
+  const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7004", runUrl: "https://github.com/owner/repository/actions/runs/7004", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
+  const result = {
+    mode: "issue", summary: "Manual triage.", type: "bug", priority: "p3", labels: [], actionable: true,
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+  };
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  let title = "Report";
+  let updatedAt = context.issue.updatedAt;
+  let labels = [];
+  let markerPublished = false;
+  const restoreGitHub = replaceGitHubMethods({
+    async getIssue() { return { number: 7, title, body: "Details", state: "open", updated_at: updatedAt, user: { id: 1, login: "reporter", type: "User" }, labels }; },
+    async ensureLabels() {},
+    async replaceManagedLabels(_number, desiredLabels) {
+      labels = desiredLabels.map((name) => ({ name }));
+      title = "Externally edited report";
+      updatedAt = "2026-08-05T10:01:00Z";
+    },
+    async upsertMarkerComment() { markerPublished = true; }
+  });
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
+    await assert.rejects(
+      publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+      /changed while Codekeeper reconciled labels/
+    );
+    assert.equal(markerPublished, false);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("issue publication rejects same-timestamp subject drift after verified label reconciliation", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-post-label-drift-test-"));
+  const configSha256 = "e".repeat(64);
+  const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7005", runUrl: "https://github.com/owner/repository/actions/runs/7005", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
+  const result = {
+    mode: "issue", summary: "Manual triage.", type: "bug", priority: "p3", labels: [], actionable: true,
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+  };
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  let labels = [];
+  let updatedAt = context.issue.updatedAt;
+  let postMutationReads = 0;
+  let mutationComplete = false;
+  let markerPublished = false;
+  const restoreGitHub = replaceGitHubMethods({
+    async getIssue() {
+      if (mutationComplete) postMutationReads += 1;
+      return {
+        number: 7,
+        title: postMutationReads >= 2 ? "Externally edited at the same timestamp" : "Report",
+        body: "Details",
+        state: "open",
+        updated_at: updatedAt,
+        user: { id: 1, login: "reporter", type: "User" },
+        labels
+      };
+    },
+    async ensureLabels() {},
+    async replaceManagedLabels(_number, desiredLabels) {
+      labels = desiredLabels.map((name) => ({ name }));
+      updatedAt = "2026-08-05T10:01:00Z";
+      mutationComplete = true;
+    },
+    async upsertMarkerComment() { markerPublished = true; }
+  });
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
+    await assert.rejects(
+      publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+      /changed while Codekeeper reconciled labels/
+    );
+    assert.equal(markerPublished, false);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("issue publication rejects malformed post-label timestamps and label metadata", async (t) => {
+  const cases = [
+    {
+      name: "invalid timestamp",
+      mutate(desiredLabels) { return { updatedAt: "not-a-timestamp", labels: desiredLabels.map((name) => ({ name })) }; },
+      error: /no updated timestamp/
+    },
+    {
+      name: "duplicate label",
+      mutate(desiredLabels) { return { updatedAt: "2026-08-05T10:01:00Z", labels: [{ name: desiredLabels[0] }, ...desiredLabels.map((name) => ({ name }))] }; },
+      error: /invalid or duplicate label metadata/
+    },
+    {
+      name: "nameless label",
+      mutate(desiredLabels) { return { updatedAt: "2026-08-05T10:01:00Z", labels: [{ color: "ffffff" }, ...desiredLabels.map((name) => ({ name }))] }; },
+      error: /invalid or duplicate label metadata/
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, async () => {
+      const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-label-metadata-test-"));
+      const configSha256 = "f".repeat(64);
+      const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7006", runUrl: "https://github.com/owner/repository/actions/runs/7006", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
+      const result = {
+        mode: "issue", summary: "Manual triage.", type: "bug", priority: "p3", labels: [], actionable: true,
+        missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+      };
+      const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+      const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+      let updatedAt = context.issue.updatedAt;
+      let labels = [];
+      let markerPublished = false;
+      const restoreGitHub = replaceGitHubMethods({
+        async getIssue() { return { number: 7, title: "Report", body: "Details", state: "open", updated_at: updatedAt, user: { id: 1, login: "reporter", type: "User" }, labels }; },
+        async ensureLabels() {},
+        async replaceManagedLabels(_number, desiredLabels) {
+          ({ updatedAt, labels } = fixture.mutate(desiredLabels));
+        },
+        async upsertMarkerComment() { markerPublished = true; }
+      });
+      try {
+        process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+        process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+        const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
+        await assert.rejects(
+          publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+          fixture.error
+        );
+        assert.equal(markerPublished, false);
+      } finally {
+        restoreGitHub();
+        if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+        else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+        if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+        else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+        await rm(artifactDirectory, { recursive: true, force: true });
+      }
+    });
   }
 });
 

@@ -112,6 +112,56 @@ async function currentOpenIssue(github, frozenIssue, staleAction) {
   return issue;
 }
 
+function issueLabelNames(issue) {
+  if (!Array.isArray(issue?.labels)) throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid label metadata`);
+  const names = issue.labels.map((label) => typeof label === "string" ? label : label?.name);
+  if (names.some((label) => typeof label !== "string" || label.length === 0) || new Set(names).size !== names.length) {
+    throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid or duplicate label metadata`);
+  }
+  return names;
+}
+
+function issuePublicationSubject(issue) {
+  return {
+    number: issue?.number,
+    title: issue?.title ?? null,
+    body: issue?.body ?? null,
+    state: issue?.state ?? null,
+    stateReason: issue?.state_reason ?? null,
+    locked: issue?.locked ?? null,
+    activeLockReason: issue?.active_lock_reason ?? null,
+    htmlUrl: issue?.html_url ?? null,
+    author: {
+      id: issue?.user?.id ?? null,
+      login: issue?.user?.login ?? null,
+      type: issue?.user?.type ?? null
+    },
+    assignees: (issue?.assignees ?? [])
+      .map((assignee) => ({ id: assignee?.id ?? null, login: assignee?.login ?? null, type: assignee?.type ?? null }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    milestone: issue?.milestone?.number ?? null
+  };
+}
+
+function assertExpectedManagedLabelMutation(before, after, desired, managed) {
+  if (after?.pull_request || after?.state !== "open") throw new Error(`Issue #${before.number} is no longer eligible`);
+  if (JSON.stringify(issuePublicationSubject(after)) !== JSON.stringify(issuePublicationSubject(before))) {
+    throw new Error(`Issue #${before.number} changed while Codekeeper reconciled labels`);
+  }
+  const managedSet = new Set(managed);
+  const expectedLabels = new Set([
+    ...issueLabelNames(before).filter((label) => !managedSet.has(label)),
+    ...desired
+  ]);
+  const actualLabels = new Set(issueLabelNames(after));
+  const exactLabels = actualLabels.size === expectedLabels.size && [...expectedLabels].every((label) => actualLabels.has(label));
+  if (!exactLabels) throw new Error(`Issue #${before.number} labels changed while Codekeeper reconciled labels`);
+  if (typeof after.updated_at !== "string" || !Number.isFinite(Date.parse(after.updated_at))) {
+    throw new Error(`Issue #${before.number} has no updated timestamp after label reconciliation`);
+  }
+  return after;
+}
+
 function branchSlug(value) {
   return String(value)
     .toLowerCase()
@@ -300,7 +350,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
 export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
   const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256);
   const github = new GitHubClient({ token, repository: context.repository });
-  const currentIssue = () => currentOpenIssue(github, context.issue, "analysis");
+  let expectedUpdatedAt = context.issue.updatedAt;
+  const currentIssue = () => currentOpenIssue(github, { ...context.issue, updatedAt: expectedUpdatedAt }, "analysis");
   const issue = await currentIssue();
   const runUrl = trustedPublicationRunUrl(context);
 
@@ -319,9 +370,21 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   // checks fail closed on observed drift immediately before each mutation boundary.
   await currentIssue();
   await github.ensureLabels(config.labels, desiredLabels);
-  await currentIssue();
+  const beforeLabelMutation = await currentIssue();
   await github.replaceManagedLabels(issue.number, desiredLabels, managedIssueLabels(config));
-  await currentIssue();
+  const afterLabelMutation = assertExpectedManagedLabelMutation(
+    beforeLabelMutation,
+    await github.getIssue(issue.number),
+    desiredLabels,
+    managedIssueLabels(config)
+  );
+  expectedUpdatedAt = afterLabelMutation.updated_at;
+  assertExpectedManagedLabelMutation(
+    afterLabelMutation,
+    await currentIssue(),
+    desiredLabels,
+    managedIssueLabels(config)
+  );
   await github.upsertMarkerComment(
     issue.number,
     ISSUE_TRIAGE_MARKER,
