@@ -23,11 +23,11 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and proof sequence. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/09ec342a9a1a8d872286524e364e3f955a04e1cf/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/38c0306a78888346208aae992a0786d7414e3c0a/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and disabled safety controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/09ec342a9a1a8d872286524e364e3f955a04e1cf/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
+| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/38c0306a78888346208aae992a0786d7414e3c0a/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
@@ -45,7 +45,7 @@ The `openai` preset uses one OpenAI Platform provider key for every selected wor
 After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
 1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, and only the selected caller workflows.
-2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `09ec342a9a1a8d872286524e364e3f955a04e1cf`.
+2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `38c0306a78888346208aae992a0786d7414e3c0a`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
 4. Before the final confirmation, opens a metadata-only file picker at Downloads (or the home folder fallback) that shows only real directories and nonempty regular `.pem` files within GitHub's 48 KB secret limit. It ignores symlinks, never reads PEM contents, and never prints the selected path.
 5. Forces `CODEKEEPER_ENABLED=false`, invokes inherited-terminal `gh secret set` for each single-line provider or trace key, and feeds only the App PEM descriptor to `gh` through non-terminal standard input. An existing same-named secret is deliberately replaced only after its new input is supplied.

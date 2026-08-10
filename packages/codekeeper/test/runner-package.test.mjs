@@ -6,7 +6,7 @@ import { chmod, cp, mkdir, readFile, symlink, writeFile } from "node:fs/promises
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
-import { PACKAGE_ROOT, temporaryDirectory } from "./helpers.mjs";
+import { PACKAGE_ROOT, PINNED_COMMIT, temporaryDirectory } from "./helpers.mjs";
 
 const SECRET_CANARIES = Object.freeze({
   OPENAI_API_KEY: "sk-openai-canary-never-forward",
@@ -242,8 +242,10 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     await chmod(path.join(installedRoot, "bin", "codekeeper.mjs"), 0o755);
   }
   const installedPackage = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8"));
+  const installedReadme = await readFile(path.join(installedRoot, "README.md"), "utf8");
   assert.deepEqual(installedPackage.bin, { codekeeper: "bin/codekeeper.mjs" });
   assert.deepEqual(installedPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
+  assert.deepEqual([...new Set(installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? [])], [PINNED_COMMIT]);
   const shimEnvironment = Object.fromEntries(Object.entries({
     PATH: process.env.PATH,
     SystemRoot: process.env.SystemRoot
