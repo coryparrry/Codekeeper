@@ -408,6 +408,7 @@ test("private-key picker hides directories that it does not need", async (t) => 
   const selection = tui.prompt.selectPrivateKey();
   await tui.waitForText("recovery-key.pem");
   assert.doesNotMatch(tui.output.lastSemanticFrame(), /denied/);
+  await tui.send("\u001b[B");
   await tui.send("\r");
   assert.equal(await selection, keyPath);
   const observable = tui.output.transcript();
@@ -1003,7 +1004,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
   });
 });
 
-test("private-key TUI shows only keys and redacts paths and bytes", async (t) => {
+test("private-key TUI shows safe folders and keys while redacting paths and bytes", async (t) => {
   const home = await temporaryDirectory(t, "codekeeper-picker-secret-path-");
   const downloads = path.join(home, "Downloads");
   const nested = path.join(downloads, "nested");
@@ -1021,9 +1022,11 @@ test("private-key TUI shows only keys and redacts paths and bytes", async (t) =>
   assert.doesNotMatch(tui.output.transcript(), new RegExp(keyBytes));
   assert.doesNotMatch(tui.output.transcript(), /hidden-link\.pem/);
 
-  assert.doesNotMatch(tui.output.lastSemanticFrame(), /nested/);
+  assert.match(tui.output.lastSemanticFrame(), /nested/);
   await tui.send("\u001b[200~pasted-private-key-canary\u001b[201~");
   assert.doesNotMatch(tui.output.transcript(), /pasted-private-key-canary/);
+  await tui.send("\u001b[B");
+  await tui.send("\u001b[B");
   await tui.send("\r");
   assert.equal(await selection, keyPath);
   await tui.flush();
