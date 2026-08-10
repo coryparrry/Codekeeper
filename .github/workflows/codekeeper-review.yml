@@ -57,7 +57,9 @@ jobs:
     name: Codekeeper review workspace specialist
     if: >-
       inputs.enabled &&
-      ((github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review') ||
+      ((github.event_name == 'repository_dispatch' &&
+        github.event.action == 'codekeeper_review' &&
+        github.actor == inputs.automation_bot_login) ||
        (inputs.auto_review &&
         github.event_name != 'repository_dispatch' &&
         !github.event.pull_request.draft &&

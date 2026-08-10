@@ -387,7 +387,10 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(gate, /exit 1/);
   assert.match(source, /auto_review:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(jobSection(source, "workspace", "analyze"), /inputs\.auto_review/);
-  assert.match(jobSection(source, "workspace", "analyze"), /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_review'/);
+  assert.match(
+    jobSection(source, "workspace", "analyze"),
+    /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_review'[\s\S]*github\.actor == inputs\.automation_bot_login/
+  );
   assert.doesNotMatch(jobSection(source, "workspace", "analyze"), /inputs\.auto_review &&\s*\(\(github\.event_name/);
   assert.match(gate, /IS_COMMAND_REVIEW/);
   assert.match(caller, /auto_review: true/);
