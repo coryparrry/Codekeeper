@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "9e467bd868a4c68ad84312e6c1532a42a22bea19";
+export const SOURCE_COMMIT = "46013ff941ee90b7a34feb82f921149c2535da39";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -82,6 +82,12 @@ export const PRESET_IDS = Object.freeze(["mixed", "openai"]);
 export const RECOMMENDED_MODES = Object.freeze(["review", "maintain"]);
 export const RECOMMENDED_PRESET = "openai";
 export const CAPABILITIES = Object.freeze({
+  reviewRepair: Object.freeze({
+    id: "reviewRepair",
+    label: "Automatic review repair",
+    description: "Allow one repair pass when a pull request review finds a blocking problem.",
+    modes: Object.freeze(["review", "fix"])
+  }),
   repair: Object.freeze({
     id: "repair",
     label: "Repository repair",
@@ -110,15 +116,16 @@ export const CAPABILITIES = Object.freeze({
 export const CAPABILITY_IDS = Object.freeze(Object.keys(CAPABILITIES));
 export const MODEL_OPTIONS = Object.freeze({
   openai: Object.freeze([
-    Object.freeze({ id: "luna-max", model: "gpt-5.6-luna", effort: "max", label: "GPT-5.6 Luna · max effort" }),
-    Object.freeze({ id: "sol-high", model: "gpt-5.6-sol", effort: "high", label: "GPT-5.6 Sol · high effort" }),
-    Object.freeze({ id: "terra-high", model: "gpt-5.6-terra", effort: "high", label: "GPT-5.6 Terra · high effort" }),
-    Object.freeze({ id: "terra-medium", model: "gpt-5.6-terra", effort: "medium", label: "GPT-5.6 Terra · medium effort" })
+    Object.freeze({ id: "luna-max", provider: "openai", model: "gpt-5.6-luna", effort: "max", label: "OpenAI · GPT-5.6 Luna · max effort" }),
+    Object.freeze({ id: "sol-high", provider: "openai", model: "gpt-5.6-sol", effort: "high", label: "OpenAI · GPT-5.6 Sol · high effort" }),
+    Object.freeze({ id: "terra-high", provider: "openai", model: "gpt-5.6-terra", effort: "high", label: "OpenAI · GPT-5.6 Terra · high effort" }),
+    Object.freeze({ id: "terra-medium", provider: "openai", model: "gpt-5.6-terra", effort: "medium", label: "OpenAI · GPT-5.6 Terra · medium effort" })
   ]),
   deepseek: Object.freeze([
-    Object.freeze({ id: "deepseek-v4-flash", model: "deepseek-v4-flash", effort: "none", label: "DeepSeek V4 Flash" })
+    Object.freeze({ id: "deepseek-v4-flash", provider: "deepseek", model: "deepseek-v4-flash", effort: "none", label: "DeepSeek · V4 Flash" })
   ])
 });
+export const ALL_MODEL_OPTIONS = Object.freeze(Object.values(MODEL_OPTIONS).flat());
 export const POLICY_TARGET = ".github/codekeeper.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
@@ -142,7 +149,7 @@ export const BOT_LOGIN_VARIABLE = "CODEKEEPER_AUTOMATION_BOT_LOGIN";
 
 export const SECRET_PURPOSES = Object.freeze({
   [OPENAI_SECRET]: "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key.",
-  [DEEPSEEK_SECRET]: "DeepSeek API key for issue triage when the mixed preset is selected",
+  [DEEPSEEK_SECRET]: "DeepSeek API key for each role assigned to DeepSeek",
   [TRACE_SECRET]: "Separate OpenAI Platform API key for trace export. Do not reuse the model API key.",
   [APP_SECRET]: "downloaded GitHub App PEM private key used to mint App installation tokens"
 });

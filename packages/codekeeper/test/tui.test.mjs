@@ -667,9 +667,9 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.send("j");
     await tui.send(" ");
     await tui.send("\r");
-    await tui.waitForText("Choose the model-provider preset");
+    await tui.waitForText("Choose the starting model set");
     assertNamedPhase(tui, "models");
-    assert.match(tui.output.lastSemanticFrame(), /model provider for each workflow/);
+    assert.match(tui.output.lastSemanticFrame(), /change every role on the next screens/);
     assert.match(semanticText(tui.output.lastSemanticFrame()), /use OpenAI for every selected workflow/);
     assert.match(semanticText(tui.output.lastSemanticFrame()), /use DeepSeek for issue triage/);
     await tui.send("j");
@@ -830,6 +830,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     ["Editable agent profiles"],
     ["Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
     ["Settings", "Codekeeper starts after merge"],
+    ["Fixed boundaries"],
     [guidance.reviewGateWarning, "Create setup", "› Cancel"]
   ];
   const completionMarkers = [[
@@ -976,9 +977,9 @@ test("NO_COLOR and narrow terminals retain visible selection semantics without o
   });
   const review = tui.prompt.reviewInstallPlan(plan);
   const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  for (let page = 1; page <= 7; page += 1) {
-    await tui.waitForText(`Review the setup · ${page} of 7`);
-    if (page < 7) await tui.send("\r");
+  for (let page = 1; page <= 8; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 8`);
+    if (page < 8) await tui.send("\r");
   }
   assert.match(tui.output.lastSemanticFrame(), /› Cancel/);
   await tui.send("\u001b[D");

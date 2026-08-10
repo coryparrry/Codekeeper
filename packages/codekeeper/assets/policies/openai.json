@@ -128,6 +128,14 @@
       "color": "FBCA04",
       "description": "Requires human judgment before merge"
     },
+    "codekeeper:paused": {
+      "color": "FBCA04",
+      "description": "Automatic Codekeeper work is paused"
+    },
+    "codekeeper:auto-repaired": {
+      "color": "0E8A16",
+      "description": "Codekeeper used its automatic repair pass"
+    },
     "codekeeper:auto-merge": {
       "color": "0E8A16",
       "description": "Eligible for policy-controlled auto-merge"
@@ -194,6 +202,7 @@
     }
   },
   "review": {
+    "autoRepair": false,
     "maximumBlockingFindings": 8,
     "maximumNonBlockingFindings": 8,
     "allowedLabels": [

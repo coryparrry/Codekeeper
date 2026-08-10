@@ -49,12 +49,12 @@ const EXPECTED_ASSETS = Object.freeze({
   "agents/maintenance-planner.md": "0a71d814e12be7f0b917d62827a203a0d51ea4ec4c40566f839fda70f188b15e",
   "agents/pr-reviewer.md": "a548423ea6098f3c0bcc17b0dbf60131cdd1689dec45504701b1949bc89e2894",
   "agents/repository-auditor.md": "48c4c7c088751fe9b2eda76cbf20b5ad6495bed052f5fb05b4a5156964604445",
-  "policies/mixed.json": "37e32105ba2300e465af8132b241633833130394eb5c15a300c0a6bf1c1f589d",
-  "policies/openai.json": "753741a11159d48a9c6bd7d938edd3310b1e9d0d242e86098715db0e499faad0",
-  "workflows/fix.yml": "50c134c5e05efda61589b60d35bea5ba797c268e8e580dc4c059a39fdfae6995",
+  "policies/mixed.json": "420228f80d14e2bfa8bafe48d650d9123fd0547dfc05236a034d59ddb7d522cc",
+  "policies/openai.json": "fbf7781d11a33de63a632ddc008c9dd32a71510ad216bf0977af39afe00f69e5",
+  "workflows/fix.yml": "74d1619e7f809a02a9a703f3f58671941b25e2714637192e9e1f95927f13f85f",
   "workflows/issues.yml": "3260d387b1ae7f76e21fdd0228062e139be3a25f047bfbd5762f638b67e153ca",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
-  "workflows/review.yml": "b77995d237b98fa02f79ea3bcd3363e63a38cd4580de126e1e64fab18c683730"
+  "workflows/review.yml": "ef33b3a226330ff13253bd086f498ff51697e6825042dc6562047d525faaa54c"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
@@ -92,6 +92,7 @@ function answers(overrides = {}) {
   };
   if (!Object.hasOwn(overrides, "capabilities")) {
     value.capabilities = [
+      ...(value.modes.includes("review") && value.modes.includes("fix") ? ["reviewRepair"] : []),
       ...(value.modes.includes("maintain") ? ["repair"] : []),
       ...(value.modes.includes("fix") ? ["issueImplementation"] : []),
       ...(value.modes.includes("issues") ? ["duplicateClosure"] : []),
@@ -204,7 +205,7 @@ test("rendered policies personalize only repository identity while retaining con
   }
 });
 
-test("model selection is a policy-only edit and does not require workflow rewriting", async () => {
+test("a same-provider model change stays in policy and does not rewrite a workflow", async () => {
   const bundle = await loadVerifiedAssets();
   const custom = JSON.parse(bundle.contents["policies/openai.json"]);
   custom.ai.agents.review.model = "gpt-5.6-luna";
@@ -350,6 +351,7 @@ test("install plan is frozen, applies startup first, and documents selected work
   ]);
   assert.deepEqual(plan.ownerLogins, ["coryparrry", "acme-bot"]);
   assert.deepEqual(plan.capabilities, {
+    reviewRepair: true,
     repair: true,
     issueImplementation: true,
     duplicateClosure: true,
@@ -363,7 +365,7 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.equal(plan.originalHead, HEAD_SHA);
   assert.equal(plan.branch, "codekeeper/setup");
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
-  assert.match(plan.pullRequest.body, /\| Mode \| Agent \| Trigger \| Model \|/);
+  assert.match(plan.pullRequest.body, /\| Workflow \| Role \| What it does \| Trigger \| Provider and model \|/);
   assert.match(plan.pullRequest.body, /\| review \| Pull request reviewer \|/);
   assert.match(plan.pullRequest.body, /OpenAI traces are \*\*enabled\*\*/);
   assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
@@ -451,6 +453,31 @@ test("model choices update the selected agent and optional tracing needs no trac
   assert.doesNotMatch(plan.pullRequest.body, /OPENAI_TRACE_API_KEY/);
 });
 
+test("each role can use any supported provider and model", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review", "issues"],
+      preset: "openai",
+      models: { review: "deepseek-v4-flash", issues: "luna-max" },
+      tracing: false
+    })
+  });
+  const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
+  const reviewWorkflow = plan.files.find((file) => file.path === MODES.review.target).contents;
+  const issueWorkflow = plan.files.find((file) => file.path === MODES.issues.target).contents;
+
+  assert.equal(policy.ai.agents.review.provider, "deepseek");
+  assert.equal(policy.ai.agents.review.model, "deepseek-v4-flash");
+  assert.equal(policy.ai.agents.issue.provider, "openai");
+  assert.equal(policy.ai.agents.issue.model, "gpt-5.6-luna");
+  assert.match(reviewWorkflow, /secrets\.DEEPSEEK_API_KEY/);
+  assert.match(issueWorkflow, /secrets\.OPENAI_API_KEY/);
+  assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, DEEPSEEK_SECRET, APP_SECRET]);
+});
+
 test("OpenAI model choices include Luna, Terra, and Sol and map Luna to one agent", async () => {
   assert.deepEqual(
     [...new Set(MODEL_OPTIONS.openai.map((choice) => choice.model))],
@@ -514,6 +541,22 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
   assert.match(contents[".github/codekeeper/agents/pr-reviewer.md"], /Repository preference/);
   assert.equal(update.pullRequest.title, "chore(codekeeper): update configuration");
 
+  const providerUpdate = buildInstallPlan({
+    bundle,
+    snapshot: existingSnapshot,
+    answers: answers({
+      modes: RECOMMENDED_MODES,
+      preset: RECOMMENDED_PRESET,
+      models: { review: "deepseek-v4-flash", maintain: "sol-high" }
+    })
+  });
+  assert.deepEqual(providerUpdate.secrets, [{ name: DEEPSEEK_SECRET }]);
+  assert.deepEqual(providerUpdate.files.map((file) => file.path), [
+    ".github/codekeeper.json",
+    ".github/workflows/codekeeper-review.yml"
+  ]);
+  assert.match(providerUpdate.files[1].contents, /secrets\.DEEPSEEK_API_KEY/);
+
   const disabled = buildInstallPlan({
     bundle,
     snapshot: existingSnapshot,
@@ -541,6 +584,7 @@ test("cleared capability choices remain off in the generated policy", async () =
   const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers({ capabilities: [] }) });
   const policy = JSON.parse(plan.files[0].contents);
   assert.deepEqual(plan.capabilities, {
+    reviewRepair: false,
     repair: false,
     issueImplementation: false,
     duplicateClosure: false,

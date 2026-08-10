@@ -39,6 +39,8 @@ Configured owners can use these exact commands:
 - `/codekeeper fix`
 - `/codekeeper stop`
 
+The issue implementation and pull request repair caller supplies this command router. Install that caller to use these commands.
+
 ## Adopter-owned coordinator profiles
 
 Each installation has four fixed Markdown files. They are normal reviewed repository files, so maintainers can change Codekeeper's evidence thresholds, prioritization, test expectations, duplicate criteria, no-action decisions, and reporting style without rebuilding the runtime.

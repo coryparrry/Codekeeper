@@ -459,7 +459,7 @@ function reviewData(plan) {
   return {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
-    preset: `${plan.preset} preset`,
+    preset: `${plan.preset} starting models`,
     workflows: workflowMap(plan.modes).map((item) => `${item.label} — ${item.trigger}`),
     models: plan.modes.map((mode) => {
       const agent = policy.ai.agents[MODES[mode].policyAgent];
@@ -482,7 +482,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const { stdout } = useStdout();
   const pagedDetail = usesPagedDetailLayout(stdout);
   const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
-  const lastPage = pagedDetail ? 6 : 2;
+  const lastPage = pagedDetail ? 7 : 2;
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
   usePaste(() => {});
   useInput((input, key) => {
@@ -560,8 +560,9 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     pagedDetail && page === 2 ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
     pagedDetail && page === 3 ? section("Editable agent profiles", data.profileDocumentPaths, 0) : null,
     pagedDetail && page === 4 ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
-    pagedDetail && page === 5 ? section("Settings", [data.startup, ...data.capabilities, ...CONSERVATIVE_BOUNDARIES], 0) : null,
-    pagedDetail && page === 6 ? h(
+    pagedDetail && page === 5 ? section("Settings", [data.startup, ...data.capabilities], 0) : null,
+    pagedDetail && page === 6 ? section("Fixed boundaries", CONSERVATIVE_BOUNDARIES, 0) : null,
+    pagedDetail && page === 7 ? h(
       Box,
       { flexDirection: "column" },
       data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,

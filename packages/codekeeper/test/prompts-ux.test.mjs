@@ -53,7 +53,7 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
     },
     async select(options) {
       calls.push({ method: "select", options });
-      if (options.message === "Choose the model-provider preset:") return preset;
+      if (options.message === "Choose the starting model set:") return preset;
       return options.defaultValue;
     },
     async inputText(options) {
@@ -111,7 +111,7 @@ test("blank terminal custom preset selection accepts the first recommended OpenA
     { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
   ];
   assert.equal(await prompt.select({
-    message: "Choose the model-provider preset:",
+    message: "Choose the starting model set:",
     choices,
     defaultValue: "openai"
   }), "openai");
@@ -127,7 +127,7 @@ test("typed preset number selects the non-default mixed preset", async () => {
     { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
   ];
   assert.equal(await prompt.select({
-    message: "Choose the model-provider preset:",
+    message: "Choose the starting model set:",
     choices,
     defaultValue: "openai"
   }), "mixed");
@@ -170,7 +170,7 @@ test("recommended setup explains consequences and returns review plus maintenanc
   const transcript = output.toString();
   assert.match(transcript, /Pull request review:.*comments, labels, and a blocking result/);
   assert.match(transcript, /Repository maintenance:.*manual dry run that makes no GitHub changes/);
-  assert.match(transcript, /OpenAI preset: uses one OpenAI Platform API key for model calls/);
+  assert.match(transcript, /OpenAI starting models: you can assign any supported provider and model to each role/);
   assert.match(transcript, /Issue triage and issue fix are not included/);
   assert.match(transcript, /Repository repair: on/);
   assert.match(transcript, /Automatic merge: on/);
@@ -207,9 +207,9 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     value: mode,
     label: `${MODES[mode].label} — ${MODES[mode].description}`
   })));
-  const presetCall = prompt.calls.find((call) => call.method === "select" && call.options.message === "Choose the model-provider preset:");
+  const presetCall = prompt.calls.find((call) => call.method === "select" && call.options.message === "Choose the starting model set:");
   assert.deepEqual(presetCall.options, {
-    message: "Choose the model-provider preset:",
+    message: "Choose the starting model set:",
     defaultValue: RECOMMENDED_PRESET,
     choices: [
       { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
@@ -263,7 +263,7 @@ test("an existing installation reuses its workflows, identity, and settings", as
   });
   assert.equal(prompt.calls.some((call) => call.options.message === "Use the recommended starter setup?"), false);
   assert.equal(prompt.calls.some((call) => call.options.message === "Choose workflows to generate:"), false);
-  assert.match(output.toString(), /current GitHub App settings and API keys stay unchanged/);
+  assert.match(output.toString(), /current GitHub App settings and existing API keys stay unchanged/);
   assert.doesNotMatch(output.toString(), /OPENAI_API_KEY:/);
 });
 

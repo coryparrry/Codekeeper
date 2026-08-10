@@ -71,7 +71,7 @@ function preview(plan, output) {
   output.write(`  Default branch: ${plan.defaultBranch}\n`);
   output.write(`  Comment display name: ${plan.displayName}\n`);
   output.write(`  Owner-command users: ${plan.ownerLogins.join(", ")}\n`);
-  output.write(`  Model-provider preset: ${plan.preset}\n`);
+  output.write(`  Starting model set: ${plan.preset}\n`);
   output.write(`  Setup branch: ${plan.settingsOnly ? "not needed for this settings change" : plan.branch}\n`);
   output.write("  Workflows:\n");
   for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);

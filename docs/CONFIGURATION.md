@@ -94,7 +94,7 @@ Reusable workflow callers expose explicit controls alongside `enabled`:
 
 `review.autoRepair=true` permits one automatic repair pass after a blocking review. A second blocking review stops for a maintainer.
 
-Configured owners can use `/codekeeper status`, `review`, `rerun`, `implement`, `fix`, and `stop`. The command must be the complete comment.
+Configured owners can use `/codekeeper status`, `/codekeeper review`, `/codekeeper rerun`, `/codekeeper implement`, `/codekeeper fix`, and `/codekeeper stop`. The command must be the complete comment. The issue implementation and pull request repair caller supplies the command router.
 
 Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
 

@@ -600,7 +600,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
       ".github/workflows/codekeeper-review.yml"
     ]
   );
-  assert.match(output.toString(), /Model-provider preset: openai/);
+  assert.match(output.toString(), /Starting model set: openai/);
   assert.match(output.toString(), /OpenAI traces: enabled/);
   assert.match(output.toString(), /Pull request review: openai \/ gpt-5\.6-sol \/ high effort/);
   assert.match(output.toString(), /Repository maintenance: openai \/ gpt-5\.6-sol \/ high effort/);

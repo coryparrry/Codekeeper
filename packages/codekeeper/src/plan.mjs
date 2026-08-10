@@ -2,6 +2,7 @@ import path from "node:path";
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
+  ALL_MODEL_OPTIONS,
   APP_SECRET,
   BOT_LOGIN_VARIABLE,
   CAPABILITIES,
@@ -11,7 +12,6 @@ import {
   DEEPSEEK_SECRET,
   ENABLED_VARIABLE,
   MODE_IDS,
-  MODEL_OPTIONS,
   MODES,
   OPENAI_SECRET,
   PRESET_IDS,
@@ -79,7 +79,9 @@ export function normalizeOwnerLogins(ownerLogins) {
 
 export function applicableCapabilityIds(modes) {
   const selected = normalizeModes(modes);
-  return CAPABILITY_IDS.filter((id) => CAPABILITIES[id].modes.some((mode) => selected.includes(mode)));
+  return CAPABILITY_IDS.filter((id) => id === "reviewRepair"
+    ? selected.includes("review") && selected.includes("fix")
+    : CAPABILITIES[id].modes.some((mode) => selected.includes(mode)));
 }
 
 export function normalizeCapabilities(modes, selected = []) {
@@ -96,16 +98,25 @@ export function capabilitySummary(capabilities, modes = null) {
   return ids.map((id) => `${CAPABILITIES[id].label}: ${capabilities[id] ? "on" : "off"}.`);
 }
 
-export function requiredSecretNames({ modes, preset, tracing = true }) {
+export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET, tracing = true }) {
   const selected = normalizeModes(modes);
-  if (!PRESET_IDS.includes(preset)) throw new InstallerError(`Unsupported preset: ${preset}`, { code: "PLAN_INVALID" });
   const names = [];
-  const openaiNeeded = selected.some((mode) => mode !== "issues") || (selected.includes("issues") && preset === "openai");
-  if (openaiNeeded) names.push(OPENAI_SECRET);
-  if (selected.includes("issues") && preset === "mixed") names.push(DEEPSEEK_SECRET);
+  const providers = new Set(selected.map((mode) => models?.[mode]?.provider ?? (preset === "mixed" && mode === "issues" ? "deepseek" : "openai")));
+  if (providers.has("openai")) names.push(OPENAI_SECRET);
+  if (providers.has("deepseek")) names.push(DEEPSEEK_SECRET);
   if (tracing) names.push(TRACE_SECRET);
   names.push(APP_SECRET);
   return Object.freeze(names);
+}
+
+function existingSecretNames(installation) {
+  const providers = new Set(installation.modes.map((mode) => installation.policy.ai.agents[MODES[mode].policyAgent].provider));
+  return new Set([
+    ...(providers.has("openai") ? [OPENAI_SECRET] : []),
+    ...(providers.has("deepseek") ? [DEEPSEEK_SECRET] : []),
+    ...(installation.policy.ai.tracing.enabled ? [TRACE_SECRET] : []),
+    APP_SECRET
+  ]);
 }
 
 export function normalizeModelChoices({ modes, preset, bundle, choices = {}, policySource = bundle.contents[`policies/${preset}.json`] }) {
@@ -114,13 +125,12 @@ export function normalizeModelChoices({ modes, preset, bundle, choices = {}, pol
   const normalized = {};
   for (const mode of selected) {
     const agent = policy.ai.agents[MODES[mode].policyAgent];
-    const options = MODEL_OPTIONS[agent.provider];
-    const defaultOption = options?.find((option) => option.model === agent.model && option.effort === agent.effort);
+    const defaultOption = ALL_MODEL_OPTIONS.find((option) => option.provider === agent.provider && option.model === agent.model && option.effort === agent.effort);
     const choiceId = choices[mode] ?? defaultOption?.id;
-    const choice = options?.find((option) => option.id === choiceId);
+    const choice = ALL_MODEL_OPTIONS.find((option) => option.id === choiceId);
     if (!choice) throw new InstallerError(`Model choice is invalid for ${MODES[mode].label}.`, { code: "PLAN_INVALID" });
     normalized[mode] = Object.freeze({
-      provider: agent.provider,
+      provider: choice.provider,
       model: choice.model,
       effort: choice.effort,
       choice: choice.id
@@ -216,10 +226,10 @@ export function setupPullRequestBody(plan) {
     documentMap(plan.files).map((item) => [`\`${item.path}\``, item.purpose])
   );
   const workflows = markdownTable(
-    ["Mode", "Agent", "Trigger", "Model"],
+    ["Workflow", "Role", "What it does", "Trigger", "Provider and model"],
     workflowMap(plan.modes).map((item) => {
       const selection = plan.models[item.mode];
-      return [item.mode, MODES[item.mode].agentLabel, item.trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
+      return [item.mode, MODES[item.mode].agentLabel, item.description, item.trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
     })
   );
   const proofs = [];
@@ -232,7 +242,7 @@ export function setupPullRequestBody(plan) {
   if (plan.modes.includes("fix")) proofs.push("Use a controlled issue that triage marks ready. Use \`/codekeeper fix\` only when repairing an existing pull request.");
   return `## Summary
 
-Codekeeper is configured with the **${plan.preset}** preset at source commit \`${plan.source.commit}\`. It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.
+Codekeeper uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.
 
 OpenAI traces are **${plan.tracing ? "enabled" : "disabled"}**.
 
@@ -312,6 +322,10 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (installation && !changedFiles.length && !variables.length) {
     throw new InstallerError("The selected configuration does not change the current installation.", { code: "NO_CHANGES" });
   }
+  const requiredSecrets = requiredSecretNames({ modes, models, tracing });
+  const secretNames = installation
+    ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))
+    : requiredSecrets;
   const plan = {
     source: {
       repository: bundle.metadata.source.repository,
@@ -331,7 +345,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     tracing,
     files: changedFiles,
     variables,
-    secrets: installation ? [] : requiredSecretNames({ modes, preset: answers.preset, tracing }).map((name) => ({ name })),
+    secrets: secretNames.map((name) => ({ name })),
     branch: installation ? snapshot.updateBranch : SETUP_BRANCH,
     commitMessage: installation ? "chore(codekeeper): update configuration" : SETUP_COMMIT_MESSAGE,
     pullRequest: { title: installation ? "chore(codekeeper): update configuration" : SETUP_PR_TITLE },
@@ -366,7 +380,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   if (!installation) {
     output.write("  - Pull request review: your GitHub App posts comments, labels, and a blocking result on controlled same-repository PRs\n");
     output.write("  - Repository maintenance: begin with a manual dry run that makes no GitHub changes\n");
-    output.write("  - OpenAI preset: uses one OpenAI Platform API key for model calls\n");
+    output.write("  - OpenAI starting models: you can assign any supported provider and model to each role\n");
     output.write("  - Issue triage and issue fix are not included\n");
     output.write("  - You choose whether Codekeeper starts when the setup pull request merges\n");
     output.write("  - The maintenance workflow includes a schedule after merge\n");
@@ -378,12 +392,12 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
       message: "Choose a starting setup",
       description: [
         "Recommended installs pull-request review and maintenance with OpenAI models.",
-        "Custom lets you select issue triage, the separately gated fix workflow, or the mixed provider preset."
+        "Custom lets you select each workflow and its provider and model."
       ],
       defaultValue: "recommended",
       choices: [
         { value: "recommended", label: "Recommended — review + maintenance, OpenAI models" },
-        { value: "custom", label: "Custom — choose workflows and provider preset" }
+        { value: "custom", label: "Custom — choose workflows and models" }
       ]
     }) === "recommended"
     : await prompt.confirm({ message: "Use the recommended starter setup?", defaultValue: true });
@@ -397,7 +411,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   } else if (useRecommended) {
     modes = [...RECOMMENDED_MODES];
     preset = RECOMMENDED_PRESET;
-    output.write("Using pull request review + repository maintenance with the OpenAI preset.\n");
+    output.write("Using pull request review and repository maintenance with OpenAI starting models.\n");
   } else {
     output.write("\nCustom setup: install only the workflows that you want to use. Issue triage responds to issue events. You choose issue implementation separately.\n");
     modes = await prompt.multiselect(tuiOptions(prompt, {
@@ -409,7 +423,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
       description: ["Install only the workflows you intend to prove in this repository."]
     }));
     preset = await prompt.select(tuiOptions(prompt, {
-      message: "Choose the model-provider preset:",
+      message: "Choose the starting model set:",
       defaultValue: RECOMMENDED_PRESET,
       choices: [
         { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
@@ -417,18 +431,15 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
       ]
     }, {
       step: "models",
-      description: [
-        "The preset chooses the model provider for each workflow.",
-        "You choose a model for each selected workflow on the next screens."
-      ]
+      description: ["This choice supplies starting models. You can change every role on the next screens."]
     }));
   }
   const presetPolicy = installation?.policy ?? JSON.parse(bundle.contents[`policies/${preset}.json`]);
   const models = {};
   for (const mode of normalizeModes(modes)) {
     const agent = presetPolicy.ai.agents[MODES[mode].policyAgent];
-    const choices = MODEL_OPTIONS[agent.provider];
-    const defaultChoice = choices.find((choice) => choice.model === agent.model && choice.effort === agent.effort) ?? choices[0];
+    const choices = ALL_MODEL_OPTIONS;
+    const defaultChoice = choices.find((choice) => choice.provider === agent.provider && choice.model === agent.model && choice.effort === agent.effort) ?? choices[0];
     models[mode] = await prompt.select(tuiOptions(prompt, {
       message: `Assign a model to the ${MODES[mode].agentLabel}:`,
       defaultValue: defaultChoice.id,
@@ -436,7 +447,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     }, {
       step: "models",
       description: [
-        `${MODES[mode].label} uses this agent. Provider: ${agent.provider}.`,
+        `${MODES[mode].label} uses this role. The role is not tied to one provider.`,
         "You can change this choice later in .github/codekeeper.json."
       ]
     }));
@@ -477,6 +488,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
       message: "Choose capabilities to turn on:",
       defaultValues: installation
         ? applicableCapabilities.filter((id) => ({
+          reviewRepair: installation.policy.review.autoRepair,
           repair: installation.policy.audit.repair.enabled,
           issueImplementation: installation.policy.issues.allowAiImplementation,
           duplicateClosure: installation.policy.issues.closeExactDuplicates,
@@ -524,9 +536,10 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     output.write("\nCredentials this setup will request later through GitHub CLI\n");
     output.write("Setup does not call a model. API keys go directly to GitHub CLI. Codekeeper does not display or store their values.\n");
     output.write("The installer sends the selected App key file directly to GitHub CLI. It does not read or display the key.\n");
-    for (const name of requiredSecretNames({ modes, preset, tracing })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
+    const selectedModels = normalizeModelChoices({ modes, preset, bundle, choices: models, policySource: JSON.stringify(presetPolicy) });
+    for (const name of requiredSecretNames({ modes, models: selectedModels, tracing })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
   } else {
-    output.write("\nThe current GitHub App settings and API keys stay unchanged.\n");
+    output.write("\nThe current GitHub App settings and existing API keys stay unchanged. If this edit needs a new key, the installer requests it after the final review.\n");
   }
 
   const policy = installation?.policy ?? JSON.parse(bundle.contents[`policies/${preset}.json`]);
