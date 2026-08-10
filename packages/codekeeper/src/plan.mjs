@@ -102,6 +102,13 @@ export function normalizeCapabilities(modes, selected = []) {
   return Object.freeze(Object.fromEntries(CAPABILITY_IDS.map((id) => [id, selected.includes(id)])));
 }
 
+export function requiresAutomationBotLogin(modes, capabilities = []) {
+  const issueImplementation = Array.isArray(capabilities)
+    ? capabilities.includes("issueImplementation")
+    : capabilities?.issueImplementation === true;
+  return modes.includes("review") || (modes.includes("fix") && issueImplementation);
+}
+
 export function capabilitySummary(capabilities, modes = null) {
   const ids = modes ? applicableCapabilityIds(modes) : CAPABILITY_IDS;
   return ids.map((id) => `${CAPABILITIES[id].label}: ${capabilities[id] ? "on" : "off"}.`);
@@ -304,9 +311,10 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (!validDisplayName(answers.displayName)) throw new InstallerError("Repository display name is invalid.", { code: "PLAN_INVALID" });
   const ownerLogins = normalizeOwnerLogins(answers.ownerLogins);
   if (!validClientId(answers.appClientId)) throw new InstallerError("GitHub App Client ID is invalid.", { code: "PLAN_INVALID" });
-  const automationBotLogin = modes.includes("review") ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
-  if (modes.includes("review") && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
+  const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities);
+  const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
+  if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models, policySource });
   const tracing = answers.tracing !== false;
   const files = renderInstallFiles(bundle, {
@@ -334,7 +342,10 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     { name: ENABLED_VARIABLE, value: String(enabled) },
     { name: CLIENT_ID_VARIABLE, value: answers.appClientId }
   ];
-  if (!installation && modes.includes("review")) variables.push({ name: BOT_LOGIN_VARIABLE, value: automationBotLogin });
+  if (!installation && needsAutomationBotLogin) variables.push({ name: BOT_LOGIN_VARIABLE, value: automationBotLogin });
+  if (installation && needsAutomationBotLogin && automationBotLogin !== snapshot.existingSettings.automationBotLogin) {
+    variables.push({ name: BOT_LOGIN_VARIABLE, value: automationBotLogin });
+  }
   if (installation && !changedFiles.length && !variables.length) {
     throw new InstallerError("The selected configuration does not change the current installation.", { code: "NO_CHANGES" });
   }
@@ -601,10 +612,30 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   });
 }
 
-export async function collectAppAnswers({ prompt, modes, output }) {
+export async function collectAutomationBotLogin({ prompt, output }) {
+  output.write("  - App URL name: find the name at the end of the App settings URL\n");
+  if (prompt?.kind === "ink") {
+    const appSlug = await prompt.inputText({
+      step: "GitHub App",
+      message: "GitHub App name from the settings URL",
+      description: [
+        "GitHub uses this name in the App settings URL.",
+        "For github.com/settings/apps/my-codekeeper-app, enter my-codekeeper-app. Codekeeper then uses my-codekeeper-app[bot]."
+      ],
+      validate: (value) => APP_SLUG.test(value.toLowerCase()) || "Enter the lowercase App name from its settings URL, without [bot]."
+    });
+    return `${appSlug.toLowerCase()}[bot]`;
+  }
+  const automationBotLogin = await prompt.inputText({
+    message: "GitHub App bot login (<app-slug>[bot], for example my-app[bot])",
+    validate: (value) => BOT_LOGIN.test(value.toLowerCase()) || "Enter the App bot login ending in [bot]."
+  });
+  return automationBotLogin.toLowerCase();
+}
+
+export async function collectAppAnswers({ prompt, modes, capabilities = [], output }) {
   output.write("\nGitHub App identifiers\n");
   output.write("  - Client ID: find the value that starts with Iv in the App settings\n");
-  if (modes.includes("review")) output.write("  - App URL name: find the name at the end of the App settings URL\n");
   const appClientId = await prompt.inputText(tuiOptions(prompt, {
     message: "GitHub App Client ID (starts with Iv, not the numeric App ID)",
     validate: (value) => validClientId(value) || "Enter the App Client ID shown in GitHub App settings."
@@ -615,26 +646,9 @@ export async function collectAppAnswers({ prompt, modes, output }) {
       "Do not enter the numeric App ID."
     ]
   }));
-  let automationBotLogin = null;
-  if (modes.includes("review")) {
-    if (prompt?.kind === "ink") {
-      const appSlug = await prompt.inputText({
-        step: "GitHub App",
-        message: "GitHub App name from the settings URL",
-        description: [
-          "GitHub uses this name in the App settings URL.",
-          "For github.com/settings/apps/my-codekeeper-app, enter my-codekeeper-app. Codekeeper then uses my-codekeeper-app[bot]."
-        ],
-        validate: (value) => APP_SLUG.test(value.toLowerCase()) || "Enter the lowercase App name from its settings URL, without [bot]."
-      });
-      automationBotLogin = `${appSlug.toLowerCase()}[bot]`;
-    } else {
-      automationBotLogin = await prompt.inputText({
-        message: "GitHub App bot login (<app-slug>[bot], for example my-app[bot])",
-        validate: (value) => BOT_LOGIN.test(value.toLowerCase()) || "Enter the App bot login ending in [bot]."
-      });
-    }
-  }
+  const automationBotLogin = requiresAutomationBotLogin(modes, capabilities)
+    ? await collectAutomationBotLogin({ prompt, output })
+    : null;
   return Object.freeze({ appClientId, automationBotLogin: automationBotLogin?.toLowerCase() ?? null });
 }
 

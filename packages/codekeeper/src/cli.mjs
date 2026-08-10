@@ -7,11 +7,13 @@ import {
   appRegistrationUrl,
   buildInstallPlan,
   collectAppAnswers,
+  collectAutomationBotLogin,
   collectAppPrivateKeyPath,
   collectSetupAnswers,
   completionGuidance,
   documentMap,
   modelAssignments,
+  requiresAutomationBotLogin,
 } from "./plan.mjs";
 import { configureRepositorySettings, installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
@@ -176,6 +178,10 @@ export async function runCli({
         appClientId: snapshot.existingSettings.appClientId,
         automationBotLogin: snapshot.existingSettings.automationBotLogin
       };
+      if (requiresAutomationBotLogin(setupAnswers.modes, setupAnswers.capabilities) && !appAnswers.automationBotLogin) {
+        presentationOutput.write("\nGitHub App identifier\n");
+        appAnswers.automationBotLogin = await collectAutomationBotLogin({ prompt: activePrompt, output: presentationOutput });
+      }
     } else {
       const registrationUrl = appRegistrationUrl({
         repository: snapshot.repository,
@@ -211,7 +217,12 @@ export async function runCli({
           resume: resumeCommand
         });
       }
-      appAnswers = await collectAppAnswers({ prompt: activePrompt, modes: setupAnswers.modes, output: presentationOutput });
+      appAnswers = await collectAppAnswers({
+        prompt: activePrompt,
+        modes: setupAnswers.modes,
+        capabilities: setupAnswers.capabilities,
+        output: presentationOutput
+      });
     }
     const plan = buildInstallPlan({
       bundle,

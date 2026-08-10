@@ -638,6 +638,34 @@ test("cleared capability choices remain off in the generated policy", async () =
   assert.equal(policy.merge.enabled, false);
 });
 
+test("fix-only issue implementation configures the trusted App bot identity", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["issues", "fix"],
+      capabilities: ["issueImplementation"]
+    })
+  });
+  assert.deepEqual(
+    plan.variables.find((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"),
+    { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
+  );
+  assert.throws(
+    () => buildInstallPlan({
+      bundle,
+      snapshot: snapshot(),
+      answers: answers({
+        modes: ["issues", "fix"],
+        capabilities: ["issueImplementation"],
+        automationBotLogin: null
+      })
+    }),
+    assertInstallerCode(assert, "PLAN_INVALID")
+  );
+});
+
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {
   const url = new URL(appRegistrationUrl({
     repository: "Acme/Widget",

@@ -301,6 +301,20 @@ async function repositoryVariable(runner, root, repository, name) {
   );
 }
 
+async function optionalRepositoryVariable(runner, root, repository, name) {
+  const variables = parseJson(await requireSuccess(
+    runner,
+    "gh",
+    ["variable", "list", "--repo", repository, "--json", "name,value"],
+    { cwd: root },
+    "Could not inspect existing repository variables."
+  ), "GitHub repository-variable query");
+  if (!Array.isArray(variables) || variables.some((variable) => typeof variable?.name !== "string" || typeof variable?.value !== "string")) {
+    throw new InstallerError("GitHub returned an invalid repository-variable list.", { code: "PREFLIGHT_INVALID_RESPONSE" });
+  }
+  return variables.find((variable) => variable.name === name)?.value ?? null;
+}
+
 export async function inspectRepository({
   runner,
   cwd = process.cwd(),
@@ -384,8 +398,8 @@ export async function inspectRepository({
     existingSettings = Object.freeze({
       enabled: (await repositoryVariable(runner, root, repository, ENABLED_VARIABLE)) === "true",
       appClientId: await repositoryVariable(runner, root, repository, CLIENT_ID_VARIABLE),
-      automationBotLogin: installation.modes.includes("review")
-        ? await repositoryVariable(runner, root, repository, BOT_LOGIN_VARIABLE)
+      automationBotLogin: installation.modes.includes("review") || (installation.modes.includes("fix") && installation.policy.issues.allowAiImplementation)
+        ? await optionalRepositoryVariable(runner, root, repository, BOT_LOGIN_VARIABLE)
         : null
     });
   }

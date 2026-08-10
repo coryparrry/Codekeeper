@@ -39,7 +39,7 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "043394d30a3337613909f8929c424413875be11f37849abef7869945212e15b8"
+      "sha256": "266bc297cf6465a2c11a484139e9fad1bd8c580913750921efb8f4fcadf3ef7d"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
@@ -87,7 +87,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "f9c2fb6f744d6c5a2f44996f2fd2064c44fc76f3526816177c8e702895968059"
+      "sha256": "a71ced7194eef65cda3c26ca272efb2bb968228a40e9f279ac25c53e10f23817"
     },
     {
       "path": "src/lib/prompts.mjs",

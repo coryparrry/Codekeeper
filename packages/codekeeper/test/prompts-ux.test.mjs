@@ -328,3 +328,24 @@ test("GitHub App identity asks for the App name in plain language", async () => 
   assert.equal(prompts[1].message, "GitHub App name from the settings URL");
   assert.match(prompts[1].description.join("\n"), /settings URL/i);
 });
+
+test("fix-only issue implementation also collects the App bot identity", async () => {
+  const prompts = [];
+  const prompt = {
+    kind: "ink",
+    async inputText(options) {
+      prompts.push(options.message);
+      return options.message.includes("Client ID") ? "Iv123456789012345678" : "codekeeper-widget";
+    }
+  };
+  assert.deepEqual(await collectAppAnswers({
+    prompt,
+    modes: ["issues", "fix"],
+    capabilities: ["issueImplementation"],
+    output: textSink()
+  }), {
+    appClientId: "Iv123456789012345678",
+    automationBotLogin: "codekeeper-widget[bot]"
+  });
+  assert.ok(prompts.includes("GitHub App name from the settings URL"));
+});

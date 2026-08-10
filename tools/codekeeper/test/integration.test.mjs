@@ -393,6 +393,7 @@ test("maintenance repair authorization requires enabled policy but not a second 
 test("manual issue and fix preparation authorize owner login casing variants", async () => {
   const root = await createRepository();
   const issueDirectory = bundle(root, "case-insensitive-issue-input");
+  const planDirectory = bundle(root, "case-insensitive-plan-input");
   const fixDirectory = bundle(root, "case-insensitive-fix-input");
   const event = bundle(root, "case-insensitive-issue-event.json");
   await writeFile(event, JSON.stringify({
@@ -430,6 +431,14 @@ test("manual issue and fix preparation authorize owner login casing variants", a
       token: "read-token",
       ...agentProfileOptions(root, "issue")
     });
+    await preparePlan({
+      targetNumber: 5,
+      actor: "repository-owner",
+      directory: planDirectory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "plan")
+    });
     const fixContext = await prepareFix({
       targetNumber: 5,
       actor: "repository-owner",
@@ -437,6 +446,7 @@ test("manual issue and fix preparation authorize owner login casing variants", a
       config,
       token: "read-token",
       planResultPath: await readyPlan(root),
+      planContextPath: path.join(planDirectory, "context.json"),
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(issueContext.triageMode, "manual");
@@ -500,6 +510,16 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
     return new Response(JSON.stringify([]), { status: 200 });
   };
   try {
+    const planDirectory = bundle(root, "automatic-plan-input");
+    await preparePlan({
+      targetNumber: 5,
+      actor: "codekeeper-app[bot]",
+      authorizationMode: "policy",
+      directory: planDirectory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "plan")
+    });
     const prepared = await prepareFix({
       targetNumber: 5,
       actor: "codekeeper-app[bot]",
@@ -508,6 +528,7 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
       config,
       token: "read-token",
       planResultPath: await readyPlan(root),
+      planContextPath: path.join(planDirectory, "context.json"),
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(prepared.authorizationMode, "policy");
@@ -522,9 +543,68 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
         config,
         token: "read-token",
         planResultPath: await readyPlan(root),
+        planContextPath: path.join(planDirectory, "context.json"),
         ...agentProfileOptions(root, "fix")
       }),
       /paused/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
+  }
+});
+
+test("fix preparation rejects a planner result after the frozen issue changes", async () => {
+  const root = await createRepository();
+  const planDirectory = bundle(root, "drifted-plan-input");
+  const config = structuredClone(templateConfig);
+  config.issues.allowAiImplementation = true;
+  config.repository.ownerLogins = ["repository-owner"];
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  let issueBody = "Original implementation request";
+  let updatedAt = "2026-08-10T10:00:00Z";
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Example",
+        body: issueBody,
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        updated_at: updatedAt,
+        labels: []
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await preparePlan({
+      targetNumber: 5,
+      actor: "repository-owner",
+      directory: planDirectory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "plan")
+    });
+    issueBody = "Changed after planning";
+    updatedAt = "2026-08-10T10:01:00Z";
+    await assert.rejects(
+      prepareFix({
+        targetNumber: 5,
+        actor: "repository-owner",
+        directory: bundle(root, "drifted-fix-input"),
+        config,
+        token: "read-token",
+        planResultPath: await readyPlan(root),
+        planContextPath: path.join(planDirectory, "context.json"),
+        ...agentProfileOptions(root, "fix")
+      }),
+      /changed after planning/
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -587,7 +667,7 @@ test("prepare writes provider-compatible workspace output schemas for every mode
     await prepareAuditBundle({ directory: directories.audit, config, ...agentProfileOptions(root, "audit", revision) });
     await prepareIssue({ eventPath: issueEvent, actor: "reporter", triageMode: "automatic", directory: directories.issue, config, token: "read-token", ...agentProfileOptions(root, "issue", revision) });
     await preparePlan({ targetNumber: 5, actor: "workspace-owner", directory: directories.plan, config, token: "read-token", ...agentProfileOptions(root, "plan", revision) });
-    await prepareFix({ targetNumber: 5, actor: "workspace-owner", directory: directories.fix, config, token: "read-token", planResultPath: await readyPlan(root), ...agentProfileOptions(root, "fix", revision) });
+    await prepareFix({ targetNumber: 5, actor: "workspace-owner", directory: directories.fix, config, token: "read-token", planResultPath: await readyPlan(root), planContextPath: path.join(directories.plan, "context.json"), ...agentProfileOptions(root, "fix", revision) });
     for (const mode of Object.keys(directories)) {
       assertWorkspaceOutputSchema(JSON.parse(await readFile(path.join(directories[mode], "schema.json"), "utf8")), mode);
     }

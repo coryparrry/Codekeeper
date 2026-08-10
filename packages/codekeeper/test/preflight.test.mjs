@@ -89,6 +89,9 @@ function preflightRunner(root, options = {}) {
     if (command === "git" && args[0] === "ls-remote" && args[1] === "--heads") return result(settings.remoteRefs);
     if (command === "gh" && args[0] === "pr" && args[1] === "list") return result(JSON.stringify(settings.pulls));
     if (command === "gh" && args[0] === "variable" && args[1] === "get") return result(`${settings.variables[args[2]] ?? ""}\n`);
+    if (command === "gh" && args.join(" ") === "variable list --repo acme/widget --json name,value") {
+      return result(JSON.stringify(Object.entries(settings.variables).map(([name, value]) => ({ name, value }))));
+    }
     throw new Error(`Unexpected preflight command: ${command} ${args.join(" ")}`);
   });
 }
@@ -244,6 +247,16 @@ test("existing generated files are recognized as a rerunnable installation", asy
   assert.equal(inspected.existingSettings.enabled, true);
   assert.equal(inspected.existingSettings.appClientId, "Iv123456789012345678");
   assert.equal(inspected.existingSettings.automationBotLogin, "codekeeper-widget[bot]");
+  const legacy = await inspectRepository({
+    runner: preflightRunner(root, {
+      variables: {
+        CODEKEEPER_ENABLED: "true",
+        CODEKEEPER_APP_CLIENT_ID: "Iv123456789012345678"
+      }
+    }),
+    cwd: root
+  });
+  assert.equal(legacy.existingSettings.automationBotLogin, null);
 });
 
 test("setup branch collision detection covers local refs, remote refs, and prior pull requests", async () => {

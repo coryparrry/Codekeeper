@@ -73,6 +73,24 @@ function runMetadata({ toolingSha = process.env.CODEKEEPER_TOOLING_SHA ?? "", co
   };
 }
 
+function frozenFixTarget(context) {
+  return {
+    repository: context.repository,
+    baseSha: context.baseSha,
+    defaultBranch: context.defaultBranch,
+    target: context.target,
+    issue: context.issue ?? null,
+    pullRequest: context.pullRequest ?? null
+  };
+}
+
+function assertPlanTargetUnchanged(planContext, currentContext) {
+  if (planContext?.mode !== "plan") throw new Error("Fix preparation requires a planner context");
+  if (JSON.stringify(frozenFixTarget(planContext)) !== JSON.stringify(frozenFixTarget(currentContext))) {
+    throw new Error(`Target #${currentContext.target.number} changed after planning; stale plan will not continue`);
+  }
+}
+
 export async function prepareReview({ eventPath, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
   const agentProfile = await trustedAgentProfile("review", agentProfilePath, agentProfileSourceSha);
   const event = await readJson(eventPath);
@@ -223,7 +241,7 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, mode = "fix", planResultPath = undefined }) {
+export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, mode = "fix", planResultPath = undefined, planContextPath = undefined }) {
   if (!["plan", "fix"].includes(mode)) throw new Error("Codekeeper implementation role must be plan or fix");
   const agentProfile = await trustedAgentProfile(mode, agentProfilePath, agentProfileSourceSha);
   if (!["owner", "policy"].includes(authorizationMode)) {
@@ -309,7 +327,6 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       }
     };
   }
-  const plan = mode === "fix" ? validatePlanResult(await readJson(planResultPath), target) : undefined;
   const context = {
     mode,
     repository,
@@ -321,9 +338,12 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     requestedBy: actor,
     authorizationMode,
     target,
-    ...(plan ? { plan } : {}),
     ...subject
   };
+  if (mode === "fix") {
+    assertPlanTargetUnchanged(await readJson(planContextPath), context);
+    context.plan = validatePlanResult(await readJson(planResultPath), target);
+  }
   await writeBundle({
     directory,
     context,

@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "30075b865ce7f34d9b2d24e59baf2775298e0f7b6d429e046703adac6e842d09";
+const toolingManifestSha256 = "3eb66618af3a06c04eaf4d76326a96d6fcd3ee749522852fac06b4d8e4db66df";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -426,6 +426,10 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(fix, /github\.event\.sender\.login == inputs\.automation_bot_login/);
   assert.match(fix, /format\('codekeeper-command-\{0\}', github\.run_id\)/);
   assert.match(fix, /--authorization-mode "\$AUTHORIZATION_MODE"/);
+  assert.match(fix, /codekeeper-plan-bundle\/context\.json/);
+  assert.match(fix, /--plan-context "\$PLAN_BUNDLE\/context\.json"/);
+  assert.match(fix, /cp "\$PLAN_BUNDLE\/context\.json" "\$BUNDLE\/plan-context\.json"/);
+  assert.match(fix, /--plan-context "\$WORKSPACE\/plan-context\.json"/);
   const fixCaller = await repositoryFile("examples/workflows/codekeeper-fix.yml.example");
   assert.match(fixCaller, /issues:\n\s+types: \[labeled\]/);
   assert.match(fixCaller, /automation_bot_login: \$\{\{ vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN \}\}/);

@@ -53,7 +53,7 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 30075b865ce7f34d9b2d24e59baf2775298e0f7b6d429e046703adac6e842d09
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 3eb66618af3a06c04eaf4d76326a96d6fcd3ee749522852fac06b4d8e4db66df
 
 concurrency:
   group: >-
@@ -261,7 +261,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: codekeeper-fix-plan-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/codekeeper-plan-bundle/plan-result.json
+          path: |
+            ${{ runner.temp }}/codekeeper-plan-bundle/context.json
+            ${{ runner.temp }}/codekeeper-plan-bundle/plan-result.json
           retention-days: 1
           if-no-files-found: error
 
@@ -376,11 +378,13 @@ jobs:
             --actor "$GITHUB_ACTOR" \
             --authorization-mode "$AUTHORIZATION_MODE" \
             --expected-head "$EXPECTED_HEAD" \
+            --plan-context "$PLAN_BUNDLE/context.json" \
             --plan-result "$PLAN_BUNDLE/plan-result.json" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git rev-parse HEAD)" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           cp "$PLAN_BUNDLE/plan-result.json" "$BUNDLE/plan-result.json"
+          cp "$PLAN_BUNDLE/context.json" "$BUNDLE/plan-context.json"
           echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - name: Check out frozen repair target
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -545,6 +549,7 @@ jobs:
             --actor "$GITHUB_ACTOR" \
             --authorization-mode "$AUTHORIZATION_MODE" \
             --expected-head "$EXPECTED_HEAD" \
+            --plan-context "$WORKSPACE/plan-context.json" \
             --plan-result "$WORKSPACE/plan-result.json" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git rev-parse HEAD)" \

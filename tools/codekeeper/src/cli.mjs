@@ -169,6 +169,7 @@ async function main() {
         toolingSha,
         configSha256,
         planResultPath: runnerFile(args.require("plan-result"), "plan-result"),
+        planContextPath: runnerFile(args.require("plan-context"), "plan-context"),
         ...agentProfileInputs(args)
       });
       break;
