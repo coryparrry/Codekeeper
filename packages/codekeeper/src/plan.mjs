@@ -112,7 +112,7 @@ export function documentMap(files) {
   return files.map((file) => Object.freeze({
     path: file.path,
     purpose: file.path.endsWith("codekeeper.json")
-      ? "Conservative policy, model choices, protected paths, and disabled release controls"
+      ? "Policy, model choices, protected paths, and startup controls"
       : AGENT_PROFILES[AGENT_PROFILE_IDS.find((profile) => AGENT_PROFILES[profile].target === file.path)]?.purpose
         ?? MODES[MODE_IDS.find((mode) => MODES[mode].target === file.path)]?.label
         ?? "Codekeeper setup"
@@ -130,7 +130,7 @@ export function workflowMap(modes) {
   }));
 }
 
-export function completionGuidance(modes) {
+export function completionGuidance(modes, enabled = true) {
   const proofs = workflowMap(modes).map((item) => Object.freeze({
     mode: item.mode,
     label: item.label,
@@ -140,16 +140,18 @@ export function completionGuidance(modes) {
         ? "controlled same-repository pull request"
         : item.mode === "issues"
           ? "controlled issue event"
-          : "owner-authorized command only after issue implementation is deliberately enabled"
+          : "owner command after you turn on issue implementation in the policy"
   }));
   return Object.freeze({
-    heading: "Next proofs after the setup PR merges: keep CODEKEEPER_ENABLED=false until ready, deliberately set it true for one bounded proof, then restore it to false.",
-    profileGuidance: "Edit .github/codekeeper/agents/*.md to tune judgment. Profiles cannot grant writes, triggers, branch choice, repair authority, issue closure, or merge.",
+    heading: enabled
+      ? "After the setup pull request merges, Codekeeper starts running the workflows you selected. Test each one before making its check required."
+      : "Codekeeper will stay off after merge. Set CODEKEEPER_ENABLED=true when you are ready to test it.",
+    profileGuidance: "Edit .github/codekeeper/agents/*.md to change decision guidance. Profiles cannot grant write, trigger, branch, repair, issue closure, or merge access.",
     proofs: Object.freeze(proofs),
     reviewGateWarning: proofs.some((item) => item.mode === "review")
       ? "Do not make the Codekeeper review gate required until its controlled review proof passes."
       : null,
-    closing: "The installer did not enable Codekeeper, dispatch a workflow, or merge the PR."
+    closing: "The installer did not run a workflow or merge the pull request."
   });
 }
 
@@ -171,8 +173,8 @@ export function setupPullRequestBody(plan) {
     workflowMap(plan.modes).map((item) => [item.mode, item.trigger, `\`${item.policyAgent}\``])
   );
   const proofs = [];
-  const reviewDisabledNote = plan.modes.includes("review")
-    ? "\nReview events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`. Do not make that gate required until the controlled review proof passes.\n"
+  const reviewDisabledNote = plan.modes.includes("review") && !plan.enabled
+    ? "\nReview events fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`. Do not make the gate required until you enable Codekeeper and see a controlled review pass.\n"
     : "";
   if (plan.modes.includes("maintain")) proofs.push("Run maintenance manually with `dry_run=true`.");
   if (plan.modes.includes("review")) proofs.push("Open a controlled same-repository pull request and verify the App-owned review.");
@@ -180,7 +182,7 @@ export function setupPullRequestBody(plan) {
   if (plan.modes.includes("fix")) proofs.push("Only after a deliberate policy change, use an owner-authorized fix command on a low-risk issue.");
   return `## Summary
 
-Codekeeper is configured with the **${plan.preset}** preset at immutable source checkpoint \`${plan.source.commit}\`. The setup remains disabled until an owner deliberately enables it for a controlled proof.
+Codekeeper is configured with the **${plan.preset}** preset at source commit \`${plan.source.commit}\`. It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.
 
 Source: [${plan.source.repository}@${plan.source.commit}](https://github.com/${plan.source.repository}/tree/${plan.source.commit})
 
@@ -203,13 +205,15 @@ Required secrets: ${plan.secrets.map((item) => `\`${item.name}\``).join(", ")}. 
 
 ## After merge
 
-Keep \`CODEKEEPER_ENABLED=false\` until the repository is ready for a bounded proof. For each selected proof, deliberately set it to \`true\`, run only that controlled scenario, then restore it to \`false\`:
+${plan.enabled
+    ? "Codekeeper starts running the selected workflows. Test each one before making its check required:"
+    : "Codekeeper stays off. Set `CODEKEEPER_ENABLED=true` when you are ready, then test each selected workflow:"}
 
 Edit \`.github/codekeeper/agents/*.md\` to tune evidence thresholds, risk judgment, and no-action decisions. These profiles cannot grant writes, change triggers or branches, authorize repairs, close issues, or enable merge. Maintenance remains report-only unless an owner explicitly commands a repair after the supporting runtime is installed.
 
 ${proofs.map((item) => `- ${item}`).join("\n")}
 
-The installer did not merge this pull request, enable Codekeeper, or dispatch a workflow.
+The installer did not merge this pull request or run a workflow.
 `;
 }
 
@@ -228,8 +232,9 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     defaultBranch: snapshot.defaultBranch,
     ownerLogins
   });
+  const enabled = answers.enabled !== false;
   const variables = [
-    { name: ENABLED_VARIABLE, value: "false" },
+    { name: ENABLED_VARIABLE, value: String(enabled) },
     { name: CLIENT_ID_VARIABLE, value: answers.appClientId }
   ];
   if (modes.includes("review")) variables.push({ name: BOT_LOGIN_VARIABLE, value: automationBotLogin });
@@ -246,6 +251,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     preset: answers.preset,
     displayName: answers.displayName,
     ownerLogins,
+    enabled,
     files,
     variables,
     secrets: requiredSecretNames({ modes, preset: answers.preset }).map((name) => ({ name })),
@@ -259,7 +265,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
 
 export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) {
   output.write(`Codekeeper guided setup\n\n`);
-  output.write("This creates a disabled setup pull request. It does not run a model, enable a workflow, merge a pull request, or put secret values in generated files.\n\n");
+  output.write("This creates a setup pull request. It does not run a model, merge the pull request, or put secrets in generated files.\n\n");
   const repositoryConfirmed = await prompt.confirm({
     message: `Install into ${snapshot.repository} on default branch ${snapshot.defaultBranch}?`,
     defaultValue: false,
@@ -277,10 +283,10 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   output.write("Recommended starter setup\n");
   output.write("  - Pull request review: your GitHub App posts comments, labels, and a blocking result on controlled same-repository PRs\n");
   output.write("  - Repository maintenance: begin with a manual dry run that makes no GitHub changes\n");
-  output.write("  - OpenAI preset: one model-provider key plus a separate OpenAI trace key; issue-event triage and the repair-PR workflow are omitted\n");
-  output.write("  - Model and publication jobs remain disabled until you deliberately run a bounded proof\n");
-  output.write("  - The maintenance caller includes a schedule after merge; while disabled, only its pinned bootstrap can run\n");
-  output.write("  - After merge, PR events also run bootstrap and the Codekeeper review gate intentionally fails while disabled; do not require it yet\n");
+  output.write("  - OpenAI preset: uses one model API key and one trace API key\n");
+  output.write("  - Issue triage and issue fix are not included\n");
+  output.write("  - You choose whether Codekeeper starts when the setup pull request merges\n");
+  output.write("  - The maintenance workflow includes a schedule after merge\n");
   output.write("Press Return at the next question to accept these choices.\n");
   const useRecommended = prompt?.kind === "ink"
     ? await prompt.select({
@@ -305,7 +311,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     preset = RECOMMENDED_PRESET;
     output.write("Using pull request review + repository maintenance with the OpenAI preset.\n");
   } else {
-    output.write("\nCustom setup: install only workflows you intend to prove. Issue triage reacts to issue events; issue fix is an advanced, separately gated mutation path.\n");
+    output.write("\nCustom setup: install only the workflows that you want to use. Issue triage responds to issue events. Issue fix needs a separate policy change.\n");
     modes = await prompt.multiselect(tuiOptions(prompt, {
       message: "Choose workflows to generate:",
       defaultValues: RECOMMENDED_MODES,
@@ -324,13 +330,28 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     }, {
       step: "models",
       description: [
-        "The preset chooses bundled starting models. Models remain quick edits in .github/codekeeper.json.",
+        "The preset chooses the starting models. You can change them in .github/codekeeper.json.",
         "Provider credentials are requested later and never stored in generated files."
       ]
     }));
   }
+  const enabled = prompt?.kind === "ink"
+    ? await prompt.select({
+      step: "startup",
+      message: "Start Codekeeper after the setup pull request merges?",
+      description: [
+        "Enabled starts the workflows you selected as soon as this setup is merged.",
+        "Disabled installs the files and secrets but keeps every Codekeeper workflow off."
+      ],
+      defaultValue: "enabled",
+      choices: [
+        { value: "enabled", label: "Enabled (recommended)" },
+        { value: "disabled", label: "Disabled" }
+      ]
+    }) === "enabled"
+    : await prompt.confirm({ message: "Start Codekeeper after the setup pull request merges?", defaultValue: true });
   const displayName = await prompt.inputText(tuiOptions(prompt, {
-    message: "Human-readable name Codekeeper shows in GitHub comments (this does not rename the repository)",
+    message: "Name to show in Codekeeper comments",
     defaultValue: snapshot.displayName,
     validate: (value) => validDisplayName(value) || "Use 1–100 printable characters."
   }, {
@@ -339,7 +360,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     maxLength: 100
   }));
   const ownersText = await prompt.inputText(tuiOptions(prompt, {
-    message: "GitHub users allowed to run owner-only /codekeeper commands (comma-separated; keep the default unless sharing control)",
+    message: "GitHub users who can run owner-only /codekeeper commands (comma-separated)",
     defaultValue: snapshot.viewerLogin,
     validate(value) {
       try {
@@ -355,15 +376,16 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   }));
 
   output.write("\nCredentials this setup will request later through GitHub CLI\n");
-  output.write("Setup itself makes no model call. Provider and trace values go directly to GitHub CLI; the App PEM will be supplied from its downloaded file without the installer reading its contents. GitHub Actions supplies the stored secrets later only to selected jobs.\n");
+  output.write("Setup does not call a model. API keys go directly to GitHub CLI. Codekeeper does not display or store their values.\n");
+  output.write("The installer sends the selected App key file directly to GitHub CLI. It does not read or display the key.\n");
   for (const name of requiredSecretNames({ modes, preset })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
 
   const policy = JSON.parse(bundle.contents[`policies/${preset}.json`]);
-  output.write("\nConservative setup boundaries:\n");
+  output.write("\nSafety settings\n");
   CONSERVATIVE_BOUNDARIES.forEach((item) => output.write(`  - ${item}\n`));
-  output.write(`Protected paths: ${policy.audit.repair.protectedPaths.length} rules covering workflows, agent instructions, security and signing files, project metadata, dependency locks, and Codekeeper itself. The exact list will be in the generated policy for review before merge.\n`);
+  output.write(`The policy has ${policy.audit.repair.protectedPaths.length} protected-path rules. Review the full list in the setup pull request.\n`);
   const confirmed = await prompt.confirm(tuiOptions(prompt, {
-    message: "Continue with these disabled-by-default boundaries?",
+    message: "Continue with these safety settings?",
     defaultValue: false
   }, {
     step: "safety",
@@ -379,14 +401,15 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     modes: normalizeModes(modes),
     preset,
     displayName,
-    ownerLogins: normalizeOwnerLogins(ownersText.split(","))
+    ownerLogins: normalizeOwnerLogins(ownersText.split(",")),
+    enabled
   });
 }
 
 export async function collectAppAnswers({ prompt, modes, output }) {
   output.write("\nGitHub App identifiers\n");
-  output.write("  - Client ID: the value beginning with Iv in App settings; do not enter the numeric App ID\n");
-  if (modes.includes("review")) output.write("  - Bot login: <app-slug>[bot], used to recognize App-authored review output\n");
+  output.write("  - Client ID: find the value that starts with Iv in the App settings\n");
+  if (modes.includes("review")) output.write("  - App URL name: find the name at the end of the App settings URL\n");
   const appClientId = await prompt.inputText(tuiOptions(prompt, {
     message: "GitHub App Client ID (starts with Iv; not the numeric App ID)",
     validate: (value) => validClientId(value) || "Enter the App Client ID shown in GitHub App settings."
@@ -402,12 +425,12 @@ export async function collectAppAnswers({ prompt, modes, output }) {
     if (prompt?.kind === "ink") {
       const appSlug = await prompt.inputText({
         step: "GitHub App",
-        message: "GitHub App slug",
+        message: "GitHub App name from the settings URL",
         description: [
-          "Find the slug in the App settings URL: github.com/settings/apps/<app-slug>.",
-          "Codekeeper derives the publication login as <app-slug>[bot]."
+          "GitHub uses this name in the App settings URL.",
+          "For github.com/settings/apps/my-codekeeper-app, enter my-codekeeper-app. Codekeeper then uses my-codekeeper-app[bot]."
         ],
-        validate: (value) => APP_SLUG.test(value.toLowerCase()) || "Enter the lowercase App slug without [bot]."
+        validate: (value) => APP_SLUG.test(value.toLowerCase()) || "Enter the lowercase App name from its settings URL, without [bot]."
       });
       automationBotLogin = `${appSlug.toLowerCase()}[bot]`;
     } else {
@@ -422,7 +445,8 @@ export async function collectAppAnswers({ prompt, modes, output }) {
 
 export async function collectAppPrivateKeyPath({ prompt, output }) {
   output.write("\nGitHub App private-key file\n");
-  output.write("Use the newly downloaded .pem file. Do not open it or paste its contents. The installer opens the file read-only and gives its descriptor directly to GitHub CLI; its path and contents are not displayed later.\n");
+  output.write("Select the new .pem file that GitHub downloaded. Do not open the file or paste its contents.\n");
+  output.write("The installer sends the file directly to GitHub CLI. It does not display the path or key.\n");
   if (typeof prompt.selectPrivateKey === "function") return prompt.selectPrivateKey();
   return prompt.inputText({
     message: "Full absolute path to the downloaded GitHub App private-key PEM",

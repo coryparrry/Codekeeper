@@ -62,30 +62,24 @@ export async function listPrivateKeyChoices(directory, { fsImpl = DEFAULT_FS } =
   for (const entry of directoryEntries) {
     const label = visibleEntryName(entry.name);
     if (!label || entry.isSymbolicLink()) continue;
-    if (!entry.isDirectory() && !(entry.isFile() && label.toLowerCase().endsWith(".pem"))) continue;
+    if (!(entry.isFile() && label.toLowerCase().endsWith(".pem"))) continue;
     const target = path.join(directory, entry.name);
     try {
       const stat = await fsImpl.lstat(target);
       if (stat.isSymbolicLink()) continue;
-      if (entry.isDirectory() && !stat.isDirectory()) continue;
-      if (entry.isFile() && (!stat.isFile() || stat.size <= 0 || stat.size > STDIN_FILE_LIMIT_BYTES)) continue;
+      if (!stat.isFile() || stat.size <= 0 || stat.size > STDIN_FILE_LIMIT_BYTES) continue;
+      candidates.push({ label, target, type: "file", modifiedTime: Number(stat.mtimeMs) || 0 });
     } catch {
       continue;
     }
-    candidates.push({ label, target, type: entry.isDirectory() ? "directory" : "file" });
   }
   candidates.sort((left, right) => {
-    if (left.type !== right.type) return left.type === "directory" ? -1 : 1;
+    if (left.modifiedTime !== right.modifiedTime) return right.modifiedTime - left.modifiedTime;
     return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
   });
 
   const choices = [];
   const targets = new Map();
-  const parent = path.dirname(directory);
-  if (parent !== directory) {
-    choices.push(Object.freeze({ id: "parent", type: "parent", label: "Go up one folder" }));
-    targets.set("parent", parent);
-  }
   candidates.forEach((candidate, index) => {
     const id = `entry-${index}`;
     choices.push(Object.freeze({ id, type: candidate.type, label: candidate.label }));
@@ -157,17 +151,9 @@ export async function createPrivateKeyPickerController({
         }
         return Object.freeze({ selected: true, value: entry.target });
       }
-      if (!stat.isDirectory()) {
-        throw new InstallerError("The selected private-key picker item is not a safe folder.", {
-          code: "SECRET_INPUT_DIRECTORY_INVALID"
-        });
-      }
-
-      // Navigation commits only after the target directory has been listed safely.
-      const nextListing = await listPrivateKeyChoices(entry.target, { fsImpl });
-      currentDirectory = entry.target;
-      commitListing(nextListing);
-      return Object.freeze({ selected: false });
+      throw new InstallerError("The selected private-key picker item is not a valid private-key file.", {
+        code: "SECRET_INPUT_FILE_INVALID"
+      });
     }
   });
 }

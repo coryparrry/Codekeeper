@@ -4,14 +4,14 @@ export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
 export const SOURCE_COMMIT = "38c0306a78888346208aae992a0786d7414e3c0a";
 export const SETUP_BRANCH = "codekeeper/setup";
-export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add disabled setup";
-export const SETUP_PR_TITLE = "chore(codekeeper): add disabled setup";
+export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
+export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
 
 export const MODES = Object.freeze({
   review: Object.freeze({
     id: "review",
     label: "Pull request review",
-    description: "reviews same-repository pull requests with comments, labels, and a blocking result when enabled",
+    description: "Reviews pull requests from this repository. Adds comments, labels, and a blocking result.",
     policyAgent: "review",
     target: ".github/workflows/codekeeper-review.yml",
     asset: "workflows/review.yml",
@@ -20,7 +20,7 @@ export const MODES = Object.freeze({
   maintain: Object.freeze({
     id: "maintain",
     label: "Repository maintenance",
-    description: "runs repository audits manually or on schedule; start with a no-change dry run",
+    description: "Runs repository audits manually or on a schedule. Start with a dry run that makes no changes.",
     policyAgent: "audit",
     target: ".github/workflows/codekeeper-maintain.yml",
     asset: "workflows/maintain.yml",
@@ -29,7 +29,7 @@ export const MODES = Object.freeze({
   issues: Object.freeze({
     id: "issues",
     label: "Issue triage",
-    description: "adds issue labels and comments on issue events when enabled; duplicate closure stays off",
+    description: "Adds labels and comments to issues. Automatic duplicate closure stays off.",
     policyAgent: "issue",
     target: ".github/workflows/codekeeper-issues.yml",
     asset: "workflows/issues.yml",
@@ -38,7 +38,7 @@ export const MODES = Object.freeze({
   fix: Object.freeze({
     id: "fix",
     label: "Owner-authorized issue fix",
-    description: "advanced; can open a repair PR only after an owner command and separate policy opt-in; auto-merge stays off",
+    description: "Can open a repair pull request after an owner command and a separate policy change. Automatic merge stays off.",
     policyAgent: "fix",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
@@ -99,17 +99,16 @@ export const CLIENT_ID_VARIABLE = "CODEKEEPER_APP_CLIENT_ID";
 export const BOT_LOGIN_VARIABLE = "CODEKEEPER_AUTOMATION_BOT_LOGIN";
 
 export const SECRET_PURPOSES = Object.freeze({
-  [OPENAI_SECRET]: "OpenAI Platform API key for model calls after enablement; this is not a ChatGPT subscription",
+  [OPENAI_SECRET]: "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key.",
   [DEEPSEEK_SECRET]: "DeepSeek API key for issue triage when the mixed preset is selected",
-  [TRACE_SECRET]: "separate OpenAI Platform API key for trace export; do not reuse the model-provider key",
+  [TRACE_SECRET]: "Separate OpenAI Platform API key for trace export. Do not reuse the model API key.",
   [APP_SECRET]: "downloaded GitHub App PEM private key used to mint App installation tokens"
 });
 
 export const CONSERVATIVE_BOUNDARIES = Object.freeze([
-  "Codekeeper is installed disabled; CODEKEEPER_ENABLED remains false.",
-  "Repository repair, AI issue implementation, and automatic merge remain disabled.",
-  "Editable Markdown profiles tune judgment only; they cannot grant writes, merge, branch, trigger, or authorization permissions.",
-  "Generated workflows use an immutable full source commit SHA.",
-  "Protected paths and git diff --check remain enforced.",
-  "The installer never merges a pull request or dispatches a workflow."
+  "Repair, issue implementation, and automatic merge stay off until you turn them on in the policy.",
+  "Agent profiles guide decisions. They cannot grant write access or change triggers, branches, or permissions.",
+  "Every generated workflow pins an exact source commit.",
+  "Protected paths and git diff --check stay in place.",
+  "The installer opens a setup pull request. It does not merge it or run a workflow."
 ]);

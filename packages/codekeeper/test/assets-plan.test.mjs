@@ -86,6 +86,7 @@ function answers(overrides = {}) {
     ownerLogins: ["CoryParrry", "Acme-Bot"],
     appClientId: "Iv123456789012345678",
     automationBotLogin: "Codekeeper-Acme[bot]",
+    enabled: true,
     ...overrides
   };
 }
@@ -326,13 +327,13 @@ test("every non-empty mode subset has the exact mixed and OpenAI secret matrix",
   }
 });
 
-test("install plan is frozen, disabled first, and documents selected workflows without credential values", async () => {
+test("install plan is frozen, applies startup first, and documents selected workflows without credential values", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers() });
   assert.ok(Object.isFrozen(plan));
   assert.ok(Object.isFrozen(plan.files));
   assert.ok(plan.files.every(Object.isFrozen));
-  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "false" });
+  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "true" });
   assert.deepEqual(plan.variables.slice(1), [
     { name: "CODEKEEPER_APP_CLIENT_ID", value: "Iv123456789012345678" },
     { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
@@ -342,13 +343,12 @@ test("install plan is frozen, disabled first, and documents selected workflows w
   assert.equal(plan.branch, "codekeeper/setup");
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
   assert.match(plan.pullRequest.body, /\| Mode \| Trigger \| Policy agent \|/);
-  assert.match(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
+  assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
   assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune evidence thresholds/);
   assert.match(plan.pullRequest.body, /cannot grant writes, change triggers or branches, authorize repairs, close issues, or enable merge/);
   assert.match(plan.pullRequest.body, /Maintenance remains report-only unless an owner explicitly commands a repair/);
-  assert.match(plan.pullRequest.body, /Review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`/);
-  assert.match(plan.pullRequest.body, /Do not make that gate required until the controlled review proof passes/);
-  assert.match(plan.pullRequest.body, /did not merge.*enable Codekeeper.*dispatch a workflow/s);
+  assert.doesNotMatch(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
+  assert.match(plan.pullRequest.body, /did not merge this pull request or run a workflow/);
   assert.doesNotMatch(plan.pullRequest.body, /PRIVATE KEY|sk-[A-Za-z0-9]/i);
   assert.deepEqual(documentMap(plan.files).map((item) => item.path), plan.files.map((file) => file.path));
   assert.deepEqual(
@@ -392,6 +392,25 @@ test("recommended starter plan selects review and maintenance with separate Open
     [policy.ai.agents.audit.provider, policy.ai.agents.audit.model, policy.ai.agents.audit.effort],
     ["openai", "gpt-5.6-sol", "high"]
   );
+});
+
+test("normal installation enables selected workflows after the setup pull request merges", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET, enabled: true })
+  });
+  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "true" });
+  assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
+});
+
+test("optional disabled installation keeps Codekeeper off after merge", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers({ enabled: false }) });
+  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "false" });
+  assert.match(plan.pullRequest.body, /Codekeeper stays off/);
+  assert.match(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
 });
 
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {

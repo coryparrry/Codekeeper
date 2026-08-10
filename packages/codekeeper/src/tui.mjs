@@ -21,13 +21,13 @@ const PEM_MARKER_STARTS = Object.freeze(["-----BEGIN", "-----END"]);
 const PRIVATE_KEY_INPUT_ERROR = "Private keys cannot be pasted here. Press Ctrl-U, then select the downloaded .pem file at the private-key step.";
 const DEFAULT_PROGRESS_STEPS = Object.freeze([
   Object.freeze({ id: "repository:verify", label: "Recheck the confirmed repository" }),
-  Object.freeze({ id: "settings:disable", label: "Keep Codekeeper disabled" }),
+  Object.freeze({ id: "settings:disable", label: "Set the startup choice" }),
   Object.freeze({ id: "secret:provider", label: "Store provider and trace keys" }),
   Object.freeze({ id: "secret:app", label: "Store the GitHub App key safely" }),
   Object.freeze({ id: "variables:configure", label: "Set non-secret repository variables" }),
   Object.freeze({ id: "git:commit", label: "Create and verify the setup commit" }),
   Object.freeze({ id: "git:push", label: "Push the setup branch" }),
-  Object.freeze({ id: "github:pull-request", label: "Open the disabled setup pull request" })
+  Object.freeze({ id: "github:pull-request", label: "Open the setup pull request" })
 ]);
 
 const NOTICE_SINK = Object.freeze({ write: () => true });
@@ -329,11 +329,60 @@ function TextInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   );
 }
 
+function SecretInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
+  const [received, setReceived] = useState(false);
+  const [error, setError] = useState("");
+  const cancel = useCancel(onCancel);
+  const accept = useCallback((text) => {
+    if (received) {
+      setError("Secret already received. Press Enter to save it, or Esc to cancel and restart.");
+      return;
+    }
+    const safe = sanitizeTextInput(text);
+    if (!safe) return;
+    if (containsPrivateKeyPemEnvelope(safe)) {
+      setError(PRIVATE_KEY_INPUT_ERROR);
+      return;
+    }
+    try {
+      spec.write(safe);
+      setReceived(true);
+      setError("");
+    } catch {
+      setError("The credential could not be sent safely. Cancel and retry.");
+    }
+  }, [received, spec]);
+  usePaste(accept);
+  useInput((input, key) => {
+    cancel(input, key);
+    if (key.return) {
+      if (received) onSubmit(true);
+      else setError("Paste the credential before continuing.");
+      return;
+    }
+    if (!key.ctrl && !key.meta && input) accept(input);
+  });
+  return h(
+    Shell,
+    {
+      step: spec.step,
+      title: spec.name,
+      description: [
+        spec.purpose,
+        "Paste the single-line key here. Codekeeper sends it directly to GitHub CLI. Codekeeper does not display or store it."
+      ],
+      footer: "Paste key  •  Enter save  •  Esc cancel",
+      colorEnabled
+    },
+    h(Text, { bold: received, ...colorProps(colorEnabled && received, "green") }, received ? "Key received. Press Enter to save." : "Waiting for a pasted key..."),
+    error ? h(Text, { color: colorEnabled ? "red" : undefined }, error) : null
+  );
+}
+
 function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [listing, setListing] = useState(null);
   const [index, setIndex] = useState(0);
   const [error, setError] = useState("");
-  const [revision, setRevision] = useState(0);
   const cancel = useCancel(onCancel);
   usePaste(() => {});
   useEffect(() => {
@@ -351,27 +400,18 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         setError("That folder could not be opened safely.");
       });
     return () => { live = false; };
-  }, [revision, spec]);
+  }, [spec]);
   const choices = listing?.choices ?? [];
   useInput((input, key) => {
     cancel(input, key);
     if (!choices.length) return;
     if (key.upArrow || input === "k") setIndex((value) => (value - 1 + choices.length) % choices.length);
     if (key.downArrow || input === "j" || key.tab) setIndex((value) => (value + 1) % choices.length);
-    if (key.leftArrow || input === "h") {
-      const parentChoice = choices.find((choice) => choice.type === "parent");
-      if (parentChoice) {
-        spec.picker.activate(parentChoice.id).then(() => setRevision((value) => value + 1)).catch(() => {
-          setError("That folder could not be opened safely.");
-        });
-      }
-    }
     if (key.return) {
       const choice = choices[index];
       if (!choice) return;
       spec.picker.activate(choice.id).then((result) => {
         if (result.selected) onSubmit(result.value);
-        else setRevision((value) => value + 1);
       }).catch(() => {
         setError("That item could not be opened safely.");
       });
@@ -383,22 +423,21 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       step: spec.step,
       title: "Choose the downloaded GitHub App key",
       description: [
-        "Only folders and regular .pem files are shown. Symlinks are ignored.",
-        "The key is never opened by the picker, and its selected path is never printed."
+        "Only .pem key files are shown. The newest files are first.",
+        "Folders, other files, and links are hidden. The picker does not open the key or display its path."
       ],
-      footer: "↑/↓ move  •  Enter open/select  •  ← parent  •  Esc cancel",
+      footer: "↑/↓ move  •  Enter select  •  Esc cancel",
       colorEnabled
     },
-    h(Text, { bold: true }, `Folder: ${listing?.folderLabel ?? "Loading…"}`),
+    h(Text, { bold: true }, `Keys in ${listing?.folderLabel ?? "Loading…"}`),
     error ? h(Text, { color: colorEnabled ? "red" : undefined }, error) : null,
-    !error && !listing ? h(Text, { dimColor: true }, "Reading file metadata…") : null,
-    listing && !choices.length ? h(Text, { dimColor: true }, "No folders or .pem files are available here.") : null,
+    !error && !listing ? h(Text, { dimColor: true }, "Finding key files...") : null,
+    listing && !choices.length ? h(Text, { dimColor: true }, `No usable .pem keys found in ${listing.folderLabel}. Download a new GitHub App key, then retry.`) : null,
     h(
       Box,
       { flexDirection: "column", marginTop: 1 },
       ...choices.slice(Math.max(0, index - 5), Math.max(0, index - 5) + 11).map((choice) => {
         const choiceIndex = choices.indexOf(choice);
-        const marker = choice.type === "file" ? "key" : choice.type === "parent" ? "up " : "dir";
         return h(
           Text,
           {
@@ -406,7 +445,7 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
             bold: choiceIndex === index,
             ...colorProps(colorEnabled && choiceIndex === index, "cyan")
           },
-          `${choiceIndex === index ? "›" : " "} ${marker}  ${choice.label}`
+          `${choiceIndex === index ? "›" : " "} key  ${choice.label}`
         );
       })
     )
@@ -430,7 +469,8 @@ function reviewData(plan) {
     setupDocumentPaths: documents.filter((item) => !item.path.includes("/agents/")).map((item) => item.path),
     profileDocumentPaths: documents.filter((item) => item.path.includes("/agents/")).map((item) => item.path),
     secrets: plan.secrets.map((secret) => `${secret.name} — ${SECRET_PURPOSES[secret.name]}`),
-    reviewGateWarning: completionGuidance(plan.modes).reviewGateWarning
+    startup: plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge.",
+    reviewGateWarning: completionGuidance(plan.modes, plan.enabled).reviewGateWarning
   };
 }
 
@@ -467,12 +507,12 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     Shell,
     {
       step: "final review",
-      title: `Review the disabled setup · ${page + 1} of ${lastPage + 1}`,
+      title: `Review the setup · ${page + 1} of ${lastPage + 1}`,
       description: pagedDetail
         ? [page === 0 ? "The App key is selected; its path and contents stay hidden." : "Nothing has changed yet."]
         : [
           "The App key file is selected. Its path and contents are not shown.",
-          "Nothing has changed yet. Choosing Create setup is the mutation boundary."
+          "Nothing has changed. Select Create setup to apply these choices."
         ],
       footer: page < lastPage
         ? "←/→ page  •  Enter next  •  Esc cancel"
@@ -498,7 +538,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     !pagedDetail && page === 2 ? h(
       Box,
       { flexDirection: "column" },
-      section("Safety", CONSERVATIVE_BOUNDARIES),
+      section("Safety", [data.startup, ...CONSERVATIVE_BOUNDARIES]),
       data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
       h(
         Box,
@@ -519,7 +559,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     pagedDetail && page === 2 ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
     pagedDetail && page === 3 ? section("Editable agent profiles", data.profileDocumentPaths, 0) : null,
     pagedDetail && page === 4 ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
-    pagedDetail && page === 5 ? section("Safety", CONSERVATIVE_BOUNDARIES, 0) : null,
+    pagedDetail && page === 5 ? section("Safety", [data.startup, ...CONSERVATIVE_BOUNDARIES], 0) : null,
     pagedDetail && page === 6 ? h(
       Box,
       { flexDirection: "column" },
@@ -540,8 +580,8 @@ function ProgressScreen({ state, colorEnabled }) {
     Shell,
     {
       step: "installing",
-      title: "Creating a disabled Codekeeper setup",
-      description: ["Automation stays disabled throughout installation."],
+      title: "Creating the Codekeeper setup",
+      description: ["Keep this terminal open until the setup pull request is ready."],
       footer: state.paused ? "GitHub CLI has the terminal. Complete its secret prompt to return." : "Please keep this terminal open.",
       colorEnabled
     },
@@ -586,19 +626,19 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const documents = documentMap(spec.plan.files);
   const setupDocuments = documents.filter((item) => !item.path.includes("/agents/"));
   const profileDocuments = documents.filter((item) => item.path.includes("/agents/"));
-  const guidance = completionGuidance(spec.plan.modes);
+  const guidance = completionGuidance(spec.plan.modes, spec.plan.enabled);
   return h(
     Shell,
     {
       step: "complete",
-      title: pagedDetail ? `Setup complete · ${page + 1} of ${lastPage + 1}` : "Your disabled setup pull request is ready",
+      title: pagedDetail ? `Setup complete · ${page + 1} of ${lastPage + 1}` : "Your setup pull request is ready",
       description: pagedDetail
         ? [page === 0
           ? spec.receipt.pullRequestUrl
           : page === 1
             ? `Pinned source: ${spec.plan.source.repository}@${spec.plan.source.commit}`
             : page === 2
-              ? "Codekeeper remains disabled until a bounded proof is deliberately enabled."
+              ? (spec.plan.enabled ? "Codekeeper starts after this pull request merges." : "Codekeeper stays off after this pull request merges.")
               : "Editable profiles tune judgment inside deterministic runtime boundaries."]
         : [
           spec.receipt.pullRequestUrl,
@@ -716,6 +756,7 @@ function TuiRoot({ registerController, colorEnabled }) {
   if (screen.kind === "select") return h(SelectScreen, common);
   if (screen.kind === "multiselect") return h(MultiSelectScreen, common);
   if (screen.kind === "input") return h(TextInputScreen, common);
+  if (screen.kind === "secret") return h(SecretInputScreen, common);
   if (screen.kind === "file") return h(FilePickerScreen, common);
   if (screen.kind === "review") return h(ReviewScreen, common);
   if (screen.kind === "completion") return h(CompletionScreen, common);
@@ -818,6 +859,9 @@ export async function createInkPrompter({
     progress,
     async inputText(spec) {
       return present("input", spec);
+    },
+    async inputSecret(spec) {
+      return present("secret", spec);
     },
     async confirm(spec) {
       return present("confirm", spec);

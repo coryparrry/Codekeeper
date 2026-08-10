@@ -22,7 +22,7 @@ export const USAGE = `Usage:
   codekeeper --help
   codekeeper --version
 
-Codekeeper init creates a disabled setup pull request for GitHub.com.
+Codekeeper init creates a setup pull request for GitHub.com.
 `;
 
 export function parseCliArgs(argv) {
@@ -55,7 +55,7 @@ async function bestEffortOpen(url, { runner, platform = process.platform }) {
 function assertSameSnapshot(expected, actual, resumeCommand) {
   for (const field of ["root", "originUrl", "repository", "defaultBranch", "headSha", "remoteDefaultSha", "viewerLogin"]) {
     if (expected[field] !== actual[field]) {
-      throw new InstallerError("Repository state changed during setup. Automation remains disabled.", {
+      throw new InstallerError("The repository changed during setup. Run the installer again.", {
         code: "PREFLIGHT_CHANGED",
         resume: resumeCommand
       });
@@ -82,23 +82,24 @@ function preview(plan, output) {
   }
   output.write("  Files:\n");
   for (const file of plan.files) output.write(`    - ${file.path}\n`);
-  output.write("  Agent profiles in .github/codekeeper/agents are editable judgment guidance; they cannot grant mutation or authorization permissions.\n");
+  output.write("  You can edit decision guidance in .github/codekeeper/agents. These files cannot grant access.\n");
   output.write(`  Variables: ${plan.variables.map((item) => item.name).join(", ")}\n`);
-  output.write("  Secrets supplied later through GitHub CLI (values are not shown or stored here):\n");
+  output.write("  Secrets sent directly to GitHub CLI. Codekeeper does not display or store their values:\n");
   for (const secret of plan.secrets) output.write(`    - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
   output.write("  The GitHub App PEM is supplied from its downloaded file, never pasted into a terminal prompt.\n");
-  output.write("  Automation remains disabled and the setup PR will not be merged.\n");
+  output.write(`  Startup: ${plan.enabled ? "enabled after merge" : "disabled after merge"}\n`);
+  output.write("  The installer will not merge the setup pull request.\n");
   if (plan.modes.includes("review")) {
-    output.write("  After merge, PR events intentionally show a failed Codekeeper review gate while disabled. Do not make that gate required until the controlled review proof passes.\n");
+    output.write("  Do not make the Codekeeper review gate required until a controlled review passes.\n");
   }
 }
 
 function printCompletion(plan, receipt, output) {
-  output.write(`\nCreated disabled setup PR: ${receipt.pullRequestUrl}\n`);
+  output.write(`\nCreated setup pull request: ${receipt.pullRequestUrl}\n`);
   output.write(`Pinned source: ${plan.source.repository}@${plan.source.commit}\n`);
   output.write("\nDocument map\n");
   for (const item of documentMap(plan.files)) output.write(`  - ${item.path}: ${item.purpose}\n`);
-  const guidance = completionGuidance(plan.modes);
+  const guidance = completionGuidance(plan.modes, plan.enabled);
   output.write(`\n${guidance.profileGuidance}\n`);
   output.write(`\n${guidance.heading}\n`);
   for (const item of guidance.proofs) output.write(`  - ${item.mode}: ${item.instruction}\n`);
@@ -173,7 +174,7 @@ export async function runCli({
       ownerType: snapshot.ownerType
     });
     const safelyOpenUrl = openUrl ?? ((url) => bestEffortOpen(url, { runner, platform }));
-    presentationOutput.write(`\nUse an adopter-owned GitHub App installed only on ${snapshot.repository}. The link creates one with the required permissions; if your test App is already installed here, close the page and use that App instead.\n${registrationUrl}\n`);
+    presentationOutput.write(`\nUse a GitHub App that you own. Install it only on ${snapshot.repository}.\nThe link creates an App with the required permissions. If you already installed one, close the page and use it.\n${registrationUrl}\n`);
     try {
       await safelyOpenUrl(registrationUrl);
     } catch {
@@ -212,7 +213,7 @@ export async function runCli({
       confirmed = await activePrompt.reviewInstallPlan(plan);
     } else {
       preview(plan, output);
-      confirmed = await activePrompt.confirm({ message: "Create this disabled setup?", defaultValue: false });
+      confirmed = await activePrompt.confirm({ message: "Create this setup?", defaultValue: false });
     }
     if (!confirmed) throw new InstallerError("Setup was cancelled before repository mutation.", { code: "USER_CANCELLED" });
 
@@ -226,6 +227,9 @@ export async function runCli({
       output: presentationOutput,
       appPrivateKeyPath,
       onProgress: activePrompt.progress?.update,
+      withSecretInput: typeof activePrompt.inputSecret === "function"
+        ? (spec) => activePrompt.inputSecret(spec)
+        : null,
       withInteractiveTerminal: typeof activePrompt.suspendTerminal === "function"
         ? (callback, notice) => activePrompt.suspendTerminal(callback, notice)
         : (callback) => callback(),

@@ -93,6 +93,25 @@ test("the real command runner maps an App PEM descriptor only to child stdin", a
   }
 });
 
+test("the real command runner sends a provider key only through child stdin", async () => {
+  const secret = "provider-key-canary-never-log";
+  const runner = createCommandRunner({
+    environment: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C" }
+  });
+  const child = await runner.run(process.execPath, [
+    "-e",
+    "let size=0;process.stdin.on('data',chunk=>size+=chunk.length);process.stdin.on('end',()=>process.stdout.write(size>0?'received':'empty'))"
+  ], {
+    provideInput(write) {
+      write(secret);
+    }
+  });
+
+  assert.equal(child.status, 0);
+  assert.equal(child.stdout, "received");
+  assert.doesNotMatch(JSON.stringify(child), new RegExp(secret));
+});
+
 test("command runner bounds captured output and requireSuccess rejects failure, timeout, or truncation", async () => {
   const runner = createCommandRunner();
   const large = await runner.run(process.execPath, ["-e", "process.stdout.write('x'.repeat(140000))"]);

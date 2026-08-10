@@ -1,6 +1,6 @@
 # Codekeeper installer
 
-`codekeeper` is the Node.js installer for Codekeeper's versioned GitHub Actions workflows. `npx codekeeper init` opens a keyboard-driven terminal UI, generates a disabled setup on a new branch, pushes that branch, and opens a setup pull request. It does not install the private runtime into the adopter repository.
+`codekeeper` is the Node.js installer for Codekeeper's versioned GitHub Actions workflows. `npx codekeeper init` opens a terminal UI, creates a setup branch, pushes it, and opens a setup pull request. By default, the selected workflows start after that pull request merges. You can choose a disabled install instead. The installer does not copy the private runtime into the adopter repository.
 
 The package is currently **unpublished** while private acceptance is in progress. Exercise the exact local tarball from a clean adopter checkout:
 
@@ -24,14 +24,14 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and proof sequence. | Before and during `codekeeper init`. |
 | [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/38c0306a78888346208aae992a0786d7414e3c0a/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
-| Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and disabled safety controls. | Before merging the setup PR and whenever policy changes. |
+| Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
 | [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/38c0306a78888346208aae992a0786d7414e3c0a/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
-The guided flow first offers a recommended starter setup: pull-request review, repository maintenance beginning with a manual dry run, and the `openai` preset. Select it to accept those choices. Model and publication jobs remain disabled, and issue-event automation plus the advanced fix path are omitted. The maintenance caller does include a scheduled trigger after merge; while `CODEKEEPER_ENABLED=false`, only its pinned bootstrap can run. PR events also run bootstrap and intentionally show a failed Codekeeper review gate while disabled, so do not make that gate required until the controlled review proof passes. Choose custom setup if you want review only, intend to prove additional workflows, or want DeepSeek for issue triage.
+The recommended setup includes pull-request review, repository maintenance, and the `openai` preset. It does not include issue triage or issue fix. The installer then asks if Codekeeper starts after the setup pull request merges. The default answer is enabled. Choose custom setup to select different workflows or use DeepSeek for issue triage.
 
 | Choice | What it adds |
 |---|---|
@@ -47,11 +47,11 @@ After choosing the starter or custom path, the flow explains that the display na
 1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, and only the selected caller workflows.
 2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `38c0306a78888346208aae992a0786d7414e3c0a`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
-4. Before the final confirmation, opens a metadata-only file picker at Downloads (or the home folder fallback) that shows only real directories and nonempty regular `.pem` files within GitHub's 48 KB secret limit. It ignores symlinks, never reads PEM contents, and never prints the selected path.
-5. Forces `CODEKEEPER_ENABLED=false`, invokes inherited-terminal `gh secret set` for each single-line provider or trace key, and feeds only the App PEM descriptor to `gh` through non-terminal standard input. An existing same-named secret is deliberately replaced only after its new input is supplied.
-6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add disabled setup`, pushes the branch, and opens a setup PR.
+4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
+5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
+6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add setup`, pushes the branch, and opens a setup pull request.
 
-It never merges the PR, enables automation, publishes an npm package, copies the runtime, or creates a hosted service.
+It never merges the pull request, runs a workflow, publishes an npm package, copies the runtime, or creates a hosted service.
 
 ## Editable agent behavior
 
@@ -78,29 +78,30 @@ In particular, issue triage does not authorize implementation. Issue repair requ
 
 The same collision checks cover all four agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
 
-If App registration, a secret prompt, push, or PR creation fails after setup begins, `CODEKEEPER_ENABLED` remains false and recoverable branch or PR state is preserved. Follow the exact command sequence printed by the installed binary; it never resolves an unpublished package from the npm registry. On Windows, printed recovery commands use PowerShell syntax. Do not merge or enable a partial setup.
+If setup fails, follow the recovery command printed by the installed binary. The installer preserves recoverable branch or pull-request state. Do not merge a partial setup.
 
 ## GitHub App and secret boundary
 
 The GitHub App needs contents, issues, and pull requests read-write plus metadata read-only, with webhooks disabled. Its settings page shows both a numeric **App ID** and a string **Client ID**. Codekeeper uses the **Client ID** (typically beginning `Iv`) for `CODEKEEPER_APP_CLIENT_ID`; the numeric App ID is not a substitute.
 
-The App settings page also shows the App slug. Its publication login is `<app-slug>[bot]`; review setup asks for the slug and derives that login so App-authored review output can be identified. Provider and trace keys are single-line values entered at inherited `gh secret set` prompts; the terminal UI suspends while GitHub CLI owns the terminal, then redraws safely. The App private key is different: never paste the multiline PEM into a prompt. Select its downloaded file in the metadata-only picker before the final review. After confirmation, the installer opens it read-only and passes the descriptor directly to `gh secret set` with child output suppressed. PEM bytes are not put in command arguments, environment variables, installer buffers, generated files, terminal output, logs, plans, receipts, or snapshots. GitHub CLI reads the secret from standard input and encrypts it locally before submission. Never paste a key into `.github/codekeeper.json` or this installer.
+The App settings URL ends with the App URL name. For example, `github.com/settings/apps/my-codekeeper-app` uses `my-codekeeper-app`. Review setup asks for this name and derives `my-codekeeper-app[bot]`.
+
+Paste API keys into the Codekeeper terminal UI and press Enter. Codekeeper sends each key directly to `gh secret set` through standard input. It does not put the value in command arguments, environment variables, generated files, output, plans, receipts, or snapshots.
+
+Do not paste the multiline App private key. Select its downloaded `.pem` file before the final review. The installer opens it read-only and passes its descriptor directly to `gh secret set`. It does not read or display the key or its path.
 
 The selected modes determine which provider secrets are requested. The `mixed` preset uses OpenAI for review, audit, and fix and DeepSeek for issue triage. The `openai` preset uses OpenAI for all selected modes. The bundled policies enable tracing, so both require a separate OpenAI trace key; a trace key is not the coordinator's provider key.
 
-## Disabled defaults
+## Safety defaults
 
-The generated policy and all model/publication jobs are deliberately disabled:
+The installer enables the selected workflows after merge by default. You can choose a disabled install. These higher-risk controls stay off in both cases:
 
-- `CODEKEEPER_ENABLED=false`;
 - audit repair is false;
 - issue AI implementation is false;
 - automatic exact-duplicate closure is false;
 - auto-merge is false.
 
-Caller triggers can still start their unconditional pinned-bootstrap jobs after the setup PR merges, including the maintenance schedule. Keep the setup PR unmerged until its triggers and source access are acceptable, and keep `CODEKEEPER_ENABLED=false` until controlled proof begins.
-
-When pull-request review is installed, PR events also run the fail-closed `Codekeeper review gate`. It intentionally fails while `CODEKEEPER_ENABLED=false`. Do not add it to branch protection until a controlled review has passed with Codekeeper deliberately enabled.
+Review all triggers before you merge the setup pull request. Do not add the `Codekeeper review gate` to branch protection until a controlled review passes.
 
 Review protected paths, allowed repair paths, deterministic validation commands, owner logins, and `git diff --check` before merging. Enabling one control never implicitly enables another.
 
@@ -142,7 +143,7 @@ There is no hosted Codekeeper service, dashboard, webhook receiver, or central c
 
 ## Proof after the setup PR merges
 
-Do not automatically exercise every selected mode. Keep `CODEKEEPER_ENABLED=false` until the repository is ready, deliberately set it to `true` for one bounded proof, then restore it to `false`. Use the smallest controlled proof for each selected mode:
+If you chose the enabled install, Codekeeper starts after the setup pull request merges. Test each selected mode before you make its check required. If you chose the disabled install, set `CODEKEEPER_ENABLED=true` when you are ready to test.
 
 | Mode | Next proof |
 |---|---|
@@ -151,4 +152,4 @@ Do not automatically exercise every selected mode. Keep `CODEKEEPER_ENABLED=fals
 | Issues | Open or update a controlled issue and confirm bounded triage without a false duplicate closure. |
 | Fix | Only after an owner deliberately sets `issues.allowAiImplementation=true`, use an owner-authorized command on a low-risk issue; confirm the PR is bounded and not auto-merged. |
 
-Codekeeper v1 intentionally has no upgrade, overwrite, force, non-interactive, GHES, verify, automatic-enable, or automatic-merge command.
+Codekeeper v1 has no upgrade, overwrite, force, non-interactive, GHES, verify, or automatic-merge command.

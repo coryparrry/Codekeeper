@@ -133,12 +133,13 @@ export async function configureRepositorySettings(plan, {
   appPrivateKeyPath,
   openInputFile = openSafeStdinFile,
   onProgress,
+  withSecretInput = null,
   withInteractiveTerminal = (callback) => callback(),
   resumeCommand = "codekeeper init"
 }) {
   const [enabledVariable, ...remainingVariables] = plan.variables;
-  if (enabledVariable?.name !== "CODEKEEPER_ENABLED" || enabledVariable.value !== "false") {
-    throw new InstallerError("Install plan does not force Codekeeper into the disabled state.", { code: "PLAN_INVALID" });
+  if (enabledVariable?.name !== "CODEKEEPER_ENABLED" || !["true", "false"].includes(enabledVariable.value)) {
+    throw new InstallerError("Install plan must choose whether Codekeeper starts after merge.", { code: "PLAN_INVALID" });
   }
   if (plan.secrets.filter((secret) => secret.name === APP_SECRET).length !== 1) {
     throw new InstallerError("Install plan must contain exactly one GitHub App private-key secret.", { code: "PLAN_INVALID" });
@@ -158,13 +159,14 @@ export async function configureRepositorySettings(plan, {
       "gh",
       ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
       { cwd: plan.root },
-      "GitHub CLI could not force CODEKEEPER_ENABLED=false; no secret or file mutation was attempted.",
+      "GitHub CLI could not set Codekeeper's startup state. No secrets or files were changed.",
       resumeCommand
     );
     reportProgress(onProgress, "settings:disable", "done");
 
     output.write("\nRequired GitHub Actions secrets\n");
-    output.write("Setup makes no model call. Provider and trace values go directly from the terminal to GitHub CLI. The App PEM is supplied to GitHub CLI from its opened file descriptor; the installer never reads or displays its contents. GitHub Actions supplies the stored secrets later only to selected jobs.\n");
+    output.write("Setup does not call a model. API keys go directly from this terminal to GitHub CLI. Codekeeper does not display or store them.\n");
+    output.write("The selected App key file goes directly to GitHub CLI. Codekeeper does not read or display the key.\n");
     for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
 
     let providerProgressStarted = false;
@@ -176,13 +178,13 @@ export async function configureRepositorySettings(plan, {
           providerProgressFinished = true;
         }
         reportProgress(onProgress, "secret:app", "active", `${APP_SECRET} — ${SECRET_PURPOSES[APP_SECRET]}`);
-        output.write(`\nSetting ${APP_SECRET} from the selected PEM file through non-terminal GitHub CLI input. Its path and contents are not displayed. If the secret already exists, this deliberately replaces it.\n`);
+        output.write(`\nSetting ${APP_SECRET} from the selected .pem file. This replaces a secret with the same name.\n`);
         await runMutation(
           runner,
           "gh",
           ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
           { cwd: plan.root, stdio: "ignore", stdinFd: appInput.descriptor, timeoutMs: null },
-          `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
+          `GitHub CLI did not set ${secret.name}.`,
           resumeCommand
         );
         reportProgress(onProgress, "secret:app", "done");
@@ -191,18 +193,39 @@ export async function configureRepositorySettings(plan, {
       }
       providerProgressStarted = true;
       reportProgress(onProgress, "secret:provider", "active", `${secret.name} — ${SECRET_PURPOSES[secret.name]}`);
-      output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. If it already exists, this deliberately replaces it. This single-line value goes directly to gh; press Ctrl-D when finished.\n`);
-      await withInteractiveTerminal(
-        () => runMutation(
+      if (typeof withSecretInput === "function") {
+        await runMutation(
           runner,
           "gh",
           ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
-          { cwd: plan.root, stdio: "inherit", timeoutMs: null },
-          `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
+          {
+            cwd: plan.root,
+            stdio: "ignore",
+            timeoutMs: null,
+            provideInput: (write) => withSecretInput({
+              step: "credential",
+              name: secret.name,
+              purpose: SECRET_PURPOSES[secret.name],
+              write
+            })
+          },
+          `GitHub CLI did not set ${secret.name}.`,
           resumeCommand
-        ),
-        Object.freeze({ name: secret.name, purpose: SECRET_PURPOSES[secret.name] })
-      );
+        );
+      } else {
+        output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. Press Ctrl-D when you finish.\n`);
+        await withInteractiveTerminal(
+          () => runMutation(
+            runner,
+            "gh",
+            ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
+            { cwd: plan.root, stdio: "inherit", timeoutMs: null },
+            `GitHub CLI did not set ${secret.name}.`,
+            resumeCommand
+          ),
+          Object.freeze({ name: secret.name, purpose: SECRET_PURPOSES[secret.name] })
+        );
+      }
     }
     if (providerProgressStarted && !providerProgressFinished) reportProgress(onProgress, "secret:provider", "done");
 
@@ -213,7 +236,7 @@ export async function configureRepositorySettings(plan, {
         "gh",
         ["variable", "set", variable.name, "--body", variable.value, "--repo", plan.repository],
         { cwd: plan.root },
-        `GitHub CLI did not set ${variable.name}. Automation remains disabled.`,
+        `GitHub CLI did not set ${variable.name}.`,
         resumeCommand
       );
     }
@@ -271,7 +294,7 @@ export async function createSetupCommit(plan, {
       "git",
       ["commit", "--only", "-m", plan.commitMessage, "--", ...paths],
       { cwd: plan.root },
-      "Could not commit the disabled setup."
+      "Could not commit the setup."
     );
   } catch (cause) {
     let rolledBack = false;
@@ -284,7 +307,7 @@ export async function createSetupCommit(plan, {
       cause.resume = rolledBack ? resumeCommand : statusCommand(platform);
       throw cause;
     }
-    throw new InstallerError("Could not create the disabled setup commit.", {
+    throw new InstallerError("Could not create the setup commit.", {
       code: "LOCAL_SETUP_FAILED",
       resume: rolledBack ? resumeCommand : statusCommand(platform),
       cause
@@ -383,7 +406,7 @@ export async function pushAndOpenSetupPullRequest(plan, commit, { runner, onProg
     "git",
     ["push", "origin", `${commit}:refs/heads/${plan.branch}`],
     { cwd: plan.root },
-    "The disabled setup commit was created locally, but push failed.",
+    "The setup commit was created locally, but the push failed.",
     `${pushCommand(plan, commit, platform)}\nThen: ${pullRequestCreateCommand(plan, platform)}`
   );
   await assertRemoteSetupCommit(plan, commit, runner, platform);
@@ -402,7 +425,7 @@ export async function pushAndOpenSetupPullRequest(plan, commit, { runner, onProg
       "--body", plan.pullRequest.body
     ],
     { cwd: plan.root },
-    "The disabled setup branch was pushed, but pull-request creation failed or was interrupted.",
+    "The setup branch was pushed, but GitHub did not create the pull request.",
     `${pullRequestListCommand(plan, platform)}\nIf no pull request is listed: ${pullRequestCreateCommand(plan, platform)}`
   );
   if (!PR_URL.test(url)) {

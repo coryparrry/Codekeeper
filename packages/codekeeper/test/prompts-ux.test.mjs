@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Readable, Writable } from "node:stream";
 import { loadVerifiedAssets } from "../src/assets.mjs";
 import { MODE_IDS, MODES, RECOMMENDED_MODES, RECOMMENDED_PRESET } from "../src/constants.mjs";
-import { collectSetupAnswers } from "../src/plan.mjs";
+import { collectAppAnswers, collectSetupAnswers } from "../src/plan.mjs";
 import { createTerminalPrompter } from "../src/prompts.mjs";
 import { HEAD_SHA, textSink } from "./helpers.mjs";
 
@@ -41,6 +41,7 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
       calls.push({ method: "confirm", options });
       if (options.message.startsWith("Install into")) return true;
       if (options.message === "Use the recommended starter setup?") return recommended;
+      if (options.message.startsWith("Start Codekeeper")) return true;
       if (options.message.startsWith("Continue with")) return boundaries;
       throw new Error(`Unexpected confirmation: ${options.message}`);
     },
@@ -140,7 +141,8 @@ test("recommended setup explains consequences and returns review plus maintenanc
     modes: ["review", "maintain"],
     preset: "openai",
     displayName: "widget",
-    ownerLogins: ["cory"]
+    ownerLogins: ["cory"],
+    enabled: true
   });
   assert.ok(Object.isFrozen(answers));
   assert.deepEqual(
@@ -148,17 +150,18 @@ test("recommended setup explains consequences and returns review plus maintenanc
     [
       { message: "Install into acme/widget on default branch main?", defaultValue: false },
       { message: "Use the recommended starter setup?", defaultValue: true },
-      { message: "Continue with these disabled-by-default boundaries?", defaultValue: false }
+      { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
+      { message: "Continue with these safety settings?", defaultValue: false }
     ]
   );
   assert.equal(prompt.calls.some((call) => call.method === "multiselect" || call.method === "select"), false);
   const transcript = output.toString();
   assert.match(transcript, /Pull request review:.*comments, labels, and a blocking result/);
   assert.match(transcript, /Repository maintenance:.*manual dry run that makes no GitHub changes/);
-  assert.match(transcript, /OpenAI preset: one model-provider key plus a separate OpenAI trace key/);
-  assert.match(transcript, /issue-event triage and the repair-PR workflow are omitted/);
-  assert.match(transcript, /Model and publication jobs remain disabled/);
-  assert.match(transcript, /Codekeeper review gate intentionally fails while disabled/);
+  assert.match(transcript, /OpenAI preset: uses one model API key and one trace API key/);
+  assert.match(transcript, /Issue triage and issue fix are not included/);
+  assert.match(transcript, /Repair, issue implementation, and automatic merge stay off/);
+  assert.match(transcript, /installer opens a setup pull request/);
   assert.match(transcript, /OPENAI_API_KEY:/);
   assert.match(transcript, /OPENAI_TRACE_API_KEY:/);
   assert.match(transcript, /CODEKEEPER_APP_PRIVATE_KEY:/);
@@ -175,7 +178,8 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     modes: ["issues", "fix"],
     preset: "mixed",
     displayName: "widget",
-    ownerLogins: ["cory"]
+    ownerLogins: ["cory"],
+    enabled: true
   });
   const modeCall = prompt.calls.find((call) => call.method === "multiselect");
   assert.equal(modeCall.options.message, "Choose workflows to generate:");
@@ -193,8 +197,25 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
       { value: "mixed", label: "mixed — provider keys vary by workflow, plus a separate OpenAI trace key" }
     ]
   });
-  assert.match(output.toString(), /Issue triage reacts to issue events/);
-  assert.match(output.toString(), /issue fix is an advanced, separately gated mutation path/);
+  assert.match(output.toString(), /Issue triage responds to issue events/);
+  assert.match(output.toString(), /Issue fix needs a separate policy change/);
   assert.match(output.toString(), /OPENAI_API_KEY:/);
   assert.match(output.toString(), /DEEPSEEK_API_KEY:/);
+});
+
+test("GitHub App identity asks for the App name in plain language", async () => {
+  const prompts = [];
+  const prompt = {
+    kind: "ink",
+    async inputText(options) {
+      prompts.push(options);
+      return options.message.includes("Client ID") ? "Iv123456789012345678" : "codekeeper-widget";
+    }
+  };
+  assert.deepEqual(await collectAppAnswers({ prompt, modes: ["review"], output: textSink() }), {
+    appClientId: "Iv123456789012345678",
+    automationBotLogin: "codekeeper-widget[bot]"
+  });
+  assert.equal(prompts[1].message, "GitHub App name from the settings URL");
+  assert.match(prompts[1].description.join("\n"), /settings URL/i);
 });
