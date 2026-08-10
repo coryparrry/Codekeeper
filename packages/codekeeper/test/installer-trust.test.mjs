@@ -160,3 +160,26 @@ test("trusted command resolution rejects global npm shims whose executable resol
   await assertTrustedCommands({ runner, root, safeBin, calls });
   assert.ok(calls.every((call) => !call.command.includes(`${path.sep}node_modules${path.sep}`)));
 });
+
+test("trusted command resolution preserves multi-call symlink identities after validating their targets", async (t) => {
+  const root = await temporaryDirectory(t, "codekeeper-multicall-checkout-");
+  const commandBin = await temporaryDirectory(t, "codekeeper-multicall-bin-");
+  const dispatcherBin = await temporaryDirectory(t, "codekeeper-multicall-dispatcher-");
+  await mkdir(path.join(root, ".git"));
+  await writeCommandFiles(dispatcherBin);
+  for (const command of ["git", "gh"]) {
+    await symlink(path.join(dispatcherBin, command), path.join(commandBin, command));
+  }
+
+  const calls = [];
+  const trusted = await recordingRunner({ PATH: commandBin, HOME: root }, calls)
+    .resolveTrustedCommands({ cwd: root });
+  await trusted.run("git", ["--version"], { cwd: root });
+  await trusted.run("gh", ["--version"], { cwd: root });
+
+  const resolvedCommandBin = await realpath(commandBin);
+  assert.deepEqual(calls.map((call) => call.command), [
+    path.join(resolvedCommandBin, "git"),
+    path.join(resolvedCommandBin, "gh")
+  ]);
+});

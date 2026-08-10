@@ -219,7 +219,9 @@ async function findTrustedExecutable(command, directories, repositoryRoot, platf
         const metadata = await fsImpl.stat(resolved);
         if (!metadata.isFile() || isRepositoryControlledPath(resolved, repositoryRoot) || hasNodeModulesAncestor(resolved)) continue;
         await fsImpl.access(resolved, fsConstants.X_OK);
-        return resolved;
+        // Trust the canonical target, but retain the selected path as argv0. Some
+        // trusted multi-call executables choose their command from that identity.
+        return candidate;
       } catch {
         // Continue looking without revealing candidate locations.
       }
