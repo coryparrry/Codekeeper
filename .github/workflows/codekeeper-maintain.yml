@@ -12,11 +12,6 @@ on:
         required: false
         default: true
         type: boolean
-      repair_authorized:
-        description: Explicit per-run repair authorization; accepted only from a configured owner.
-        required: false
-        default: false
-        type: boolean
       app_client_id:
         description: GitHub App client ID. Required only when dry_run=false.
         required: false
@@ -43,7 +38,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 9ea59dc54288186c0d4f84d24c86de9c6485900e876d1d3a03ceb6126fc87596
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: a72a80dfe365d178cd35078ff4bf2d4d5d44b1317a0623b9a08dd4228db221c1
 
 concurrency:
   group: codekeeper-maintenance-${{ github.repository }}
@@ -113,7 +108,7 @@ jobs:
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/repository-auditor.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REPAIR_AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_authorized || false }}
+          REPAIR_AUTHORIZED: ${{ !inputs.dry_run }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -138,7 +133,7 @@ jobs:
         working-directory: repository
         env:
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
-          REPAIR_AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_authorized || false }}
+          REPAIR_AUTHORIZED: ${{ !inputs.dry_run }}
         run: |
           node ../tooling/tools/codekeeper/src/cli.mjs agent-settings \
             --config "$CONFIG" \
@@ -258,7 +253,7 @@ jobs:
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/repository-auditor.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REPAIR_AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_authorized || false }}
+          REPAIR_AUTHORIZED: ${{ !inputs.dry_run }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"

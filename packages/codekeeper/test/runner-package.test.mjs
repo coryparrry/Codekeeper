@@ -6,7 +6,7 @@ import { chmod, cp, mkdir, readFile, symlink, writeFile } from "node:fs/promises
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
-import { PACKAGE_ROOT, temporaryDirectory } from "./helpers.mjs";
+import { PACKAGE_ROOT, PINNED_COMMIT, temporaryDirectory } from "./helpers.mjs";
 
 const SECRET_CANARIES = Object.freeze({
   OPENAI_API_KEY: "sk-openai-canary-never-forward",
@@ -93,6 +93,25 @@ test("the real command runner maps an App PEM descriptor only to child stdin", a
   }
 });
 
+test("the real command runner sends a provider key only through child stdin", async () => {
+  const secret = "provider-key-canary-never-log";
+  const runner = createCommandRunner({
+    environment: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C" }
+  });
+  const child = await runner.run(process.execPath, [
+    "-e",
+    "let size=0;process.stdin.on('data',chunk=>size+=chunk.length);process.stdin.on('end',()=>process.stdout.write(size>0?'received':'empty'))"
+  ], {
+    provideInput(write) {
+      write(secret);
+    }
+  });
+
+  assert.equal(child.status, 0);
+  assert.equal(child.stdout, "received");
+  assert.doesNotMatch(JSON.stringify(child), new RegExp(secret));
+});
+
 test("command runner bounds captured output and requireSuccess rejects failure, timeout, or truncation", async () => {
   const runner = createCommandRunner();
   const large = await runner.run(process.execPath, ["-e", "process.stdout.write('x'.repeat(140000))"]);
@@ -138,6 +157,7 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   const expected = [
     "LICENSE",
     "README.md",
+    "assets/agents/fixer.md",
     "assets/agents/issue-triager.md",
     "assets/agents/maintenance-planner.md",
     "assets/agents/pr-reviewer.md",
@@ -242,8 +262,10 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     await chmod(path.join(installedRoot, "bin", "codekeeper.mjs"), 0o755);
   }
   const installedPackage = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8"));
+  const installedReadme = await readFile(path.join(installedRoot, "README.md"), "utf8");
   assert.deepEqual(installedPackage.bin, { codekeeper: "bin/codekeeper.mjs" });
   assert.deepEqual(installedPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
+  assert.deepEqual([...new Set(installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? [])], [PINNED_COMMIT]);
   const shimEnvironment = Object.fromEntries(Object.entries({
     PATH: process.env.PATH,
     SystemRoot: process.env.SystemRoot

@@ -16,10 +16,10 @@ const actionPins = {
   "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
   "actions/create-github-app-token": "bcd2ba49218906704ab6c1aa796996da409d3eb1",
   "openai/codex-action": "52fe01ec70a42f454c9d2ebd47598f9fd6893d56",
-  "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
+  "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "9ea59dc54288186c0d4f84d24c86de9c6485900e876d1d3a03ceb6126fc87596";
+const toolingManifestSha256 = "a72a80dfe365d178cd35078ff4bf2d4d5d44b1317a0623b9a08dd4228db221c1";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -65,7 +65,7 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.match(reviewCaller, /on:\n\s+pull_request_target:/);
   assert.doesNotMatch(reviewCaller, /on:\n\s+pull_request:/);
   assert.match(reviewCaller, /pull-requests: read/);
-  assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \}\} @\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/);
+  assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\}"/);
   const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
@@ -101,7 +101,7 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
   assert.ok(parsedManifest.files.some((entry) => entry.path === "scripts/verify-tooling-artifact.mjs"));
   assert.ok(parsedManifest.files.every((entry) => !entry.path.startsWith("test/") && !entry.path.startsWith("evals/")));
 
-  const expectedConsumers = { maintain: 5, fix: 5, issues: 4, review: 4 };
+  const expectedConsumers = { maintain: 5, fix: 7, issues: 4, review: 4 };
   for (const [mode, count] of Object.entries(expectedConsumers)) {
     const source = await workflow(mode);
     assert.equal([...source.matchAll(/name: Download bootstrap Codekeeper tooling/g)].length, count);
@@ -345,22 +345,21 @@ test("maintenance and fix dry runs do not require App credentials, but publicati
   }
 });
 
-test("maintenance repair requires a frozen configured-owner authorization on each manual run", async () => {
+test("live maintenance runs use the enabled repair capability without a second approval", async () => {
   const source = await workflow("maintain");
   const caller = await repositoryFile("examples/workflows/codekeeper-maintain.yml.example");
   const workspace = jobSection(source, "workspace", "analyze");
 
-  assert.match(source, /repair_authorized:\n\s+description:[^\n]*\n\s+required: false\n\s+default: false\n\s+type: boolean/);
+  assert.doesNotMatch(source, /repair_authorized:\n\s+description:/);
   assert.match(workspace, /--actor "\$GITHUB_ACTOR"/);
   assert.match(workspace, /--repair-authorized "\$REPAIR_AUTHORIZED"/);
   assert.match(workspace, /--mutation-authorized "\$REPAIR_AUTHORIZED"/);
   assert.equal(
-    [...source.matchAll(/REPAIR_AUTHORIZED: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.repair_authorized \|\| false \}\}/g)].length,
+    [...source.matchAll(/REPAIR_AUTHORIZED: \$\{\{ !inputs\.dry_run \}\}/g)].length,
     3,
-    "the reusable workflow must deny repair authorization to every non-manual caller"
+    "every maintenance stage must bind repair authority to a live run"
   );
-  assert.match(caller, /repair_authorized:\n\s+description:[^\n]*\n\s+required: true\n\s+type: boolean\n\s+default: false/);
-  assert.match(caller, /repair_authorized: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.repair_authorized \|\| false \}\}/);
+  assert.doesNotMatch(caller, /repair_authorized:/);
 });
 
 test("review and issue-triage retain mandatory App credentials", async () => {
@@ -388,11 +387,17 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(gate, /exit 1/);
   assert.match(source, /auto_review:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(jobSection(source, "workspace", "analyze"), /inputs\.auto_review/);
+  assert.match(
+    jobSection(source, "workspace", "analyze"),
+    /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_review'[\s\S]*github\.actor == inputs\.automation_bot_login/
+  );
+  assert.doesNotMatch(jobSection(source, "workspace", "analyze"), /inputs\.auto_review &&\s*\(\(github\.event_name/);
+  assert.match(gate, /IS_COMMAND_REVIEW/);
   assert.match(caller, /auto_review: true/);
   assert.doesNotMatch(source, /publish-review-status|pull_request_target|state="success"/);
 });
 
-test("issue triage allows only bounded automatic events while owner commands and fixes stay gated", async () => {
+test("issue triage can start enabled issue implementation while owner PR repair stays gated", async () => {
   const issue = await workflow("issues");
   const fix = await workflow("fix");
   const caller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
@@ -417,12 +422,32 @@ test("issue triage allows only bounded automatic events while owner commands and
   assert.match(fix, /fromJSON\(steps\.prepare\.outputs\.result\)\.baseSha/);
   assert.match(fix, /ref: \$\{\{ needs\.analyze\.outputs\.base_sha \}\}/);
   assert.match(fix, /Check out frozen repair target/);
-  assert.doesNotMatch(fix, /github\.event_name == 'issues'/);
+  assert.match(fix, /github\.event_name == 'issues'/);
+  assert.match(fix, /github\.event\.action == 'labeled'/);
+  assert.match(fix, /github\.event\.label\.name == 'codekeeper:ready'/);
+  assert.match(fix, /automation_bot_login:/);
+  assert.match(fix, /github\.event\.sender\.login == inputs\.automation_bot_login/);
+  assert.match(fix, /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_fix'[\s\S]*github\.actor == inputs\.automation_bot_login/);
+  assert.match(fix, /format\('codekeeper-command-\{0\}', github\.run_id\)/);
+  assert.match(fix, /--authorization-mode "\$AUTHORIZATION_MODE"/);
+  assert.match(fix, /codekeeper-plan-bundle\/context\.json/);
+  assert.match(fix, /--plan-context "\$PLAN_BUNDLE\/context\.json"/);
+  assert.match(fix, /cp "\$PLAN_BUNDLE\/context\.json" "\$BUNDLE\/plan-context\.json"/);
+  assert.match(fix, /--plan-context "\$WORKSPACE\/plan-context\.json"/);
+  const fixCaller = await repositoryFile("examples/workflows/codekeeper-fix.yml.example");
+  assert.match(fixCaller, /issues:\n\s+types: \[labeled\]/);
+  assert.match(fixCaller, /automation_bot_login: \$\{\{ vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN \}\}/);
+  const commands = await repositoryFile("tools/codekeeper/src/lib/commands.mjs");
+  assert.match(commands, /pull\.base\?\.ref !== config\.repository\.defaultBranch/);
+  assert.match(commands, /removeLabel\(number, "codekeeper:paused"\)/);
 });
 
 test("owner-commanded pull request repair can update only the frozen existing head", async () => {
   const fix = await workflow("fix");
   const publisher = await repositoryFile("tools/codekeeper/src/lib/pr-repair.mjs");
+  const command = jobSection(fix, "command", "plan");
+  assert.match(command, /github\.event\.comment\.body == '\/codekeeper fix'/);
+  assert.match(fix, /plan:\n[\s\S]*needs: command[\s\S]*needs\.command\.result == 'success'/);
   assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
   assert.doesNotMatch(fix, /!github\.event\.issue\.pull_request/);
   assert.match(fix, /target_kind: \$\{\{ fromJSON\(steps\.prepare\.outputs\.result\)\.target\.kind \}\}/);
@@ -476,4 +501,12 @@ test("self-test reports through annotations with read-only repository permission
   assert.doesNotMatch(selfTest, /checks: write/);
   assert.match(selfTest, /reporter: github-annotations/);
   assert.match(selfTest, /fail_level: any/);
+});
+
+test("pull request repair runs reviewer, planner, then fixer roles", async () => {
+  const source = await workflow("fix");
+  assert.ok(source.indexOf("  plan:") < source.indexOf("  workspace:"));
+  assert.match(jobSection(source, "plan", "workspace"), /maintenance-planner\.md[\s\S]*--mode plan[\s\S]*plan-result\.json/);
+  assert.match(jobSection(source, "workspace", "analyze"), /needs: plan[\s\S]*fixer\.md[\s\S]*--plan-result/);
+  assert.match(jobSection(source, "analyze", "verify"), /fixer\.md[\s\S]*--mode fix/);
 });

@@ -1,6 +1,6 @@
 # Codekeeper
 
-Codekeeper is a set of **versioned reusable GitHub Actions workflows** for one repository at a time. It uses four independently configured Agents SDK coordinators to review same-repository pull requests, triage bounded issue lifecycle events or maintainer commands, audit the default branch, and implement explicitly enabled, bounded fixes.
+Codekeeper is a set of **versioned reusable GitHub Actions workflows** for one repository at a time. It uses five independently configured agent roles to review pull requests, triage issues, audit the default branch, plan validated work, and implement explicitly enabled fixes.
 
 It is not a hosted service, webhook receiver, or multi-tenant GitHub App. The private runtime is not delivered through npm. A separate dependency-light [`codekeeper` installer package](packages/codekeeper/README.md) generates pinned policy and caller files; it remains unpublished while private acceptance is in progress. Each adopter owns its GitHub App credentials and policy, and caller workflows pin this repository to an immutable release commit.
 
@@ -9,17 +9,42 @@ It is not a hosted service, webhook receiver, or multi-tenant GitHub App. The pr
 | Reusable workflow | Caller responsibility |
 |---|---|
 | `codekeeper-review.yml` | Review eligible pull requests and expose a fail-closed review gate. |
-| `codekeeper-maintain.yml` | Run report-only default-branch audits. A repair additionally requires an explicit, owner-authorized manual run. |
+| `codekeeper-maintain.yml` | Audit the default branch. A live run may create one bounded repair when repository repair is on. |
 | `codekeeper-issues.yml` | Triage opened, reopened, or edited issues while `auto_triage=true`; configured-owner `/codekeeper triage` comments remain available when automatic triage is off. |
-| `codekeeper-fix.yml` | Implement an issue or update an eligible same-repository pull request only after a configured owner requests exactly `/codekeeper fix` or uses manual dispatch. |
+| `codekeeper-fix.yml` | Implement an issue that trusted triage marks ready when issue implementation is on. A configured owner can also request exactly `/codekeeper fix` on an existing pull request. |
 
-The guided installer performs this generation from release-pinned assets. Until it is published, use a locally built installer tarball for private acceptance or follow the [manual installation guide](INSTALL.md). The generated setup includes [`.github/codekeeper.json`](.github/codekeeper.json), the selected callers, and four adopter-owned Markdown profiles under `.github/codekeeper/agents/`. The manual path copies the matching non-executable templates from [`examples/workflows`](examples/workflows), replaces `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copies the policy and profiles into the adopter's default branch. Each caller pins the direct Codekeeper bootstrap action and its reusable workflow to the same immutable commit. The action stages only the production `tools/codekeeper` payload as a one-day artifact; every reusable job verifies that payload against the source-controlled manifest before using it. Adopters do not copy `tools/codekeeper` or source workflow files, and do not provide a source-repository token.
+The guided installer performs this generation from release-pinned assets. Until it is published, use a locally built installer tarball for private acceptance or follow the [manual installation guide](INSTALL.md). The generated setup includes [`.github/codekeeper.json`](.github/codekeeper.json), the selected callers, and five adopter-owned Markdown profiles under `.github/codekeeper/agents/`. The manual path copies the matching non-executable templates from [`examples/workflows`](examples/workflows), replaces `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copies the policy and profiles into the adopter's default branch. Each caller pins the direct Codekeeper bootstrap action and its reusable workflow to the same immutable commit. The action stages only the production `tools/codekeeper` payload as a one-day artifact; every reusable job verifies that payload against the source-controlled manifest before using it. Adopters do not copy `tools/codekeeper` or source workflow files, and do not provide a source-repository token.
 
 The root policy is a valid starter, not a safe default for every repository. Before enabling it, replace `repository.ownerLogins`, verify the default branch and automation prefix, and tailor repair, validation, and auto-merge paths. Each mode has its own `ai.agents.<mode>` provider, model, settings, and optional Codex workspace specialist. The runtime label names are intentionally namespaced and must remain defined exactly as supplied. See [configuration](docs/CONFIGURATION.md).
 
+Each role can use any supported provider and model. OpenAI and DeepSeek are the first integrations. A role is not fixed to either provider.
+
+## Agent roles and authority
+
+| Role | Trigger | What it does | Actions it can take |
+|---|---|---|---|
+| Pull request reviewer | A PR event or `/codekeeper review` | Checks each finding against the current PR head, tries to disprove it, and classifies it. Reports defects, risk, and test coverage. Adds a Mermaid diagram when a flow needs one. | Updates one review comment and managed labels. A current, validated blocker can start the Planner when automatic review repair is on. |
+| Issue triager | An issue event or `/codekeeper triage` | Classifies the issue. Compares it with open issues and PRs that describe the same component, symptom, failure, or requested outcome. These are related items, not duplicates unless the failure and outcome match. | Updates one triage comment and managed labels. It can mark an issue ready or close an exact duplicate when those capabilities are on. |
+| Repository auditor | A schedule or manual run | Reviews the default branch for evidence-backed maintenance work. | Creates maintenance issues. It can open one bounded repair PR when repository repair is on. |
+| Maintenance planner | A ready issue, `/codekeeper implement`, `/codekeeper fix`, or a validated automatic repair request | Turns the validated target into a bounded implementation and test plan. | Produces a frozen plan for the Fixer. It cannot edit files or publish changes. |
+| Fixer | A Maintenance Planner result with `readyForFixer=true` | Implements the frozen plan, adds focused tests, and runs the configured checks. | Opens one issue PR or pushes to the existing PR branch. It cannot bypass path, size, validation, or merge policy. |
+
+The deterministic coordinator connects these roles. Pull request repair follows Reviewer → Planner → Fixer. A Fixer push triggers the Reviewer again on the new PR head. The coordinator also limits automatic repair to one pass and checks live GitHub state before each action.
+
+Configured owners can use these exact commands:
+
+- `/codekeeper status`
+- `/codekeeper review`
+- `/codekeeper rerun`
+- `/codekeeper implement`
+- `/codekeeper fix`
+- `/codekeeper stop`
+
+The issue implementation and pull request repair caller supplies this command router. Install that caller to use these commands.
+
 ## Adopter-owned coordinator profiles
 
-Each installation has four fixed Markdown files. They are normal reviewed repository files, so maintainers can change Codekeeper's evidence thresholds, prioritization, test expectations, duplicate criteria, no-action decisions, and reporting style without rebuilding the runtime.
+Each installation has five fixed Markdown files. They are normal reviewed repository files, so maintainers can change Codekeeper's evidence thresholds, prioritization, test expectations, duplicate criteria, no-action decisions, and reporting style without rebuilding the runtime.
 
 | Coordinator | Installed path | Bundled seed |
 |---|---|---|
@@ -27,8 +52,9 @@ Each installation has four fixed Markdown files. They are normal reviewed reposi
 | Issue triager | `.github/codekeeper/agents/issue-triager.md` | [`tools/codekeeper/agents/issue-triager.md`](tools/codekeeper/agents/issue-triager.md) |
 | Repository auditor | `.github/codekeeper/agents/repository-auditor.md` | [`tools/codekeeper/agents/repository-auditor.md`](tools/codekeeper/agents/repository-auditor.md) |
 | Maintenance planner | `.github/codekeeper/agents/maintenance-planner.md` | [`tools/codekeeper/agents/maintenance-planner.md`](tools/codekeeper/agents/maintenance-planner.md) |
+| Fixer | `.github/codekeeper/agents/fixer.md` | [`tools/codekeeper/agents/fixer.md`](tools/codekeeper/agents/fixer.md) |
 
-Profiles tune judgment, not permission. They cannot enable a workflow, authorize a repair or merge, expand allowed paths, bypass protected paths or validation, change the target, expose credentials, or grant tools and network access. Those boundaries remain in the caller, frozen policy, schemas, validators, and publication code.
+Profiles tune priorities, work selection, implementation approach, review standards, and reporting. Capability switches control repair, issue implementation, issue closure, and merge actions. Profiles cannot enable a disabled capability, expand allowed paths, bypass protected paths or validation, change the target, expose credentials, or grant tools and network access.
 
 Every run reads the applicable profile from the trusted default-branch checkout, records its source commit and SHA-256, and freezes the exact bytes used by the workspace and coordinator. Publication fails if the trusted profile has changed since preparation. Content from a pull-request branch, issue, comment, diff, or repository file is evidence only and cannot replace the trusted profile. To change behavior, edit the relevant installed Markdown file in a normal pull request and merge it; later runs use the new default-branch version.
 
@@ -56,7 +82,8 @@ This release is **GitHub.com only**. It relies on reusable-workflow identity fie
 - The supplied review caller does not subscribe to `merge_group`; do not make its gate required for merge queues.
 - The review caller controls automatic PR review with `auto_review` (default `true`); setting it to `false` skips review and causes the required review gate to fail closed.
 - The issue caller controls automatic issue triage with `auto_triage` (default `true`). Automatic triage is limited to opened, reopened, and edited issue events. It may publish labels, a sticky comment, and a duplicate candidate only; `issues.closeExactDuplicates` remains a separate default-`false` policy.
-- Scheduled maintenance is report-only. A maintenance repair requires both `audit.repair.enabled=true` and a manual `workflow_dispatch` run with `repair_authorized=true` by a configured owner; scheduled runs always pass `false`.
+- A maintenance dry run is report-only. A live maintenance run may create one bounded repair when `audit.repair.enabled=true`.
+- When `issues.allowAiImplementation=true`, trusted triage adds `codekeeper:ready` to a clear, bounded issue and starts its implementation workflow.
 - Configured-owner `/codekeeper triage` and `/codekeeper fix` comments require an `OWNER`, `MEMBER`, or `COLLABORATOR` association plus a GitHub login in `repository.ownerLogins`. The fix command must be the complete comment body. Manual fix dispatch also requires a configured owner.
 - An issue fix may open a bounded repair pull request. A fix requested on an eligible same-repository pull request instead commits to that pull request's existing head branch; it never opens a second pull request and has no create-new-PR fallback. Fork pull requests, drafts, protected/default head branches, stale heads, and unsupported targets fail closed.
 
@@ -65,6 +92,8 @@ Treebar-specific paths and policy are kept only as an optional [example](example
 ## Local verification
 
 ```bash
+env npm_config_cache=/tmp/codekeeper-npm-cache npm ci --ignore-scripts --no-audit --no-fund
+npm run check
 node tools/codekeeper/src/cli.mjs check-config
 cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
@@ -81,3 +110,9 @@ bash scripts/release-source.sh --output ../codekeeper-release-artifacts
 ```
 
 See [validation](VALIDATION.md#source-release-integrity) for the clean-tree requirement, verification-only command, and the boundary between source integrity and GitHub release visibility.
+
+## Acknowledgements
+
+Codekeeper's command routing, bounded repair loop, status comment, related-item context, and maintainer-decision design were inspired by [ClawSweeper](https://github.com/openclaw/clawsweeper).
+
+No ClawSweeper source code is included. Codekeeper is an independent implementation, so the ClawSweeper MIT license is not bundled.

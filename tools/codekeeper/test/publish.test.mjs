@@ -496,6 +496,7 @@ test("issue publication accepts its exact managed-label mutation before publishi
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-label-revision-test-"));
   const configSha256 = "c".repeat(64);
   const issueConfig = structuredClone(config);
+  issueConfig.issues.allowAiImplementation = true;
   const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7003", runUrl: "https://github.com/owner/repository/actions/runs/7003", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
   const result = {
     mode: "issue", summary: "Ready for triage.", type: "bug", priority: "p3", labels: [], actionable: true,
@@ -762,7 +763,7 @@ test("fix publication does not create a repair PR after the issue changes", asyn
   }
 });
 
-function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), runId = "7001" }) {
+function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), runId = "7001", authorizationMode = "owner" }) {
   const pull = {
     number: 42,
     title: "Repair this change",
@@ -780,6 +781,7 @@ function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), ru
     repository: "owner/repository",
     configSha256,
     runId,
+    authorizationMode,
     baseSha: headSha,
     defaultBranch: config.repository.defaultBranch,
     target: {
@@ -807,6 +809,7 @@ function liveRepairPull(context, overrides = {}) {
     body: context.pullRequest.body,
     user: { login: context.pullRequest.author },
     html_url: context.pullRequest.url,
+    labels: [],
     head: { ref: target.headRef, sha: target.headSha, repo: { full_name: target.headRepository } },
     base: { ref: target.baseRef, sha: target.baseSha, repo: { full_name: target.baseRepository } },
     ...overrides
@@ -957,7 +960,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
   }
 });
 
-test("PR repair rejects changed, stale-evidence, forked, draft, closed, retargeted, and protected targets with one App comment", async (t) => {
+test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, retargeted, and protected targets", async (t) => {
   const cases = [
     ["closed", (pull) => ({ ...pull, state: "closed" }), /not open/],
     ["draft", (pull) => ({ ...pull, draft: true }), /is a draft/],
@@ -971,14 +974,16 @@ test("PR repair rejects changed, stale-evidence, forked, draft, closed, retarget
     ["fork", (pull) => ({ ...pull, head: { ...pull.head, repo: { full_name: "fork/repository" } } }), /head repository changed/],
     ["retargeted", (pull) => ({ ...pull, base: { ...pull.base, ref: "release" } }), /base branch changed/],
     ["base moved", (pull) => ({ ...pull, base: { ...pull.base, sha: "d".repeat(40) } }), /base SHA changed/],
+    ["paused owner repair", (pull) => ({ ...pull, labels: [{ name: "codekeeper:paused" }] }), /paused/, undefined, undefined, "owner", 0],
+    ["paused automatic repair", (pull) => ({ ...pull, labels: [{ name: "codekeeper:paused" }] }), /paused/, undefined, undefined, "policy", 0],
     ["protected", (pull) => pull, /is protected/, { protected: true }],
     ["branch moved", (pull) => pull, /head branch moved/, { protected: false, commit: { sha: "e".repeat(40) } }]
   ];
-  for (const [name, mutate, expected, branchOverride, commentsOverride] of cases) {
+  for (const [name, mutate, expected, branchOverride, commentsOverride, authorizationMode = "owner", expectedComments = 1] of cases) {
     await t.test(name, async () => {
       const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-pr-repair-negative-"));
       const configSha256 = "3".repeat(64);
-      const context = pullRepairContext({ configSha256, headSha: "a".repeat(40), runId: `negative-${name}` });
+      const context = pullRepairContext({ configSha256, headSha: "a".repeat(40), runId: `negative-${name}`, authorizationMode });
       const patch = Buffer.from("not reached");
       await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
       const integrity = await writeSealedArtifact(artifactDirectory, {
@@ -1020,10 +1025,12 @@ test("PR repair rejects changed, stale-evidence, forked, draft, closed, retarget
           expected
         );
         assert.equal(createPullCalls, 0);
-        assert.equal(comments.length, 1);
-        assert.equal(comments[0].number, context.target.number);
-        assert.equal(comments[0].marker, fixRunMarker(context.runId));
-        assert.deepEqual(comments[0].authorIdentity, identity);
+        assert.equal(comments.length, expectedComments);
+        if (expectedComments > 0) {
+          assert.equal(comments[0].number, context.target.number);
+          assert.equal(comments[0].marker, fixRunMarker(context.runId));
+          assert.deepEqual(comments[0].authorIdentity, identity);
+        }
       } finally {
         restoreGitHub();
         if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;

@@ -17,6 +17,7 @@ import {
   ASSET_KEYS,
   DEEPSEEK_SECRET,
   MODE_IDS,
+  MODEL_OPTIONS,
   MODES,
   OPENAI_SECRET,
   RECOMMENDED_MODES,
@@ -28,6 +29,7 @@ import {
 import {
   appRegistrationUrl,
   buildInstallPlan,
+  completionGuidance,
   documentMap,
   normalizeModes,
   normalizeOwnerLogins,
@@ -44,19 +46,21 @@ import {
 } from "./helpers.mjs";
 
 const EXPECTED_ASSETS = Object.freeze({
-  "agents/issue-triager.md": "866e45a5431d9e08fe036d47d3334106f0e0734dfeef0421bd5465a1f472b5d2",
-  "agents/maintenance-planner.md": "8ff0abe5c7b232b595f6e4f43c947314e7d0cce5c15d1b7cd0884f7526e17479",
-  "agents/pr-reviewer.md": "9b90b3ae1d2ac501924b0a38d4a559c8fb8e7e84ab309a41fc5b33739a40ce76",
-  "agents/repository-auditor.md": "82af520eee898bb55136d448116cf68308645c714f9626c0b099850a2e94b7ff",
-  "policies/mixed.json": "37e32105ba2300e465af8132b241633833130394eb5c15a300c0a6bf1c1f589d",
-  "policies/openai.json": "753741a11159d48a9c6bd7d938edd3310b1e9d0d242e86098715db0e499faad0",
-  "workflows/fix.yml": "60e142109c0ff184d61ba1c149a96b134a038c5d3f41edb4c67876e6a7e6d5fc",
+  "agents/fixer.md": "b1604c6ff872abdcd4e7c174dc018db55705ad917152a6e338b710331fae4227",
+  "agents/issue-triager.md": "05662b59c92fae8f942b199f4ab1257c6b96014ffc45125aa71775313ce8fbac",
+  "agents/maintenance-planner.md": "17e6eb1192452b8779b10e46f49f98e8fd4e75e5bd1ff08c218eb0f3badd8cdf",
+  "agents/pr-reviewer.md": "dfea6cff0bb9ee49fa25f0c5cb5177c65060922d5745fd707f4936b7fba96603",
+  "agents/repository-auditor.md": "48c4c7c088751fe9b2eda76cbf20b5ad6495bed052f5fb05b4a5156964604445",
+  "policies/mixed.json": "26694bf8a27e1885bb903a3dd6ac1b7c6be760f8fee7604ee54c228b42dd4af5",
+  "policies/openai.json": "9eee50d058bf1e2e845268925875085be20991fed5a89bca913d38d2da286794",
+  "workflows/fix.yml": "66cd05e2dc27ae7c150d2911561dfb8a24c2a8d0f6093fe245671df3307f26fd",
   "workflows/issues.yml": "3260d387b1ae7f76e21fdd0228062e139be3a25f047bfbd5762f638b67e153ca",
-  "workflows/maintain.yml": "1df21ec555e467813a086ef6c63a30fe1edfcf93389e4147f607b51d0a40082a",
-  "workflows/review.yml": "b77995d237b98fa02f79ea3bcd3363e63a38cd4580de126e1e64fab18c683730"
+  "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
+  "workflows/review.yml": "ef33b3a226330ff13253bd086f498ff51697e6825042dc6562047d525faaa54c"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
+  "agents/fixer.md": "tools/codekeeper/agents/fixer.md",
   "agents/issue-triager.md": "tools/codekeeper/agents/issue-triager.md",
   "agents/maintenance-planner.md": "tools/codekeeper/agents/maintenance-planner.md",
   "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
@@ -79,15 +83,26 @@ function snapshot() {
 }
 
 function answers(overrides = {}) {
-  return {
+  const value = {
     modes: ["review", "maintain", "issues", "fix"],
     preset: "mixed",
     displayName: "Widget",
     ownerLogins: ["CoryParrry", "Acme-Bot"],
     appClientId: "Iv123456789012345678",
     automationBotLogin: "Codekeeper-Acme[bot]",
+    enabled: true,
     ...overrides
   };
+  if (!Object.hasOwn(overrides, "capabilities")) {
+    value.capabilities = [
+      ...(value.modes.includes("review") && value.modes.includes("fix") ? ["reviewRepair"] : []),
+      ...(value.modes.includes("maintain") ? ["repair"] : []),
+      ...(value.modes.includes("fix") ? ["issueImplementation"] : []),
+      ...(value.modes.includes("issues") ? ["duplicateClosure"] : []),
+      ...(value.modes.some((mode) => mode === "maintain" || mode === "fix") ? ["autoMerge"] : [])
+    ];
+  }
+  return value;
 }
 
 test("the ten bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
@@ -130,13 +145,13 @@ test("bundled starter profiles are byte-for-byte canonical current-branch profil
   }
 });
 
-test("bundled starter profiles preserve the deterministic mutation boundary", async () => {
+test("bundled starter profiles describe enabled automation and retain fixed runtime limits", async () => {
   const { contents } = await loadVerifiedAssets();
-  assert.match(contents["agents/repository-auditor.md"], /report-only unless the frozen trusted context explicitly records/);
-  assert.match(contents["agents/issue-triager.md"], /Triage never starts or authorizes implementation/);
-  assert.match(contents["agents/issue-triager.md"], /exact `\/codekeeper fix` command from a configured owner/);
-  assert.match(contents["agents/maintenance-planner.md"], /exact open same-repository pull request's frozen head branch/);
-  assert.match(contents["agents/maintenance-planner.md"], /Never propose a sibling branch, a replacement or follow-up pull request/);
+  assert.match(contents["agents/repository-auditor.md"], /live run can request one repair when repository repair is on/);
+  assert.match(contents["agents/issue-triager.md"], /`ai-ready` starts a separate implementation run/);
+  assert.match(contents["agents/maintenance-planner.md"], /Reviewer validated against the current head/);
+  assert.match(contents["agents/maintenance-planner.md"], /readyForFixer=false/);
+  assert.match(contents["agents/fixer.md"], /Make the smallest complete change/);
   assert.match(contents["agents/pr-reviewer.md"], /Review is not repair authorization/);
   assert.match(contents["agents/pr-reviewer.md"], /it must never open a second pull request/);
 });
@@ -193,7 +208,7 @@ test("rendered policies personalize only repository identity while retaining con
   }
 });
 
-test("model selection is a policy-only edit and does not require workflow rewriting", async () => {
+test("a same-provider model change stays in policy and does not rewrite a workflow", async () => {
   const bundle = await loadVerifiedAssets();
   const custom = JSON.parse(bundle.contents["policies/openai.json"]);
   custom.ai.agents.review.model = "gpt-5.6-luna";
@@ -214,6 +229,25 @@ test("model selection is a policy-only edit and does not require workflow rewrit
     });
     assert.doesNotMatch(rendered, /gpt-5\.6-(?:sol|terra|luna)/);
   }
+});
+
+test("policy reruns add newly required labels without replacing adopter customizations", async () => {
+  const bundle = await loadVerifiedAssets();
+  const bundledPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
+  const previous = structuredClone(bundledPolicy);
+  delete previous.labels["codekeeper:paused"];
+  delete previous.labels["codekeeper:auto-repaired"];
+  previous.labels["codekeeper:ready"].description = "Repository-specific ready label";
+  const rendered = JSON.parse(renderPolicy(JSON.stringify(previous), {
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    enforceBundledDefaults: false,
+    requiredPolicySource: bundle.contents["policies/openai.json"]
+  }));
+  assert.equal(rendered.labels["codekeeper:ready"].description, "Repository-specific ready label");
+  assert.deepEqual(rendered.labels["codekeeper:paused"], bundledPolicy.labels["codekeeper:paused"]);
+  assert.deepEqual(rendered.labels["codekeeper:auto-repaired"], bundledPolicy.labels["codekeeper:auto-repaired"]);
 });
 
 test("openai preset changes only issue-triage model policy from the mixed preset", async () => {
@@ -288,6 +322,7 @@ test("renderInstallFiles emits policy, every profile, and only selected callers 
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
     ".github/codekeeper/agents/maintenance-planner.md",
+    ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml"
   ]);
@@ -326,29 +361,42 @@ test("every non-empty mode subset has the exact mixed and OpenAI secret matrix",
   }
 });
 
-test("install plan is frozen, disabled first, and documents selected workflows without credential values", async () => {
+test("install plan is frozen, applies startup first, and documents selected workflows without credential values", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers() });
   assert.ok(Object.isFrozen(plan));
   assert.ok(Object.isFrozen(plan.files));
   assert.ok(plan.files.every(Object.isFrozen));
-  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "false" });
+  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "true" });
   assert.deepEqual(plan.variables.slice(1), [
     { name: "CODEKEEPER_APP_CLIENT_ID", value: "Iv123456789012345678" },
     { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
   ]);
   assert.deepEqual(plan.ownerLogins, ["coryparrry", "acme-bot"]);
+  assert.deepEqual(plan.capabilities, {
+    reviewRepair: true,
+    repair: true,
+    issueImplementation: true,
+    duplicateClosure: true,
+    autoMerge: true
+  });
+  const renderedPolicy = JSON.parse(plan.files[0].contents);
+  assert.equal(renderedPolicy.audit.repair.enabled, true);
+  assert.equal(renderedPolicy.issues.allowAiImplementation, true);
+  assert.equal(renderedPolicy.issues.closeExactDuplicates, true);
+  assert.equal(renderedPolicy.merge.enabled, true);
   assert.equal(plan.originalHead, HEAD_SHA);
   assert.equal(plan.branch, "codekeeper/setup");
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
-  assert.match(plan.pullRequest.body, /\| Mode \| Trigger \| Policy agent \|/);
-  assert.match(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
-  assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune evidence thresholds/);
-  assert.match(plan.pullRequest.body, /cannot grant writes, change triggers or branches, authorize repairs, close issues, or enable merge/);
-  assert.match(plan.pullRequest.body, /Maintenance remains report-only unless an owner explicitly commands a repair/);
-  assert.match(plan.pullRequest.body, /Review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`/);
-  assert.match(plan.pullRequest.body, /Do not make that gate required until the controlled review proof passes/);
-  assert.match(plan.pullRequest.body, /did not merge.*enable Codekeeper.*dispatch a workflow/s);
+  assert.match(plan.pullRequest.body, /\| Workflow \| Role \| What it does \| Trigger \| Provider and model \|/);
+  assert.match(plan.pullRequest.body, /\| Pull request review \| Pull request reviewer \|/);
+  assert.match(plan.pullRequest.body, /OpenAI traces are \*\*enabled\*\*/);
+  assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
+  assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune priorities, work selection, implementation approach/);
+  assert.match(plan.pullRequest.body, /capability switches above control which GitHub actions Codekeeper can take/);
+  assert.match(plan.pullRequest.body, /live maintenance run can repair when repository repair is on/);
+  assert.doesNotMatch(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
+  assert.match(plan.pullRequest.body, /did not merge this pull request or run a workflow/);
   assert.doesNotMatch(plan.pullRequest.body, /PRIVATE KEY|sk-[A-Za-z0-9]/i);
   assert.deepEqual(documentMap(plan.files).map((item) => item.path), plan.files.map((file) => file.path));
   assert.deepEqual(
@@ -374,6 +422,7 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
     ".github/codekeeper/agents/maintenance-planner.md",
+    ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml"
   ]);
@@ -391,6 +440,229 @@ test("recommended starter plan selects review and maintenance with separate Open
   assert.deepEqual(
     [policy.ai.agents.audit.provider, policy.ai.agents.audit.model, policy.ai.agents.audit.effort],
     ["openai", "gpt-5.6-sol", "high"]
+  );
+});
+
+test("normal installation enables selected workflows after the setup pull request merges", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET, enabled: true })
+  });
+  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "true" });
+  assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
+});
+
+test("model choices update the selected agent and optional tracing needs no trace key", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      models: { review: "terra-medium" },
+      tracing: false
+    })
+  });
+  const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
+  assert.equal(policy.ai.agents.review.model, "gpt-5.6-terra");
+  assert.equal(policy.ai.agents.review.effort, "medium");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-terra");
+  assert.equal(policy.ai.agents.review.workspace.effort, "medium");
+  assert.equal(policy.ai.tracing.enabled, false);
+  assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, APP_SECRET]);
+  assert.match(plan.pullRequest.body, /OpenAI traces are \*\*disabled\*\*/);
+  assert.doesNotMatch(plan.pullRequest.body, /OPENAI_TRACE_API_KEY/);
+});
+
+test("each role can use any supported provider and model", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review", "issues"],
+      preset: "openai",
+      models: { review: "deepseek-v4-flash", issues: "luna-max" },
+      tracing: false
+    })
+  });
+  const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
+  const reviewWorkflow = plan.files.find((file) => file.path === MODES.review.target).contents;
+  const issueWorkflow = plan.files.find((file) => file.path === MODES.issues.target).contents;
+
+  assert.equal(policy.ai.agents.review.provider, "deepseek");
+  assert.equal(policy.ai.agents.review.model, "deepseek-v4-flash");
+  assert.equal(policy.ai.agents.issue.provider, "openai");
+  assert.equal(policy.ai.agents.issue.model, "gpt-5.6-luna");
+  assert.match(reviewWorkflow, /secrets\.DEEPSEEK_API_KEY/);
+  assert.match(issueWorkflow, /secrets\.OPENAI_API_KEY/);
+  assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, DEEPSEEK_SECRET, APP_SECRET]);
+});
+
+test("planner and fixer can use different supported models", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: ["fix"], preset: "openai", models: { plan: "deepseek-v4-flash", fix: "sol-high" }, tracing: false })
+  });
+  const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
+  const workflow = plan.files.find((file) => file.path === MODES.fix.target).contents;
+  assert.equal(policy.ai.agents.plan.provider, "deepseek");
+  assert.equal(policy.ai.agents.fix.model, "gpt-5.6-sol");
+  assert.match(workflow, /planner_model_api_key: \$\{\{ secrets\.DEEPSEEK_API_KEY \}\}/);
+  assert.match(workflow, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+});
+
+test("OpenAI model choices include Luna, Terra, and Sol and map Luna to one agent", async () => {
+  assert.deepEqual(
+    [...new Set(MODEL_OPTIONS.openai.map((choice) => choice.model))],
+    ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
+  );
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: ["review"], preset: "openai", models: { review: "luna-max" } })
+  });
+  const policy = JSON.parse(plan.files[0].contents);
+  assert.deepEqual(plan.models.review, {
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    effort: "max",
+    choice: "luna-max"
+  });
+  assert.equal(policy.ai.agents.review.model, "gpt-5.6-luna");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
+});
+
+test("a rerun creates a configuration-only update and preserves edited profiles", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  contents[".github/codekeeper/agents/pr-reviewer.md"] += "\nRepository preference: report API regressions first.\n";
+  const existingSnapshot = {
+    ...snapshot(),
+    installation: {
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
+      modes: initial.modes,
+      contents
+    },
+    existingSettings: {
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    },
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  };
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: existingSnapshot,
+    answers: answers({
+      modes: RECOMMENDED_MODES,
+      preset: RECOMMENDED_PRESET,
+      models: { review: "luna-max", maintain: "sol-high" }
+    })
+  });
+  assert.equal(update.update, true);
+  assert.equal(update.branch, `codekeeper/update-${HEAD_SHA.slice(0, 12)}`);
+  assert.deepEqual(update.variables, []);
+  assert.deepEqual(update.secrets, []);
+  assert.deepEqual(update.files.map((file) => file.path), [".github/codekeeper.json"]);
+  assert.match(contents[".github/codekeeper/agents/pr-reviewer.md"], /Repository preference/);
+  assert.equal(update.pullRequest.title, "chore(codekeeper): update configuration");
+  assert.match(update.pullRequest.body, /enabled now with the current default-branch configuration/i);
+  assert.match(update.pullRequest.body, /continues running the current default-branch configuration now/i);
+  assert.match(completionGuidance(update.modes, update.enabled, update.update).heading, /running now with the current default-branch configuration/i);
+
+  const providerUpdate = buildInstallPlan({
+    bundle,
+    snapshot: existingSnapshot,
+    answers: answers({
+      modes: RECOMMENDED_MODES,
+      preset: RECOMMENDED_PRESET,
+      models: { review: "deepseek-v4-flash", maintain: "sol-high" }
+    })
+  });
+  assert.deepEqual(providerUpdate.secrets, [{ name: DEEPSEEK_SECRET }]);
+  assert.deepEqual(providerUpdate.files.map((file) => file.path), [
+    ".github/codekeeper.json",
+    ".github/workflows/codekeeper-review.yml"
+  ]);
+  assert.match(providerUpdate.files[1].contents, /secrets\.DEEPSEEK_API_KEY/);
+
+  const disabled = buildInstallPlan({
+    bundle,
+    snapshot: existingSnapshot,
+    answers: answers({
+      modes: RECOMMENDED_MODES,
+      preset: RECOMMENDED_PRESET,
+      enabled: false
+    })
+  });
+  assert.equal(disabled.settingsOnly, true);
+  assert.deepEqual(disabled.files, []);
+  assert.deepEqual(disabled.variables, [{ name: "CODEKEEPER_ENABLED", value: "false" }]);
+});
+
+test("optional disabled installation keeps Codekeeper off after merge", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers({ enabled: false }) });
+  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "false" });
+  assert.match(plan.pullRequest.body, /Codekeeper stays off/);
+  assert.match(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
+});
+
+test("cleared capability choices remain off in the generated policy", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers({ capabilities: [] }) });
+  const policy = JSON.parse(plan.files[0].contents);
+  assert.deepEqual(plan.capabilities, {
+    reviewRepair: false,
+    repair: false,
+    issueImplementation: false,
+    duplicateClosure: false,
+    autoMerge: false
+  });
+  assert.equal(policy.audit.repair.enabled, false);
+  assert.equal(policy.issues.allowAiImplementation, false);
+  assert.equal(policy.issues.closeExactDuplicates, false);
+  assert.equal(policy.merge.enabled, false);
+});
+
+test("fix-only issue implementation configures the trusted App bot identity", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["issues", "fix"],
+      capabilities: ["issueImplementation"]
+    })
+  });
+  assert.deepEqual(
+    plan.variables.find((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"),
+    { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
+  );
+  assert.throws(
+    () => buildInstallPlan({
+      bundle,
+      snapshot: snapshot(),
+      answers: answers({
+        modes: ["issues", "fix"],
+        capabilities: ["issueImplementation"],
+        automationBotLogin: null
+      })
+    }),
+    assertInstallerCode(assert, "PLAN_INVALID")
   );
 });
 

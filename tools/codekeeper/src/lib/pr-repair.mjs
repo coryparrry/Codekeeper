@@ -111,8 +111,22 @@ async function assertWritableFrozenBranch(github, target) {
   return branch;
 }
 
-async function currentFrozenPull(github, target) {
+function pullLabelNames(pull) {
+  if (!Array.isArray(pull?.labels)) throw new Error(`PR #${pull?.number ?? "unknown"} has invalid label metadata`);
+  const names = pull.labels.map((label) => typeof label === "string" ? label : label?.name);
+  if (names.some((label) => typeof label !== "string" || label.length === 0) || new Set(names).size !== names.length) {
+    throw new Error(`PR #${pull?.number ?? "unknown"} has invalid or duplicate label metadata`);
+  }
+  return names;
+}
+
+async function currentFrozenPull(github, target, { rejectPaused = false } = {}) {
   const pull = assertLivePullRepairTarget(await github.getPull(target.number), target);
+  if (rejectPaused && pullLabelNames(pull).includes("codekeeper:paused")) {
+    const error = new Error(`PR #${target.number} is paused; automatic publication stopped`);
+    error.code = "CODEKEEPER_PAUSED";
+    throw error;
+  }
   const comments = await github.listIssueComments(target.number);
   if (frozenPullRepairSubjectSha256(pull, comments) !== target.subjectSha256) {
     throw new Error(`PR #${target.number} repair evidence changed after implementation started`);
@@ -182,9 +196,10 @@ export async function publishPullRequestRepair({
   gitOperations = defaultGitOperations
 }) {
   const target = frozenPullRepairTarget(context, config);
+  const revalidationOptions = { rejectPaused: true };
   if (!String(context.runId ?? "").trim()) throw new Error("Frozen PR repair context is missing its workflow run ID");
   try {
-    const pull = await currentFrozenPull(github, target);
+    const pull = await currentFrozenPull(github, target, revalidationOptions);
     if (!manifest.patch?.valid || !manifest.patch.fileName) {
       const reason = result.noChangeReason || manifest.patch?.reasons?.join("; ") || "No valid patch was produced";
       if (!dryRun) {
@@ -203,14 +218,14 @@ export async function publishPullRequestRepair({
       return { updated: false, pullRequest: target.number, dryRun: true, branch: target.headRef, files: patch.files };
     }
 
-    await currentFrozenPull(github, target);
+    await currentFrozenPull(github, target, revalidationOptions);
     gitOperations.configureAutomationIdentity(automationIdentity);
     const commitSha = gitOperations.createCommitOnCurrentHead({
       expectedParent: target.headSha,
       message: "fix: apply owner-requested pull request repair",
       paths: patch.stagePaths
     });
-    await currentFrozenPull(github, target);
+    await currentFrozenPull(github, target, revalidationOptions);
     const pushedSha = gitOperations.pushHeadToBranch(target.headRef, github.token);
     if (pushedSha !== commitSha) throw new Error(`PR repair pushed ${pushedSha}; expected ${commitSha}`);
     const updatedPull = assertLivePullRepairTarget(await github.getPull(target.number), target, { expectedHeadSha: commitSha });
@@ -225,7 +240,7 @@ export async function publishPullRequestRepair({
       dryRun: false
     };
   } catch (error) {
-    if (!dryRun) {
+    if (!dryRun && error.code !== "CODEKEEPER_PAUSED") {
       try {
         await publishFailureComment(github, context, target, error, automationIdentity);
       } catch (commentError) {

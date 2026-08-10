@@ -295,7 +295,7 @@ export function openSafeStdinFile(stdinFilePath, { fileOperations = DEFAULT_FILE
       }
     }
     if (cause instanceof InstallerError) throw cause;
-    throw new InstallerError("The selected private-key file could not be opened safely.", {
+    throw new InstallerError("The installer failed to open the selected private-key file safely.", {
       code: "SECRET_INPUT_FILE_INVALID",
       cause
     });
@@ -344,6 +344,9 @@ export function createCommandRunner({
       if (stdinFd !== null && (!Number.isInteger(stdinFd) || stdinFd < 3)) {
         throw new TypeError("stdinFd must be an open non-standard file descriptor");
       }
+      const provideInput = options.provideInput ?? null;
+      if (provideInput !== null && typeof provideInput !== "function") throw new TypeError("provideInput must be a function");
+      if (provideInput && stdinFd !== null) throw new TypeError("provideInput and stdinFd cannot be used together");
       const env = options.env ?? sanitizedEnvironment(environment, { platform });
       const executable = frozenCommandPaths?.[command] ?? command;
 
@@ -358,9 +361,9 @@ export function createCommandRunner({
         let child;
         try {
           const childStdio = stdio === "capture"
-            ? [stdinFd ?? "ignore", "pipe", "pipe"]
+            ? [provideInput ? "pipe" : (stdinFd ?? "ignore"), "pipe", "pipe"]
             : stdinFd === null
-              ? stdio
+              ? (provideInput ? ["pipe", stdio, stdio] : stdio)
               : [stdinFd, stdio, stdio];
           child = spawnImpl(executable, args, {
             cwd: options.cwd,
@@ -376,6 +379,23 @@ export function createCommandRunner({
         if (stdio === "capture") {
           child.stdout?.on("data", (chunk) => appendBounded(stdout, chunk, stdoutState));
           child.stderr?.on("data", (chunk) => appendBounded(stderr, chunk, stderrState));
+        }
+
+        let inputFailed = false;
+        if (provideInput) {
+          Promise.resolve().then(() => provideInput((chunk) => {
+            if (typeof chunk !== "string" || !chunk || /[\r\n\u0000]/.test(chunk)) {
+              throw new TypeError("Credential input must be a nonempty single-line string");
+            }
+            if (!child.stdin?.writable) throw new Error("credential input is unavailable");
+            child.stdin.write(chunk);
+          })).then(() => {
+            child.stdin?.end();
+          }).catch(() => {
+            inputFailed = true;
+            child.stdin?.destroy();
+            child.kill("SIGTERM");
+          });
         }
 
         const timer = timeoutMs === null ? null : setTimeout(() => {
@@ -401,6 +421,10 @@ export function createCommandRunner({
           if (settled) return;
           settled = true;
           clearTimers();
+          if (inputFailed) {
+            reject(new InstallerError("The credential input was cancelled or failed to send safely.", { code: "COMMAND_INPUT_FAILED" }));
+            return;
+          }
           resolve(Object.freeze({
             status: status ?? 1,
             signal,

@@ -117,10 +117,13 @@ function managedIssueLabels(config) {
   return config.issues.managedLabels;
 }
 
-async function currentOpenIssue(github, frozenIssue, staleAction) {
+async function currentOpenIssue(github, frozenIssue, staleAction, { rejectPaused = false } = {}) {
   const issue = await github.getIssue(frozenIssue.number);
   if (issue.pull_request) throw new Error(`Issue #${issue.number} is no longer eligible`);
   if (issue.state !== "open") throw new Error(`Issue #${issue.number} is not open`);
+  if (rejectPaused && issueLabelNames(issue).includes("codekeeper:paused")) {
+    throw new Error(`Issue #${issue.number} is paused; automatic publication stopped`);
+  }
   if (frozenIssue.updatedAt && issue.updated_at !== frozenIssue.updatedAt) {
     throw new Error(`Issue #${issue.number} changed after ${staleAction}; stale action will not publish`);
   }
@@ -278,6 +281,11 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
   const blocking = result.blockingFindings.length > 0 || critical || result.mergeRecommendation === "block";
+  const existingLabels = new Set((pull.labels ?? []).map((label) => typeof label === "string" ? label : label.name));
+  const automaticRepair = {
+    eligible: blocking && config.review.autoRepair && !existingLabels.has("codekeeper:paused") && !existingLabels.has("codekeeper:auto-repaired"),
+    dispatched: false
+  };
   const publicationState = (autoMerge) => {
     const desiredSet = new Set(reviewLabels(result));
     desiredSet.delete("codekeeper:auto-merge");
@@ -359,7 +367,19 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     }
   }
 
-  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, blocking };
+  if (automaticRepair.eligible) {
+    await currentReviewPull(github, context, config);
+    await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+    await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
+    await currentReviewPull(github, context, config);
+    await github.createRepositoryDispatch("codekeeper_fix", {
+      number: pull.number,
+      head_sha: pull.head.sha
+    });
+    automaticRepair.dispatched = true;
+  }
+
+  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, blocking };
 }
 
 export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
@@ -371,7 +391,9 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   const runUrl = trustedPublicationRunUrl(context);
 
   const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
-  if (result.implementationRecommendation === "ai-ready") desired.add("codekeeper:ready");
+  if (config.issues.allowAiImplementation && result.implementationRecommendation === "ai-ready") {
+    desired.add("codekeeper:ready");
+  }
   if (result.duplicateOf && result.duplicateConfidence === "high") desired.add("codekeeper:duplicate-candidate");
   const desiredLabels = [...desired];
   const comment = renderIssueTriage(result, runUrl);
@@ -777,7 +799,9 @@ export async function publishFix({ artifactDirectory, config, configSha256, expe
   if (context.issue?.number !== context.target.number) {
     throw new Error("Frozen issue fix context does not match its target");
   }
-  const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started");
+  const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started", {
+    rejectPaused: context.authorizationMode === "policy"
+  });
   const issue = await currentIssue();
 
   if (!manifest.patch?.valid) {

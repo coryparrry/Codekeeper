@@ -5,30 +5,35 @@ import path from "node:path";
 import { loadVerifiedAssets } from "../src/assets.mjs";
 import { currentResumeCommand, parseCliArgs, runCli, USAGE } from "../src/cli.mjs";
 import { createCommandRunner } from "../src/command-runner.mjs";
-import { completionGuidance } from "../src/plan.mjs";
+import { buildInstallPlan, completionGuidance } from "../src/plan.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
 import { createRecordingRunner, git, HEAD_SHA, result, temporaryDirectory, textSink } from "./helpers.mjs";
 
-function guidedPrompt(confirmations = [true, true, true, true, true], { privateKeyPath = "/private/tmp/codekeeper-test-private-key.pem" } = {}) {
+function guidedPrompt(confirmations = [true, true, true, true, true, true], { privateKeyPath = "/private/tmp/codekeeper-test-private-key.pem" } = {}) {
   const answers = [...confirmations];
   const prompt = {
     confirmations: [],
     async confirm(options) {
       prompt.confirmations.push(options);
+      if (options.message === "Enable OpenAI traces?") return true;
       return answers.shift();
     },
-    async multiselect() {
+    async multiselect({ message, defaultValues }) {
+      if (message.startsWith("Choose capabilities")) return defaultValues;
       throw new Error("recommended setup must not ask for custom workflows");
     },
-    async select({ message }) {
+    async select({ message, defaultValue }) {
       if (message === "Choose a starting setup") return "recommended";
+      if (message.startsWith("Assign a model to")) return defaultValue;
+      if (message === "Enable OpenAI traces?") return "enabled";
+      if (message.startsWith("Start Codekeeper")) return "enabled";
       throw new Error("recommended setup must not ask for a custom preset");
     },
     async inputText({ message }) {
-      if (message.startsWith("Human-readable")) return "Widget";
+      if (message.startsWith("Name to show")) return "Widget";
       if (message.startsWith("GitHub users")) return "cory";
       if (message.startsWith("GitHub App Client")) return "Iv123456789012345678";
-      if (message === "GitHub App slug") return "codekeeper-widget";
+      if (message.startsWith("GitHub App name")) return "codekeeper-widget";
       if (message.startsWith("GitHub App bot")) return "codekeeper-widget[bot]";
       if (message.startsWith("Full absolute path")) return privateKeyPath;
       throw new Error(`Unexpected prompt: ${message}`);
@@ -108,7 +113,7 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   const runner = createRecordingRunner(() => {
     throw new Error("no external command is expected before the App confirmation");
   });
-  const prompt = guidedPrompt([true, true, true, false]);
+  const prompt = guidedPrompt([true, true, true, true, false]);
   const snapshot = Object.freeze({
     root: "/tmp/acme widget",
     originUrl: "https://github.com/acme/widget.git",
@@ -142,7 +147,7 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   assert.match(output.toString(), new RegExp(openedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(errorOutput.toString(), /Complete GitHub App creation/);
   assert.match(errorOutput.toString(), new RegExp(resumeCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.equal(prompt.confirmations.length, 4);
+  assert.equal(prompt.confirmations.length, 6);
   assert.deepEqual(runner.calls, []);
 });
 
@@ -181,7 +186,7 @@ test("declining conservative boundaries on the recommended path performs no muta
   const runner = createRecordingRunner(() => {
     throw new Error("no external mutation is expected before boundary confirmation");
   });
-  const prompt = guidedPrompt([true, true, false]);
+  const prompt = guidedPrompt([true, true, true, false]);
   let opens = 0;
   const snapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
   const status = await runCli({
@@ -201,7 +206,9 @@ test("declining conservative boundaries on the recommended path performs no muta
   assert.deepEqual(prompt.confirmations, [
     { message: "Install into acme/widget on default branch main?", defaultValue: false },
     { message: "Use the recommended starter setup?", defaultValue: true },
-    { message: "Continue with these disabled-by-default boundaries?", defaultValue: false }
+    { message: "Enable OpenAI traces?", defaultValue: true },
+    { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
+    { message: "Continue with these safety settings?", defaultValue: false }
   ]);
   assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
   assert.deepEqual(runner.calls, []);
@@ -228,7 +235,7 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   const runner = createRecordingRunner(() => {
     throw new Error("no repository setting, GitHub, or Git command is expected before final confirmation");
   });
-  const prompt = guidedPrompt([true, true, true, true, false]);
+  const prompt = guidedPrompt([true, true, true, true, true, false]);
   let inspections = 0;
   let openedUrl = null;
   const status = await runCli({
@@ -254,9 +261,11 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   assert.deepEqual(prompt.confirmations, [
     { message: "Install into acme/widget on default branch main?", defaultValue: false },
     { message: "Use the recommended starter setup?", defaultValue: true },
-    { message: "Continue with these disabled-by-default boundaries?", defaultValue: false },
+    { message: "Enable OpenAI traces?", defaultValue: true },
+    { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
+    { message: "Continue with these safety settings?", defaultValue: false },
     { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: false },
-    { message: "Create this disabled setup?", defaultValue: false }
+    { message: "Create this setup?", defaultValue: false }
   ]);
   assert.match(output.toString(), /Setup preview/);
   assert.match(errorOutput.toString(), /Setup was cancelled before repository mutation/);
@@ -288,15 +297,20 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
     },
     async select(options) {
       calls.push(["select", options.message]);
-      return "recommended";
+      if (options.message === "Choose a starting setup") return "recommended";
+      if (options.message.startsWith("Assign a model to")) return options.defaultValue;
+      if (options.message === "Enable OpenAI traces?") return "enabled";
+      if (options.message.startsWith("Start Codekeeper")) return "enabled";
+      throw new Error(`Unexpected select prompt: ${options.message}`);
     },
-    async multiselect() {
+    async multiselect(options) {
+      if (options.message.startsWith("Choose capabilities")) return options.defaultValues;
       throw new Error("recommended setup must not show workflow customization");
     },
     async inputText(options) {
       calls.push(["inputText", options.message]);
       if (options.message.startsWith("GitHub App Client")) return "Iv123456789012345678";
-      if (options.message === "GitHub App slug") return "codekeeper-widget";
+      if (options.message.startsWith("GitHub App name")) return "codekeeper-widget";
       return options.defaultValue;
     },
     async selectPrivateKey() {
@@ -341,11 +355,81 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
   assert.deepEqual(runner.calls, []);
   assert.equal(disposed, 1);
   assert.ok(calls.findIndex(([method]) => method === "selectPrivateKey") < calls.findIndex(([method]) => method === "reviewInstallPlan"));
-  assert.equal(reviewedPlan.variables.find((variable) => variable.name === "CODEKEEPER_ENABLED").value, "false");
+  assert.equal(reviewedPlan.variables.find((variable) => variable.name === "CODEKEEPER_ENABLED").value, "true");
   assert.equal(reviewedPlan.variables.find((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN").value, "codekeeper-widget[bot]");
   const observable = `${JSON.stringify(reviewedPlan)}\n${output.toString()}\n${errorOutput.toString()}\n${notices.toString()}`;
   assert.doesNotMatch(observable, new RegExp(privateKeyPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(errorOutput.toString(), /cancelled before repository mutation/);
+});
+
+test("an existing installation rerun skips App setup and secret prompts", async () => {
+  const bundle = await loadVerifiedAssets();
+  const baseSnapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: baseSnapshot,
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true
+    }
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const snapshot = Object.freeze({
+    ...baseSnapshot,
+    installation: Object.freeze({
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
+      modes: Object.freeze(["review", "maintain"]),
+      contents: Object.freeze(contents)
+    }),
+    existingSettings: Object.freeze({
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]"
+    }),
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  });
+  let reviewedPlan = null;
+  let opens = 0;
+  const prompt = {
+    kind: "ink",
+    notices: textSink(),
+    async confirm() { return true; },
+    async select(options) {
+      if (options.message.includes("Pull request reviewer")) return "luna-max";
+      return options.defaultValue;
+    },
+    async multiselect(options) { return options.defaultValues; },
+    async inputText(options) { return options.defaultValue; },
+    async selectPrivateKey() { throw new Error("an update must not request the App key"); },
+    async reviewInstallPlan(plan) {
+      reviewedPlan = plan;
+      return false;
+    },
+    async dispose() {}
+  };
+  const status = await runCli({
+    argv: ["init"],
+    prompt,
+    output: textSink(),
+    errorOutput: textSink(),
+    runner: createRecordingRunner(() => { throw new Error("no mutation before review"); }),
+    inspect: async () => snapshot,
+    openUrl: async () => { opens += 1; },
+    loadAssets: async () => bundle
+  });
+  assert.equal(status, 1);
+  assert.equal(opens, 0);
+  assert.equal(reviewedPlan.update, true);
+  assert.deepEqual(reviewedPlan.secrets, []);
+  assert.deepEqual(reviewedPlan.variables, []);
+  assert.deepEqual(reviewedPlan.files.map((file) => file.path), [".github/codekeeper.json"]);
+  assert.equal(reviewedPlan.models.review.model, "gpt-5.6-luna");
 });
 
 test("resume command formatting is executable on POSIX and PowerShell", () => {
@@ -387,6 +471,11 @@ test("successful init revalidates three snapshots and orders settings, exact com
     async run(command, args, options = {}) {
       calls.push({ command, args: [...args], options: { ...options } });
       if (command === "gh") {
+        if (typeof options.provideInput === "function") {
+          let received = "";
+          await options.provideInput((value) => { received += value; });
+          assert.equal(received, "test-provider-key");
+        }
         return args[0] === "pr" && args[1] === "create"
           ? result("https://github.com/acme/widget/pull/42\n")
           : result();
@@ -407,8 +496,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
   const errorOutput = textSink();
   const prompt = guidedPrompt(undefined, { privateKeyPath });
   const progressEvents = [];
-  const suspendedSecrets = [];
-  const suspendedNotices = [];
+  const enteredSecrets = [];
   let progressStarted = 0;
   prompt.kind = "ink";
   prompt.notices = output;
@@ -420,13 +508,9 @@ test("successful init revalidates three snapshots and orders settings, exact com
       progressEvents.push(event);
     }
   };
-  prompt.suspendTerminal = async (callback, notice) => {
-    const before = calls.length;
-    suspendedNotices.push(notice);
-    const value = await callback();
-    assert.equal(calls.length, before + 1);
-    suspendedSecrets.push(calls.at(-1).args[2]);
-    return value;
+  prompt.inputSecret = async ({ name, purpose, write }) => {
+    enteredSecrets.push({ name, purpose });
+    write("test-provider-key");
   };
   const status = await runCli({
     argv: ["init"],
@@ -451,9 +535,9 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.equal(progressStarted, 1);
   assert.deepEqual(prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })), [
     { message: "Install into acme/widget on default branch main?", defaultValue: false },
-    { message: "Continue with these disabled-by-default boundaries?", defaultValue: false },
+    { message: "Continue with these safety settings?", defaultValue: false },
     { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: false },
-    { message: "Create this disabled setup?", defaultValue: false }
+    { message: "Create this setup?", defaultValue: false }
   ]);
   assert.match(opened, /^https:\/\/github\.com\/settings\/apps\/new\?/);
   assert.match(pushedCommit, /^[0-9a-f]{40}$/);
@@ -472,21 +556,21 @@ test("successful init revalidates three snapshots and orders settings, exact com
     calls.filter((call) => call.command === "gh" && call.args[0] === "secret").map((call) => call.args[2]),
     ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]
   );
-  assert.deepEqual(suspendedSecrets, ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY"]);
-  assert.deepEqual(suspendedNotices.map((notice) => notice.name), suspendedSecrets);
-  assert.deepEqual(suspendedNotices.map((notice) => notice.purpose), [
-    "OpenAI Platform API key for model calls after enablement; this is not a ChatGPT subscription",
-    "separate OpenAI Platform API key for trace export; do not reuse the model-provider key"
+  assert.deepEqual(enteredSecrets.map(({ name }) => name), ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY"]);
+  assert.deepEqual(enteredSecrets.map(({ purpose }) => purpose), [
+    "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key.",
+    "Separate OpenAI Platform API key for trace export. Do not reuse the model API key."
   ]);
-  assert.equal(suspendedNotices.some((notice) => notice.name === "CODEKEEPER_APP_PRIVATE_KEY"), false);
+  assert.equal(enteredSecrets.some(({ name }) => name === "CODEKEEPER_APP_PRIVATE_KEY"), false);
   const providerSecretCalls = calls.filter((call) => call.command === "gh"
     && call.args[0] === "secret"
     && call.args[2] !== "CODEKEEPER_APP_PRIVATE_KEY");
-  assert.ok(providerSecretCalls.every((call) => call.options.stdio === "inherit" && !Object.hasOwn(call.options, "stdinFd")));
+  assert.ok(providerSecretCalls.every((call) => call.options.stdio === "ignore"
+    && typeof call.options.provideInput === "function"
+    && !Object.hasOwn(call.options, "stdinFd")));
   const appSecretCall = calls.find((call) => call.command === "gh" && call.args.includes("CODEKEEPER_APP_PRIVATE_KEY"));
   assert.equal(appSecretCall.options.stdio, "ignore");
   assert.ok(Number.isInteger(appSecretCall.options.stdinFd) && appSecretCall.options.stdinFd >= 3);
-  assert.equal(suspendedSecrets.includes("CODEKEEPER_APP_PRIVATE_KEY"), false);
   assert.deepEqual(
     progressEvents.filter((event) => event.status === "done").map((event) => event.id),
     [
@@ -508,6 +592,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
     git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(),
     [
       ".github/codekeeper.json",
+      ".github/codekeeper/agents/fixer.md",
       ".github/codekeeper/agents/issue-triager.md",
       ".github/codekeeper/agents/maintenance-planner.md",
       ".github/codekeeper/agents/pr-reviewer.md",
@@ -516,23 +601,24 @@ test("successful init revalidates three snapshots and orders settings, exact com
       ".github/workflows/codekeeper-review.yml"
     ]
   );
-  assert.match(output.toString(), /Provider preset: openai \(one OpenAI model-provider key plus a separate OpenAI trace key\)/);
-  assert.match(output.toString(), /Pull request review: openai \/ gpt-5\.6-sol \/ high effort/);
-  assert.match(output.toString(), /Repository maintenance: openai \/ gpt-5\.6-sol \/ high effort/);
-  assert.match(output.toString(), /OPENAI_API_KEY: OpenAI Platform API key for model calls after enablement; this is not a ChatGPT subscription/);
-  assert.match(output.toString(), /OPENAI_TRACE_API_KEY: separate OpenAI Platform API key for trace export; do not reuse the model-provider key/);
+  assert.match(output.toString(), /Starting model set: openai/);
+  assert.match(output.toString(), /OpenAI traces: enabled/);
+  assert.match(output.toString(), /Pull request reviewer \(Pull request review\): openai \/ gpt-5\.6-sol \/ high effort/);
+  assert.match(output.toString(), /Repository auditor \(Repository maintenance\): openai \/ gpt-5\.6-sol \/ high effort/);
+  assert.match(output.toString(), /OPENAI_API_KEY: OpenAI Platform API key for model calls/);
+  assert.match(output.toString(), /OPENAI_TRACE_API_KEY: Separate OpenAI Platform API key for trace export/);
   assert.match(output.toString(), /CODEKEEPER_APP_PRIVATE_KEY: downloaded GitHub App PEM private key used to mint App installation tokens/);
   assert.doesNotMatch(output.toString(), /DEEPSEEK_API_KEY:/);
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-review\.yml/);
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-maintain\.yml/);
   assert.match(output.toString(), /\.github\/codekeeper\/agents\/pr-reviewer\.md/);
-  assert.match(output.toString(), /Agent profiles in \.github\/codekeeper\/agents are editable judgment guidance/);
-  assert.match(output.toString(), /Profiles cannot grant writes, triggers, branch choice, repair authority, issue closure, or merge/);
+  assert.match(output.toString(), /edit decision guidance in \.github\/codekeeper\/agents/);
+  assert.match(output.toString(), /Capability switches control repair, issue implementation, issue closure, and merge actions/);
   assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
-  assert.match(output.toString(), /After merge, PR events intentionally show a failed Codekeeper review gate while disabled/);
+  assert.match(output.toString(), /After the setup pull request merges, Codekeeper starts running the workflows you selected/);
   assert.match(output.toString(), /Do not make the Codekeeper review gate required until its controlled review proof passes/);
-  assert.match(output.toString(), /Created disabled setup PR: https:\/\/github\.com\/acme\/widget\/pull\/42/);
-  assert.match(output.toString(), /did not enable Codekeeper, dispatch a workflow, or merge the PR/);
+  assert.match(output.toString(), /Created setup pull request: https:\/\/github\.com\/acme\/widget\/pull\/42/);
+  assert.match(output.toString(), /did not run a workflow or merge the pull request/);
   const guidance = completionGuidance(["review", "maintain"]);
   assert.match(output.toString(), new RegExp(guidance.profileGuidance.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   for (const proof of guidance.proofs) {
@@ -567,7 +653,7 @@ test("snapshot drift after confirmation aborts before settings or Git mutation",
   });
   assert.equal(status, 1);
   assert.equal(inspections, 2);
-  assert.match(errorOutput.toString(), /Repository state changed during setup/);
+  assert.match(errorOutput.toString(), /repository changed during setup/i);
   assert.match(errorOutput.toString(), /Resume: safe resume/);
   assert.deepEqual(runner.calls, []);
 });

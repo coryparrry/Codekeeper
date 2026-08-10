@@ -1,6 +1,16 @@
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
-import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODES, SETUP_BRANCH } from "./constants.mjs";
+import {
+  AGENT_PROFILE_IDS,
+  AGENT_PROFILES,
+  BOT_LOGIN_VARIABLE,
+  CLIENT_ID_VARIABLE,
+  ENABLED_VARIABLE,
+  MODE_IDS,
+  MODES,
+  POLICY_TARGET,
+  SETUP_BRANCH
+} from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 import { requireSuccess } from "./command-runner.mjs";
 
@@ -87,7 +97,8 @@ function caseEntry(entries, expected) {
 }
 
 export async function assertNoInstallationFiles(root, {
-  fsImpl = { lstat, readdir, readFile }
+  fsImpl = { lstat, readdir, readFile },
+  allowExisting = false
 } = {}) {
   const rootEntries = await safeDirectoryEntries(fsImpl, root);
   const githubEntry = caseEntry(rootEntries, ".github");
@@ -99,7 +110,12 @@ export async function assertNoInstallationFiles(root, {
   const githubRoot = path.join(root, ".github");
   const githubEntries = await safeDirectoryEntries(fsImpl, githubRoot);
   const policyEntry = caseEntry(githubEntries, "codekeeper.json");
-  if (policyEntry) throw new InstallerError("A Codekeeper policy or case-colliding path already exists.", { code: "EXISTING_INSTALLATION" });
+  if (policyEntry) {
+    if (policyEntry.name !== "codekeeper.json" || policyEntry.isSymbolicLink() || !policyEntry.isFile()) {
+      throw new InstallerError("A case-colliding or symlinked Codekeeper policy exists.", { code: "PATH_COLLISION" });
+    }
+    if (!allowExisting) throw new InstallerError("A Codekeeper policy already exists.", { code: "EXISTING_INSTALLATION" });
+  }
 
   const codekeeperEntry = caseEntry(githubEntries, "codekeeper");
   if (codekeeperEntry) {
@@ -115,13 +131,18 @@ export async function assertNoInstallationFiles(root, {
       }
       const agentsRoot = path.join(codekeeperRoot, "agents");
       const agentEntries = await safeDirectoryEntries(fsImpl, agentsRoot);
-      const knownProfileNames = new Set(AGENT_PROFILE_IDS.map((profile) => path.basename(AGENT_PROFILES[profile].target).toLowerCase()));
+      const knownProfileNames = new Map(AGENT_PROFILE_IDS.map((profile) => {
+        const name = path.basename(AGENT_PROFILES[profile].target);
+        return [name.toLowerCase(), name];
+      }));
       for (const entry of agentEntries) {
-        if (!knownProfileNames.has(entry.name.toLowerCase())) continue;
-        if (entry.isSymbolicLink()) {
-          throw new InstallerError("A symlinked Codekeeper agent profile already exists.", { code: "PATH_COLLISION" });
+        const expectedName = knownProfileNames.get(entry.name.toLowerCase());
+        if (!expectedName) continue;
+        if (entry.name !== expectedName
+          || entry.isSymbolicLink() || !entry.isFile()) {
+          throw new InstallerError("A case-colliding or symlinked Codekeeper agent profile exists.", { code: "PATH_COLLISION" });
         }
-        throw new InstallerError("A Codekeeper agent profile or case-colliding path already exists.", { code: "EXISTING_INSTALLATION" });
+        if (!allowExisting) throw new InstallerError("A Codekeeper agent profile already exists.", { code: "EXISTING_INSTALLATION" });
       }
     }
   }
@@ -134,10 +155,18 @@ export async function assertNoInstallationFiles(root, {
 
   const workflowsRoot = path.join(githubRoot, "workflows");
   const workflowEntries = await safeDirectoryEntries(fsImpl, workflowsRoot);
-  const knownWorkflowNames = new Set(MODE_IDS.map((mode) => path.basename(MODES[mode].target).toLowerCase()));
+  const knownWorkflowNames = new Map(MODE_IDS.map((mode) => {
+    const name = path.basename(MODES[mode].target);
+    return [name.toLowerCase(), { mode, name }];
+  }));
   for (const entry of workflowEntries) {
-    if (knownWorkflowNames.has(entry.name.toLowerCase())) {
-      throw new InstallerError("A Codekeeper caller or case-colliding workflow already exists.", { code: "EXISTING_INSTALLATION" });
+    const knownWorkflow = knownWorkflowNames.get(entry.name.toLowerCase());
+    if (knownWorkflow) {
+      if (entry.name !== knownWorkflow.name || entry.isSymbolicLink() || !entry.isFile()) {
+        throw new InstallerError("A case-colliding or symlinked Codekeeper workflow exists.", { code: "PATH_COLLISION" });
+      }
+      if (!allowExisting) throw new InstallerError("A Codekeeper workflow already exists.", { code: "EXISTING_INSTALLATION" });
+      continue;
     }
     if (entry.isSymbolicLink()) {
       if (/codekeeper/i.test(entry.name)) throw new InstallerError("A symlinked Codekeeper workflow path already exists.", { code: "PATH_COLLISION" });
@@ -149,6 +178,58 @@ export async function assertNoInstallationFiles(root, {
       throw new InstallerError(`Existing workflow ${entry.name} already invokes Codekeeper.`, { code: "EXISTING_INSTALLATION" });
     }
   }
+}
+
+export async function inspectInstallationFiles(root, {
+  fsImpl = { lstat, readdir, readFile }
+} = {}) {
+  const policyPath = path.join(root, ...POLICY_TARGET.split("/"));
+  const policyStat = await exists(fsImpl, policyPath);
+  if (!policyStat) {
+    await assertNoInstallationFiles(root, { fsImpl });
+    return null;
+  }
+  await assertNoInstallationFiles(root, { fsImpl, allowExisting: true });
+  let policy;
+  const installedPolicySource = await fsImpl.readFile(policyPath, "utf8");
+  try {
+    policy = JSON.parse(installedPolicySource);
+  } catch (cause) {
+    throw new InstallerError("The existing Codekeeper policy is not valid JSON.", { code: "EXISTING_INSTALLATION_INVALID", cause });
+  }
+  if (!policy?.ai?.agents || !policy?.repository || !policy?.audit || !policy?.issues || !policy?.merge) {
+    throw new InstallerError("The existing Codekeeper policy does not have the required sections.", { code: "EXISTING_INSTALLATION_INVALID" });
+  }
+  if (!policy.ai.agents.plan && policy.ai.agents.fix) {
+    policy.ai.agents.plan = structuredClone(policy.ai.agents.fix);
+    policy.ai.agents.plan.workspace.enabled = false;
+    policy.ai.agents.plan.workspace.allowWrites = false;
+  }
+  const policySource = `${JSON.stringify(policy, null, 2)}\n`;
+  const contents = { [POLICY_TARGET]: installedPolicySource };
+  for (const profile of AGENT_PROFILE_IDS) {
+    const target = AGENT_PROFILES[profile].target;
+    const filePath = path.join(root, ...target.split("/"));
+    const stat = await exists(fsImpl, filePath);
+    if (!stat && profile === "fixer") continue;
+    if (!stat) throw new InstallerError(`The existing installation is missing ${target}.`, { code: "EXISTING_INSTALLATION_INVALID" });
+    contents[target] = await fsImpl.readFile(filePath, "utf8");
+  }
+  const modes = [];
+  for (const mode of MODE_IDS) {
+    const target = MODES[mode].target;
+    const filePath = path.join(root, ...target.split("/"));
+    if (!await exists(fsImpl, filePath)) continue;
+    modes.push(mode);
+    contents[target] = await fsImpl.readFile(filePath, "utf8");
+  }
+  if (!modes.length) throw new InstallerError("The existing installation has no Codekeeper workflows.", { code: "EXISTING_INSTALLATION_INVALID" });
+  return Object.freeze({
+    policy: Object.freeze(policy),
+    policySource,
+    modes: Object.freeze(modes),
+    contents: Object.freeze(contents)
+  });
 }
 
 async function assertNoGitOperation(root, runner, fsImpl) {
@@ -172,7 +253,7 @@ function remoteSha(output, defaultBranch) {
   return sha;
 }
 
-export async function assertNoSetupBranch({ runner, root, repository }) {
+export async function assertNoSetupBranch({ runner, root, repository, branch = SETUP_BRANCH }) {
   const localRefs = await requireSuccess(
     runner,
     "git",
@@ -182,32 +263,56 @@ export async function assertNoSetupBranch({ runner, root, repository }) {
   );
   const collidingRefs = new Set([
     "refs/heads/codekeeper",
-    `refs/heads/${SETUP_BRANCH}`,
+    `refs/heads/${branch}`,
     "refs/remotes/origin/codekeeper",
-    `refs/remotes/origin/${SETUP_BRANCH}`
+    `refs/remotes/origin/${branch}`
   ]);
-  if (localRefs.split("\n").some((ref) => collidingRefs.has(ref.trim()) || ref.trim().startsWith(`refs/heads/${SETUP_BRANCH}/`) || ref.trim().startsWith(`refs/remotes/origin/${SETUP_BRANCH}/`))) {
-    throw new InstallerError(`Local Git refs collide with ${SETUP_BRANCH}.`, { code: "SETUP_BRANCH_EXISTS" });
+  if (localRefs.split("\n").some((ref) => collidingRefs.has(ref.trim()) || ref.trim().startsWith(`refs/heads/${branch}/`) || ref.trim().startsWith(`refs/remotes/origin/${branch}/`))) {
+    throw new InstallerError(`Local Git refs collide with ${branch}.`, { code: "SETUP_BRANCH_EXISTS" });
   }
 
   const remoteRefs = await requireSuccess(
     runner,
     "git",
-    ["ls-remote", "--heads", "origin", "refs/heads/codekeeper", `refs/heads/${SETUP_BRANCH}`, `refs/heads/${SETUP_BRANCH}/*`],
+    ["ls-remote", "--heads", "origin", "refs/heads/codekeeper", `refs/heads/${branch}`, `refs/heads/${branch}/*`],
     { cwd: root },
     "Could not inspect remote setup refs."
   );
-  if (remoteRefs.trim()) throw new InstallerError(`Remote branch ${SETUP_BRANCH} or a colliding ref already exists.`, { code: "SETUP_BRANCH_EXISTS" });
+  if (remoteRefs.trim()) throw new InstallerError(`Remote branch ${branch} or a colliding ref already exists.`, { code: "SETUP_BRANCH_EXISTS" });
 
   const pulls = parseJson(await requireSuccess(
     runner,
     "gh",
-    ["pr", "list", "--repo", repository, "--state", "all", "--head", SETUP_BRANCH, "--json", "number,url"],
+    ["pr", "list", "--repo", repository, "--state", "all", "--head", branch, "--json", "number,url"],
     { cwd: root },
     "Could not inspect existing setup pull requests."
   ), "GitHub pull-request query");
   if (!Array.isArray(pulls)) throw new InstallerError("GitHub returned an invalid pull-request list.", { code: "PREFLIGHT_INVALID_RESPONSE" });
-  if (pulls.length) throw new InstallerError(`A setup pull request already exists for ${SETUP_BRANCH}.`, { code: "SETUP_BRANCH_EXISTS" });
+  if (pulls.length) throw new InstallerError(`A setup pull request already exists for ${branch}.`, { code: "SETUP_BRANCH_EXISTS" });
+}
+
+async function repositoryVariable(runner, root, repository, name) {
+  return requireSuccess(
+    runner,
+    "gh",
+    ["variable", "get", name, "--repo", repository, "--json", "value", "--jq", ".value"],
+    { cwd: root },
+    `The existing installation is missing the ${name} repository variable.`
+  );
+}
+
+async function optionalRepositoryVariable(runner, root, repository, name) {
+  const variables = parseJson(await requireSuccess(
+    runner,
+    "gh",
+    ["variable", "list", "--repo", repository, "--json", "name,value"],
+    { cwd: root },
+    "Could not inspect existing repository variables."
+  ), "GitHub repository-variable query");
+  if (!Array.isArray(variables) || variables.some((variable) => typeof variable?.name !== "string" || typeof variable?.value !== "string")) {
+    throw new InstallerError("GitHub returned an invalid repository-variable list.", { code: "PREFLIGHT_INVALID_RESPONSE" });
+  }
+  return variables.find((variable) => variable.name === name)?.value ?? null;
 }
 
 export async function inspectRepository({
@@ -285,8 +390,19 @@ export async function inspectRepository({
     throw new InstallerError("Configure Git user.name and user.email before setup.", { code: "GIT_IDENTITY_REQUIRED" });
   }
 
-  await assertNoInstallationFiles(root, { fsImpl });
-  await assertNoSetupBranch({ runner, root, repository });
+  const installation = await inspectInstallationFiles(root, { fsImpl });
+  const updateBranch = installation ? `codekeeper/update-${headSha.slice(0, 12)}` : SETUP_BRANCH;
+  await assertNoSetupBranch({ runner, root, repository, branch: updateBranch });
+  let existingSettings = null;
+  if (installation) {
+    existingSettings = Object.freeze({
+      enabled: (await repositoryVariable(runner, root, repository, ENABLED_VARIABLE)) === "true",
+      appClientId: await repositoryVariable(runner, root, repository, CLIENT_ID_VARIABLE),
+      automationBotLogin: installation.modes.includes("review") || (installation.modes.includes("fix") && installation.policy.issues.allowAiImplementation)
+        ? await optionalRepositoryVariable(runner, root, repository, BOT_LOGIN_VARIABLE)
+        : null
+    });
+  }
   return Object.freeze({
     root,
     originUrl,
@@ -297,6 +413,7 @@ export async function inspectRepository({
     headSha,
     remoteDefaultSha,
     viewerLogin,
-    displayName: repository.split("/")[1]
+    displayName: repository.split("/")[1],
+    ...(installation ? { installation, existingSettings, updateBranch } : {})
   });
 }

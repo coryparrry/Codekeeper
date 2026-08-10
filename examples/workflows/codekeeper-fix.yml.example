@@ -3,8 +3,12 @@
 name: Codekeeper issue implementation
 
 on:
+  issues:
+    types: [labeled]
   issue_comment:
     types: [created]
+  repository_dispatch:
+    types: [codekeeper_fix]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -34,11 +38,14 @@ jobs:
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-fix.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
-      issue_number: ${{ inputs.issue_number || '' }}
+      automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
+      issue_number: ${{ github.event.client_payload.number || inputs.issue_number || '' }}
       dry_run: ${{ inputs.dry_run || false }}
       # Optional for dry_run=true; required when dry_run=false publishes changes.
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:
+      # Match this secret to ai.agents.plan.provider in .github/codekeeper.json.
+      planner_model_api_key: ${{ secrets.OPENAI_API_KEY }}
       # Match this secret to ai.agents.fix.provider in .github/codekeeper.json.
       model_api_key: ${{ secrets.OPENAI_API_KEY }}
       # Required while this mode keeps workspace.enabled=true.

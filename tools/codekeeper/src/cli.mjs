@@ -5,12 +5,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { getAgentRuntimeSettings, loadConfig } from "./lib/config.mjs";
 import { log, parseArgs, readJson, readRegularFile, setGitHubOutput } from "./lib/io.mjs";
 import { applyPatch, createPatch, currentHead } from "./lib/git.mjs";
-import { prepareAudit, prepareFix, prepareIssue, prepareReview } from "./lib/prepare.mjs";
+import { prepareAudit, prepareFix, prepareIssue, preparePlan, prepareReview } from "./lib/prepare.mjs";
 import { publishAudit, publishFix, publishIssue, publishReview } from "./lib/publish.mjs";
 import { sealAudit, sealFix, sealIssue, sealReview, validateAudit, validateFix, validateIssue, validateReview, verifyAudit, verifyFix } from "./lib/validate.mjs";
 import { assertRunnerOwnedDirectory } from "./lib/workspace.mjs";
 import { sha256 } from "./lib/markers.mjs";
 import { runAgentFromBundle } from "./lib/agents-runtime.mjs";
+import { runOwnerCommand } from "./lib/commands.mjs";
 
 function integer(value, name) {
   const parsed = Number(value);
@@ -92,6 +93,17 @@ async function main() {
     case "check-config":
       result = { valid: true, version: config.version };
       break;
+    case "owner-command":
+      result = await runOwnerCommand({
+        eventPath: args.require("event"),
+        config,
+        token,
+        automationIdentity: {
+          login: args.require("automation-bot-login"),
+          id: args.require("automation-bot-id")
+        }
+      });
+      break;
     case "agent-settings":
       {
         const mode = args.require("mode");
@@ -129,7 +141,7 @@ async function main() {
       result = { applied: true };
       break;
     case "prepare-review":
-      result = await prepareReview({ eventPath: args.require("event"), directory, config, toolingSha, configSha256, ...agentProfileInputs(args) });
+      result = await prepareReview({ eventPath: args.require("event"), directory, config, token, toolingSha, configSha256, ...agentProfileInputs(args) });
       break;
     case "prepare-audit":
       result = await prepareAudit({
@@ -149,6 +161,24 @@ async function main() {
       result = await prepareFix({
         targetNumber: integer(args.require("target-number"), "target-number"),
         actor: args.require("actor"),
+        authorizationMode: args.get("authorization-mode", "owner"),
+        expectedHead: args.get("expected-head", ""),
+        directory,
+        config,
+        token,
+        toolingSha,
+        configSha256,
+        planResultPath: runnerFile(args.require("plan-result"), "plan-result"),
+        planContextPath: runnerFile(args.require("plan-context"), "plan-context"),
+        ...agentProfileInputs(args)
+      });
+      break;
+    case "prepare-plan":
+      result = await preparePlan({
+        targetNumber: integer(args.require("target-number"), "target-number"),
+        actor: args.require("actor"),
+        authorizationMode: args.get("authorization-mode", "owner"),
+        expectedHead: args.get("expected-head", ""),
         directory,
         config,
         token,

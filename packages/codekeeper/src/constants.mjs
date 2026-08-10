@@ -2,16 +2,17 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "38c0306a78888346208aae992a0786d7414e3c0a";
+export const SOURCE_COMMIT = "94df55ad6bf97b26f4449593ef44a8745282636c";
 export const SETUP_BRANCH = "codekeeper/setup";
-export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add disabled setup";
-export const SETUP_PR_TITLE = "chore(codekeeper): add disabled setup";
+export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
+export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
 
 export const MODES = Object.freeze({
   review: Object.freeze({
     id: "review",
     label: "Pull request review",
-    description: "reviews same-repository pull requests with comments, labels, and a blocking result when enabled",
+    agentLabel: "Pull request reviewer",
+    description: "Reviews pull requests from this repository. Adds comments, labels, and a blocking result.",
     policyAgent: "review",
     target: ".github/workflows/codekeeper-review.yml",
     asset: "workflows/review.yml",
@@ -20,16 +21,18 @@ export const MODES = Object.freeze({
   maintain: Object.freeze({
     id: "maintain",
     label: "Repository maintenance",
-    description: "runs repository audits manually or on schedule; start with a no-change dry run",
+    agentLabel: "Repository auditor",
+    description: "Runs repository audits manually or on a schedule. Live runs can repair the repository when repair is on.",
     policyAgent: "audit",
     target: ".github/workflows/codekeeper-maintain.yml",
     asset: "workflows/maintain.yml",
-    trigger: "schedule or manual dry run"
+    trigger: "schedule or manual run"
   }),
   issues: Object.freeze({
     id: "issues",
     label: "Issue triage",
-    description: "adds issue labels and comments on issue events when enabled; duplicate closure stays off",
+    agentLabel: "Issue triager",
+    description: "Adds labels and comments to issues. Automatic duplicate closure stays off.",
     policyAgent: "issue",
     target: ".github/workflows/codekeeper-issues.yml",
     asset: "workflows/issues.yml",
@@ -37,12 +40,13 @@ export const MODES = Object.freeze({
   }),
   fix: Object.freeze({
     id: "fix",
-    label: "Owner-authorized issue fix",
-    description: "advanced; can open a repair PR only after an owner command and separate policy opt-in; auto-merge stays off",
+    label: "Issue implementation and pull request repair",
+    agentLabel: "Fixer",
+    description: "Plans, then implements ready issues or validated pull request repairs.",
     policyAgent: "fix",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
-    trigger: "owner command or manual dry run"
+    trigger: "ready issue, owner command, or manual run"
   })
 });
 
@@ -70,13 +74,64 @@ export const AGENT_PROFILES = Object.freeze({
     id: "maintenance-planner",
     target: ".github/codekeeper/agents/maintenance-planner.md",
     asset: "agents/maintenance-planner.md",
-    purpose: "Editable owner-commanded repair judgment rules"
+    purpose: "Editable implementation planning rules"
+  }),
+  fixer: Object.freeze({
+    id: "fixer",
+    target: ".github/codekeeper/agents/fixer.md",
+    asset: "agents/fixer.md",
+    purpose: "Editable implementation and repair rules"
   })
 });
 export const AGENT_PROFILE_IDS = Object.freeze(Object.keys(AGENT_PROFILES));
 export const PRESET_IDS = Object.freeze(["mixed", "openai"]);
 export const RECOMMENDED_MODES = Object.freeze(["review", "maintain"]);
 export const RECOMMENDED_PRESET = "openai";
+export const CAPABILITIES = Object.freeze({
+  reviewRepair: Object.freeze({
+    id: "reviewRepair",
+    label: "Automatic review repair",
+    description: "Allow one repair pass when a pull request review finds a blocking problem.",
+    modes: Object.freeze(["review", "fix"])
+  }),
+  repair: Object.freeze({
+    id: "repair",
+    label: "Repository repair",
+    description: "Allow live maintenance runs to create repair pull requests.",
+    modes: Object.freeze(["maintain"])
+  }),
+  issueImplementation: Object.freeze({
+    id: "issueImplementation",
+    label: "Issue implementation",
+    description: "Automatically implement issues that triage marks ready.",
+    modes: Object.freeze(["fix"])
+  }),
+  duplicateClosure: Object.freeze({
+    id: "duplicateClosure",
+    label: "Automatic duplicate closure",
+    description: "Allow issue triage to close an issue when it finds an exact duplicate.",
+    modes: Object.freeze(["issues"])
+  }),
+  autoMerge: Object.freeze({
+    id: "autoMerge",
+    label: "Automatic merge",
+    description: "Allow Codekeeper to merge validated repair pull requests within policy limits.",
+    modes: Object.freeze(["maintain", "fix"])
+  })
+});
+export const CAPABILITY_IDS = Object.freeze(Object.keys(CAPABILITIES));
+export const MODEL_OPTIONS = Object.freeze({
+  openai: Object.freeze([
+    Object.freeze({ id: "luna-max", provider: "openai", model: "gpt-5.6-luna", effort: "max", label: "OpenAI · GPT-5.6 Luna · max effort" }),
+    Object.freeze({ id: "sol-high", provider: "openai", model: "gpt-5.6-sol", effort: "high", label: "OpenAI · GPT-5.6 Sol · high effort" }),
+    Object.freeze({ id: "terra-high", provider: "openai", model: "gpt-5.6-terra", effort: "high", label: "OpenAI · GPT-5.6 Terra · high effort" }),
+    Object.freeze({ id: "terra-medium", provider: "openai", model: "gpt-5.6-terra", effort: "medium", label: "OpenAI · GPT-5.6 Terra · medium effort" })
+  ]),
+  deepseek: Object.freeze([
+    Object.freeze({ id: "deepseek-v4-flash", provider: "deepseek", model: "deepseek-v4-flash", effort: "none", label: "DeepSeek · V4 Flash" })
+  ])
+});
+export const ALL_MODEL_OPTIONS = Object.freeze(Object.values(MODEL_OPTIONS).flat());
 export const POLICY_TARGET = ".github/codekeeper.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
@@ -99,17 +154,15 @@ export const CLIENT_ID_VARIABLE = "CODEKEEPER_APP_CLIENT_ID";
 export const BOT_LOGIN_VARIABLE = "CODEKEEPER_AUTOMATION_BOT_LOGIN";
 
 export const SECRET_PURPOSES = Object.freeze({
-  [OPENAI_SECRET]: "OpenAI Platform API key for model calls after enablement; this is not a ChatGPT subscription",
-  [DEEPSEEK_SECRET]: "DeepSeek API key for issue triage when the mixed preset is selected",
-  [TRACE_SECRET]: "separate OpenAI Platform API key for trace export; do not reuse the model-provider key",
+  [OPENAI_SECRET]: "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key.",
+  [DEEPSEEK_SECRET]: "DeepSeek API key for each role assigned to DeepSeek",
+  [TRACE_SECRET]: "Separate OpenAI Platform API key for trace export. Do not reuse the model API key.",
   [APP_SECRET]: "downloaded GitHub App PEM private key used to mint App installation tokens"
 });
 
 export const CONSERVATIVE_BOUNDARIES = Object.freeze([
-  "Codekeeper is installed disabled; CODEKEEPER_ENABLED remains false.",
-  "Repository repair, AI issue implementation, and automatic merge remain disabled.",
-  "Editable Markdown profiles tune judgment only; they cannot grant writes, merge, branch, trigger, or authorization permissions.",
-  "Generated workflows use an immutable full source commit SHA.",
-  "Protected paths and git diff --check remain enforced.",
-  "The installer never merges a pull request or dispatches a workflow."
+  "Agent profiles guide decisions. They cannot grant write access or change triggers, branches, or permissions.",
+  "Every generated workflow pins an exact source commit.",
+  "Protected paths and git diff --check stay in place.",
+  "The installer opens a setup pull request. It does not merge it or run a workflow."
 ]);

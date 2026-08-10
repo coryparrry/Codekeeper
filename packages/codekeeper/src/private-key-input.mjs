@@ -22,7 +22,7 @@ async function listDirectoryMetadata(fsImpl, directory) {
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("unsafe directory");
     return await fsImpl.readdir(directory, { withFileTypes: true });
   } catch (cause) {
-    throw new InstallerError("The private-key picker could not list that folder safely.", {
+    throw new InstallerError("The private-key picker failed to list that folder safely.", {
       code: "SECRET_INPUT_DIRECTORY_INVALID",
       cause
     });
@@ -34,7 +34,7 @@ export async function defaultPrivateKeyDirectory({
   homeDirectory = homedir()
 } = {}) {
   if (typeof homeDirectory !== "string" || !path.isAbsolute(homeDirectory)) {
-    throw new InstallerError("The private-key picker could not determine a safe starting folder.", {
+    throw new InstallerError("The private-key picker failed to find a safe starting folder.", {
       code: "SECRET_INPUT_DIRECTORY_INVALID"
     });
   }
@@ -46,46 +46,76 @@ export async function defaultPrivateKeyDirectory({
       // Prefer a listable Downloads folder, then fall back to a listable home folder.
     }
   }
-  throw new InstallerError("The private-key picker could not determine a safe starting folder.", {
+  throw new InstallerError("The private-key picker failed to find a safe starting folder.", {
     code: "SECRET_INPUT_DIRECTORY_INVALID"
   });
 }
 
-export async function listPrivateKeyChoices(directory, { fsImpl = DEFAULT_FS } = {}) {
+function containedBy(root, target) {
+  const relative = path.relative(root, target);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+export async function listPrivateKeyChoices(directory, {
+  fsImpl = DEFAULT_FS,
+  rootDirectory = directory,
+  includeDirectories = false
+} = {}) {
   if (typeof directory !== "string" || !path.isAbsolute(directory)) {
     throw new InstallerError("The private-key picker received an invalid folder.", {
       code: "SECRET_INPUT_DIRECTORY_INVALID"
     });
   }
   const directoryEntries = await listDirectoryMetadata(fsImpl, directory);
+  const root = path.resolve(rootDirectory);
+  if (!containedBy(root, directory)) {
+    throw new InstallerError("The private-key picker received an invalid folder.", {
+      code: "SECRET_INPUT_DIRECTORY_INVALID"
+    });
+  }
+  const folders = [];
   const candidates = [];
   for (const entry of directoryEntries) {
     const label = visibleEntryName(entry.name);
     if (!label || entry.isSymbolicLink()) continue;
-    if (!entry.isDirectory() && !(entry.isFile() && label.toLowerCase().endsWith(".pem"))) continue;
     const target = path.join(directory, entry.name);
+    if (!containedBy(root, target)) continue;
+    if (includeDirectories && entry.isDirectory()) {
+      try {
+        await listDirectoryMetadata(fsImpl, target);
+        folders.push({ label, target, type: "directory" });
+      } catch {
+        // Hide folders that cannot be opened safely.
+      }
+      continue;
+    }
+    if (!(entry.isFile() && label.toLowerCase().endsWith(".pem"))) continue;
     try {
       const stat = await fsImpl.lstat(target);
       if (stat.isSymbolicLink()) continue;
-      if (entry.isDirectory() && !stat.isDirectory()) continue;
-      if (entry.isFile() && (!stat.isFile() || stat.size <= 0 || stat.size > STDIN_FILE_LIMIT_BYTES)) continue;
+      if (!stat.isFile() || stat.size <= 0 || stat.size > STDIN_FILE_LIMIT_BYTES) continue;
+      candidates.push({ label, target, type: "file", modifiedTime: Number(stat.mtimeMs) || 0 });
     } catch {
       continue;
     }
-    candidates.push({ label, target, type: entry.isDirectory() ? "directory" : "file" });
   }
   candidates.sort((left, right) => {
-    if (left.type !== right.type) return left.type === "directory" ? -1 : 1;
+    if (left.modifiedTime !== right.modifiedTime) return right.modifiedTime - left.modifiedTime;
     return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
   });
 
   const choices = [];
   const targets = new Map();
-  const parent = path.dirname(directory);
-  if (parent !== directory) {
-    choices.push(Object.freeze({ id: "parent", type: "parent", label: "Go up one folder" }));
-    targets.set("parent", parent);
+  if (includeDirectories && path.resolve(directory) !== root) {
+    choices.push(Object.freeze({ id: "parent", type: "parent", label: "Parent folder" }));
+    targets.set("parent", path.dirname(directory));
   }
+  folders.sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+  folders.forEach((candidate, index) => {
+    const id = `folder-${index}`;
+    choices.push(Object.freeze({ id, type: candidate.type, label: candidate.label }));
+    targets.set(id, candidate.target);
+  });
   candidates.forEach((candidate, index) => {
     const id = `entry-${index}`;
     choices.push(Object.freeze({ id, type: candidate.type, label: candidate.label }));
@@ -114,6 +144,7 @@ export async function createPrivateKeyPickerController({
   homeDirectory = homedir()
 } = {}) {
   let currentDirectory = await defaultPrivateKeyDirectory({ fsImpl, homeDirectory });
+  const rootDirectory = path.resolve(homeDirectory);
   let currentListing = null;
   let entries = new Map();
 
@@ -126,7 +157,11 @@ export async function createPrivateKeyPickerController({
   return Object.freeze({
     async list() {
       if (currentListing) return currentListing;
-      return commitListing(await listPrivateKeyChoices(currentDirectory, { fsImpl }));
+      return commitListing(await listPrivateKeyChoices(currentDirectory, {
+        fsImpl,
+        rootDirectory,
+        includeDirectories: true
+      }));
     },
     async activate(id) {
       const entry = entries.get(id);
@@ -157,17 +192,23 @@ export async function createPrivateKeyPickerController({
         }
         return Object.freeze({ selected: true, value: entry.target });
       }
-      if (!stat.isDirectory()) {
-        throw new InstallerError("The selected private-key picker item is not a safe folder.", {
-          code: "SECRET_INPUT_DIRECTORY_INVALID"
-        });
+      if (entry.type === "directory" || entry.type === "parent") {
+        if (!stat.isDirectory() || !containedBy(rootDirectory, entry.target)) {
+          throw new InstallerError("The selected private-key picker item is not safe.", {
+            code: "SECRET_INPUT_DIRECTORY_INVALID"
+          });
+        }
+        currentDirectory = entry.target;
+        const listing = commitListing(await listPrivateKeyChoices(currentDirectory, {
+          fsImpl,
+          rootDirectory,
+          includeDirectories: true
+        }));
+        return Object.freeze({ selected: false, listing });
       }
-
-      // Navigation commits only after the target directory has been listed safely.
-      const nextListing = await listPrivateKeyChoices(entry.target, { fsImpl });
-      currentDirectory = entry.target;
-      commitListing(nextListing);
-      return Object.freeze({ selected: false });
+      throw new InstallerError("The selected private-key picker item is not a valid private-key file.", {
+        code: "SECRET_INPUT_FILE_INVALID"
+      });
     }
   });
 }

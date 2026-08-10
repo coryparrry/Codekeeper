@@ -6,7 +6,8 @@ const LIMITS = Object.freeze({
   key: 512,
   label: 128,
   command: 2000,
-  result: 8000
+  result: 8000,
+  diagram: 6000
 });
 
 function isPlainObject(value) {
@@ -95,6 +96,9 @@ function reviewFindingSchema() {
     explanation: stringSchema({ maxLength: LIMITS.body }),
     severity: { enum: ["critical", "high", "medium", "low"] },
     confidence: { enum: ["high", "medium", "low"] },
+    classification: { enum: ["current", "stale", "already-fixed", "pre-existing", "preference-only", "not-actionable"] },
+    validation: stringSchema({ maxLength: LIMITS.body }),
+    preventionTest: stringSchema({ maxLength: LIMITS.summary }),
     file: nullableString(LIMITS.path),
     line: nullableInteger()
   });
@@ -124,6 +128,7 @@ export function reviewSchema(config) {
         adequate: { type: "boolean" },
         notes: stringSchema({ minLength: 0, maxLength: LIMITS.summary })
       }),
+      diagram: nullableString(LIMITS.diagram),
       mergeRecommendation: { enum: ["block", "manual", "auto"] },
       noActionReason: nullableString(LIMITS.summary)
     });
@@ -170,6 +175,20 @@ export function issueSchema(config) {
       duplicateOf: nullableInteger(),
       duplicateConfidence: { enum: ["none", "low", "medium", "high"] },
       implementationRecommendation: { enum: ["no", "manual", "ai-ready"] },
+      decision: object({
+        required: { type: "boolean" },
+        question: stringSchema({ minLength: 0, maxLength: LIMITS.summary }),
+        rationale: stringSchema({ minLength: 0, maxLength: LIMITS.summary }),
+        options: {
+          type: "array",
+          maxItems: 3,
+          items: object({
+            label: stringSchema({ maxLength: LIMITS.title }),
+            description: stringSchema({ maxLength: LIMITS.summary }),
+            recommended: { type: "boolean" }
+          })
+        }
+      }),
       comment: stringSchema({ maxLength: LIMITS.body })
     });
 }
@@ -198,6 +217,26 @@ export function fixSchema(target = null) {
       readyForReview: { type: "boolean" },
       noChangeReason: nullableString(LIMITS.body)
     });
+}
+
+export function planSchema(target = null) {
+  const targetKind = target?.kind;
+  const targetNumber = target?.number;
+  if (target !== null && (!["issue", "pull_request"].includes(targetKind) || !Number.isSafeInteger(targetNumber) || targetNumber <= 0)) {
+    throw new Error("Plan schema requires a valid frozen target");
+  }
+  return object({
+    mode: { const: "plan" },
+    summary: stringSchema({ maxLength: LIMITS.summary }),
+    targetKind: target ? { const: targetKind } : { enum: ["issue", "pull_request"] },
+    targetNumber: target ? { const: targetNumber } : { type: "integer", minimum: 1 },
+    objective: stringSchema({ minLength: 0, maxLength: LIMITS.body }),
+    steps: { type: "array", items: stringSchema({ maxLength: LIMITS.body }), maxItems: 20 },
+    validation: { type: "array", items: stringSchema({ maxLength: LIMITS.command }), maxItems: 20 },
+    risks: { type: "array", items: stringSchema({ maxLength: LIMITS.summary }), maxItems: 12 },
+    readyForFixer: { type: "boolean" },
+    noActionReason: nullableString(LIMITS.body)
+  });
 }
 
 function assert(condition, message) {
@@ -243,23 +282,28 @@ function assertEnum(value, allowed, name) {
 }
 
 function validateReviewFinding(finding, name, { blocking = false } = {}) {
-  assertExactKeys(finding, ["title", "explanation", "severity", "confidence", "file", "line"], name);
+  assertExactKeys(finding, ["title", "explanation", "severity", "confidence", "classification", "validation", "preventionTest", "file", "line"], name);
   assertString(finding.title, `${name}.title`, { maxLength: LIMITS.title });
   assertString(finding.explanation, `${name}.explanation`, { maxLength: LIMITS.body });
   assertEnum(finding.severity, ["critical", "high", "medium", "low"], `${name}.severity`);
   assertEnum(finding.confidence, ["high", "medium", "low"], `${name}.confidence`);
+  assertEnum(finding.classification, ["current", "stale", "already-fixed", "pre-existing", "preference-only", "not-actionable"], `${name}.classification`);
+  assertString(finding.validation, `${name}.validation`, { maxLength: LIMITS.body });
+  assertString(finding.preventionTest, `${name}.preventionTest`, { maxLength: LIMITS.summary });
   assertNullableString(finding.file, `${name}.file`, LIMITS.path);
   assert(finding.line === null || (Number.isInteger(finding.line) && finding.line > 0), `${name}.line must be positive integer or null`);
   if (blocking) {
+    assert(finding.classification === "current", `${name} must be a current validated finding before it can block`);
     assert(finding.confidence !== "low", `${name} cannot block with low confidence`);
     assert(finding.severity !== "low", `${name} cannot block with low severity`);
   }
 }
 
 export function validateReviewResult(result, config) {
+  if (result && typeof result === "object" && !Object.hasOwn(result, "diagram")) result.diagram = null;
   assertExactKeys(result, [
     "mode", "summary", "risk", "labels", "blockingFindings", "nonBlockingFindings",
-    "tests", "mergeRecommendation", "noActionReason"
+    "tests", "diagram", "mergeRecommendation", "noActionReason"
   ], "result");
   assert(result.mode === "review", "mode must be review");
   assertString(result.summary, "summary", { maxLength: LIMITS.summary });
@@ -283,6 +327,11 @@ export function validateReviewResult(result, config) {
   assertExactKeys(result.tests, ["adequate", "notes"], "tests");
   assert(typeof result.tests.adequate === "boolean", "tests.adequate must be boolean");
   assertString(result.tests.notes, "tests.notes", { allowEmpty: true, maxLength: LIMITS.summary });
+  assertNullableString(result.diagram, "diagram", LIMITS.diagram);
+  if (result.diagram !== null) {
+    assert(/^(?:flowchart|sequenceDiagram|stateDiagram|classDiagram|erDiagram|gantt|pie|mindmap|timeline|gitGraph)\b/.test(result.diagram.trim()), "diagram must start with a supported Mermaid diagram type");
+    assert(!/```|%%\{|\bclick\b|\bhref\b|javascript:/i.test(result.diagram), "diagram contains unsupported Mermaid content");
+  }
   assertEnum(result.mergeRecommendation, ["block", "manual", "auto"], "mergeRecommendation");
   assertNullableString(result.noActionReason, "noActionReason", LIMITS.summary);
   if (result.blockingFindings.length > 0) {
@@ -346,9 +395,13 @@ export function validateAuditResult(result, config) {
 }
 
 export function validateIssueResult(result, config) {
+  const hadDecision = result && typeof result === "object" && Object.hasOwn(result, "decision");
+  if (!hadDecision) {
+    result.decision = { required: false, question: "", rationale: "", options: [] };
+  }
   assertExactKeys(result, [
     "mode", "summary", "type", "priority", "labels", "actionable", "missingInformation",
-    "duplicateOf", "duplicateConfidence", "implementationRecommendation", "comment"
+    "duplicateOf", "duplicateConfidence", "implementationRecommendation", "decision", "comment"
   ], "result");
   assert(result.mode === "issue", "mode must be issue");
   assertString(result.summary, "summary", { maxLength: LIMITS.summary });
@@ -363,6 +416,25 @@ export function validateIssueResult(result, config) {
   assert(result.duplicateOf === null || (Number.isInteger(result.duplicateOf) && result.duplicateOf > 0), "duplicateOf invalid");
   assertEnum(result.duplicateConfidence, ["none", "low", "medium", "high"], "duplicateConfidence");
   assertEnum(result.implementationRecommendation, ["no", "manual", "ai-ready"], "implementationRecommendation");
+  assertExactKeys(result.decision, ["required", "question", "rationale", "options"], "decision");
+  assert(typeof result.decision.required === "boolean", "decision.required must be boolean");
+  assertString(result.decision.question, "decision.question", { allowEmpty: true, maxLength: LIMITS.summary });
+  assertString(result.decision.rationale, "decision.rationale", { allowEmpty: true, maxLength: LIMITS.summary });
+  assert(Array.isArray(result.decision.options) && result.decision.options.length <= 3, "decision.options is invalid");
+  for (const [index, option] of result.decision.options.entries()) {
+    assertExactKeys(option, ["label", "description", "recommended"], `decision.options[${index}]`);
+    assertString(option.label, `decision.options[${index}].label`, { maxLength: LIMITS.title });
+    assertString(option.description, `decision.options[${index}].description`, { maxLength: LIMITS.summary });
+    assert(typeof option.recommended === "boolean", `decision.options[${index}].recommended must be boolean`);
+  }
+  if (result.decision.required) {
+    assertString(result.decision.question, "decision.question", { maxLength: LIMITS.summary });
+    assertString(result.decision.rationale, "decision.rationale", { maxLength: LIMITS.summary });
+    assert(result.decision.options.length > 0, "a required decision needs options");
+    assert(result.decision.options.filter((option) => option.recommended).length === 1, "a required decision needs one recommendation");
+  } else {
+    assert(result.decision.question === "" && result.decision.rationale === "" && result.decision.options.length === 0, "an unused decision must be empty");
+  }
   assertString(result.comment, "comment", { maxLength: LIMITS.body });
   if (result.duplicateOf === null) {
     assert(result.duplicateConfidence === "none", "duplicateConfidence must be none without duplicateOf");
@@ -374,6 +446,7 @@ export function validateIssueResult(result, config) {
     assert(result.missingInformation.length === 0, "ai-ready cannot have missing information");
     assert(result.duplicateOf === null, "ai-ready cannot be a duplicate");
   }
+  if (!hadDecision) delete result.decision;
   return result;
 }
 
@@ -403,6 +476,30 @@ export function validateFixResult(result, target) {
   assertNullableString(result.noChangeReason, "noChangeReason", LIMITS.body);
   if (result.noChangeReason !== null) {
     assert(!result.readyForReview, "no-change result cannot be ready for review");
+  }
+  return result;
+}
+
+export function validatePlanResult(result, target) {
+  assertExactKeys(result, [
+    "mode", "summary", "targetKind", "targetNumber", "objective", "steps", "validation", "risks", "readyForFixer", "noActionReason"
+  ], "result");
+  assert(result.mode === "plan", "mode must be plan");
+  assert(result.targetKind === target?.kind, "targetKind must match the frozen target");
+  assert(result.targetNumber === target?.number, "targetNumber must match the frozen target");
+  assertString(result.summary, "summary", { maxLength: LIMITS.summary });
+  assertString(result.objective, "objective", { allowEmpty: true, maxLength: LIMITS.body });
+  assertUniqueStrings(result.steps, "steps", { maximum: 20, itemMaximum: LIMITS.body });
+  assertUniqueStrings(result.validation, "validation", { maximum: 20, itemMaximum: LIMITS.command });
+  assertUniqueStrings(result.risks, "risks", { maximum: 12, itemMaximum: LIMITS.summary });
+  assert(typeof result.readyForFixer === "boolean", "readyForFixer must be boolean");
+  assertNullableString(result.noActionReason, "noActionReason", LIMITS.body);
+  if (result.readyForFixer) {
+    assert(result.objective.length > 0, "ready plans require an objective");
+    assert(result.steps.length > 0, "ready plans require at least one step");
+    assert(result.noActionReason === null, "ready plans cannot include noActionReason");
+  } else {
+    assert(result.noActionReason !== null, "plans that are not ready require noActionReason");
   }
   return result;
 }

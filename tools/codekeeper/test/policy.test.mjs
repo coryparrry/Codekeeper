@@ -74,6 +74,17 @@ test("auto-merge is limited to low-risk allowlisted automation PRs", () => {
   });
   assert.equal(accepted.eligible, true);
 
+  const paused = evaluateAutoMerge({
+    config,
+    pullRequest: { ...pullRequest, labels: [{ name: "codekeeper:paused" }] },
+    files: [{ filename: "docs/README.md", additions: 10, deletions: 2 }],
+    reviewResult,
+    reviewContextComplete: true,
+    automationBotLogin: "codekeeper[bot]"
+  });
+  assert.equal(paused.eligible, false);
+  assert.ok(paused.reasons.some((reason) => reason.includes("paused")));
+
   const swift = evaluateAutoMerge({
     config,
     pullRequest,

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
 import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
-import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
+import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, preparePlan, prepareReview } from "../src/lib/prepare.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -43,7 +43,7 @@ function assertWorkspaceOutputSchema(schema, mode) {
 }
 
 async function installAgentProfiles(root) {
-  for (const mode of ["review", "audit", "issue", "fix"]) {
+  for (const mode of ["review", "audit", "issue", "plan", "fix"]) {
     const destination = path.join(root, agentProfilePathForMode(mode));
     await mkdir(path.dirname(destination), { recursive: true });
     await copyFile(
@@ -51,6 +51,23 @@ async function installAgentProfiles(root) {
       destination
     );
   }
+}
+
+async function readyPlan(root, target = { kind: "issue", number: 5 }) {
+  const file = bundle(root, `plan-${target.kind}-${target.number}.json`);
+  await writeFile(file, JSON.stringify({
+    mode: "plan",
+    summary: "The target is ready for a bounded implementation.",
+    targetKind: target.kind,
+    targetNumber: target.number,
+    objective: "Implement the requested outcome.",
+    steps: ["Make the smallest complete change."],
+    validation: ["Run the focused test."],
+    risks: [],
+    readyForFixer: true,
+    noActionReason: null
+  }), "utf8");
+  return file;
 }
 
 function agentProfileOptions(root, mode, sourceSha = run("git", ["rev-parse", "HEAD"], root).trim()) {
@@ -343,7 +360,7 @@ test("manual issue preparation requires an explicitly authorised actor", async (
   );
 });
 
-test("maintenance repair authorization requires enabled policy and a configured owner", async (context) => {
+test("maintenance repair authorization requires enabled policy but not a second owner approval", async (context) => {
   const root = await createRepository();
   context.after(() => rm(root, { recursive: true, force: true }));
   const revision = run("git", ["rev-parse", "HEAD"], root).trim();
@@ -362,31 +379,21 @@ test("maintenance repair authorization requires enabled policy and a configured 
 
   const enabled = structuredClone(disabled);
   enabled.audit.repair.enabled = true;
-  await assert.rejects(
-    prepareAuditBundle({
-      directory: bundle(root, "unauthorised-repair"),
-      config: enabled,
-      actor: "not-an-owner",
-      repairAuthorized: true,
-      ...agentProfileOptions(root, "audit", revision)
-    }),
-    /not authorised/
-  );
-
   const prepared = await prepareAuditBundle({
-    directory: bundle(root, "owner-repair"),
+    directory: bundle(root, "enabled-repair"),
     config: enabled,
-    actor: "REPOSITORY-OWNER",
+    actor: "github-actions[bot]",
     repairAuthorized: true,
     ...agentProfileOptions(root, "audit", revision)
   });
   assert.equal(prepared.repairAuthorized, true);
-  assert.equal(prepared.repairAuthorizedBy, "REPOSITORY-OWNER");
+  assert.equal(prepared.repairAuthorizedBy, "github-actions[bot]");
 });
 
 test("manual issue and fix preparation authorize owner login casing variants", async () => {
   const root = await createRepository();
   const issueDirectory = bundle(root, "case-insensitive-issue-input");
+  const planDirectory = bundle(root, "case-insensitive-plan-input");
   const fixDirectory = bundle(root, "case-insensitive-fix-input");
   const event = bundle(root, "case-insensitive-issue-event.json");
   await writeFile(event, JSON.stringify({
@@ -424,12 +431,22 @@ test("manual issue and fix preparation authorize owner login casing variants", a
       token: "read-token",
       ...agentProfileOptions(root, "issue")
     });
+    await preparePlan({
+      targetNumber: 5,
+      actor: "repository-owner",
+      directory: planDirectory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "plan")
+    });
     const fixContext = await prepareFix({
       targetNumber: 5,
       actor: "repository-owner",
       directory: fixDirectory,
       config,
       token: "read-token",
+      planResultPath: await readyPlan(root),
+      planContextPath: path.join(planDirectory, "context.json"),
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(issueContext.triageMode, "manual");
@@ -465,6 +482,286 @@ test("automatic issue preparation records trusted mode without an owner command"
     assert.equal(context.issue.number, 5);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("enabled issue implementation accepts a trusted ready-label run without an owner command", async () => {
+  const root = await createRepository();
+  const directory = bundle(root, "automatic-fix-input");
+  const config = structuredClone(templateConfig);
+  config.issues.allowAiImplementation = true;
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  let issueLabels = [{ name: "codekeeper:ready" }];
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Example",
+        body: "Details",
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        labels: issueLabels
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    const planDirectory = bundle(root, "automatic-plan-input");
+    await preparePlan({
+      targetNumber: 5,
+      actor: "codekeeper-app[bot]",
+      authorizationMode: "policy",
+      directory: planDirectory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "plan")
+    });
+    const prepared = await prepareFix({
+      targetNumber: 5,
+      actor: "codekeeper-app[bot]",
+      authorizationMode: "policy",
+      directory,
+      config,
+      token: "read-token",
+      planResultPath: await readyPlan(root),
+      planContextPath: path.join(planDirectory, "context.json"),
+      ...agentProfileOptions(root, "fix")
+    });
+    assert.equal(prepared.authorizationMode, "policy");
+    assert.equal(prepared.requestedBy, "codekeeper-app[bot]");
+    issueLabels = [{ name: "codekeeper:ready" }, { name: "codekeeper:paused" }];
+    await assert.rejects(
+      prepareFix({
+        targetNumber: 5,
+        actor: "codekeeper-app[bot]",
+        authorizationMode: "policy",
+        directory: bundle(root, "paused-automatic-fix-input"),
+        config,
+        token: "read-token",
+        planResultPath: await readyPlan(root),
+        planContextPath: path.join(planDirectory, "context.json"),
+        ...agentProfileOptions(root, "fix")
+      }),
+      /paused/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
+  }
+});
+
+test("automatic PR repair requires its one-shot marker and every repair honors pause", async () => {
+  const root = await createRepository();
+  const config = structuredClone(templateConfig);
+  config.review.autoRepair = true;
+  config.repository.ownerLogins = ["repository-owner"];
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  const revision = run("git", ["rev-parse", "HEAD"], root).trim();
+  let labels = [];
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/pulls/42")) {
+      return new Response(JSON.stringify({
+        number: 42,
+        title: "Repair this PR",
+        body: "A blocking review finding needs repair.",
+        html_url: "https://github.com/acme/example/pull/42",
+        user: { login: "contributor" },
+        state: "open",
+        draft: false,
+        head: { ref: "feature/repair", sha: revision, repo: { full_name: "acme/example" } },
+        base: { ref: "main", sha: "b".repeat(40), repo: { full_name: "acme/example" } }
+      }), { status: 200 });
+    }
+    if (String(url).includes("/issues/42")) {
+      return new Response(JSON.stringify({
+        number: 42,
+        state: "open",
+        pull_request: {},
+        labels
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await assert.rejects(
+      preparePlan({
+        targetNumber: 42,
+        actor: "codekeeper-app[bot]",
+        authorizationMode: "policy",
+        directory: bundle(root, "unmarked-automatic-pr-plan"),
+        config,
+        token: "read-token",
+        expectedHead: revision,
+        ...agentProfileOptions(root, "plan")
+      }),
+      /codekeeper:auto-repaired/
+    );
+    labels = [{ name: "codekeeper:auto-repaired" }];
+    const prepared = await preparePlan({
+      targetNumber: 42,
+      actor: "codekeeper-app[bot]",
+      authorizationMode: "policy",
+      directory: bundle(root, "marked-automatic-pr-plan"),
+      config,
+      token: "read-token",
+      expectedHead: revision,
+      ...agentProfileOptions(root, "plan")
+    });
+    assert.equal(prepared.target.kind, "pull_request");
+    labels = [{ name: "codekeeper:auto-repaired" }, { name: "codekeeper:paused" }];
+    await assert.rejects(
+      preparePlan({
+        targetNumber: 42,
+        actor: "repository-owner",
+        authorizationMode: "owner",
+        directory: bundle(root, "paused-owner-pr-plan"),
+        config,
+        token: "read-token",
+        expectedHead: revision,
+        ...agentProfileOptions(root, "plan")
+      }),
+      /paused/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
+  }
+});
+
+test("fix preparation rejects a planner result after the frozen issue changes", async () => {
+  const root = await createRepository();
+  const planDirectory = bundle(root, "drifted-plan-input");
+  const config = structuredClone(templateConfig);
+  config.issues.allowAiImplementation = true;
+  config.repository.ownerLogins = ["repository-owner"];
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  let issueBody = "Original implementation request";
+  let updatedAt = "2026-08-10T10:00:00Z";
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Example",
+        body: issueBody,
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        updated_at: updatedAt,
+        labels: []
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await preparePlan({
+      targetNumber: 5,
+      actor: "repository-owner",
+      directory: planDirectory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "plan")
+    });
+    issueBody = "Changed after planning";
+    updatedAt = "2026-08-10T10:01:00Z";
+    await assert.rejects(
+      prepareFix({
+        targetNumber: 5,
+        actor: "repository-owner",
+        directory: bundle(root, "drifted-fix-input"),
+        config,
+        token: "read-token",
+        planResultPath: await readyPlan(root),
+        planContextPath: path.join(planDirectory, "context.json"),
+        ...agentProfileOptions(root, "fix")
+      }),
+      /changed after planning/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
+  }
+});
+
+test("fix preparation stops before creating a bundle when the planner rejects the request", async (context) => {
+  const root = await createRepository();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const planDirectory = bundle(root, "rejected-plan-input");
+  const fixDirectory = bundle(root, "rejected-fix-input");
+  const planResultPath = bundle(root, "rejected-plan-result.json");
+  const config = structuredClone(templateConfig);
+  config.issues.allowAiImplementation = true;
+  config.repository.ownerLogins = ["repository-owner"];
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Unclear request",
+        body: "The requested outcome is not proven.",
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        updated_at: "2026-08-10T10:00:00Z",
+        labels: []
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await preparePlan({
+      targetNumber: 5,
+      actor: "repository-owner",
+      directory: planDirectory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "plan")
+    });
+    await writeFile(planResultPath, JSON.stringify({
+      mode: "plan",
+      summary: "The request is not safe to implement.",
+      targetKind: "issue",
+      targetNumber: 5,
+      objective: "",
+      steps: [],
+      validation: [],
+      risks: ["The requested behavior is not established."],
+      readyForFixer: false,
+      noActionReason: "The desired outcome needs clarification before implementation."
+    }), "utf8");
+    await assert.rejects(
+      prepareFix({
+        targetNumber: 5,
+        actor: "repository-owner",
+        directory: fixDirectory,
+        config,
+        token: "read-token",
+        planResultPath,
+        planContextPath: path.join(planDirectory, "context.json"),
+        ...agentProfileOptions(root, "fix")
+      }),
+      /planner did not approve the requested fix/i
+    );
+    await assert.rejects(lstat(fixDirectory), (error) => error.code === "ENOENT");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
   }
 });
 
@@ -516,12 +813,13 @@ test("prepare writes provider-compatible workspace output schemas for every mode
     }
     return new Response(JSON.stringify([]), { status: 200 });
   };
-  const directories = Object.fromEntries(["review", "audit", "issue", "fix"].map((mode) => [mode, path.join(root, mode)]));
+  const directories = Object.fromEntries(["review", "audit", "issue", "plan", "fix"].map((mode) => [mode, path.join(root, mode)]));
   try {
     await prepareReview({ eventPath: reviewEvent, directory: directories.review, config, ...agentProfileOptions(root, "review", revision) });
     await prepareAuditBundle({ directory: directories.audit, config, ...agentProfileOptions(root, "audit", revision) });
     await prepareIssue({ eventPath: issueEvent, actor: "reporter", triageMode: "automatic", directory: directories.issue, config, token: "read-token", ...agentProfileOptions(root, "issue", revision) });
-    await prepareFix({ targetNumber: 5, actor: "workspace-owner", directory: directories.fix, config, token: "read-token", ...agentProfileOptions(root, "fix", revision) });
+    await preparePlan({ targetNumber: 5, actor: "workspace-owner", directory: directories.plan, config, token: "read-token", ...agentProfileOptions(root, "plan", revision) });
+    await prepareFix({ targetNumber: 5, actor: "workspace-owner", directory: directories.fix, config, token: "read-token", planResultPath: await readyPlan(root), planContextPath: path.join(directories.plan, "context.json"), ...agentProfileOptions(root, "fix", revision) });
     for (const mode of Object.keys(directories)) {
       assertWorkspaceOutputSchema(JSON.parse(await readFile(path.join(directories[mode], "schema.json"), "utf8")), mode);
     }
@@ -690,6 +988,9 @@ test("review findings must cite a changed line hunk", async () => {
       explanation: "The changed line needs a stronger explanation.",
       severity: "medium",
       confidence: "high",
+      classification: "current",
+      validation: "The current documentation still contains the unclear changed line.",
+      preventionTest: "Check the rendered documentation wording.",
       file: "README.md",
       line: 2
     }],

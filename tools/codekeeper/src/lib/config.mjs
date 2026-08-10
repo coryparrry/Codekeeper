@@ -1,7 +1,7 @@
 import path from "node:path";
 import { readJson } from "./io.mjs";
 
-export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "fix"]);
+export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "plan", "fix"]);
 const PROVIDER_APIS = new Set(["responses", "chat_completions"]);
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
 const LIMITS = Object.freeze({
@@ -181,6 +181,8 @@ const REQUIRED_RUNTIME_LABELS = [
   "codekeeper:ready",
   "codekeeper:blocked",
   "codekeeper:manual-review",
+  "codekeeper:paused",
+  "codekeeper:auto-repaired",
   "codekeeper:auto-merge",
   "codekeeper:duplicate-candidate",
   "codekeeper:needs-tests",
@@ -285,7 +287,7 @@ function validateAi(config) {
       nonEmptyString(workspace.model, `ai.agents.${mode}.workspace.model`, 256);
       assert(REASONING_EFFORTS.has(workspace.effort), `ai.agents.${mode}.workspace.effort is unsupported`);
     }
-    if (mode === "review" || mode === "issue") {
+    if (mode === "review" || mode === "issue" || mode === "plan") {
       assert(!workspace.allowWrites, `ai.agents.${mode}.workspace.allowWrites must remain false`);
     }
   }
@@ -356,7 +358,8 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
     assert(config.labels[label], `runtime requires undefined label ${label}`);
   }
 
-  fixedObject(config.review, "review", ["maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
+  fixedObject(config.review, "review", ["autoRepair", "maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
+  boolean(config.review.autoRepair, "review.autoRepair");
   cappedNonNegativeInteger(config.review.maximumBlockingFindings, "review.maximumBlockingFindings", LIMITS.maximumBlockingFindings);
   cappedNonNegativeInteger(config.review.maximumNonBlockingFindings, "review.maximumNonBlockingFindings", LIMITS.maximumNonBlockingFindings);
   cappedPositiveInteger(config.review.maximumDiffBytes, "review.maximumDiffBytes", LIMITS.maximumDiffBytes);

@@ -1,0 +1,7 @@
+node_modules
+.codex-pr*-fix
+acceptance/fixture
+MANIFEST*.sha256
+**/package-lock.json
+packages/codekeeper/assets/metadata.json
+tools/codekeeper/tooling-manifest.json

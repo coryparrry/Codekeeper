@@ -29,7 +29,7 @@ function assertRelativeTarget(relativePath) {
   return parts;
 }
 
-async function ensureSafeParents(fsImpl, root, relativePath) {
+async function ensureSafeParents(fsImpl, root, relativePath, { allowExisting = false } = {}) {
   const parts = assertRelativeTarget(relativePath);
   let current = root;
   for (const part of parts.slice(0, -1)) {
@@ -44,8 +44,9 @@ async function ensureSafeParents(fsImpl, root, relativePath) {
     }
   }
   const target = path.join(root, ...parts);
-  if (await maybeLstat(fsImpl, target)) {
-    throw new InstallerError(`Generated path already exists: ${relativePath}`, { code: "PATH_COLLISION" });
+  const targetStat = await maybeLstat(fsImpl, target);
+  if (targetStat && (!allowExisting || !targetStat.isFile() || targetStat.isSymbolicLink())) {
+    throw new InstallerError(`Generated path already exists or is unsafe: ${relativePath}`, { code: "PATH_COLLISION" });
   }
   return target;
 }
@@ -92,7 +93,31 @@ async function rollbackPreCommit(plan, { runner, fsImpl }) {
     if (!stat) continue;
     if (!stat.isFile() || stat.isSymbolicLink()) return false;
     const contents = await fsImpl.readFile(target);
-    if (contents.byteLength !== file.bytes || sha256(contents) !== file.sha256) return false;
+    const digest = sha256(contents);
+    if (plan.update) {
+      if (![file.sha256, file.previousSha256].includes(digest)) return false;
+    } else if (contents.byteLength !== file.bytes || digest !== file.sha256) return false;
+  }
+
+  if (plan.update) {
+    const existingPaths = plan.files.filter((file) => file.previousSha256 !== null).map((file) => file.path);
+    const newFiles = plan.files.filter((file) => file.previousSha256 === null);
+    if (existingPaths.length) {
+      const reset = await runner.run("git", ["reset", "--quiet", "HEAD", "--", ...existingPaths], { cwd: plan.root });
+      if (reset.status !== 0 || reset.timedOut || reset.truncated) return false;
+      const restored = await runner.run("git", ["restore", "--worktree", "--source=HEAD", "--", ...existingPaths], { cwd: plan.root });
+      if (restored.status !== 0 || restored.timedOut || restored.truncated) return false;
+    }
+    for (const file of newFiles) {
+      const target = path.join(plan.root, ...assertRelativeTarget(file.path));
+      if (await maybeLstat(fsImpl, target)) await fsImpl.unlink(target);
+    }
+    const status = await runner.run("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: plan.root });
+    if (status.status !== 0 || status.timedOut || status.truncated || status.stdout) return false;
+    const switched = await runner.run("git", ["switch", plan.defaultBranch], { cwd: plan.root });
+    if (switched.status !== 0 || switched.timedOut || switched.truncated) return false;
+    const deleted = await runner.run("git", ["branch", "-d", plan.branch], { cwd: plan.root });
+    return deleted.status === 0 && !deleted.timedOut && !deleted.truncated;
   }
 
   const reset = await runner.run("git", ["reset", "--quiet", "HEAD", "--", ...paths], { cwd: plan.root });
@@ -133,39 +158,47 @@ export async function configureRepositorySettings(plan, {
   appPrivateKeyPath,
   openInputFile = openSafeStdinFile,
   onProgress,
+  withSecretInput = null,
   withInteractiveTerminal = (callback) => callback(),
   resumeCommand = "codekeeper init"
 }) {
-  const [enabledVariable, ...remainingVariables] = plan.variables;
-  if (enabledVariable?.name !== "CODEKEEPER_ENABLED" || enabledVariable.value !== "false") {
-    throw new InstallerError("Install plan does not force Codekeeper into the disabled state.", { code: "PLAN_INVALID" });
+  const enabledVariable = plan.variables.find((variable) => variable.name === "CODEKEEPER_ENABLED");
+  const remainingVariables = plan.variables.filter((variable) => variable.name !== "CODEKEEPER_ENABLED");
+  if (enabledVariable && !["true", "false"].includes(enabledVariable.value)) {
+    throw new InstallerError("Install plan must choose whether Codekeeper starts after merge.", { code: "PLAN_INVALID" });
   }
-  if (plan.secrets.filter((secret) => secret.name === APP_SECRET).length !== 1) {
-    throw new InstallerError("Install plan must contain exactly one GitHub App private-key secret.", { code: "PLAN_INVALID" });
+  const appSecretCount = plan.secrets.filter((secret) => secret.name === APP_SECRET).length;
+  if (appSecretCount > 1 || (!plan.update && appSecretCount !== 1)) {
+    throw new InstallerError("Install plan has an invalid GitHub App private-key secret count.", { code: "PLAN_INVALID" });
   }
 
-  const appInput = openInputFile(appPrivateKeyPath);
-  if (!Number.isInteger(appInput?.descriptor) || appInput.descriptor < 3 || typeof appInput.close !== "function") {
-    throw new InstallerError("The selected private-key input could not be prepared safely.", {
+  const appInput = appSecretCount === 1 ? openInputFile(appPrivateKeyPath) : null;
+  if (appInput && (!Number.isInteger(appInput.descriptor) || appInput.descriptor < 3 || typeof appInput.close !== "function")) {
+    throw new InstallerError("The installer failed to prepare the selected private-key input safely.", {
       code: "SECRET_INPUT_FILE_INVALID"
     });
   }
 
   try {
     reportProgress(onProgress, "settings:disable", "active");
-    await runMutation(
-      runner,
-      "gh",
-      ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
-      { cwd: plan.root },
-      "GitHub CLI could not force CODEKEEPER_ENABLED=false; no secret or file mutation was attempted.",
-      resumeCommand
-    );
+    if (enabledVariable) {
+      await runMutation(
+        runner,
+        "gh",
+        ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
+        { cwd: plan.root },
+        "GitHub CLI failed to set the Codekeeper startup state. No secrets or files changed.",
+        resumeCommand
+      );
+    }
     reportProgress(onProgress, "settings:disable", "done");
 
-    output.write("\nRequired GitHub Actions secrets\n");
-    output.write("Setup makes no model call. Provider and trace values go directly from the terminal to GitHub CLI. The App PEM is supplied to GitHub CLI from its opened file descriptor; the installer never reads or displays its contents. GitHub Actions supplies the stored secrets later only to selected jobs.\n");
-    for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
+    if (plan.secrets.length) {
+      output.write("\nRequired GitHub Actions secrets\n");
+      output.write("Setup does not call a model. API keys go directly from this terminal to GitHub CLI. Codekeeper does not display or store them.\n");
+      output.write("The selected App key file goes directly to GitHub CLI. Codekeeper does not read or display the key.\n");
+      for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
+    }
 
     let providerProgressStarted = false;
     let providerProgressFinished = false;
@@ -176,13 +209,13 @@ export async function configureRepositorySettings(plan, {
           providerProgressFinished = true;
         }
         reportProgress(onProgress, "secret:app", "active", `${APP_SECRET} — ${SECRET_PURPOSES[APP_SECRET]}`);
-        output.write(`\nSetting ${APP_SECRET} from the selected PEM file through non-terminal GitHub CLI input. Its path and contents are not displayed. If the secret already exists, this deliberately replaces it.\n`);
+        output.write(`\nSetting ${APP_SECRET} from the selected .pem file. This replaces a secret with the same name.\n`);
         await runMutation(
           runner,
           "gh",
           ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
           { cwd: plan.root, stdio: "ignore", stdinFd: appInput.descriptor, timeoutMs: null },
-          `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
+          `GitHub CLI did not set ${secret.name}.`,
           resumeCommand
         );
         reportProgress(onProgress, "secret:app", "done");
@@ -191,18 +224,39 @@ export async function configureRepositorySettings(plan, {
       }
       providerProgressStarted = true;
       reportProgress(onProgress, "secret:provider", "active", `${secret.name} — ${SECRET_PURPOSES[secret.name]}`);
-      output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. If it already exists, this deliberately replaces it. This single-line value goes directly to gh; press Ctrl-D when finished.\n`);
-      await withInteractiveTerminal(
-        () => runMutation(
+      if (typeof withSecretInput === "function") {
+        await runMutation(
           runner,
           "gh",
           ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
-          { cwd: plan.root, stdio: "inherit", timeoutMs: null },
-          `GitHub CLI did not set ${secret.name}. Automation remains disabled.`,
+          {
+            cwd: plan.root,
+            stdio: "ignore",
+            timeoutMs: null,
+            provideInput: (write) => withSecretInput({
+              step: "credential",
+              name: secret.name,
+              purpose: SECRET_PURPOSES[secret.name],
+              write
+            })
+          },
+          `GitHub CLI did not set ${secret.name}.`,
           resumeCommand
-        ),
-        Object.freeze({ name: secret.name, purpose: SECRET_PURPOSES[secret.name] })
-      );
+        );
+      } else {
+        output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. Press Ctrl-D when you finish.\n`);
+        await withInteractiveTerminal(
+          () => runMutation(
+            runner,
+            "gh",
+            ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
+            { cwd: plan.root, stdio: "inherit", timeoutMs: null },
+            `GitHub CLI did not set ${secret.name}.`,
+            resumeCommand
+          ),
+          Object.freeze({ name: secret.name, purpose: SECRET_PURPOSES[secret.name] })
+        );
+      }
     }
     if (providerProgressStarted && !providerProgressFinished) reportProgress(onProgress, "secret:provider", "done");
 
@@ -213,14 +267,14 @@ export async function configureRepositorySettings(plan, {
         "gh",
         ["variable", "set", variable.name, "--body", variable.value, "--repo", plan.repository],
         { cwd: plan.root },
-        `GitHub CLI did not set ${variable.name}. Automation remains disabled.`,
+        `GitHub CLI did not set ${variable.name}.`,
         resumeCommand
       );
     }
     reportProgress(onProgress, "variables:configure", "done");
   } finally {
     try {
-      appInput.close();
+      appInput?.close();
     } catch {
       // The descriptor is process-local and contains no buffered secret bytes.
     }
@@ -246,10 +300,16 @@ export async function createSetupCommit(plan, {
   );
 
   try {
-    await assertNoInstallationFiles(plan.root, { fsImpl });
+    await assertNoInstallationFiles(plan.root, { fsImpl, allowExisting: plan.update === true });
     for (const file of plan.files) {
-      const target = await ensureSafeParents(fsImpl, plan.root, file.path);
-      await fsImpl.writeFile(target, file.contents, { flag: "wx", mode: 0o644 });
+      const target = await ensureSafeParents(fsImpl, plan.root, file.path, { allowExisting: plan.update === true });
+      if (plan.update) {
+        const stat = await maybeLstat(fsImpl, target);
+        if (file.previousSha256 === null ? stat !== null : !stat || sha256(await fsImpl.readFile(target)) !== file.previousSha256) {
+          throw new InstallerError(`The current file changed before the update: ${file.path}`, { code: "EXISTING_INSTALLATION_CHANGED" });
+        }
+      }
+      await fsImpl.writeFile(target, file.contents, { flag: !plan.update || file.previousSha256 === null ? "wx" : "w", mode: 0o644 });
       const written = await fsImpl.readFile(target);
       if (written.byteLength !== file.bytes || sha256(written) !== file.sha256) {
         throw new InstallerError(`Generated file verification failed: ${file.path}`, { code: "GENERATED_FILE_MISMATCH" });
@@ -271,7 +331,7 @@ export async function createSetupCommit(plan, {
       "git",
       ["commit", "--only", "-m", plan.commitMessage, "--", ...paths],
       { cwd: plan.root },
-      "Could not commit the disabled setup."
+      "Could not commit the setup."
     );
   } catch (cause) {
     let rolledBack = false;
@@ -284,7 +344,7 @@ export async function createSetupCommit(plan, {
       cause.resume = rolledBack ? resumeCommand : statusCommand(platform);
       throw cause;
     }
-    throw new InstallerError("Could not create the disabled setup commit.", {
+    throw new InstallerError("Could not create the setup commit.", {
       code: "LOCAL_SETUP_FAILED",
       resume: rolledBack ? resumeCommand : statusCommand(platform),
       cause
@@ -310,13 +370,13 @@ export async function createSetupCommit(plan, {
     for (const file of plan.files) {
       const blob = await runner.run("git", ["show", `HEAD:${file.path}`], { cwd: plan.root });
       if (blob.status !== 0 || blob.timedOut || blob.truncated) {
-        throw new InstallerError(`Could not verify committed bytes for ${file.path}; nothing was pushed.`, {
+        throw new InstallerError(`The installer failed to verify the committed bytes for ${file.path}. Nothing was pushed.`, {
           code: "COMMITTED_FILE_READ_FAILED",
           resume: formatCommand("git", ["show", "--stat", "--oneline", "HEAD"], platform)
         });
       }
       if (Buffer.byteLength(blob.stdout) !== file.bytes || sha256(blob.stdout) !== file.sha256) {
-        throw new InstallerError(`Committed bytes changed for ${file.path}; nothing was pushed.`, {
+        throw new InstallerError(`The committed bytes changed for ${file.path}. Nothing was pushed.`, {
           code: "COMMITTED_FILE_MISMATCH",
           resume: formatCommand("git", ["show", "--no-ext-diff", "--", file.path], platform)
         });
@@ -324,7 +384,7 @@ export async function createSetupCommit(plan, {
     }
     const status = await requireSuccess(runner, "git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: plan.root }, "Could not verify the setup worktree.");
     if (status) {
-      throw new InstallerError("The worktree changed while the setup commit was created; nothing was pushed.", {
+      throw new InstallerError("The worktree changed while the installer created the setup commit. Nothing was pushed.", {
         code: "WORKTREE_CHANGED",
         resume: statusCommand(platform)
       });
@@ -355,8 +415,8 @@ async function assertRemoteSetupCommit(plan, commit, runner, platform, pullReque
   if (remoteResult.status !== 0 || remoteResult.timedOut || remoteResult.truncated) {
     throw new InstallerError(
       pullRequestUrl
-        ? "The setup pull request may exist, but its remote branch could not be verified."
-        : "The setup branch may have been pushed, but its remote commit could not be verified.",
+        ? "The setup pull request can exist. The installer failed to verify its remote branch."
+        : "The setup branch can exist on the remote. The installer failed to verify its remote commit.",
       {
         code: "REMOTE_COMMIT_READ_FAILED",
         resume: remoteInspectionResume(plan, platform, pullRequestUrl)
@@ -383,7 +443,7 @@ export async function pushAndOpenSetupPullRequest(plan, commit, { runner, onProg
     "git",
     ["push", "origin", `${commit}:refs/heads/${plan.branch}`],
     { cwd: plan.root },
-    "The disabled setup commit was created locally, but push failed.",
+    "The setup commit was created locally, but the push failed.",
     `${pushCommand(plan, commit, platform)}\nThen: ${pullRequestCreateCommand(plan, platform)}`
   );
   await assertRemoteSetupCommit(plan, commit, runner, platform);
@@ -402,7 +462,7 @@ export async function pushAndOpenSetupPullRequest(plan, commit, { runner, onProg
       "--body", plan.pullRequest.body
     ],
     { cwd: plan.root },
-    "The disabled setup branch was pushed, but pull-request creation failed or was interrupted.",
+    "The setup branch was pushed, but GitHub did not create the pull request.",
     `${pullRequestListCommand(plan, platform)}\nIf no pull request is listed: ${pullRequestCreateCommand(plan, platform)}`
   );
   if (!PR_URL.test(url)) {

@@ -155,7 +155,7 @@ const SCENARIOS = Object.freeze([
       ...noFindingReview({ risk: "medium", adequate: false, noActionReason: null }),
       labels: ["codekeeper:needs-tests"],
       summary: "The retry behavior changes without deterministic coverage.",
-      nonBlockingFindings: [{ title: "Changed retry limit lacks coverage", explanation: "No deterministic test exercises the new retry boundary.", severity: "medium", confidence: "high", file: "src/retry.mjs", line: 1 }]
+      nonBlockingFindings: [{ title: "Changed retry limit lacks coverage", explanation: "No deterministic test exercises the new retry boundary.", severity: "medium", confidence: "high", classification: "current", validation: "The current tests do not exercise the changed retry limit.", preventionTest: "Exercise success and exhaustion at the new retry boundary.", file: "src/retry.mjs", line: 1 }]
     },
     assert(output) {
       assert(output.tests.adequate === false, "uncovered changed behavior must be inadequate");
@@ -178,7 +178,7 @@ const SCENARIOS = Object.freeze([
       summary: "The PR breaks valid login on the changed success path.",
       risk: "high",
       labels: ["codekeeper:type-bug"],
-      blockingFindings: [{ title: "Valid login always returns an authorization error", explanation: "The changed success branch returns before session creation, so every valid login fails.", severity: "high", confidence: "high", file: "src/session.mjs", line: 1 }],
+      blockingFindings: [{ title: "Valid login always returns an authorization error", explanation: "The changed success branch returns before session creation, so every valid login fails.", severity: "high", confidence: "high", classification: "current", validation: "The current-head test fails while the base succeeds.", preventionTest: "Keep a valid-login success-path regression test.", file: "src/session.mjs", line: 1 }],
       nonBlockingFindings: [],
       tests: { adequate: false, notes: "The supplied regression test demonstrates the failure but the PR does not preserve expected login coverage." },
       mergeRecommendation: "block",

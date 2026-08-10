@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 export const REVIEW_MARKER = "<!-- codekeeper:review -->";
 export const ISSUE_TRIAGE_MARKER = "<!-- codekeeper:issue-triage -->";
+export const COMMAND_STATUS_MARKER = "<!-- codekeeper:command-status -->";
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

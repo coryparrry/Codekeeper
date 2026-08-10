@@ -39,7 +39,8 @@ async function completePlan(overrides = {}) {
       displayName: "Widget",
       ownerLogins: ["cory"],
       appClientId: "Iv123456789012345678",
-      automationBotLogin: "codekeeper-widget[bot]"
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true
     },
     ...overrides
   });
@@ -67,10 +68,10 @@ function simplePlan(root, originalHead, fileContents = [
     ],
     secrets: [{ name: "OPENAI_API_KEY" }, { name: "OPENAI_TRACE_API_KEY" }, { name: "CODEKEEPER_APP_PRIVATE_KEY" }],
     branch: "codekeeper/setup",
-    commitMessage: "chore(codekeeper): add disabled setup",
+    commitMessage: "chore(codekeeper): add setup",
     pullRequest: {
-      title: "chore(codekeeper): add disabled setup",
-      body: "Disabled setup only; Cory's approval is still required."
+      title: "chore(codekeeper): add setup",
+      body: "Setup only. Cory's approval is still required."
     }
   };
 }
@@ -101,19 +102,25 @@ function isolatedCommandRunner(root) {
   });
 }
 
-test("repository settings force disablement first and pass every secret directly to inherited gh input", async () => {
+test("repository settings set startup first and pass provider secrets through private stdin", async () => {
   const basePlan = await completePlan();
   const plan = {
     ...basePlan,
     secrets: basePlan.secrets.map((secret) => ({ ...secret, value: SECRET_CANARY }))
   };
   const output = textSink();
-  const runner = createRecordingRunner(() => result());
+  const enteredSecrets = [];
+  const runner = createRecordingRunner(async (call) => {
+    if (typeof call.options.provideInput === "function") {
+      let received = "";
+      await call.options.provideInput((value) => { received += value; });
+      assert.equal(received, SECRET_CANARY);
+    }
+    return result();
+  });
   const privateKeyPath = "/private/tmp/codekeeper-secret-path-canary.pem";
   let closed = 0;
   const progressEvents = [];
-  const suspendedSecrets = [];
-  const suspendedNotices = [];
   const openInputFile = (selectedPath) => {
     assert.equal(selectedPath, privateKeyPath);
     return { descriptor: 37, close() { closed += 1; } };
@@ -126,20 +133,16 @@ test("repository settings force disablement first and pass every secret directly
     onProgress(event) {
       progressEvents.push(event);
     },
-    async withInteractiveTerminal(callback, notice) {
-      const before = runner.calls.length;
-      suspendedNotices.push(notice);
-      const value = await callback();
-      assert.equal(runner.calls.length, before + 1);
-      suspendedSecrets.push(runner.calls.at(-1).args[2]);
-      return value;
+    async withSecretInput({ name, purpose, write }) {
+      enteredSecrets.push({ name, purpose });
+      write(SECRET_CANARY);
     },
     resumeCommand: "'node' 'codekeeper.mjs' 'init'"
   });
 
   assert.deepEqual(runner.calls[0], {
     command: "gh",
-    args: ["variable", "set", "CODEKEEPER_ENABLED", "--body", "false", "--repo", "acme/widget"],
+    args: ["variable", "set", "CODEKEEPER_ENABLED", "--body", "true", "--repo", "acme/widget"],
     options: { cwd: "/tmp/widget" }
   });
   const secretCalls = runner.calls.filter((call) => call.args[0] === "secret");
@@ -152,7 +155,10 @@ test("repository settings force disablement first and pass every secret directly
   for (const call of secretCalls.filter((call) => call.args[2] !== "CODEKEEPER_APP_PRIVATE_KEY")) {
     assert.deepEqual(call.args.slice(0, 2), ["secret", "set"]);
     assert.deepEqual(call.args.slice(3), ["--app", "actions", "--repo", "acme/widget"]);
-    assert.deepEqual(call.options, { cwd: "/tmp/widget", stdio: "inherit", timeoutMs: null });
+    assert.equal(call.options.cwd, "/tmp/widget");
+    assert.equal(call.options.stdio, "ignore");
+    assert.equal(call.options.timeoutMs, null);
+    assert.equal(typeof call.options.provideInput, "function");
     assert.ok(!Object.hasOwn(call.options, "env"));
     assert.ok(!Object.hasOwn(call.options, "input"));
     assert.ok(!call.args.includes("--body"));
@@ -165,11 +171,8 @@ test("repository settings force disablement first and pass every secret directly
     timeoutMs: null
   });
   assert.equal(closed, 1);
-  assert.deepEqual(suspendedSecrets, ["OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_TRACE_API_KEY"]);
-  assert.deepEqual(suspendedNotices.map((notice) => notice.name), suspendedSecrets);
-  assert.ok(suspendedNotices.every((notice) => typeof notice.purpose === "string" && notice.purpose.length > 20));
-  assert.equal(suspendedNotices.some((notice) => notice.name === "CODEKEEPER_APP_PRIVATE_KEY"), false);
-  assert.equal(suspendedSecrets.includes("CODEKEEPER_APP_PRIVATE_KEY"), false);
+  assert.deepEqual(enteredSecrets.map(({ name }) => name), ["OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_TRACE_API_KEY"]);
+  assert.ok(enteredSecrets.every(({ purpose }) => typeof purpose === "string" && purpose.length > 20));
   const providerDone = progressEvents.findIndex((event) => event.id === "secret:provider" && event.status === "done");
   const appActive = progressEvents.findIndex((event) => event.id === "secret:app" && event.status === "active");
   assert.ok(providerDone >= 0 && providerDone < appActive, "provider prompts must complete before App fd progress starts");
@@ -195,12 +198,12 @@ test("repository settings force disablement first and pass every secret directly
   const transcript = JSON.stringify(runner.calls) + output.toString();
   assert.doesNotMatch(transcript, new RegExp(SECRET_CANARY));
   assert.doesNotMatch(transcript, /codekeeper-secret-path-canary/);
-  assert.ok(runner.calls.every((call) => !call.args.includes("true")));
+  assert.equal(runner.calls.filter((call) => call.args.includes("true")).length, 1);
 });
 
-test("invalid plans and disable-first failure stop before all secret and file mutations", async () => {
+test("invalid plans and startup-setting failure stop before all secret and file mutations", async () => {
   const valid = await completePlan();
-  const invalid = { ...valid, variables: [{ name: "CODEKEEPER_ENABLED", value: "true" }, ...valid.variables.slice(1)] };
+  const invalid = { ...valid, variables: [{ name: "CODEKEEPER_ENABLED", value: "sometimes" }, ...valid.variables.slice(1)] };
   const invalidRunner = createRecordingRunner(() => result());
   await assert.rejects(
     configureRepositorySettings(invalid, {
@@ -232,7 +235,7 @@ test("invalid plans and disable-first failure stop before all secret and file mu
   assert.equal(closed, 1);
 });
 
-test("secret or variable failure leaves automation disabled and stops later settings", async () => {
+test("secret or variable failure stops later settings", async () => {
   const plan = await completePlan();
   for (const failedName of ["DEEPSEEK_API_KEY", "CODEKEEPER_APP_CLIENT_ID"]) {
     const runner = createRecordingRunner((call) => call.args.includes(failedName) ? result("", { status: 1 }) : result());
@@ -250,7 +253,7 @@ test("secret or variable failure leaves automation disabled and stops later sett
     assert.ok(runner.calls[0].args.includes("CODEKEEPER_ENABLED"));
     const failedIndex = runner.calls.findIndex((call) => call.args.includes(failedName));
     assert.equal(failedIndex, runner.calls.length - 1);
-    assert.ok(runner.calls.every((call) => !call.args.includes("true")));
+    assert.equal(runner.calls.filter((call) => call.args.includes("true")).length, 1);
     assert.equal(closed, 1);
   }
 });
@@ -391,7 +394,8 @@ test("real Git integration creates one exact generated-only commit without broad
     ".github/codekeeper/agents/pr-reviewer.md",
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
-    ".github/codekeeper/agents/maintenance-planner.md"
+    ".github/codekeeper/agents/maintenance-planner.md",
+    ".github/codekeeper/agents/fixer.md"
   ]);
   assert.equal(git(root, ["status", "--porcelain=v1"]), "");
   assert.deepEqual(calls.find((call) => call.command === "git" && call.args[0] === "add").args, [
@@ -405,6 +409,75 @@ test("real Git integration creates one exact generated-only commit without broad
     { id: "git:commit", status: "done" }
   ]);
   assert.ok(calls.every((call) => !call.args.includes("-A") && !call.args.includes("--all") && !call.args.includes("--force")));
+});
+
+test("real Git integration reruns against an existing installation and commits only changed configuration", async (t) => {
+  const { root, head } = await committedRepository(t);
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: { root, repository: "acme/widget", defaultBranch: "main", headSha: head, viewerLogin: "cory" },
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true
+    }
+  });
+  for (const file of initial.files) {
+    await mkdir(path.dirname(path.join(root, file.path)), { recursive: true });
+    await writeFile(path.join(root, file.path), file.contents);
+  }
+  await writeFile(path.join(root, ".github/codekeeper/agents/pr-reviewer.md"), `${initial.files.find((file) => file.path.endsWith("pr-reviewer.md")).contents}\nTeam preference: report API regressions first.\n`);
+  git(root, ["add", ".github"]);
+  git(root, ["commit", "-m", "install codekeeper"]);
+  const installedHead = git(root, ["rev-parse", "HEAD"]).trim();
+  const contents = {};
+  for (const file of initial.files) contents[file.path] = await readFile(path.join(root, file.path), "utf8");
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      root,
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: installedHead,
+      viewerLogin: "cory",
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: ["review", "maintain"],
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${installedHead.slice(0, 12)}`
+    },
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      models: { review: "luna-max", maintain: "sol-high" },
+      tracing: true,
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true,
+      capabilities: ["repair", "autoMerge"]
+    }
+  });
+  const commit = await createSetupCommit(update, { runner: isolatedCommandRunner(root) });
+  assert.match(commit, /^[0-9a-f]{40}$/);
+  assert.equal(git(root, ["branch", "--show-current"]).trim(), `codekeeper/update-${installedHead.slice(0, 12)}`);
+  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n"), [".github/codekeeper.json"]);
+  assert.match(await readFile(path.join(root, ".github/codekeeper/agents/pr-reviewer.md"), "utf8"), /Team preference/);
+  const policy = JSON.parse(await readFile(path.join(root, ".github/codekeeper.json"), "utf8"));
+  assert.equal(policy.ai.agents.review.model, "gpt-5.6-luna");
 });
 
 test("pre-push commit trust checks reject parent, inventory, and blob mismatches", async (t) => {

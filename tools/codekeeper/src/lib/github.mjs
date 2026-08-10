@@ -268,8 +268,8 @@ export class GitHubClient {
     return this.paginate(this.repoPath(`/issues/${number}/comments`));
   }
 
-  async listOpenPulls() {
-    return this.paginate(this.repoPath("/pulls?state=open&sort=updated&direction=desc"));
+  async listOpenPulls(limit = Number.POSITIVE_INFINITY) {
+    return this.paginate(this.repoPath("/pulls?state=open&sort=updated&direction=desc"), { limit });
   }
 
   async listMaintenanceIssues(label = "codekeeper:maintenance") {
@@ -360,6 +360,26 @@ export class GitHubClient {
         if (error.status !== 404) throw error;
       }
     }
+  }
+
+  async addLabels(number, labels) {
+    const unique = [...new Set(labels)];
+    if (unique.length === 0) return;
+    await this.request("POST", this.repoPath(`/issues/${number}/labels`), { body: { labels: unique } });
+  }
+
+  async removeLabel(number, label) {
+    try {
+      await this.request("DELETE", this.repoPath(`/issues/${number}/labels/${encodeURIComponent(label)}`));
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+
+  async createRepositoryDispatch(eventType, clientPayload) {
+    await this.request("POST", this.repoPath("/dispatches"), {
+      body: { event_type: eventType, client_payload: clientPayload }
+    });
   }
 
   async findOpenPullByHead(branch) {

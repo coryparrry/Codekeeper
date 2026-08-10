@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Readable, Writable } from "node:stream";
 import { loadVerifiedAssets } from "../src/assets.mjs";
 import { MODE_IDS, MODES, RECOMMENDED_MODES, RECOMMENDED_PRESET } from "../src/constants.mjs";
-import { collectSetupAnswers } from "../src/plan.mjs";
+import { collectAppAnswers, collectSetupAnswers } from "../src/plan.mjs";
 import { createTerminalPrompter } from "../src/prompts.mjs";
 import { HEAD_SHA, textSink } from "./helpers.mjs";
 
@@ -39,18 +39,22 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
     calls,
     async confirm(options) {
       calls.push({ method: "confirm", options });
-      if (options.message.startsWith("Install into")) return true;
+      if (options.message.startsWith("Install into") || options.message.startsWith("Edit Codekeeper in")) return true;
       if (options.message === "Use the recommended starter setup?") return recommended;
+      if (options.message === "Enable OpenAI traces?") return true;
+      if (options.message.startsWith("Start Codekeeper")) return true;
       if (options.message.startsWith("Continue with")) return boundaries;
       throw new Error(`Unexpected confirmation: ${options.message}`);
     },
     async multiselect(options) {
       calls.push({ method: "multiselect", options });
+      if (options.message.startsWith("Choose capabilities")) return options.defaultValues;
       return modes;
     },
     async select(options) {
       calls.push({ method: "select", options });
-      return preset;
+      if (options.message === "Choose the starting model set:") return preset;
+      return options.defaultValue;
     },
     async inputText(options) {
       calls.push({ method: "inputText", options });
@@ -100,30 +104,45 @@ test("typed workflow numbers select issue triage and issue fix instead of the de
   assert.match(transcript(), /Choose one or more comma-separated numbers \[1, 2\]:/);
 });
 
+test("terminal capability selection can explicitly leave every capability off", async () => {
+  const { prompt, transcript } = terminal("none\n");
+  const choices = [
+    { value: "repair", label: "Repository repair" },
+    { value: "autoMerge", label: "Automatic merge" }
+  ];
+  assert.deepEqual(await prompt.multiselect({
+    message: "Choose capabilities to turn on:",
+    choices,
+    defaultValues: ["repair", "autoMerge"],
+    allowEmpty: true
+  }), []);
+  assert.match(transcript(), /Enter none to leave every capability off/);
+});
+
 test("blank terminal custom preset selection accepts the first recommended OpenAI choice", async () => {
   const { prompt, transcript } = terminal("\n");
   const choices = [
-    { value: "openai", label: "openai — one OpenAI model-provider key plus a separate OpenAI trace key (recommended)" },
-    { value: "mixed", label: "mixed — provider keys vary by workflow, plus a separate OpenAI trace key" }
+    { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
+    { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
   ];
   assert.equal(await prompt.select({
-    message: "Choose the model-provider preset:",
+    message: "Choose the starting model set:",
     choices,
     defaultValue: "openai"
   }), "openai");
-  assert.match(transcript(), /1\. openai — one OpenAI model-provider key plus a separate OpenAI trace key.*recommended/);
-  assert.match(transcript(), /2\. mixed — provider keys vary by workflow, plus a separate OpenAI trace key/);
+  assert.match(transcript(), /1\. openai — use OpenAI for every selected workflow.*recommended/);
+  assert.match(transcript(), /2\. mixed — use DeepSeek for issue triage and OpenAI for other workflows/);
   assert.match(transcript(), /Choose one \[1\]:/);
 });
 
 test("typed preset number selects the non-default mixed preset", async () => {
   const { prompt, transcript } = terminal("2\n");
   const choices = [
-    { value: "openai", label: "openai — one OpenAI model-provider key plus a separate OpenAI trace key (recommended)" },
-    { value: "mixed", label: "mixed — provider keys vary by workflow, plus a separate OpenAI trace key" }
+    { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
+    { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
   ];
   assert.equal(await prompt.select({
-    message: "Choose the model-provider preset:",
+    message: "Choose the starting model set:",
     choices,
     defaultValue: "openai"
   }), "mixed");
@@ -139,8 +158,15 @@ test("recommended setup explains consequences and returns review plus maintenanc
   assert.deepEqual(answers, {
     modes: ["review", "maintain"],
     preset: "openai",
+    models: {
+      review: "sol-high",
+      maintain: "sol-high"
+    },
+    tracing: true,
     displayName: "widget",
-    ownerLogins: ["cory"]
+    ownerLogins: ["cory"],
+    enabled: true,
+    capabilities: ["repair", "autoMerge"]
   });
   assert.ok(Object.isFrozen(answers));
   assert.deepEqual(
@@ -148,17 +174,22 @@ test("recommended setup explains consequences and returns review plus maintenanc
     [
       { message: "Install into acme/widget on default branch main?", defaultValue: false },
       { message: "Use the recommended starter setup?", defaultValue: true },
-      { message: "Continue with these disabled-by-default boundaries?", defaultValue: false }
+      { message: "Enable OpenAI traces?", defaultValue: true },
+      { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
+      { message: "Continue with these safety settings?", defaultValue: false }
     ]
   );
-  assert.equal(prompt.calls.some((call) => call.method === "multiselect" || call.method === "select"), false);
+  const capabilityCall = prompt.calls.find((call) => call.method === "multiselect");
+  assert.equal(capabilityCall.options.message, "Choose capabilities to turn on:");
+  assert.deepEqual(capabilityCall.options.defaultValues, ["repair", "autoMerge"]);
   const transcript = output.toString();
   assert.match(transcript, /Pull request review:.*comments, labels, and a blocking result/);
   assert.match(transcript, /Repository maintenance:.*manual dry run that makes no GitHub changes/);
-  assert.match(transcript, /OpenAI preset: one model-provider key plus a separate OpenAI trace key/);
-  assert.match(transcript, /issue-event triage and the repair-PR workflow are omitted/);
-  assert.match(transcript, /Model and publication jobs remain disabled/);
-  assert.match(transcript, /Codekeeper review gate intentionally fails while disabled/);
+  assert.match(transcript, /OpenAI starting models: you can assign any supported provider and model to each role/);
+  assert.match(transcript, /Issue triage and issue fix are not included/);
+  assert.match(transcript, /Repository repair: on/);
+  assert.match(transcript, /Automatic merge: on/);
+  assert.match(transcript, /installer opens a setup pull request/);
   assert.match(transcript, /OPENAI_API_KEY:/);
   assert.match(transcript, /OPENAI_TRACE_API_KEY:/);
   assert.match(transcript, /CODEKEEPER_APP_PRIVATE_KEY:/);
@@ -174,8 +205,16 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
   assert.deepEqual(answers, {
     modes: ["issues", "fix"],
     preset: "mixed",
+    models: {
+      issues: "deepseek-v4-flash",
+      plan: "terra-high",
+      fix: "terra-high"
+    },
+    tracing: true,
     displayName: "widget",
-    ownerLogins: ["cory"]
+    ownerLogins: ["cory"],
+    enabled: true,
+    capabilities: ["issueImplementation", "duplicateClosure", "autoMerge"]
   });
   const modeCall = prompt.calls.find((call) => call.method === "multiselect");
   assert.equal(modeCall.options.message, "Choose workflows to generate:");
@@ -184,17 +223,129 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     value: mode,
     label: `${MODES[mode].label} — ${MODES[mode].description}`
   })));
-  const presetCall = prompt.calls.find((call) => call.method === "select");
+  const presetCall = prompt.calls.find((call) => call.method === "select" && call.options.message === "Choose the starting model set:");
   assert.deepEqual(presetCall.options, {
-    message: "Choose the model-provider preset:",
+    message: "Choose the starting model set:",
     defaultValue: RECOMMENDED_PRESET,
     choices: [
-      { value: "openai", label: "openai — one OpenAI model-provider key plus a separate OpenAI trace key (recommended)" },
-      { value: "mixed", label: "mixed — provider keys vary by workflow, plus a separate OpenAI trace key" }
+      { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
+      { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
     ]
   });
-  assert.match(output.toString(), /Issue triage reacts to issue events/);
-  assert.match(output.toString(), /issue fix is an advanced, separately gated mutation path/);
+  assert.match(output.toString(), /Issue triage responds to issue events/);
+  assert.match(output.toString(), /You choose issue implementation separately/);
   assert.match(output.toString(), /OPENAI_API_KEY:/);
   assert.match(output.toString(), /DEEPSEEK_API_KEY:/);
+});
+
+test("an existing installation reuses its workflows, identity, and settings", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = JSON.parse(bundle.contents["policies/openai.json"]);
+  policy.repository.displayName = "Existing Widget";
+  policy.repository.ownerLogins = ["alice", "cory"];
+  policy.audit.repair.enabled = true;
+  policy.merge.enabled = true;
+  const prompt = setupPrompt({ recommended: true });
+  const output = textSink();
+  const answers = await collectSetupAnswers({
+    prompt,
+    bundle,
+    output,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy,
+        policySource: `${JSON.stringify(policy, null, 2)}\n`,
+        modes: ["review", "maintain"],
+        contents: {}
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    }
+  });
+  assert.deepEqual(answers, {
+    modes: ["review", "maintain"],
+    preset: "openai",
+    models: { review: "sol-high", maintain: "sol-high" },
+    tracing: true,
+    displayName: "Existing Widget",
+    ownerLogins: ["alice", "cory"],
+    enabled: true,
+    capabilities: ["repair", "autoMerge"]
+  });
+  assert.equal(prompt.calls.some((call) => call.options.message === "Use the recommended starter setup?"), false);
+  assert.equal(prompt.calls.some((call) => call.options.message === "Choose workflows to generate:"), false);
+  assert.match(output.toString(), /current GitHub App settings and existing API keys stay unchanged/);
+  assert.doesNotMatch(output.toString(), /OPENAI_API_KEY:/);
+});
+
+test("enabling an existing installation explicitly describes immediate activation", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = JSON.parse(bundle.contents["policies/openai.json"]);
+  const prompt = setupPrompt({ recommended: true });
+  await collectSetupAnswers({
+    prompt,
+    bundle,
+    output: textSink(),
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy,
+        policySource: `${JSON.stringify(policy, null, 2)}\n`,
+        modes: ["review", "maintain"],
+        contents: {}
+      },
+      existingSettings: {
+        enabled: false,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    }
+  });
+  const startup = prompt.calls.find((call) => call.options.message.startsWith("Start Codekeeper"));
+  assert.equal(startup.options.message, "Start Codekeeper now?");
+  assert.ok(startup.options.description.some((line) => line.includes("current default-branch configuration")));
+});
+
+test("GitHub App identity asks for the App name in plain language", async () => {
+  const prompts = [];
+  const prompt = {
+    kind: "ink",
+    async inputText(options) {
+      prompts.push(options);
+      return options.message.includes("Client ID") ? "Iv123456789012345678" : "codekeeper-widget";
+    }
+  };
+  assert.deepEqual(await collectAppAnswers({ prompt, modes: ["review"], output: textSink() }), {
+    appClientId: "Iv123456789012345678",
+    automationBotLogin: "codekeeper-widget[bot]"
+  });
+  assert.equal(prompts[1].message, "GitHub App name from the settings URL");
+  assert.match(prompts[1].description.join("\n"), /settings URL/i);
+});
+
+test("fix-only issue implementation also collects the App bot identity", async () => {
+  const prompts = [];
+  const prompt = {
+    kind: "ink",
+    async inputText(options) {
+      prompts.push(options.message);
+      return options.message.includes("Client ID") ? "Iv123456789012345678" : "codekeeper-widget";
+    }
+  };
+  assert.deepEqual(await collectAppAnswers({
+    prompt,
+    modes: ["issues", "fix"],
+    capabilities: ["issueImplementation"],
+    output: textSink()
+  }), {
+    appClientId: "Iv123456789012345678",
+    automationBotLogin: "codekeeper-widget[bot]"
+  });
+  assert.ok(prompts.includes("GitHub App name from the settings URL"));
 });

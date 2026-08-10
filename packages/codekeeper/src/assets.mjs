@@ -91,6 +91,7 @@ function count(source, token) {
 }
 
 function assertDisabledPolicy(policy) {
+  if (policy?.review?.autoRepair !== false) throw new InstallerError("Bundled policy enables automatic review repair.", { code: "UNSAFE_POLICY" });
   if (policy?.audit?.repair?.enabled !== false) throw new InstallerError("Bundled policy enables repository repair.", { code: "UNSAFE_POLICY" });
   if (policy?.issues?.allowAiImplementation !== false) throw new InstallerError("Bundled policy enables AI issue implementation.", { code: "UNSAFE_POLICY" });
   if (policy?.issues?.closeExactDuplicates !== false) throw new InstallerError("Bundled policy enables automatic duplicate closure.", { code: "UNSAFE_POLICY" });
@@ -103,14 +104,29 @@ function assertDisabledPolicy(policy) {
   }
 }
 
-export function renderPolicy(policySource, { displayName, defaultBranch, ownerLogins }) {
+export function renderPolicy(policySource, {
+  displayName,
+  defaultBranch,
+  ownerLogins,
+  capabilities = {},
+  models = {},
+  tracing = true,
+  enforceBundledDefaults = true,
+  requiredPolicySource = policySource
+}) {
   let policy;
   try {
     policy = JSON.parse(policySource);
   } catch (cause) {
     throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
   }
-  assertDisabledPolicy(policy);
+  if (enforceBundledDefaults) assertDisabledPolicy(policy);
+  let requiredPolicy;
+  try {
+    requiredPolicy = JSON.parse(requiredPolicySource);
+  } catch (cause) {
+    throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
+  }
   if (!policy.repository || !policy.merge || !Array.isArray(policy.merge.allowedUserAuthors)) {
     throw new InstallerError("Bundled policy cannot be tailored safely.", { code: "ASSET_POLICY_INVALID" });
   }
@@ -118,7 +134,38 @@ export function renderPolicy(policySource, { displayName, defaultBranch, ownerLo
   policy.repository.defaultBranch = defaultBranch;
   policy.repository.ownerLogins = [...ownerLogins];
   policy.merge.allowedUserAuthors = [...ownerLogins];
-  assertDisabledPolicy(policy);
+  policy.labels ??= {};
+  for (const [name, definition] of Object.entries(requiredPolicy.labels ?? {})) {
+    if (!Object.hasOwn(policy.labels, name)) policy.labels[name] = structuredClone(definition);
+  }
+  policy.audit.repair.enabled = capabilities.repair === true;
+  policy.review.autoRepair = capabilities.reviewRepair === true;
+  policy.issues.allowAiImplementation = capabilities.issueImplementation === true;
+  policy.issues.closeExactDuplicates = capabilities.duplicateClosure === true;
+  policy.merge.enabled = capabilities.autoMerge === true;
+  policy.ai.tracing.enabled = tracing;
+  for (const [mode, selection] of Object.entries(models)) {
+    const agent = policy.ai.agents[MODES[mode]?.policyAgent ?? mode];
+    if (!agent) throw new InstallerError(`The ${mode} workflow has no model configuration.`, { code: "PLAN_INVALID" });
+    agent.provider = selection.provider;
+    agent.model = selection.model;
+    agent.effort = selection.effort;
+    agent.modelSettings = selection.provider === "openai"
+      ? { text: { verbosity: "low" } }
+      : { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } };
+    if (agent.workspace) {
+      agent.workspace.enabled = selection.provider === "openai" && mode !== "issues" && mode !== "plan";
+      agent.workspace.allowWrites = agent.workspace.enabled && (mode === "maintain" || mode === "fix");
+      agent.workspace.model = selection.model;
+      agent.workspace.effort = selection.effort;
+    }
+  }
+  if (!Array.isArray(policy.audit.repair.protectedPaths) || !policy.audit.repair.protectedPaths.length) {
+    throw new InstallerError("Rendered policy has no protected paths.", { code: "UNSAFE_POLICY" });
+  }
+  if (!policy.audit.repair.validationCommands.includes("git diff --check")) {
+    throw new InstallerError("Rendered policy does not require git diff --check.", { code: "UNSAFE_POLICY" });
+  }
   return `${JSON.stringify(policy, null, 2)}\n`;
 }
 
@@ -138,7 +185,7 @@ function assertPinnedWorkflow(source, sourceRepository, sourceCommit) {
   }
 }
 
-export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, preset }) {
+export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, plannerProvider, preset }) {
   if (!MODE_IDS.includes(mode)) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   if (count(template, "OWNER/REPOSITORY") !== 3 || count(template, "FULL_COMMIT_SHA") !== 3) {
     throw new InstallerError(`Bundled ${mode} workflow has unexpected placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
@@ -152,15 +199,19 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
     .replaceAll("OWNER/REPOSITORY", sourceRepository)
     .replaceAll("FULL_COMMIT_SHA", sourceCommit);
 
-  if (mode === "issues" && preset === "openai") {
-    const modelKey = "model_api_key: ${{ secrets.DEEPSEEK_API_KEY }}";
-    const traceComment = "# Traces still export to OpenAI, so this must not be the DeepSeek key.";
-    if (count(rendered, modelKey) !== 1 || count(rendered, traceComment) !== 1) {
-      throw new InstallerError("Bundled issue workflow cannot be routed to OpenAI safely.", { code: "WORKFLOW_RENDER_INVALID" });
-    }
-    rendered = rendered
-      .replace(modelKey, "model_api_key: ${{ secrets.OPENAI_API_KEY }}")
-      .replace(traceComment, "# Always a separate OpenAI trace-export key, never the model-provider key.");
+  const resolvedProvider = provider ?? (mode === "issues" && preset === "mixed" ? "deepseek" : "openai");
+  const desiredSecret = resolvedProvider === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY";
+  const modelSecretPattern = /model_api_key: \$\{\{ secrets\.(?:OPENAI|DEEPSEEK)_API_KEY \}\}/;
+  if (!modelSecretPattern.test(rendered)) {
+    throw new InstallerError(`Bundled ${mode} workflow has no model API key placeholder.`, { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  rendered = rendered.replace(modelSecretPattern, `model_api_key: \${{ secrets.${desiredSecret} }}`);
+  if (mode === "fix") {
+    const plannerSecret = plannerProvider === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY";
+    rendered = rendered.replace(
+      /planner_model_api_key: \$\{\{ secrets\.(?:OPENAI|DEEPSEEK)_API_KEY \}\}/,
+      `planner_model_api_key: \${{ secrets.${plannerSecret} }}`
+    );
   }
 
   if (rendered.includes("OWNER/REPOSITORY") || rendered.includes("FULL_COMMIT_SHA")) {
@@ -170,22 +221,50 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
   return rendered;
 }
 
-export function renderInstallFiles(bundle, { modes, preset, displayName, defaultBranch, ownerLogins }) {
+export function renderInstallFiles(bundle, {
+  modes,
+  preset,
+  displayName,
+  defaultBranch,
+  ownerLogins,
+  capabilities = {},
+  models = {},
+  tracing = true,
+  policySource = bundle.contents[`policies/${preset}.json`],
+  profileSources = bundle.contents,
+  enforceBundledDefaults = true
+}) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
   const rendered = [{
     path: POLICY_TARGET,
-    contents: renderPolicy(bundle.contents[`policies/${preset}.json`], { displayName, defaultBranch, ownerLogins })
+    contents: renderPolicy(policySource, {
+      displayName,
+      defaultBranch,
+      ownerLogins,
+      capabilities,
+      models,
+      tracing,
+      enforceBundledDefaults,
+      requiredPolicySource: bundle.contents[`policies/${preset}.json`]
+    })
   }];
   for (const profile of AGENT_PROFILE_IDS) {
     rendered.push({
       path: AGENT_PROFILES[profile].target,
-      contents: bundle.contents[AGENT_PROFILES[profile].asset]
+      contents: profileSources[AGENT_PROFILES[profile].target] ?? profileSources[AGENT_PROFILES[profile].asset]
     });
   }
   for (const mode of modes) {
     rendered.push({
       path: MODES[mode].target,
-      contents: renderWorkflow(bundle.contents[MODES[mode].asset], { sourceRepository, sourceCommit, mode, preset })
+      contents: renderWorkflow(bundle.contents[MODES[mode].asset], {
+        sourceRepository,
+        sourceCommit,
+        mode,
+        provider: models[mode]?.provider,
+        plannerProvider: mode === "fix" ? models.plan?.provider : undefined,
+        preset
+      })
     });
   }
   return rendered.map((file) => deepFreeze({

@@ -41,6 +41,9 @@ export function renderReviewComment(result, autoMerge, runUrl = "") {
   const decision = autoMerge.eligible
     ? "Eligible for policy-controlled auto-merge."
     : `Manual boundary retained: ${autoMerge.reasons.join("; ") || "policy did not allow auto-merge"}.`;
+  const diagram = result.diagram
+    ? `\n\n### Change flow\n\n\`\`\`mermaid\n${result.diagram.trim()}\n\`\`\``
+    : "";
   return `## PR review summary
 
 ${safeMarkdown(result.summary)}
@@ -62,7 +65,7 @@ ${findingList(result.nonBlockingFindings)}
 
 ### Test assessment
 
-${safeMarkdown(result.tests.notes || "No additional test note.")}
+${safeMarkdown(result.tests.notes || "No additional test note.")}${diagram}
 
 <sub>Generated from the exact PR head analysed by the repository maintainer. Blocking findings fail the required Codekeeper review gate; GitHub branch protection remains authoritative.</sub>${workflowRunEvidence(runUrl)}`;
 }
@@ -74,6 +77,9 @@ export function renderIssueTriage(result, runUrl = "") {
   const duplicate = result.duplicateOf
     ? `Possible duplicate: #${result.duplicateOf} (${result.duplicateConfidence} confidence).`
     : "No duplicate identified.";
+  const decision = result.decision?.required
+    ? `\n\n### Maintainer decision\n\n**Question:** ${safeMarkdown(result.decision.question)}\n\n${safeMarkdown(result.decision.rationale)}\n\n${result.decision.options.map((option) => `- ${option.recommended ? "**Recommended:** " : ""}**${safeMarkdown(option.label)}** — ${safeMarkdown(option.description)}`).join("\n")}`
+    : "";
   return `## Codekeeper triage
 
 ${safeMarkdown(result.comment)}
@@ -88,7 +94,7 @@ ${safeMarkdown(result.comment)}
 
 ### Missing information
 
-${missing}${workflowRunEvidence(runUrl)}`;
+${missing}${decision}${workflowRunEvidence(runUrl)}`;
 }
 
 export function renderMaintenanceIssue(finding, fingerprint, runUrl = "") {

@@ -8,7 +8,7 @@ import { loadVerifiedAssets } from "../src/assets.mjs";
 import { runCli } from "../src/cli.mjs";
 import { STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
 import { buildInstallPlan, collectAppAnswers, collectSetupAnswers, completionGuidance } from "../src/plan.mjs";
-import { defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
+import { createPrivateKeyPickerController, defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
 import {
   DEFAULT_PROGRESS_STEPS,
   containsPrivateKeyPemEnvelope,
@@ -163,10 +163,10 @@ function semanticText(frame) {
 }
 
 async function assertPagedScreenFits(tui, { kind, columns, rows, markers }) {
-  const title = kind === "review" ? "Review the disabled setup" : "Setup complete";
+  const title = kind === "review" ? "Review the setup" : "Setup complete";
   const firstPattern = kind === "review"
-    ? /Review the disabled setup · 1 of \d+/
-    : /(?:Your disabled setup pull request is ready|Setup complete · 1 of \d+)/;
+    ? /Review the setup · 1 of \d+/
+    : /Setup complete(?: · 1 of \d+)?/;
   let first;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     await tui.flush();
@@ -311,7 +311,7 @@ test("private-key picker starts safely and exposes only opaque metadata", async 
   assert.equal(await defaultPrivateKeyDirectory({ fsImpl, homeDirectory: home }), downloads);
   const listing = await listPrivateKeyChoices(downloads, { fsImpl });
   const visible = listing.choices.map((choice) => choice.label);
-  assert.ok(visible.includes("nested"));
+  assert.equal(visible.includes("nested"), false);
   assert.ok(visible.includes("good-key.pem"));
   assert.equal(visible.includes("empty.pem"), false);
   assert.equal(visible.includes("oversized.pem"), false);
@@ -319,10 +319,31 @@ test("private-key picker starts safely and exposes only opaque metadata", async 
   assert.equal(visible.includes("unsafe\n.pem"), false);
   if (process.platform !== "win32") assert.equal(visible.includes("linked.pem"), false);
   assert.equal(reads, 0);
+  assert.ok(listing.choices.every((choice) => choice.type === "file"));
   const publicListing = JSON.stringify({ folderLabel: listing.folderLabel, choices: listing.choices });
   assert.doesNotMatch(publicListing, new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.ok(listing.choices.every((choice) => !Object.hasOwn(choice, "path") && !Object.hasOwn(choice, "target")));
   assert.equal(listing.targets.get(listing.choices.find((choice) => choice.label === "good-key.pem").id), good);
+});
+
+test("Ink provider credential stays inside the guided flow and submits pasted input with Enter", async (t) => {
+  const tui = await createTuiHarness(t);
+  const chunks = [];
+  const submitted = tui.prompt.inputSecret({
+    step: "credential",
+    name: "OPENAI_API_KEY",
+    purpose: "OpenAI model calls",
+    write(chunk) {
+      chunks.push(chunk);
+    }
+  });
+  await tui.waitForText("OPENAI_API_KEY");
+  await tui.send("\u001b[200~sk-test-provider-value\u001b[201~");
+  assert.doesNotMatch(tui.output.transcript(), /sk-test-provider-value/);
+  await tui.send("\r");
+  await submitted;
+  assert.deepEqual(chunks, ["sk-test-provider-value"]);
+  assert.match(tui.output.transcript(), /Key received/);
 });
 
 test("private-key start folder falls back to home and rejects symlinked directories", async (t) => {
@@ -363,7 +384,7 @@ test("private-key start folder falls back when Downloads metadata is safe but li
   assert.deepEqual(reads, [downloads, home]);
 });
 
-test("denied child navigation retains the prior picker listing and Back still recovers", async (t) => {
+test("private-key picker hides directories that it does not need", async (t) => {
   const home = "/virtual/codekeeper-home";
   const downloads = path.join(home, "Downloads");
   const denied = path.join(downloads, "denied");
@@ -385,19 +406,43 @@ test("denied child navigation retains the prior picker listing and Back still re
   };
   const tui = await createTuiHarness(t, { fsImpl, homeDirectory: home });
   const selection = tui.prompt.selectPrivateKey();
-  const cancellation = assert.rejects(selection, (error) => error.code === "PROMPT_ABORTED");
   await tui.waitForText("recovery-key.pem");
-  await tui.send("j");
+  assert.doesNotMatch(tui.output.lastSemanticFrame(), /denied/);
+  await tui.send("\u001b[B");
   await tui.send("\r");
-  await tui.waitForText("That item could not be opened safely");
-  assert.match(tui.output.lastSemanticFrame(), /Folder: Downloads/);
-  assert.match(tui.output.lastSemanticFrame(), /recovery-key\.pem/);
-  await tui.send("\u001b[D");
-  await tui.waitForText("Folder: codekeeper-home");
-  await tui.send("\u001b");
-  await cancellation;
+  assert.equal(await selection, keyPath);
   const observable = tui.output.transcript();
   assert.doesNotMatch(observable, new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("private-key picker navigates safely to a key outside Downloads", async () => {
+  const home = "/virtual/codekeeper-home";
+  const downloads = path.join(home, "Downloads");
+  const desktop = path.join(home, "Desktop");
+  const keyPath = path.join(desktop, "github-app.pem");
+  const fsImpl = {
+    async lstat(target) {
+      if ([home, downloads, desktop].includes(target)) return fakeStat("directory");
+      if (target === keyPath) return fakeStat("file", 1024);
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    async readdir(target) {
+      if (target === downloads) return [];
+      if (target === home) return [fakeDirent("Downloads", "directory"), fakeDirent("Desktop", "directory")];
+      if (target === desktop) return [fakeDirent("github-app.pem", "file")];
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    }
+  };
+  const picker = await createPrivateKeyPickerController({ fsImpl, homeDirectory: home });
+  const downloadsListing = await picker.list();
+  const parent = downloadsListing.choices.find((choice) => choice.type === "parent");
+  assert.ok(parent);
+  const homeListing = await picker.activate(parent.id);
+  const desktopChoice = homeListing.listing.choices.find((choice) => choice.label === "Desktop");
+  assert.equal(desktopChoice.type, "directory");
+  const desktopListing = await picker.activate(desktopChoice.id);
+  const keyChoice = desktopListing.listing.choices.find((choice) => choice.label === "github-app.pem");
+  assert.deepEqual(await picker.activate(keyChoice.id), { selected: true, value: keyPath });
 });
 
 test("progress preserves stage order and always resumes after terminal handoff", async () => {
@@ -554,6 +599,17 @@ test("Ink controls support arrows, j/k, checkboxes, text editing, Escape, and Ct
   await tui.send("\r");
   assert.deepEqual(await modes, ["maintain", "issues"]);
 
+  const capabilities = tui.prompt.multiselect({
+    message: "Choose capabilities",
+    choices: [{ value: "repair", label: "Repair" }],
+    defaultValues: ["repair"],
+    allowEmpty: true
+  });
+  await tui.waitForText("Choose capabilities");
+  await tui.send(" ");
+  await tui.send("\r");
+  assert.deepEqual(await capabilities, []);
+
   const text = tui.prompt.inputText({ message: "Display name", validate: () => true });
   await tui.waitForText("Display name");
   await tui.send("ab");
@@ -591,23 +647,44 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.send("\r");
     await tui.waitForText("Choose a starting setup");
     assertNamedPhase(tui, "setup");
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /one OpenAI model-provider key plus a separate OpenAI trace key/);
+    assert.match(semanticText(tui.output.lastSemanticFrame()), /OpenAI models/);
     await tui.send("\r");
-    await tui.waitForText("Human-readable name");
+    await tui.waitForText("Assign a model to the Pull request reviewer");
+    assertNamedPhase(tui, "models");
+    await tui.send("j");
+    await tui.send("\r");
+    await tui.waitForText("Assign a model to the Repository auditor");
+    await tui.send("\r");
+    await tui.waitForText("Enable OpenAI traces");
+    assertNamedPhase(tui, "tracing");
+    await tui.send("\r");
+    await tui.waitForText("Start Codekeeper after the setup pull request merges");
+    assertNamedPhase(tui, "startup");
+    await tui.send("\r");
+    await tui.waitForText("Choose capabilities to turn on");
+    assertNamedPhase(tui, "capabilities");
+    assert.match(tui.output.lastSemanticFrame(), /Repository repair/);
+    assert.match(tui.output.lastSemanticFrame(), /Automatic merge/);
+    await tui.send("\r");
+    await tui.waitForText("Name to show in Codekeeper comments");
     assertNamedPhase(tui, "identity");
     await tui.send("\r");
-    await tui.waitForText("GitHub users allowed");
+    await tui.waitForText("GitHub users who can run");
     assertNamedPhase(tui, "identity");
     await tui.send("\r");
-    await tui.waitForText("Continue with these disabled-by-default boundaries");
+    await tui.waitForText("Continue with these safety settings");
     assertNamedPhase(tui, "safety");
     await tui.send("y");
     await tui.send("\r");
     assert.deepEqual(await answers, {
       modes: ["review", "maintain"],
       preset: "openai",
+      models: { review: "terra-high", maintain: "sol-high" },
+      tracing: true,
       displayName: "widget",
-      ownerLogins: ["cory"]
+      ownerLogins: ["cory"],
+      enabled: true,
+      capabilities: ["repair", "autoMerge"]
     });
   });
 
@@ -632,36 +709,56 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.send("j");
     await tui.send(" ");
     await tui.send("\r");
-    await tui.waitForText("Choose the model-provider preset");
+    await tui.waitForText("Choose the starting model set");
     assertNamedPhase(tui, "models");
-    assert.match(tui.output.lastSemanticFrame(), /Models remain quick edits in/);
-    assert.match(tui.output.lastSemanticFrame(), /\.github\/codekeeper\.json/);
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /one OpenAI model-provider key plus a separate OpenAI trace key/);
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /provider keys vary by workflow, plus a separate OpenAI trace key/);
+    assert.match(tui.output.lastSemanticFrame(), /change every role on the next screens/);
+    assert.match(semanticText(tui.output.lastSemanticFrame()), /use OpenAI for every selected workflow/);
+    assert.match(semanticText(tui.output.lastSemanticFrame()), /use DeepSeek for issue triage/);
     await tui.send("j");
     await tui.send("\r");
-    await tui.waitForText("Human-readable name");
+    await tui.waitForText("Assign a model to the Issue triager");
+    await tui.send("\r");
+    await tui.waitForText("Assign a model to the Maintenance planner");
+    await tui.send("\r");
+    await tui.waitForText("Assign a model to the Fixer");
+    await tui.send("\r");
+    await tui.waitForText("Enable OpenAI traces");
+    await tui.send("\r");
+    await tui.waitForText("Start Codekeeper after the setup pull request merges");
+    assertNamedPhase(tui, "startup");
+    await tui.send("\r");
+    await tui.waitForText("Choose capabilities to turn on");
+    assertNamedPhase(tui, "capabilities");
+    assert.match(tui.output.lastSemanticFrame(), /Issue implementation/);
+    assert.match(tui.output.lastSemanticFrame(), /Automatic duplicate closure/);
+    assert.match(tui.output.lastSemanticFrame(), /Automatic merge/);
+    await tui.send("\r");
+    await tui.waitForText("Name to show in Codekeeper comments");
     assertNamedPhase(tui, "identity");
     await tui.send("Custom");
     await tui.send("\r");
-    await tui.waitForText("GitHub users allowed");
+    await tui.waitForText("GitHub users who can run");
     assertNamedPhase(tui, "identity");
     await tui.send("alice");
     await tui.send("\r");
-    await tui.waitForText("Continue with these disabled-by-default boundaries");
+    await tui.waitForText("Continue with these safety settings");
     assertNamedPhase(tui, "safety");
     await tui.send("y");
     await tui.send("\r");
     assert.deepEqual(await answers, {
       modes: ["issues", "fix"],
       preset: "mixed",
+      models: { issues: "deepseek-v4-flash", plan: "terra-high", fix: "terra-high" },
+      tracing: true,
       displayName: "Custom",
-      ownerLogins: ["alice"]
+      ownerLogins: ["alice"],
+      enabled: true,
+      capabilities: ["issueImplementation", "duplicateClosure", "autoMerge"]
     });
   });
 });
 
-test("GitHub App TUI explains and derives the bot login from Client ID plus App slug", async (t) => {
+test("GitHub App TUI explains the App name and derives the bot login", async (t) => {
   const tui = await createTuiHarness(t);
   const answers = collectAppAnswers({ prompt: tui.prompt, modes: ["review"], output: tui.prompt.notices });
   await tui.waitForText("GitHub App Client ID");
@@ -674,10 +771,10 @@ test("GitHub App TUI explains and derives the bot login from Client ID plus App 
   await tui.send("\u0015");
   await tui.send("Iv123456789012345678");
   await tui.send("\r");
-  await tui.waitForText("GitHub App slug");
+  await tui.waitForText("GitHub App name from the settings URL");
   assertNamedPhase(tui, "GitHub App");
-  assert.match(tui.output.lastSemanticFrame(), /github\.com\/settings\/apps\/<app-slug>/);
-  assert.match(tui.output.lastSemanticFrame(), /derives the publication login as <app-slug>\[bot\]/);
+  assert.match(tui.output.lastSemanticFrame(), /settings URL/);
+  assert.match(tui.output.lastSemanticFrame(), /my-codekeeper-app\[bot\]/);
   await tui.send("codekeeper-widget");
   await tui.send("\r");
   assert.deepEqual(await answers, {
@@ -702,29 +799,84 @@ test("final review supports paged Back navigation and requires explicit creation
   });
   const tui = await createTuiHarness(t);
   const approved = tui.prompt.reviewInstallPlan(plan);
-  await tui.waitForText("Review the disabled setup · 1 of 3");
+  await tui.waitForText("Review the setup · 1 of 3");
   assertNamedPhase(tui, "final review");
-  assert.match(tui.output.lastSemanticFrame(), /Nothing has changed yet/);
+  assert.match(tui.output.lastSemanticFrame(), /Nothing has changed/);
   await tui.send("\r");
-  await tui.waitForText("Review the disabled setup · 2 of 3");
+  await tui.waitForText("Review the setup · 2 of 3");
   await tui.send("\r");
-  await tui.waitForText("Review the disabled setup · 3 of 3");
+  await tui.waitForText("Review the setup · 3 of 3");
   await tui.send("\u007f");
-  await tui.waitForText("Review the disabled setup · 2 of 3");
+  await tui.waitForText("Review the setup · 2 of 3");
   await tui.send("\u001b[C");
-  await tui.waitForText("Review the disabled setup · 3 of 3");
+  await tui.waitForText("Review the setup · 3 of 3");
   await tui.send("\u001b[D");
   await tui.send("\r");
   assert.equal(await approved, true);
 
   const cancelled = tui.prompt.reviewInstallPlan(plan);
   const cancellation = assert.rejects(cancelled, (error) => error.code === "PROMPT_ABORTED");
-  await tui.waitForText("Review the disabled setup · 1 of 3");
+  await tui.waitForText("Review the setup · 1 of 3");
   await tui.send("\u001b");
   await cancellation;
 });
 
-test("Ink completion renders the canonical proof instructions and review warning for selected modes", async (t) => {
+test("settings-only updates can be reviewed without a changed policy file", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: repositorySnapshot(),
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true,
+      capabilities: ["repair", "autoMerge"]
+    }
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...repositorySnapshot(),
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: ["review", "maintain"],
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: false,
+      capabilities: ["repair", "autoMerge"]
+    }
+  });
+  assert.equal(plan.settingsOnly, true);
+  assert.deepEqual(plan.files, []);
+  const tui = await createTuiHarness(t);
+  const review = tui.prompt.reviewInstallPlan(plan);
+  const cancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
+  await tui.waitForText("Review the setup");
+  await tui.send("\u001b");
+  await cancellation;
+});
+
+test("Ink completion shows every completed step on one screen", async (t) => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
     bundle,
@@ -743,20 +895,14 @@ test("Ink completion renders the canonical proof instructions and review warning
     commit: "c".repeat(40),
     pullRequestUrl: "https://github.com/acme/widget/pull/42"
   };
-  const guidance = completionGuidance(plan.modes);
   const tui = await createTuiHarness(t);
   const completion = tui.prompt.showCompletion(plan, receipt);
-  await tui.waitForText("Your disabled setup pull request is ready");
+  await tui.waitForText("Setup complete");
   assertNamedPhase(tui, "complete");
-  const normalized = (value) => value.replace(/\s+/g, " ").trim();
   const rendered = semanticText(tui.output.lastSemanticFrame());
-  assert.ok(rendered.includes(normalized(guidance.heading)), `missing completion heading: ${rendered}`);
-  assert.ok(rendered.includes(normalized(guidance.profileGuidance)), `missing profile guidance: ${rendered}`);
-  for (const proof of guidance.proofs) {
-    assert.ok(rendered.includes(normalized(`- ${proof.mode}: ${proof.instruction}`)), `missing ${proof.mode} proof`);
-  }
-  assert.ok(rendered.includes(normalized(guidance.reviewGateWarning)));
-  assert.ok(rendered.includes(normalized(guidance.closing)));
+  for (const step of DEFAULT_PROGRESS_STEPS) assert.match(rendered, new RegExp(`✓ ${step.label}`));
+  assert.match(rendered, /OpenAI traces: enabled/);
+  assert.doesNotMatch(rendered, /Setup complete · \d+ of \d+/);
   await tui.send("\r");
   assert.equal(await completion, true);
 });
@@ -782,15 +928,21 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     ["Policy and caller documents", ".github/codekeeper.json"],
     ["Editable agent profiles"],
     ["Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
-    ["Safety", "CODEKEEPER_ENABLED remains false"],
+    ["Settings", "Codekeeper starts after merge"],
+    ["Fixed boundaries"],
     [guidance.reviewGateWarning, "Create setup", "› Cancel"]
   ];
-  const completionMarkers = [
-    ["Policy and caller documents", ".github/codekeeper.json"],
-    ["Editable agent profiles"],
-    ["Next proofs", ...guidance.proofs.map((proof) => `- ${proof.mode}: ${proof.instruction}`)],
-    [guidance.profileGuidance, guidance.reviewGateWarning, guidance.closing]
-  ];
+  const completionMarkers = [[
+    "✓ Recheck the confirmed repository",
+    "✓ Set the startup choice",
+    "✓ Store API keys",
+    "✓ Store the GitHub App key safely",
+    "✓ Set non-secret repository variables",
+    "✓ Create and verify the setup commit",
+    "✓ Push the setup branch",
+    "✓ Open the setup pull request",
+    "Codekeeper starts after merge"
+  ]];
   for (const dimensions of [
     { columns: 40, rows: 24 },
     { columns: 40, rows: 29 },
@@ -829,7 +981,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
       markers: [
         ["Workflows", "Models (editable", "gpt-5.6"],
         ["Document map", ".github/codekeeper/agents/pr-reviewer.md", "Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
-        ["Safety", guidance.reviewGateWarning, "Create setup", "› Cancel"]
+        ["Settings", guidance.reviewGateWarning, "Create setup", "› Cancel"]
       ],
       ...dimensions
     });
@@ -843,15 +995,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     });
     await assertPagedScreenFits(tui, {
       kind: "completion",
-      markers: [[
-        "Document map",
-        ".github/codekeeper/agents/maintenance-planner.md",
-        guidance.profileGuidance,
-        "Next proofs",
-        ...guidance.proofs.map((proof) => `- ${proof.mode}: ${proof.instruction}`),
-        guidance.reviewGateWarning,
-        guidance.closing
-      ]],
+      markers: [[...completionMarkers[0], "OpenAI traces: enabled", guidance.reviewGateWarning, guidance.closing]],
       ...dimensions
     });
     assertFrameFits(tui.output.lastSemanticFrame(), dimensions);
@@ -860,7 +1004,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
   });
 });
 
-test("private-key TUI supports folder back navigation while redacting path and bytes", async (t) => {
+test("private-key TUI shows safe folders and keys while redacting paths and bytes", async (t) => {
   const home = await temporaryDirectory(t, "codekeeper-picker-secret-path-");
   const downloads = path.join(home, "Downloads");
   const nested = path.join(downloads, "nested");
@@ -873,20 +1017,16 @@ test("private-key TUI supports folder back navigation while redacting path and b
   const selection = tui.prompt.selectPrivateKey();
   await tui.waitForText("visible-key-name.pem");
   assertNamedPhase(tui, "private key");
-  assert.match(tui.output.lastSemanticFrame(), /Folder: Downloads/);
+  assert.match(tui.output.lastSemanticFrame(), /Keys in Downloads/);
   assert.doesNotMatch(tui.output.transcript(), new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(tui.output.transcript(), new RegExp(keyBytes));
   assert.doesNotMatch(tui.output.transcript(), /hidden-link\.pem/);
 
-  await tui.send("j");
-  await tui.send("\r");
-  await tui.waitForText("Folder: nested");
-  await tui.send("\u001b[D");
-  await tui.waitForText("Folder: Downloads");
+  assert.match(tui.output.lastSemanticFrame(), /nested/);
   await tui.send("\u001b[200~pasted-private-key-canary\u001b[201~");
   assert.doesNotMatch(tui.output.transcript(), /pasted-private-key-canary/);
-  await tui.send("j");
-  await tui.send("j");
+  await tui.send("\u001b[B");
+  await tui.send("\u001b[B");
   await tui.send("\r");
   assert.equal(await selection, keyPath);
   await tui.flush();
@@ -938,9 +1078,9 @@ test("NO_COLOR and narrow terminals retain visible selection semantics without o
   });
   const review = tui.prompt.reviewInstallPlan(plan);
   const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  for (let page = 1; page <= 7; page += 1) {
-    await tui.waitForText(`Review the disabled setup · ${page} of 7`);
-    if (page < 7) await tui.send("\r");
+  for (let page = 1; page <= 8; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 8`);
+    if (page < 8) await tui.send("\r");
   }
   assert.match(tui.output.lastSemanticFrame(), /› Cancel/);
   await tui.send("\u001b[D");

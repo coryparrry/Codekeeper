@@ -58,16 +58,16 @@ This proves only the source archive. It does not prove that a GitHub release has
 
 The repository workflow runs the maintainer suite, the installer suite on the pinned Node 22 and 24 LTS releases, the offline acceptance-harness suite, Actionlint, and YAML parsing for every tracked-file pull request and push.
 
-The tests cover provider selection, trusted default-branch profile loading, fixed paths, byte freezing, profile provenance and drift rejection, separate tracing credentials, contract-invalid agent retry, bounded automatic issue triage plus configured-owner manual triage and exact fix authorization, policy and label ownership, report-only scheduled maintenance, per-run maintenance repair authorization, bounded prompt context, artifact sealing, patch limits, fresh-checkout verification, current PR identity, App-owned markers, same-PR non-force updates without a create-pull-request fallback, auto-merge eligibility, reusable-workflow contracts, and source-release manifest integrity. Regenerate and verify `MANIFEST.sha256` when release files change.
+The tests cover provider selection, trusted default-branch profile loading, fixed paths, byte freezing, profile provenance and drift rejection, separate tracing credentials, contract-invalid agent retry, bounded automatic issue triage and issue implementation, configured-owner commands, policy and label ownership, live maintenance repair, dry runs, bounded prompt context, artifact sealing, patch limits, fresh-checkout verification, current PR identity, App-owned markers, same-PR non-force updates without a create-pull-request fallback, auto-merge eligibility, reusable-workflow contracts, and source-release manifest integrity. Regenerate and verify `MANIFEST.sha256` when release files change.
 
 These local checks do not prove an adopter installation. Before enabling writes, confirm the installer metadata pins the final source checkpoint that implements adopter-owned profiles and same-PR repair; an older embedded pin does not acquire those behaviors from a newer tarball. Then prove the following in a private disposable adopter repository:
 
-1. Install all four `.github/codekeeper/agents/*.md` files, merge them to the default branch, and run maintenance with `dry_run=true` and `repair_authorized=false`.
-2. With `audit.repair.enabled=true`, show that a schedule and an ordinary manual run remain report-only. Separately authorize one configured-owner manual run with `repair_authorized=true`; verify only the allowed patch can reach publication.
+1. Install all four `.github/codekeeper/agents/*.md` files, merge them to the default branch, and run maintenance with `dry_run=true`.
+2. With `audit.repair.enabled=true`, run live maintenance and verify that only one allowed, validated patch can reach publication.
 3. Edit one agent profile through a normal pull request. Show that the unmerged branch does not affect a run, then show that a later run records and uses the merged default-branch profile digest.
 4. Open a controlled same-repository pull request targeting the default branch. Confirm the review caller is evaluated from its default-branch `pull_request_target` definition and never checks out or executes PR code.
 5. Post a comment whose complete body is `/codekeeper fix` as a configured owner. Verify the App advances the existing pull request's head with a non-force commit, does not open another pull request, and refuses a stale or moved head.
-6. Open a separate controlled issue. Verify triage alone cannot start a repair, then use the same exact owner command and confirm the issue path creates at most one bounded, unmerged repair pull request.
+6. Open a separate controlled issue. Verify trusted triage marks it ready and automatically starts at most one bounded, unmerged repair pull request when issue implementation is on.
 
 Record workflow-run, issue, pull-request, review, and App-owned commit URLs as evidence. Restore `CODEKEEPER_ENABLED=false` after proof. Forks, merge queues, non-default PR targets, and GitHub Enterprise Server are outside the supported surface.
 
