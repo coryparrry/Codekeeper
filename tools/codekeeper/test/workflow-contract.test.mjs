@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "dbc7de18f7d6b6b9b795faf632eb70b72877e44bebd922cae05b8f741de7c581";
+const toolingManifestSha256 = "7d5e1b0d5b46d9d9034d6cdf3677890414144e3ab354a928d1dd804c192a36e1";
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -316,6 +316,11 @@ test("maintenance repair requires a frozen configured-owner authorization on eac
   assert.match(workspace, /--actor "\$GITHUB_ACTOR"/);
   assert.match(workspace, /--repair-authorized "\$REPAIR_AUTHORIZED"/);
   assert.match(workspace, /--mutation-authorized "\$REPAIR_AUTHORIZED"/);
+  assert.equal(
+    [...source.matchAll(/REPAIR_AUTHORIZED: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.repair_authorized \|\| false \}\}/g)].length,
+    3,
+    "the reusable workflow must deny repair authorization to every non-manual caller"
+  );
   assert.match(caller, /repair_authorized:\n\s+description:[^\n]*\n\s+required: true\n\s+type: boolean\n\s+default: false/);
   assert.match(caller, /repair_authorized: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.repair_authorized \|\| false \}\}/);
 });

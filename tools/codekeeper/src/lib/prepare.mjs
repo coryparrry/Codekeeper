@@ -4,6 +4,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-prof
 import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
+import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
 import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
 import { assertRunnerOwnedDirectory, runUrl } from "./workspace.mjs";
@@ -248,19 +249,9 @@ export async function prepareFix({ targetNumber, actor, directory, config, token
     };
     baseSha = target.headSha;
     subject = {
-      pullRequest: {
-        number: targetNumber,
-        title: boundedText(pull.title, 512, "…"),
-        body: boundedText(pull.body, 30000),
-        author: boundedText(pull.user?.login, 256, "…"),
-        url: boundedText(pull.html_url, 2048, "…"),
-        comments: comments.slice(-20).map((comment) => ({
-          author: boundedText(comment.user?.login, 256, "…"),
-          body: boundedText(comment.body, 12000),
-          createdAt: comment.created_at ?? ""
-        }))
-      }
+      pullRequest: frozenPullRepairSubject(pull, comments)
     };
+    target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments);
   } else {
     if (!config.issues.allowAiImplementation) {
       throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");

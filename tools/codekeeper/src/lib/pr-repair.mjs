@@ -17,6 +17,34 @@ import { validatePatch } from "./policy.mjs";
 import { sanitizeMarkdown } from "./render.mjs";
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
+const SHA256 = /^[0-9a-f]{64}$/i;
+
+function boundedText(value, maximum, suffix = "\n…[truncated]") {
+  const text = String(value ?? "");
+  if (text.length <= maximum) return text;
+  return `${text.slice(0, Math.max(0, maximum - suffix.length))}${suffix}`;
+}
+
+export function frozenPullRepairSubject(pull, comments) {
+  return {
+    number: pull?.number,
+    title: boundedText(pull?.title, 512, "…"),
+    body: boundedText(pull?.body, 30000),
+    author: boundedText(pull?.user?.login, 256, "…"),
+    url: boundedText(pull?.html_url, 2048, "…"),
+    comments: Array.isArray(comments)
+      ? comments.slice(-20).map((comment) => ({
+        author: boundedText(comment?.user?.login, 256, "…"),
+        body: boundedText(comment?.body, 12000),
+        createdAt: comment?.created_at ?? ""
+      }))
+      : []
+  };
+}
+
+export function frozenPullRepairSubjectSha256(pull, comments) {
+  return sha256(JSON.stringify(frozenPullRepairSubject(pull, comments)));
+}
 
 function requiredText(value, name) {
   const normalized = String(value ?? "").trim();
@@ -36,10 +64,11 @@ export function frozenPullRepairTarget(context, config) {
     headRepository: requiredText(target.headRepository, "head repository"),
     baseRef: requiredText(target.baseRef, "base ref"),
     baseSha: requiredText(target.baseSha, "base SHA"),
-    baseRepository: requiredText(target.baseRepository, "base repository")
+    baseRepository: requiredText(target.baseRepository, "base repository"),
+    subjectSha256: requiredText(target.subjectSha256, "repair evidence SHA-256")
   };
-  if (!COMMIT_SHA.test(frozen.headSha) || !COMMIT_SHA.test(frozen.baseSha)) {
-    throw new Error("Frozen PR target requires full head and base commit SHAs");
+  if (!COMMIT_SHA.test(frozen.headSha) || !COMMIT_SHA.test(frozen.baseSha) || !SHA256.test(frozen.subjectSha256)) {
+    throw new Error("Frozen PR target requires full head and base commit SHAs plus repair evidence SHA-256");
   }
   if (frozen.headRepository !== context.repository || frozen.baseRepository !== context.repository) {
     throw new Error(`PR #${frozen.number} is not a same-repository repair target`);
@@ -84,6 +113,10 @@ async function assertWritableFrozenBranch(github, target) {
 
 async function currentFrozenPull(github, target) {
   const pull = assertLivePullRepairTarget(await github.getPull(target.number), target);
+  const comments = await github.listIssueComments(target.number);
+  if (frozenPullRepairSubjectSha256(pull, comments) !== target.subjectSha256) {
+    throw new Error(`PR #${target.number} repair evidence changed after implementation started`);
+  }
   await assertWritableFrozenBranch(github, target);
   return pull;
 }

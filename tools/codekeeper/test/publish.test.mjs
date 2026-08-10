@@ -8,6 +8,7 @@ import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/li
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
 import { findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
+import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
 import {
   isTrustedMaintenanceIssue,
   isTrustedRepairPull,
@@ -762,6 +763,18 @@ test("fix publication does not create a repair PR after the issue changes", asyn
 });
 
 function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), runId = "7001" }) {
+  const pull = {
+    number: 42,
+    title: "Repair this change",
+    body: "The current repair evidence.",
+    user: { login: "pull-author" },
+    html_url: "https://example.test/pull/42"
+  };
+  const comments = [{
+    body: "Please repair this safely.",
+    created_at: "2026-08-10T09:00:00Z",
+    user: { login: "repository-owner" }
+  }];
   return {
     mode: "fix",
     repository: "owner/repository",
@@ -777,9 +790,10 @@ function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), ru
       headRepository: "owner/repository",
       baseRef: config.repository.defaultBranch,
       baseSha,
-      baseRepository: "owner/repository"
+      baseRepository: "owner/repository",
+      subjectSha256: frozenPullRepairSubjectSha256(pull, comments)
     },
-    pullRequest: { number: 42, title: "Repair this change" }
+    pullRequest: frozenPullRepairSubject(pull, comments)
   };
 }
 
@@ -789,11 +803,23 @@ function liveRepairPull(context, overrides = {}) {
     number: target.number,
     state: "open",
     draft: false,
-    html_url: "https://example.test/pull/42",
+    title: context.pullRequest.title,
+    body: context.pullRequest.body,
+    user: { login: context.pullRequest.author },
+    html_url: context.pullRequest.url,
     head: { ref: target.headRef, sha: target.headSha, repo: { full_name: target.headRepository } },
     base: { ref: target.baseRef, sha: target.baseSha, repo: { full_name: target.baseRepository } },
     ...overrides
   };
+}
+
+function liveRepairComments(context, overrides = undefined) {
+  if (overrides !== undefined) return overrides;
+  return context.pullRequest.comments.map((comment) => ({
+    body: comment.body,
+    created_at: comment.createdAt,
+    user: { login: comment.author }
+  }));
 }
 
 function pullRepairResult() {
@@ -849,6 +875,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
           head: { ref: context.target.headRef, sha: liveHead, repo: { full_name: context.repository } }
         });
       },
+      async listIssueComments() { return liveRepairComments(context); },
       async getBranch() { return { protected: false, commit: { sha: liveHead } }; },
       async createPull() { createPullCalls += 1; throw new Error("must not create a second pull request"); },
       async updateIssue() { throw new Error("must not close or mutate an issue"); },
@@ -930,18 +957,24 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
   }
 });
 
-test("PR repair rejects changed, forked, draft, closed, retargeted, and protected targets with one App comment", async (t) => {
+test("PR repair rejects changed, stale-evidence, forked, draft, closed, retargeted, and protected targets with one App comment", async (t) => {
   const cases = [
     ["closed", (pull) => ({ ...pull, state: "closed" }), /not open/],
     ["draft", (pull) => ({ ...pull, draft: true }), /is a draft/],
     ["stale head", (pull) => ({ ...pull, head: { ...pull.head, sha: "c".repeat(40) } }), /head SHA changed/],
+    ["stale repair evidence", (pull) => ({ ...pull, body: "The PR body changed after implementation started." }), /repair evidence changed/],
+    ["stale repair comment", (pull) => pull, /repair evidence changed/, undefined, [{
+      body: "A new comment changed the requested repair.",
+      created_at: "2026-08-10T09:05:00Z",
+      user: { login: "repository-owner" }
+    }]],
     ["fork", (pull) => ({ ...pull, head: { ...pull.head, repo: { full_name: "fork/repository" } } }), /head repository changed/],
     ["retargeted", (pull) => ({ ...pull, base: { ...pull.base, ref: "release" } }), /base branch changed/],
     ["base moved", (pull) => ({ ...pull, base: { ...pull.base, sha: "d".repeat(40) } }), /base SHA changed/],
     ["protected", (pull) => pull, /is protected/, { protected: true }],
     ["branch moved", (pull) => pull, /head branch moved/, { protected: false, commit: { sha: "e".repeat(40) } }]
   ];
-  for (const [name, mutate, expected, branchOverride] of cases) {
+  for (const [name, mutate, expected, branchOverride, commentsOverride] of cases) {
     await t.test(name, async () => {
       const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-pr-repair-negative-"));
       const configSha256 = "3".repeat(64);
@@ -959,6 +992,7 @@ test("PR repair rejects changed, forked, draft, closed, retargeted, and protecte
       let createPullCalls = 0;
       const restoreGitHub = replaceGitHubMethods({
         async getPull() { return mutate(liveRepairPull(context)); },
+        async listIssueComments() { return liveRepairComments(context, commentsOverride); },
         async getBranch() { return branchOverride ?? { protected: false, commit: { sha: context.target.headSha } }; },
         async createPull() { createPullCalls += 1; },
         async upsertMarkerComment(number, marker, body, authorIdentity) {

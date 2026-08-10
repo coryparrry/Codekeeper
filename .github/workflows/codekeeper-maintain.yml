@@ -43,7 +43,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: dbc7de18f7d6b6b9b795faf632eb70b72877e44bebd922cae05b8f741de7c581
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 7d5e1b0d5b46d9d9034d6cdf3677890414144e3ab354a928d1dd804c192a36e1
 
 concurrency:
   group: codekeeper-maintenance-${{ github.repository }}
@@ -113,7 +113,7 @@ jobs:
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/repository-auditor.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REPAIR_AUTHORIZED: ${{ inputs.repair_authorized }}
+          REPAIR_AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_authorized || false }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -138,7 +138,7 @@ jobs:
         working-directory: repository
         env:
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
-          REPAIR_AUTHORIZED: ${{ inputs.repair_authorized }}
+          REPAIR_AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_authorized || false }}
         run: |
           node ../tooling/tools/codekeeper/src/cli.mjs agent-settings \
             --config "$CONFIG" \
@@ -258,7 +258,7 @@ jobs:
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/repository-auditor.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REPAIR_AUTHORIZED: ${{ inputs.repair_authorized }}
+          REPAIR_AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_authorized || false }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
