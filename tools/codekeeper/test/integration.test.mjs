@@ -6,7 +6,7 @@ import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } fro
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges, runValidationCommands } from "../src/lib/git.mjs";
+import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges, runValidationCommands, validationEnvironment } from "../src/lib/git.mjs";
 import { prepareIssue } from "../src/lib/prepare.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -372,6 +372,23 @@ test("validation commands receive a usable disposable home directory", async () 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("validation environment retains Rust toolchain discovery without inheriting home or secrets", () => {
+  const explicit = validationEnvironment({
+    PATH: "/toolchains/cargo/bin:/usr/bin",
+    HOME: "/Users/cory",
+    RUSTUP_HOME: "/toolchains/rustup",
+    OPENAI_API_KEY: "must-not-pass"
+  });
+  assert.deepEqual(explicit, {
+    PATH: "/toolchains/cargo/bin:/usr/bin",
+    RUSTUP_HOME: "/toolchains/rustup"
+  });
+
+  const standard = validationEnvironment({ PATH: "/Users/cory/.cargo/bin:/usr/bin", HOME: "/Users/cory" });
+  assert.equal(standard.RUSTUP_HOME, path.join("/Users/cory", ".rustup"));
+  assert.equal(standard.HOME, undefined);
 });
 
 test("seal rejects a candidate altered after secretless validation", async () => {

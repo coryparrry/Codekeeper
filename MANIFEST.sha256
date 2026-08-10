@@ -28,7 +28,7 @@ a330eaf17eb97908031581e6bcc547130f5e5c72765bcfff37fff447e2d3edc7  ./examples/tre
 301ebb09b3cd8426b780ac977a6443d53034e2cee1336c5a22be8c75ab7950dc  ./tools/codekeeper/src/cli.mjs
 c4455a398b3f452db113bad0976f2bb8fea68117e1bf3e89c5efb0e98f3009aa  ./tools/codekeeper/src/lib/agents-runtime.mjs
 1f4ef603a80b3f3e76c30e2215d26c40b900070cade4db6f04c58e4137d0bef2  ./tools/codekeeper/src/lib/config.mjs
-a307a5ff3ffeee729e96183fb4e3b01ac76a361265cc251828037f3beae0b25c  ./tools/codekeeper/src/lib/git.mjs
+b82f8ed4e1fc05cdf4eb66b123a17a0cff8199c89222cfe83388a8fc095ab116  ./tools/codekeeper/src/lib/git.mjs
 f51848749ec40dd1513a877c117ce0ff5db5ba94e0cc37ba095add79fa3ce94b  ./tools/codekeeper/src/lib/github.mjs
 08c20f4bc8ffb26af8af65b064f95bd2e46e243d6262a0b1f5151dd22e07991c  ./tools/codekeeper/src/lib/glob.mjs
 e9ced7b38b2504ac6d99f0cdebe9a0e17357896becc26d0efee12bf07a41c0c1  ./tools/codekeeper/src/lib/io.mjs
@@ -44,7 +44,7 @@ df4b9a1c1f846559a3e29d30aa4b226e1638bf454fee1871f9904caf4804cf0c  ./tools/codeke
 2327711e4dad3b085996591d3b85c7f4c59650f6735fb9f86bb6a68935d3996d  ./tools/codekeeper/test/agents-runtime.test.mjs
 ce56ebcbfe63a878c70701c0a33aefbcdb2b9e1c15c93a0668b0e721cde824d4  ./tools/codekeeper/test/config.test.mjs
 73e8b1caf0058dcc799e7588ddbf38e56db94dd56bddb91442b1aacdc23292a4  ./tools/codekeeper/test/glob.test.mjs
-7116aea808ee1ec80035ce7fe25533c2126c11f902ae8a02cb8c5eee035dae58  ./tools/codekeeper/test/integration.test.mjs
+95c33b07ca90ac0524e64ad2ef8be3940c8f8a10af685f1971ce12922fa9e1b0  ./tools/codekeeper/test/integration.test.mjs
 9536e8e312f2cbf52c4b3080324ec7e280f3b3c1d7f3880677696b7692b2f7c8  ./tools/codekeeper/test/markers.test.mjs
 875cd72acb91e6fb1199420bf26be20361f7e21323dc096a16aa3f5201d6f28b  ./tools/codekeeper/test/policy.test.mjs
 bc6674322a83396329b263dabb0300a54962d551cfc50bfc821505bcf1553649  ./tools/codekeeper/test/prompts.test.mjs

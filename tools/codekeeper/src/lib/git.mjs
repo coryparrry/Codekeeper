@@ -205,11 +205,21 @@ export function applyPatch(patchPath, cwd = process.cwd()) {
   git(["apply", "--whitespace=error-all", patchPath], { cwd });
 }
 
-export async function runValidationCommands(commands, cwd = process.cwd()) {
-  const environment = {};
+export function validationEnvironment(environment = process.env) {
+  const sanitized = {};
   for (const key of ["PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "TEMP", "TMP"]) {
-    if (process.env[key] !== undefined) environment[key] = process.env[key];
+    if (environment[key] !== undefined) sanitized[key] = environment[key];
   }
+  const inheritedHome = typeof environment.HOME === "string" && environment.HOME.trim() ? environment.HOME : null;
+  const rustupHome = typeof environment.RUSTUP_HOME === "string" && environment.RUSTUP_HOME.trim()
+    ? environment.RUSTUP_HOME
+    : inheritedHome && path.join(inheritedHome, ".rustup");
+  if (rustupHome) sanitized.RUSTUP_HOME = rustupHome;
+  return sanitized;
+}
+
+export async function runValidationCommands(commands, cwd = process.cwd()) {
+  const environment = validationEnvironment();
   const home = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-home-"));
   environment.HOME = home;
   try {
