@@ -12,11 +12,6 @@ on:
         required: true
         type: boolean
         default: true
-      repair_authorized:
-        description: Allow one bounded repair in this manual run (configured owners only)
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -35,7 +30,6 @@ jobs:
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       dry_run: ${{ inputs.dry_run || false }}
-      repair_authorized: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_authorized || false }}
       # Optional for dry_run=true; required when dry_run=false publishes changes.
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:

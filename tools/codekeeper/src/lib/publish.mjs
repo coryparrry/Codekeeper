@@ -371,7 +371,9 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   const runUrl = trustedPublicationRunUrl(context);
 
   const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
-  if (result.implementationRecommendation === "ai-ready") desired.add("codekeeper:ready");
+  if (config.issues.allowAiImplementation && result.implementationRecommendation === "ai-ready") {
+    desired.add("codekeeper:ready");
+  }
   if (result.duplicateOf && result.duplicateConfidence === "high") desired.add("codekeeper:duplicate-candidate");
   const desiredLabels = [...desired];
   const comment = renderIssueTriage(result, runUrl);

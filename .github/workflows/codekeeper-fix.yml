@@ -45,7 +45,7 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 9ea59dc54288186c0d4f84d24c86de9c6485900e876d1d3a03ceb6126fc87596
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: f43ba32eb8afa419058d0251e4fd4d849fed14eac3ffdabf25da596ab72ae33a
 
 concurrency:
   group: codekeeper-fix-${{ inputs.issue_number || github.event.issue.number }}
@@ -54,11 +54,12 @@ concurrency:
 jobs:
   workspace:
     name: Codekeeper implementation workspace specialist
-    # Comment-triggered implementation is deliberately maintainer-only. The
-    # frozen config then checks the exact configured owner login before Codex runs.
     if: >-
       inputs.enabled &&
       (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'codekeeper:ready') ||
       (github.event.comment.body == '/codekeeper fix' &&
         (github.event.comment.author_association == 'OWNER' ||
          github.event.comment.author_association == 'MEMBER' ||
@@ -138,6 +139,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
           TARGET_NUMBER: ${{ steps.target.outputs.target_number }}
+          AUTHORIZATION_MODE: ${{ github.event_name == 'issues' && 'policy' || 'owner' }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -150,6 +152,7 @@ jobs:
             --directory "$BUNDLE" \
             --target-number "$TARGET_NUMBER" \
             --actor "$GITHUB_ACTOR" \
+            --authorization-mode "$AUTHORIZATION_MODE" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git rev-parse HEAD)" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
@@ -302,6 +305,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
           TARGET_NUMBER: ${{ steps.target.outputs.target_number }}
+          AUTHORIZATION_MODE: ${{ github.event_name == 'issues' && 'policy' || 'owner' }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -314,6 +318,7 @@ jobs:
             --directory "$BUNDLE" \
             --target-number "$TARGET_NUMBER" \
             --actor "$GITHUB_ACTOR" \
+            --authorization-mode "$AUTHORIZATION_MODE" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git rev-parse HEAD)" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"

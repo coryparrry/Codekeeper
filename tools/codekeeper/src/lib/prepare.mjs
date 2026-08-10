@@ -134,9 +134,6 @@ export async function prepareAudit({ directory, config, toolingSha, configSha256
   if (repairAuthorized && !config.audit.repair.enabled) {
     throw new Error("Maintenance repair was authorized while audit.repair.enabled=false");
   }
-  if (repairAuthorized && !isConfiguredOwner(config, actor)) {
-    throw new Error(`Actor ${actor || "unknown"} is not authorised to request a Codekeeper maintenance repair`);
-  }
   const agentProfile = await trustedAgentProfile("audit", agentProfilePath, agentProfileSourceSha);
   const repository = process.env.GITHUB_REPOSITORY;
   const context = {
@@ -207,9 +204,12 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
   const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha);
-  if (!isConfiguredOwner(config, actor)) {
+  if (!["owner", "policy"].includes(authorizationMode)) {
+    throw new Error("Codekeeper fix authorization mode must be owner or policy");
+  }
+  if (authorizationMode === "owner" && !isConfiguredOwner(config, actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request a Codekeeper fix`);
   }
   const repository = process.env.GITHUB_REPOSITORY;
@@ -256,6 +256,10 @@ export async function prepareFix({ targetNumber, actor, directory, config, token
     if (!config.issues.allowAiImplementation) {
       throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
     }
+    const labels = boundedLabels(issue.labels);
+    if (authorizationMode === "policy" && !labels.includes("codekeeper:ready")) {
+      throw new Error("Automatic issue implementation requires the codekeeper:ready label");
+    }
     target = { kind: "issue", number: targetNumber };
     baseSha = currentHead();
     subject = {
@@ -266,7 +270,7 @@ export async function prepareFix({ targetNumber, actor, directory, config, token
         author: boundedText(issue.user?.login, 256, "…"),
         url: boundedText(issue.html_url, 2048, "…"),
         updatedAt: issue.updated_at ?? "",
-        labels: boundedLabels(issue.labels),
+        labels,
         comments: comments.slice(-20).map((comment) => ({
           author: boundedText(comment.user?.login, 256, "…"),
           body: boundedText(comment.body, 12000),
@@ -284,6 +288,7 @@ export async function prepareFix({ targetNumber, actor, directory, config, token
     baseSha,
     defaultBranch: config.repository.defaultBranch,
     requestedBy: actor,
+    authorizationMode,
     target,
     ...subject
   };

@@ -149,6 +149,7 @@ async function main() {
       result = await prepareFix({
         targetNumber: integer(args.require("target-number"), "target-number"),
         actor: args.require("actor"),
+        authorizationMode: args.get("authorization-mode", "owner"),
         directory,
         config,
         token,

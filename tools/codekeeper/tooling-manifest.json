@@ -3,19 +3,19 @@
   "files": [
     {
       "path": "agents/issue-triager.md",
-      "sha256": "866e45a5431d9e08fe036d47d3334106f0e0734dfeef0421bd5465a1f472b5d2"
+      "sha256": "05662b59c92fae8f942b199f4ab1257c6b96014ffc45125aa71775313ce8fbac"
     },
     {
       "path": "agents/maintenance-planner.md",
-      "sha256": "8ff0abe5c7b232b595f6e4f43c947314e7d0cce5c15d1b7cd0884f7526e17479"
+      "sha256": "0a71d814e12be7f0b917d62827a203a0d51ea4ec4c40566f839fda70f188b15e"
     },
     {
       "path": "agents/pr-reviewer.md",
-      "sha256": "9b90b3ae1d2ac501924b0a38d4a559c8fb8e7e84ab309a41fc5b33739a40ce76"
+      "sha256": "a548423ea6098f3c0bcc17b0dbf60131cdd1689dec45504701b1949bc89e2894"
     },
     {
       "path": "agents/repository-auditor.md",
-      "sha256": "82af520eee898bb55136d448116cf68308645c714f9626c0b099850a2e94b7ff"
+      "sha256": "48c4c7c088751fe9b2eda76cbf20b5ad6495bed052f5fb05b4a5156964604445"
     },
     {
       "path": "package-lock.json",
@@ -35,11 +35,11 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "0faf9285e591f1b2e53b6a91087ab5a486dea7286ccd0d16c12ecc804217e94b"
+      "sha256": "5403c3a87581c6975824ef2ec5ef17fb612ddede0051dc14d3e97c4ddbecc832"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
-      "sha256": "7fd375afdda2c109d039a98472d3f98e07b5534bd5ffe10a7ac62bc14292bb99"
+      "sha256": "36dfebcc7f76f189cde8373ba973ec28af3f02ae08bcc1d2bdd128ec162a2394"
     },
     {
       "path": "src/lib/agents-runtime.mjs",
@@ -79,15 +79,15 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "6030e5f5958507457881460f92c9cecff0e315ec48b335578086e6071c76e1e1"
+      "sha256": "135086c2666acb35f5125ace37b7d91622b62c01937f80f009ae1ce2a931e97d"
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "2acfc0fe55d1b362fae9442ed33930b4928e0b64efec90d76f83cd1ac2523d15"
+      "sha256": "89d0292c6409675a31afb703d08fd11eda11423b3df1c0193713dd35d2b744d2"
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "467276571796adb2467f83343cf418e3c254acdda3efaf7ec315354ee0ec8434"
+      "sha256": "c51240698a0199a0ef6dcb9c0a0571972a1baaac57cddbb23fc18424c8414862"
     },
     {
       "path": "src/lib/render.mjs",

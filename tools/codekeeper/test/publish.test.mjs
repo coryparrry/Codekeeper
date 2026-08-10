@@ -496,6 +496,7 @@ test("issue publication accepts its exact managed-label mutation before publishi
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-label-revision-test-"));
   const configSha256 = "c".repeat(64);
   const issueConfig = structuredClone(config);
+  issueConfig.issues.allowAiImplementation = true;
   const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7003", runUrl: "https://github.com/owner/repository/actions/runs/7003", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
   const result = {
     mode: "issue", summary: "Ready for triage.", type: "bug", priority: "p3", labels: [], actionable: true,

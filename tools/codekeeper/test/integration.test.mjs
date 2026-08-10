@@ -343,7 +343,7 @@ test("manual issue preparation requires an explicitly authorised actor", async (
   );
 });
 
-test("maintenance repair authorization requires enabled policy and a configured owner", async (context) => {
+test("maintenance repair authorization requires enabled policy but not a second owner approval", async (context) => {
   const root = await createRepository();
   context.after(() => rm(root, { recursive: true, force: true }));
   const revision = run("git", ["rev-parse", "HEAD"], root).trim();
@@ -362,26 +362,15 @@ test("maintenance repair authorization requires enabled policy and a configured 
 
   const enabled = structuredClone(disabled);
   enabled.audit.repair.enabled = true;
-  await assert.rejects(
-    prepareAuditBundle({
-      directory: bundle(root, "unauthorised-repair"),
-      config: enabled,
-      actor: "not-an-owner",
-      repairAuthorized: true,
-      ...agentProfileOptions(root, "audit", revision)
-    }),
-    /not authorised/
-  );
-
   const prepared = await prepareAuditBundle({
-    directory: bundle(root, "owner-repair"),
+    directory: bundle(root, "enabled-repair"),
     config: enabled,
-    actor: "REPOSITORY-OWNER",
+    actor: "github-actions[bot]",
     repairAuthorized: true,
     ...agentProfileOptions(root, "audit", revision)
   });
   assert.equal(prepared.repairAuthorized, true);
-  assert.equal(prepared.repairAuthorizedBy, "REPOSITORY-OWNER");
+  assert.equal(prepared.repairAuthorizedBy, "github-actions[bot]");
 });
 
 test("manual issue and fix preparation authorize owner login casing variants", async () => {
@@ -465,6 +454,48 @@ test("automatic issue preparation records trusted mode without an owner command"
     assert.equal(context.issue.number, 5);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("enabled issue implementation accepts a trusted ready-label run without an owner command", async () => {
+  const root = await createRepository();
+  const directory = bundle(root, "automatic-fix-input");
+  const config = structuredClone(templateConfig);
+  config.issues.allowAiImplementation = true;
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Example",
+        body: "Details",
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        labels: [{ name: "codekeeper:ready" }]
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    const prepared = await prepareFix({
+      targetNumber: 5,
+      actor: "codekeeper-app[bot]",
+      authorizationMode: "policy",
+      directory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "fix")
+    });
+    assert.equal(prepared.authorizationMode, "policy");
+    assert.equal(prepared.requestedBy, "codekeeper-app[bot]");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
   }
 });
 
