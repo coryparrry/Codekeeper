@@ -2,7 +2,14 @@ import { GitHubClient } from "./github.mjs";
 import { readJson } from "./io.mjs";
 import { COMMAND_STATUS_MARKER } from "./markers.mjs";
 
-const COMMANDS = new Set(["status", "review", "rerun", "implement", "stop"]);
+const COMMANDS = new Set([
+  "status",
+  "review",
+  "rerun",
+  "implement",
+  "fix",
+  "stop",
+]);
 const ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 function labels(issue) {
@@ -14,7 +21,7 @@ function labels(issue) {
 function parseCommand(body) {
   const match = String(body ?? "")
     .trim()
-    .match(/^\/codekeeper\s+(status|review|rerun|implement|stop)$/i);
+    .match(/^\/codekeeper\s+(status|review|rerun|implement|fix|stop)$/i);
   return match ? match[1].toLowerCase() : null;
 }
 
@@ -101,6 +108,9 @@ export async function runOwnerCommand({
     await github.removeLabel(number, "codekeeper:paused");
     await github.addLabels(number, ["codekeeper:ready"]);
     outcome = "The issue was queued for implementation.";
+  } else if (command === "fix") {
+    await github.removeLabel(number, "codekeeper:paused");
+    outcome = "The item was resumed for owner-requested repair.";
   } else if (command === "stop") {
     await github.ensureLabels(config.labels, ["codekeeper:paused"]);
     await github.addLabels(number, ["codekeeper:paused"]);

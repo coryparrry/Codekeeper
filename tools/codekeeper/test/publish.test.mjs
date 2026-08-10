@@ -974,6 +974,7 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
     ["fork", (pull) => ({ ...pull, head: { ...pull.head, repo: { full_name: "fork/repository" } } }), /head repository changed/],
     ["retargeted", (pull) => ({ ...pull, base: { ...pull.base, ref: "release" } }), /base branch changed/],
     ["base moved", (pull) => ({ ...pull, base: { ...pull.base, sha: "d".repeat(40) } }), /base SHA changed/],
+    ["paused owner repair", (pull) => ({ ...pull, labels: [{ name: "codekeeper:paused" }] }), /paused/, undefined, undefined, "owner", 0],
     ["paused automatic repair", (pull) => ({ ...pull, labels: [{ name: "codekeeper:paused" }] }), /paused/, undefined, undefined, "policy", 0],
     ["protected", (pull) => pull, /is protected/, { protected: true }],
     ["branch moved", (pull) => pull, /head branch moved/, { protected: false, commit: { sha: "e".repeat(40) } }]

@@ -275,9 +275,13 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     if (expectedHead && pull.head?.sha !== expectedHead) {
       throw new Error(`PR #${targetNumber} moved from ${expectedHead} to ${pull.head?.sha}; stale repair will not start`);
     }
+    const labels = boundedLabels(issue.labels);
+    if (labels.includes("codekeeper:paused")) throw new Error(`PR #${targetNumber} is paused`);
     if (authorizationMode === "policy") {
       if (!config.review.autoRepair) throw new Error("Automatic review repair is off in the Codekeeper policy");
-      if (boundedLabels(issue.labels).includes("codekeeper:paused")) throw new Error(`PR #${targetNumber} is paused`);
+      if (!labels.includes("codekeeper:auto-repaired")) {
+        throw new Error("Automatic review repair requires the codekeeper:auto-repaired marker");
+      }
     }
     if (!/^[0-9a-f]{40}$/i.test(String(pull.head?.sha ?? "")) || !/^[0-9a-f]{40}$/i.test(String(pull.base?.sha ?? ""))) {
       throw new Error(`PR #${targetNumber} is missing full head or base commit SHAs`);

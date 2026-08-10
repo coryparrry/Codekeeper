@@ -555,6 +555,88 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
   }
 });
 
+test("automatic PR repair requires its one-shot marker and every repair honors pause", async () => {
+  const root = await createRepository();
+  const config = structuredClone(templateConfig);
+  config.review.autoRepair = true;
+  config.repository.ownerLogins = ["repository-owner"];
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  const revision = run("git", ["rev-parse", "HEAD"], root).trim();
+  let labels = [];
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/pulls/42")) {
+      return new Response(JSON.stringify({
+        number: 42,
+        title: "Repair this PR",
+        body: "A blocking review finding needs repair.",
+        html_url: "https://github.com/acme/example/pull/42",
+        user: { login: "contributor" },
+        state: "open",
+        draft: false,
+        head: { ref: "feature/repair", sha: revision, repo: { full_name: "acme/example" } },
+        base: { ref: "main", sha: "b".repeat(40), repo: { full_name: "acme/example" } }
+      }), { status: 200 });
+    }
+    if (String(url).includes("/issues/42")) {
+      return new Response(JSON.stringify({
+        number: 42,
+        state: "open",
+        pull_request: {},
+        labels
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await assert.rejects(
+      preparePlan({
+        targetNumber: 42,
+        actor: "codekeeper-app[bot]",
+        authorizationMode: "policy",
+        directory: bundle(root, "unmarked-automatic-pr-plan"),
+        config,
+        token: "read-token",
+        expectedHead: revision,
+        ...agentProfileOptions(root, "plan")
+      }),
+      /codekeeper:auto-repaired/
+    );
+    labels = [{ name: "codekeeper:auto-repaired" }];
+    const prepared = await preparePlan({
+      targetNumber: 42,
+      actor: "codekeeper-app[bot]",
+      authorizationMode: "policy",
+      directory: bundle(root, "marked-automatic-pr-plan"),
+      config,
+      token: "read-token",
+      expectedHead: revision,
+      ...agentProfileOptions(root, "plan")
+    });
+    assert.equal(prepared.target.kind, "pull_request");
+    labels = [{ name: "codekeeper:auto-repaired" }, { name: "codekeeper:paused" }];
+    await assert.rejects(
+      preparePlan({
+        targetNumber: 42,
+        actor: "repository-owner",
+        authorizationMode: "owner",
+        directory: bundle(root, "paused-owner-pr-plan"),
+        config,
+        token: "read-token",
+        expectedHead: revision,
+        ...agentProfileOptions(root, "plan")
+      }),
+      /paused/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
+  }
+});
+
 test("fix preparation rejects a planner result after the frozen issue changes", async () => {
   const root = await createRepository();
   const planDirectory = bundle(root, "drifted-plan-input");

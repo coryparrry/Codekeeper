@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "3eb66618af3a06c04eaf4d76326a96d6fcd3ee749522852fac06b4d8e4db66df";
+const toolingManifestSha256 = "44f1d2e339312f094c29d2f8bb0f460c88253223818d333c97b479e8c2d0e06a";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -424,6 +424,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(fix, /github\.event\.label\.name == 'codekeeper:ready'/);
   assert.match(fix, /automation_bot_login:/);
   assert.match(fix, /github\.event\.sender\.login == inputs\.automation_bot_login/);
+  assert.match(fix, /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_fix'[\s\S]*github\.actor == inputs\.automation_bot_login/);
   assert.match(fix, /format\('codekeeper-command-\{0\}', github\.run_id\)/);
   assert.match(fix, /--authorization-mode "\$AUTHORIZATION_MODE"/);
   assert.match(fix, /codekeeper-plan-bundle\/context\.json/);
@@ -441,6 +442,9 @@ test("issue triage can start enabled issue implementation while owner PR repair 
 test("owner-commanded pull request repair can update only the frozen existing head", async () => {
   const fix = await workflow("fix");
   const publisher = await repositoryFile("tools/codekeeper/src/lib/pr-repair.mjs");
+  const command = jobSection(fix, "command", "plan");
+  assert.match(command, /github\.event\.comment\.body == '\/codekeeper fix'/);
+  assert.match(fix, /plan:\n[\s\S]*needs: command[\s\S]*needs\.command\.result == 'success'/);
   assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
   assert.doesNotMatch(fix, /!github\.event\.issue\.pull_request/);
   assert.match(fix, /target_kind: \$\{\{ fromJSON\(steps\.prepare\.outputs\.result\)\.target\.kind \}\}/);

@@ -196,7 +196,7 @@ export async function publishPullRequestRepair({
   gitOperations = defaultGitOperations
 }) {
   const target = frozenPullRepairTarget(context, config);
-  const revalidationOptions = { rejectPaused: context.authorizationMode === "policy" };
+  const revalidationOptions = { rejectPaused: true };
   if (!String(context.runId ?? "").trim()) throw new Error("Frozen PR repair context is missing its workflow run ID");
   try {
     const pull = await currentFrozenPull(github, target, revalidationOptions);

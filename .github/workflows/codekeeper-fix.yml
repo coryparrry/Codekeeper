@@ -53,7 +53,7 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 3eb66618af3a06c04eaf4d76326a96d6fcd3ee749522852fac06b4d8e4db66df
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 44f1d2e339312f094c29d2f8bb0f460c88253223818d333c97b479e8c2d0e06a
 
 concurrency:
   group: >-
@@ -76,6 +76,7 @@ jobs:
        github.event.comment.body == '/codekeeper review' ||
        github.event.comment.body == '/codekeeper rerun' ||
        github.event.comment.body == '/codekeeper implement' ||
+       github.event.comment.body == '/codekeeper fix' ||
        github.event.comment.body == '/codekeeper stop')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -166,10 +167,14 @@ jobs:
 
   plan:
     name: Codekeeper maintenance plan
+    needs: command
     if: >-
+      always() &&
+      (needs.command.result == 'success' || needs.command.result == 'skipped') &&
       inputs.enabled &&
       (github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_fix') ||
+      (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_fix' &&
+       github.actor == inputs.automation_bot_login) ||
       (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'codekeeper:ready' &&
        github.event.sender.login == inputs.automation_bot_login) ||
       (github.event.comment.body == '/codekeeper fix' &&
@@ -273,7 +278,8 @@ jobs:
     if: >-
       inputs.enabled &&
       (github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_fix') ||
+      (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_fix' &&
+       github.actor == inputs.automation_bot_login) ||
       (github.event_name == 'issues' &&
        github.event.action == 'labeled' &&
        github.event.label.name == 'codekeeper:ready' &&
