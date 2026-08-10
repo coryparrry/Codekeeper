@@ -8,6 +8,7 @@ test("review comment contains deterministic policy decision", () => {
       summary: "The change is narrow.",
       risk: "low",
       tests: { adequate: true, notes: "Covered." },
+      diagram: "flowchart LR\n  Change --> Test",
       mergeRecommendation: "auto",
       blockingFindings: [],
       nonBlockingFindings: []
@@ -18,6 +19,7 @@ test("review comment contains deterministic policy decision", () => {
   assert.match(markdown, /^## PR review summary$/m);
   assert.match(markdown, /Manual boundary retained/);
   assert.match(markdown, /Swift files require manual review/);
+  assert.match(markdown, /```mermaid\nflowchart LR/);
   assert.match(markdown, /<sub>Codekeeper workflow run: https:\/\/github\.com\/owner\/repository\/actions\/runs\/7001<\/sub>/);
 });
 

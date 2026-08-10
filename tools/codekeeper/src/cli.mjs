@@ -11,6 +11,7 @@ import { sealAudit, sealFix, sealIssue, sealReview, validateAudit, validateFix, 
 import { assertRunnerOwnedDirectory } from "./lib/workspace.mjs";
 import { sha256 } from "./lib/markers.mjs";
 import { runAgentFromBundle } from "./lib/agents-runtime.mjs";
+import { runOwnerCommand } from "./lib/commands.mjs";
 
 function integer(value, name) {
   const parsed = Number(value);
@@ -92,6 +93,17 @@ async function main() {
     case "check-config":
       result = { valid: true, version: config.version };
       break;
+    case "owner-command":
+      result = await runOwnerCommand({
+        eventPath: args.require("event"),
+        config,
+        token,
+        automationIdentity: {
+          login: args.require("automation-bot-login"),
+          id: args.require("automation-bot-id")
+        }
+      });
+      break;
     case "agent-settings":
       {
         const mode = args.require("mode");
@@ -129,7 +141,7 @@ async function main() {
       result = { applied: true };
       break;
     case "prepare-review":
-      result = await prepareReview({ eventPath: args.require("event"), directory, config, toolingSha, configSha256, ...agentProfileInputs(args) });
+      result = await prepareReview({ eventPath: args.require("event"), directory, config, token, toolingSha, configSha256, ...agentProfileInputs(args) });
       break;
     case "prepare-audit":
       result = await prepareAudit({
@@ -150,6 +162,7 @@ async function main() {
         targetNumber: integer(args.require("target-number"), "target-number"),
         actor: args.require("actor"),
         authorizationMode: args.get("authorization-mode", "owner"),
+        expectedHead: args.get("expected-head", ""),
         directory,
         config,
         token,

@@ -46,10 +46,10 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: f43ba32eb8afa419058d0251e4fd4d849fed14eac3ffdabf25da596ab72ae33a
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 56e661fdba28f5a8f9af61c6759835f288db08c30e264261535c095a9c08216c
 
 concurrency:
-  group: codekeeper-review-${{ github.event.pull_request.number }}
+  group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
   cancel-in-progress: true
 
 jobs:
@@ -58,9 +58,11 @@ jobs:
     if: >-
       inputs.enabled &&
       inputs.auto_review &&
-      !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.base.ref == github.event.repository.default_branch
+      ((github.event_name != 'repository_dispatch' &&
+        !github.event.pull_request.draft &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.base.ref == github.event.repository.default_branch) ||
+       (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -111,7 +113,7 @@ jobs:
       - name: Check out exact pull request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}
           fetch-depth: 0
           path: worktree
           persist-credentials: false
@@ -132,6 +134,7 @@ jobs:
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -250,7 +253,7 @@ jobs:
       - name: Check out exact pull request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}
           fetch-depth: 0
           path: worktree
           persist-credentials: false
@@ -281,6 +284,7 @@ jobs:
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -547,10 +551,10 @@ jobs:
         env:
           ENABLED: ${{ inputs.enabled }}
           AUTO_REVIEW: ${{ inputs.auto_review }}
-          IS_DRAFT: ${{ github.event.pull_request.draft }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          IS_DRAFT: ${{ github.event.pull_request.draft || github.event.client_payload.draft }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.event.client_payload.head_repository }}
           REPOSITORY: ${{ github.repository }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.client_payload.base_ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           ANALYZE_RESULT: ${{ needs.analyze.result }}
           SEAL_RESULT: ${{ needs.seal.result }}

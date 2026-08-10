@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "f43ba32eb8afa419058d0251e4fd4d849fed14eac3ffdabf25da596ab72ae33a";
+const toolingManifestSha256 = "56e661fdba28f5a8f9af61c6759835f288db08c30e264261535c095a9c08216c";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -65,7 +65,7 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.match(reviewCaller, /on:\n\s+pull_request_target:/);
   assert.doesNotMatch(reviewCaller, /on:\n\s+pull_request:/);
   assert.match(reviewCaller, /pull-requests: read/);
-  assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \}\} @\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/);
+  assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\}"/);
   const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
@@ -101,7 +101,7 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
   assert.ok(parsedManifest.files.some((entry) => entry.path === "scripts/verify-tooling-artifact.mjs"));
   assert.ok(parsedManifest.files.every((entry) => !entry.path.startsWith("test/") && !entry.path.startsWith("evals/")));
 
-  const expectedConsumers = { maintain: 5, fix: 5, issues: 4, review: 4 };
+  const expectedConsumers = { maintain: 5, fix: 6, issues: 4, review: 4 };
   for (const [mode, count] of Object.entries(expectedConsumers)) {
     const source = await workflow(mode);
     assert.equal([...source.matchAll(/name: Download bootstrap Codekeeper tooling/g)].length, count);

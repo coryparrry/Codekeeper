@@ -14,6 +14,8 @@ Every operation limit has a global ceiling. Review context is limited to 20 find
 
 Each coordinator mode is independent under `ai.agents.review`, `audit`, `issue`, and `fix`. It selects a provider from `ai.providers`, a model, attempt/turn limits, JSON model settings, and an optional Codex workspace specialist. The JSON below is a partial excerpt; use the [starter policy](../.github/codekeeper.json) for the complete required four-mode `agents` object.
 
+The installer lists every supported provider and model for every role. The starting preset supplies defaults only. It does not lock a role to a provider.
+
 ```json
 {
   "ai": {
@@ -90,6 +92,10 @@ Reusable workflow callers expose explicit controls alongside `enabled`:
 - `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/codekeeper triage` comments from configured owners remain available.
 - `dry_run=true` makes maintenance report-only. A live run can repair only when `audit.repair.enabled=true` and every patch limit passes.
 
+`review.autoRepair=true` permits one automatic repair pass after a blocking review. A second blocking review stops for a maintainer.
+
+Configured owners can use `/codekeeper status`, `review`, `rerun`, `implement`, `fix`, and `stop`. The command must be the complete comment.
+
 Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
 
 ## Explicit repair targets
@@ -99,6 +105,7 @@ Capabilities decide which automatic actions can run.
 - **Maintenance:** a live scheduled or manual run may create one repair when `audit.repair.enabled=true`. A dry run remains report-only.
 - **Issue:** when `issues.allowAiImplementation=true`, trusted triage may add `codekeeper:ready` to a clear, bounded issue. That label starts a fix run which may create one bounded repair pull request. A configured owner may also provide an issue through manual dispatch.
 - **Same-repository pull request:** the same exact owner command may target an eligible open, non-draft pull request to the default branch. A valid repair is committed and pushed to that pull request's existing head branch. The publisher never calls the create-pull-request path for this target and has no fallback that opens a second pull request. Forks, default/protected head branches, stale heads, branch movement, or target drift fail closed.
+- **Automatic review repair:** when `review.autoRepair=true`, a blocking review can request one repair for the exact PR head. The next blocking review requires a maintainer.
 
 Profiles can decide that an enabled repair is too risky and return no change. They cannot turn on a disabled capability or bypass its fixed limits.
 

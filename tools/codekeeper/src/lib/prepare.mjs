@@ -73,10 +73,19 @@ function runMetadata({ toolingSha = process.env.CODEKEEPER_TOOLING_SHA ?? "", co
   };
 }
 
-export async function prepareReview({ eventPath, directory, config, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+export async function prepareReview({ eventPath, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
   const agentProfile = await trustedAgentProfile("review", agentProfilePath, agentProfileSourceSha);
   const event = await readJson(eventPath);
   const repository = repositoryFromEvent(event);
+  if (!event.pull_request && event.action === "codekeeper_review") {
+    const number = Number(event.client_payload?.number);
+    if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Review dispatch has no valid pull request number");
+    const github = new GitHubClient({ token, repository });
+    event.pull_request = await github.getPull(number);
+    if (event.client_payload?.head_sha && event.pull_request.head?.sha !== event.client_payload.head_sha) {
+      throw new Error(`PR #${number} moved before the requested review started`);
+    }
+  }
   const pull = ensureSameRepositoryPullRequest(event, repository);
   const context = {
     mode: "review",
@@ -170,7 +179,10 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   const issue = event.issue;
   if (!issue || issue.pull_request) throw new Error("Issue payload is missing or refers to a pull request");
   const github = new GitHubClient({ token, repository });
-  const existing = await github.listOpenIssues(config.issues.maximumOpenIssueContext);
+  const [existing, pulls] = await Promise.all([
+    github.listOpenIssues(config.issues.maximumOpenIssueContext),
+    github.listOpenPulls(config.issues.maximumOpenIssueContext)
+  ]);
   const context = {
     mode: "issue",
     triageMode,
@@ -192,7 +204,14 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
         number: candidate.number,
         title: boundedText(candidate.title, 512, "…"),
         labels: boundedLabels(candidate.labels)
-      }))
+      })),
+    existingOpenPullRequests: pulls.map((pull) => ({
+      number: pull.number,
+      title: boundedText(pull.title, 512, "…"),
+      body: boundedText(pull.body, 4000),
+      labels: boundedLabels(pull.labels),
+      url: boundedText(pull.html_url, 2048, "…")
+    }))
   };
   await writeBundle({
     directory,
@@ -204,7 +223,7 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
   const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha);
   if (!["owner", "policy"].includes(authorizationMode)) {
     throw new Error("Codekeeper fix authorization mode must be owner or policy");
@@ -233,6 +252,13 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     }
     if (pull.head?.ref === config.repository.defaultBranch) {
       throw new Error(`PR #${targetNumber} uses the default branch as its head`);
+    }
+    if (expectedHead && pull.head?.sha !== expectedHead) {
+      throw new Error(`PR #${targetNumber} moved from ${expectedHead} to ${pull.head?.sha}; stale repair will not start`);
+    }
+    if (authorizationMode === "policy") {
+      if (!config.review.autoRepair) throw new Error("Automatic review repair is off in the Codekeeper policy");
+      if (boundedLabels(issue.labels).includes("codekeeper:paused")) throw new Error(`PR #${targetNumber} is paused`);
     }
     if (!/^[0-9a-f]{40}$/i.test(String(pull.head?.sha ?? "")) || !/^[0-9a-f]{40}$/i.test(String(pull.base?.sha ?? ""))) {
       throw new Error(`PR #${targetNumber} is missing full head or base commit SHAs`);

@@ -278,6 +278,11 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
   const blocking = result.blockingFindings.length > 0 || critical || result.mergeRecommendation === "block";
+  const existingLabels = new Set((pull.labels ?? []).map((label) => typeof label === "string" ? label : label.name));
+  const automaticRepair = {
+    eligible: blocking && config.review.autoRepair && !existingLabels.has("codekeeper:paused") && !existingLabels.has("codekeeper:auto-repaired"),
+    dispatched: false
+  };
   const publicationState = (autoMerge) => {
     const desiredSet = new Set(reviewLabels(result));
     desiredSet.delete("codekeeper:auto-merge");
@@ -359,7 +364,19 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     }
   }
 
-  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, blocking };
+  if (automaticRepair.eligible) {
+    await currentReviewPull(github, context, config);
+    await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+    await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
+    await currentReviewPull(github, context, config);
+    await github.createRepositoryDispatch("codekeeper_fix", {
+      number: pull.number,
+      head_sha: pull.head.sha
+    });
+    automaticRepair.dispatched = true;
+  }
+
+  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, blocking };
 }
 
 export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {

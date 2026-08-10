@@ -181,6 +181,8 @@ const REQUIRED_RUNTIME_LABELS = [
   "codekeeper:ready",
   "codekeeper:blocked",
   "codekeeper:manual-review",
+  "codekeeper:paused",
+  "codekeeper:auto-repaired",
   "codekeeper:auto-merge",
   "codekeeper:duplicate-candidate",
   "codekeeper:needs-tests",
@@ -356,7 +358,8 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
     assert(config.labels[label], `runtime requires undefined label ${label}`);
   }
 
-  fixedObject(config.review, "review", ["maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
+  fixedObject(config.review, "review", ["autoRepair", "maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
+  boolean(config.review.autoRepair, "review.autoRepair");
   cappedNonNegativeInteger(config.review.maximumBlockingFindings, "review.maximumBlockingFindings", LIMITS.maximumBlockingFindings);
   cappedNonNegativeInteger(config.review.maximumNonBlockingFindings, "review.maximumNonBlockingFindings", LIMITS.maximumNonBlockingFindings);
   cappedPositiveInteger(config.review.maximumDiffBytes, "review.maximumDiffBytes", LIMITS.maximumDiffBytes);

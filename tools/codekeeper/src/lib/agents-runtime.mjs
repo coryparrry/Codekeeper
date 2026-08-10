@@ -293,6 +293,8 @@ export async function runConfiguredAgent({
         await modelProvider.close();
       } catch (error) {
         reportDiagnostic(diagnostic, "provider-close", lastFailureAttempt);
+        // The provider close failure is the final runtime result at this boundary.
+        // eslint-disable-next-line no-unsafe-finally
         throw error;
       }
     }

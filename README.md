@@ -17,6 +17,28 @@ The guided installer performs this generation from release-pinned assets. Until 
 
 The root policy is a valid starter, not a safe default for every repository. Before enabling it, replace `repository.ownerLogins`, verify the default branch and automation prefix, and tailor repair, validation, and auto-merge paths. Each mode has its own `ai.agents.<mode>` provider, model, settings, and optional Codex workspace specialist. The runtime label names are intentionally namespaced and must remain defined exactly as supplied. See [configuration](docs/CONFIGURATION.md).
 
+Each role can use any supported provider and model. OpenAI and DeepSeek are the first integrations. A role is not fixed to either provider.
+
+## Agent roles and authority
+
+| Role | Trigger | What it does | Actions it can take |
+|---|---|---|---|
+| Pull request reviewer | A PR event or `/codekeeper review` | Reviews the exact PR commit. Reports defects, risk, and test coverage. Adds a Mermaid diagram when a flow needs one. | Updates one review comment and managed labels. It can request one repair pass when automatic review repair is on. |
+| Issue triager | An issue event or `/codekeeper triage` | Classifies the issue. Finds missing details, related issues, and related PRs. Creates a clear maintainer decision when required. | Updates one triage comment and managed labels. It can mark an issue ready or close an exact duplicate when those capabilities are on. |
+| Repository auditor | A schedule or manual run | Reviews the default branch for evidence-backed maintenance work. | Creates maintenance issues. It can open one bounded repair PR when repository repair is on. |
+| Maintenance planner | A ready issue, `/codekeeper implement`, `/codekeeper fix`, or an automatic repair request | Implements one issue or repairs one existing PR. Runs the configured checks and reports the result. | Opens one issue PR or pushes to the existing PR branch. It cannot bypass path, size, validation, or merge policy. |
+
+The deterministic coordinator connects these roles. It routes events and commands, limits automatic repair to one pass, and checks live GitHub state before each action.
+
+Configured owners can use these exact commands:
+
+- `/codekeeper status`
+- `/codekeeper review`
+- `/codekeeper rerun`
+- `/codekeeper implement`
+- `/codekeeper fix`
+- `/codekeeper stop`
+
 ## Adopter-owned coordinator profiles
 
 Each installation has four fixed Markdown files. They are normal reviewed repository files, so maintainers can change Codekeeper's evidence thresholds, prioritization, test expectations, duplicate criteria, no-action decisions, and reporting style without rebuilding the runtime.
@@ -66,6 +88,8 @@ Treebar-specific paths and policy are kept only as an optional [example](example
 ## Local verification
 
 ```bash
+env npm_config_cache=/tmp/codekeeper-npm-cache npm ci --ignore-scripts --no-audit --no-fund
+npm run check
 node tools/codekeeper/src/cli.mjs check-config
 cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
@@ -82,3 +106,9 @@ bash scripts/release-source.sh --output ../codekeeper-release-artifacts
 ```
 
 See [validation](VALIDATION.md#source-release-integrity) for the clean-tree requirement, verification-only command, and the boundary between source integrity and GitHub release visibility.
+
+## Acknowledgements
+
+Codekeeper's command routing, bounded repair loop, status comment, related-item context, and maintainer-decision design were inspired by [ClawSweeper](https://github.com/openclaw/clawsweeper).
+
+No ClawSweeper source code is included. Codekeeper is an independent implementation, so the ClawSweeper MIT license is not bundled.
