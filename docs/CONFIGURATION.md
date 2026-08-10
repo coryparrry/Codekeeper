@@ -88,19 +88,19 @@ Reusable workflow callers expose explicit controls alongside `enabled`:
 
 - `auto_review` defaults to `true` and permits eligible pull-request events to run the review workflow. Setting it to `false` skips automatic review; the supplied required review gate then fails closed.
 - `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/codekeeper triage` comments from configured owners remain available.
-- `repair_authorized` defaults to `false` for maintenance. It is accepted only on a manual `workflow_dispatch` initiated by a configured owner. Scheduled callers always pass `false`; even a manual `true` still requires `audit.repair.enabled=true` and all deterministic patch gates.
+- `dry_run=true` makes maintenance report-only. A live run can repair only when `audit.repair.enabled=true` and every patch limit passes.
 
 Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
 
 ## Explicit repair targets
 
-Repairs never follow automatically from a review or triage decision.
+Capabilities decide which automatic actions can run.
 
-- **Maintenance:** schedule and default manual runs are report-only. A patch is eligible only for one owner-started manual run with `repair_authorized=true`, `audit.repair.enabled=true`, and `dry_run=false`.
-- **Issue:** an automatic issue event cannot request implementation. A configured owner with an accepted repository association must post a comment whose complete body is `/codekeeper fix`, or deliberately provide the target through manual dispatch. `issues.allowAiImplementation=true` is still required. An accepted issue result may create one bounded repair pull request.
+- **Maintenance:** a live scheduled or manual run may create one repair when `audit.repair.enabled=true`. A dry run remains report-only.
+- **Issue:** when `issues.allowAiImplementation=true`, trusted triage may add `codekeeper:ready` to a clear, bounded issue. That label starts a fix run which may create one bounded repair pull request. A configured owner may also provide an issue through manual dispatch.
 - **Same-repository pull request:** the same exact owner command may target an eligible open, non-draft pull request to the default branch. A valid repair is committed and pushed to that pull request's existing head branch. The publisher never calls the create-pull-request path for this target and has no fallback that opens a second pull request. Forks, default/protected head branches, stale heads, branch movement, or target drift fail closed.
 
-Profiles can decide that an authorized repair is too risky and return no change. They cannot turn a review, triage, scheduled audit, or unauthorized manual audit into a repair.
+Profiles can decide that an enabled repair is too risky and return no change. They cannot turn on a disabled capability or bypass its fixed limits.
 
 ## Workspace specialists
 
@@ -109,11 +109,11 @@ The coordinator itself is one tool-less Agents SDK `Agent` per mode. Codex is op
 | Mode | Default provider | Workspace behavior |
 |---|---|---|
 | review | OpenAI | Optional read-only inspection of the exact PR head. |
-| audit | OpenAI | Optional inspection; write access also requires `audit.repair.enabled=true` and per-run `repair_authorized=true`. |
+| audit | OpenAI | Optional inspection; write access requires `audit.repair.enabled=true` and a live run. |
 | issue | DeepSeek V4 Flash | Disabled by default; optional workspace is always read-only. |
 | fix | OpenAI | Optional implementation; write access also requires `issues.allowAiImplementation=true`. |
 
-Review and issue workspace writes are rejected by config validation. `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled` are all false in the starter policy. Enabling a capability in policy does not authorize a particular run.
+Review and issue workspace writes are rejected by config validation. The installer lets the adopter choose `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled`. A capability that is on is active for its matching live workflow.
 
 ## Bounded review context and auto-merge
 

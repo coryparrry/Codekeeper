@@ -107,13 +107,13 @@ The App token is present only in publication jobs. Maintenance and fix callers m
 
 ## 4. Prove the configuration before making the gate required
 
-Commit the configuration, profiles, and callers to the default branch with `CODEKEEPER_ENABLED=false`. When ready to prove the configuration, set it to `true` and run the maintenance caller manually with `dry_run=true` and `repair_authorized=false` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests, and does not require the maintenance App client ID or private-key mapping.
+Commit the configuration, profiles, and callers to the default branch. Run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests, and does not require the maintenance App client ID or private-key mapping.
 
 Then open a small same-repository pull request targeting the default branch. The supplied caller sets `auto_review: true`; keep it true while proving the required review gate. Confirm that the caller's **Codekeeper review gate** completes and the App identity, labels, and `PR review summary` comment are correct before adding the gate to branch protection.
 
 Branch protection remains the source of truth. Keep normal build, test, approval, and deployment checks required independently of this workflow.
 
-## 5. Choose automatic triage and use configured-owner commands
+## 5. Choose automatic triage and issue implementation
 
 The supplied issue caller opts in to `auto_triage: true`, so opened, reopened, and edited issues receive bounded automatic triage. Automatic triage can label, comment, and identify a duplicate candidate; it does not close an issue because `issues.closeExactDuplicates` remains false by default. Set `auto_triage: false` in the caller to skip those automatic events.
 
@@ -123,24 +123,11 @@ Only a GitHub login listed in `repository.ownerLogins` can request manual issue 
 /codekeeper triage
 ```
 
-For a bounded issue implementation, add a comment whose complete body is exactly:
-
-```text
-/codekeeper fix
-```
-
-Do not add arguments or other text to that comment. For an issue, an accepted fix may open one bounded repair pull request. The workflow never repairs an issue merely because it was opened, edited, or triaged.
+When `issues.allowAiImplementation=true`, trusted triage adds `codekeeper:ready` only to a clear, bounded, testable issue. That label starts the issue implementation workflow, which may open one bounded repair pull request.
 
 The same exact owner command can be added to an eligible open, non-draft, same-repository pull request targeting the default branch. Codekeeper freezes that pull request's current head and, after validation, pushes one App-owned commit to its existing head branch. It does not open a second pull request and does not fall back to creating one. Forks, default/protected head branches, stale heads, and changed targets fail closed.
 
-Maintenance schedules are always report-only. A manually dispatched maintenance run is also report-only unless all of the following are true:
-
-- The actor is listed in `repository.ownerLogins`.
-- `audit.repair.enabled=true` in the trusted policy.
-- That individual `workflow_dispatch` sets `repair_authorized=true`.
-- `dry_run=false`, and the resulting patch passes every configured path, size, and validation gate.
-
-The authorization applies only to that run; schedules always pass `repair_authorized=false`. Keep the first run dry and unauthorized.
+A maintenance run is report-only when `dry_run=true` or `audit.repair.enabled=false`. When repository repair is on, a live manual or scheduled run may make one repair that passes the configured path, size, and validation limits.
 
 ## Limits to keep in branch rules
 
