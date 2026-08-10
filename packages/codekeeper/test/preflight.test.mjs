@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { loadVerifiedAssets } from "../src/assets.mjs";
 import {
   assertNodeVersion,
   assertNoInstallationFiles,
   assertNoSetupBranch,
+  inspectInstallationFiles,
   inspectRepository,
   parseGitHubRemote
 } from "../src/preflight.mjs";
@@ -45,6 +47,11 @@ function preflightRunner(root, options = {}) {
     sparseValue: "",
     userName: "Cory",
     userEmail: "cory@example.test",
+    variables: {
+      CODEKEEPER_ENABLED: "true",
+      CODEKEEPER_APP_CLIENT_ID: "Iv123456789012345678",
+      CODEKEEPER_AUTOMATION_BOT_LOGIN: "codekeeper-widget[bot]"
+    },
     failures: new Map(),
     ...options
   };
@@ -81,6 +88,7 @@ function preflightRunner(root, options = {}) {
     if (command === "git" && args[0] === "for-each-ref") return result(settings.localRefs);
     if (command === "git" && args[0] === "ls-remote" && args[1] === "--heads") return result(settings.remoteRefs);
     if (command === "gh" && args[0] === "pr" && args[1] === "list") return result(JSON.stringify(settings.pulls));
+    if (command === "gh" && args[0] === "variable" && args[1] === "get") return result(`${settings.variables[args[2]] ?? ""}\n`);
     throw new Error(`Unexpected preflight command: ${command} ${args.join(" ")}`);
   });
 }
@@ -137,7 +145,7 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     const root = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github"));
     await writeFile(path.join(root, ".github", "CodeKeeper.JSON"), "{}\n");
-    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "EXISTING_INSTALLATION"));
+    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
   });
   await t.test("case-colliding GitHub directory fails", async (t) => {
     const root = await temporaryDirectory(t);
@@ -161,7 +169,7 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     const root = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
     await writeFile(path.join(root, ".github", "codekeeper", "agents", "Issue-Triager.MD"), "# Existing\n");
-    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "EXISTING_INSTALLATION"));
+    await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
   });
   await t.test("case-colliding Codekeeper profile parent fails", async (t) => {
     const root = await temporaryDirectory(t);
@@ -208,6 +216,30 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     await writeFile(path.join(root, ".github", "codekeeper", "agents", "team-notes.md"), "# Notes\n");
     await assertNoInstallationFiles(root);
   });
+});
+
+test("existing generated files are recognized as a rerunnable installation", async (t) => {
+  const root = await temporaryDirectory(t);
+  const bundle = await loadVerifiedAssets();
+  await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
+  await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
+  await writeFile(path.join(root, ".github", "codekeeper.json"), bundle.contents["policies/openai.json"]);
+  for (const [name, asset] of [
+    ["pr-reviewer.md", "agents/pr-reviewer.md"],
+    ["repository-auditor.md", "agents/repository-auditor.md"],
+    ["issue-triager.md", "agents/issue-triager.md"],
+    ["maintenance-planner.md", "agents/maintenance-planner.md"]
+  ]) await writeFile(path.join(root, ".github", "codekeeper", "agents", name), bundle.contents[asset]);
+  await writeFile(path.join(root, ".github", "workflows", "codekeeper-review.yml"), bundle.contents["workflows/review.yml"]);
+
+  const installation = await inspectInstallationFiles(root);
+  assert.deepEqual(installation.modes, ["review"]);
+  assert.equal(installation.policy.ai.agents.review.model, "gpt-5.6-sol");
+  const inspected = await inspectRepository({ runner: preflightRunner(root), cwd: root });
+  assert.equal(inspected.updateBranch, `codekeeper/update-${HEAD_SHA.slice(0, 12)}`);
+  assert.equal(inspected.existingSettings.enabled, true);
+  assert.equal(inspected.existingSettings.appClientId, "Iv123456789012345678");
+  assert.equal(inspected.existingSettings.automationBotLogin, "codekeeper-widget[bot]");
 });
 
 test("setup branch collision detection covers local refs, remote refs, and prior pull requests", async () => {

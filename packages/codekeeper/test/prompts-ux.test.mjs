@@ -39,7 +39,7 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
     calls,
     async confirm(options) {
       calls.push({ method: "confirm", options });
-      if (options.message.startsWith("Install into")) return true;
+      if (options.message.startsWith("Install into") || options.message.startsWith("Edit Codekeeper in")) return true;
       if (options.message === "Use the recommended starter setup?") return recommended;
       if (options.message === "Enable OpenAI traces?") return true;
       if (options.message.startsWith("Start Codekeeper")) return true;
@@ -220,6 +220,51 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
   assert.match(output.toString(), /You choose issue implementation separately/);
   assert.match(output.toString(), /OPENAI_API_KEY:/);
   assert.match(output.toString(), /DEEPSEEK_API_KEY:/);
+});
+
+test("an existing installation reuses its workflows, identity, and settings", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = JSON.parse(bundle.contents["policies/openai.json"]);
+  policy.repository.displayName = "Existing Widget";
+  policy.repository.ownerLogins = ["alice", "cory"];
+  policy.audit.repair.enabled = true;
+  policy.merge.enabled = true;
+  const prompt = setupPrompt({ recommended: true });
+  const output = textSink();
+  const answers = await collectSetupAnswers({
+    prompt,
+    bundle,
+    output,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy,
+        policySource: `${JSON.stringify(policy, null, 2)}\n`,
+        modes: ["review", "maintain"],
+        contents: {}
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    }
+  });
+  assert.deepEqual(answers, {
+    modes: ["review", "maintain"],
+    preset: "openai",
+    models: { review: "sol-high", maintain: "sol-high" },
+    tracing: true,
+    displayName: "Existing Widget",
+    ownerLogins: ["alice", "cory"],
+    enabled: true,
+    capabilities: ["repair", "autoMerge"]
+  });
+  assert.equal(prompt.calls.some((call) => call.options.message === "Use the recommended starter setup?"), false);
+  assert.equal(prompt.calls.some((call) => call.options.message === "Choose workflows to generate:"), false);
+  assert.match(output.toString(), /current GitHub App settings and API keys stay unchanged/);
+  assert.doesNotMatch(output.toString(), /OPENAI_API_KEY:/);
 });
 
 test("GitHub App identity asks for the App name in plain language", async () => {

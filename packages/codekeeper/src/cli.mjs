@@ -72,7 +72,7 @@ function preview(plan, output) {
   output.write(`  Comment display name: ${plan.displayName}\n`);
   output.write(`  Owner-command users: ${plan.ownerLogins.join(", ")}\n`);
   output.write(`  Model-provider preset: ${plan.preset}\n`);
-  output.write(`  Setup branch: ${plan.branch}\n`);
+  output.write(`  Setup branch: ${plan.settingsOnly ? "not needed for this settings change" : plan.branch}\n`);
   output.write("  Workflows:\n");
   for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);
   output.write("  Models (editable in .github/codekeeper.json before merge):\n");
@@ -96,7 +96,9 @@ function preview(plan, output) {
 }
 
 function printCompletion(plan, receipt, output) {
-  output.write(`\nCreated setup pull request: ${receipt.pullRequestUrl}\n`);
+  output.write(receipt.settingsOnly
+    ? "\nUpdated the Codekeeper repository settings. No pull request was needed.\n"
+    : `\nCreated setup pull request: ${receipt.pullRequestUrl}\n`);
   output.write(`Pinned source: ${plan.source.repository}@${plan.source.commit}\n`);
   output.write("\nDocument map\n");
   for (const item of documentMap(plan.files)) output.write(`  - ${item.path}: ${item.purpose}\n`);
@@ -169,47 +171,57 @@ export async function runCli({
     const presentationOutput = activePrompt.kind === "ink" ? activePrompt.notices : output;
     const snapshot = await inspect({ runner, cwd, interactive });
     const setupAnswers = await collectSetupAnswers({ prompt: activePrompt, snapshot, bundle, output: presentationOutput });
-    const registrationUrl = appRegistrationUrl({
-      repository: snapshot.repository,
-      displayName: setupAnswers.displayName,
-      ownerType: snapshot.ownerType
-    });
-    const safelyOpenUrl = openUrl ?? ((url) => bestEffortOpen(url, { runner, platform }));
-    presentationOutput.write(`\nUse a GitHub App that you own. Install it only on ${snapshot.repository}.\nThe link creates an App with the required permissions. If you already installed one, close the page and use it.\n${registrationUrl}\n`);
-    try {
-      await safelyOpenUrl(registrationUrl);
-    } catch {
-      // Opening the browser is best-effort; the printed URL is always authoritative.
-    }
-    const appReady = await activePrompt.confirm({
-      message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
-      defaultValue: false,
-      ...(activePrompt.kind === "ink" ? {
-        step: "GitHub App",
-        description: [
-          `Required for: ${snapshot.repository}`,
-          "The App needs read and write access to contents, issues, and pull requests.",
-          "The App needs read-only access to metadata. Webhooks stay disabled.",
-          "Create or inspect the App in the browser, install it only on this repository, then download a new private key.",
-          registrationUrl
-        ],
-        yesLabel: "App and key ready",
-        noLabel: "Stop for now"
-      } : {})
-    });
-    if (!appReady) {
-      throw new InstallerError("Complete GitHub App creation and installation, then rerun init.", {
-        code: "APP_SETUP_ABORTED",
-        resume: resumeCommand
+    let appAnswers;
+    if (snapshot.installation) {
+      appAnswers = {
+        appClientId: snapshot.existingSettings.appClientId,
+        automationBotLogin: snapshot.existingSettings.automationBotLogin
+      };
+    } else {
+      const registrationUrl = appRegistrationUrl({
+        repository: snapshot.repository,
+        displayName: setupAnswers.displayName,
+        ownerType: snapshot.ownerType
       });
+      const safelyOpenUrl = openUrl ?? ((url) => bestEffortOpen(url, { runner, platform }));
+      presentationOutput.write(`\nUse a GitHub App that you own. Install it only on ${snapshot.repository}.\nThe link creates an App with the required permissions. If you already installed one, close the page and use it.\n${registrationUrl}\n`);
+      try {
+        await safelyOpenUrl(registrationUrl);
+      } catch {
+        // Opening the browser is best-effort; the printed URL is always authoritative.
+      }
+      const appReady = await activePrompt.confirm({
+        message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
+        defaultValue: false,
+        ...(activePrompt.kind === "ink" ? {
+          step: "GitHub App",
+          description: [
+            `Required for: ${snapshot.repository}`,
+            "The App needs read and write access to contents, issues, and pull requests.",
+            "The App needs read-only access to metadata. Webhooks stay disabled.",
+            "Create or inspect the App in the browser, install it only on this repository, then download a new private key.",
+            registrationUrl
+          ],
+          yesLabel: "App and key ready",
+          noLabel: "Stop for now"
+        } : {})
+      });
+      if (!appReady) {
+        throw new InstallerError("Complete GitHub App creation and installation, then rerun init.", {
+          code: "APP_SETUP_ABORTED",
+          resume: resumeCommand
+        });
+      }
+      appAnswers = await collectAppAnswers({ prompt: activePrompt, modes: setupAnswers.modes, output: presentationOutput });
     }
-    const appAnswers = await collectAppAnswers({ prompt: activePrompt, modes: setupAnswers.modes, output: presentationOutput });
     const plan = buildInstallPlan({
       bundle,
       snapshot,
       answers: { ...setupAnswers, ...appAnswers }
     });
-    const appPrivateKeyPath = await collectAppPrivateKeyPath({ prompt: activePrompt, output: presentationOutput });
+    const appPrivateKeyPath = plan.secrets.some((secret) => secret.name === "CODEKEEPER_APP_PRIVATE_KEY")
+      ? await collectAppPrivateKeyPath({ prompt: activePrompt, output: presentationOutput })
+      : null;
     let confirmed;
     if (typeof activePrompt.reviewInstallPlan === "function") {
       confirmed = await activePrompt.reviewInstallPlan(plan);
@@ -237,14 +249,19 @@ export async function runCli({
         : (callback) => callback(),
       resumeCommand
     });
-    const beforeGit = await inspect({ runner, cwd: snapshot.root, interactive });
-    assertSameSnapshot(snapshot, beforeGit, resumeCommand);
-    const receipt = await installPlan(plan, {
-      runner,
-      onProgress: activePrompt.progress?.update,
-      resumeCommand,
-      platform
-    });
+    let receipt;
+    if (plan.settingsOnly) {
+      receipt = Object.freeze({ settingsOnly: true, pullRequestUrl: "No pull request was needed." });
+    } else {
+      const beforeGit = await inspect({ runner, cwd: snapshot.root, interactive });
+      assertSameSnapshot(snapshot, beforeGit, resumeCommand);
+      receipt = await installPlan(plan, {
+        runner,
+        onProgress: activePrompt.progress?.update,
+        resumeCommand,
+        platform
+      });
+    }
     if (typeof activePrompt.showCompletion === "function") await activePrompt.showCompletion(plan, receipt);
     else printCompletion(plan, receipt, output);
     await activePrompt.dispose?.();

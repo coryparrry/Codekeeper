@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadVerifiedAssets } from "../src/assets.mjs";
 import { currentResumeCommand, parseCliArgs, runCli, USAGE } from "../src/cli.mjs";
 import { createCommandRunner } from "../src/command-runner.mjs";
-import { completionGuidance } from "../src/plan.mjs";
+import { buildInstallPlan, completionGuidance } from "../src/plan.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
 import { createRecordingRunner, git, HEAD_SHA, result, temporaryDirectory, textSink } from "./helpers.mjs";
 
@@ -360,6 +360,76 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
   const observable = `${JSON.stringify(reviewedPlan)}\n${output.toString()}\n${errorOutput.toString()}\n${notices.toString()}`;
   assert.doesNotMatch(observable, new RegExp(privateKeyPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(errorOutput.toString(), /cancelled before repository mutation/);
+});
+
+test("an existing installation rerun skips App setup and secret prompts", async () => {
+  const bundle = await loadVerifiedAssets();
+  const baseSnapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: baseSnapshot,
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true
+    }
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const snapshot = Object.freeze({
+    ...baseSnapshot,
+    installation: Object.freeze({
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
+      modes: Object.freeze(["review", "maintain"]),
+      contents: Object.freeze(contents)
+    }),
+    existingSettings: Object.freeze({
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]"
+    }),
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  });
+  let reviewedPlan = null;
+  let opens = 0;
+  const prompt = {
+    kind: "ink",
+    notices: textSink(),
+    async confirm() { return true; },
+    async select(options) {
+      if (options.message.includes("Pull request reviewer")) return "luna-max";
+      return options.defaultValue;
+    },
+    async multiselect(options) { return options.defaultValues; },
+    async inputText(options) { return options.defaultValue; },
+    async selectPrivateKey() { throw new Error("an update must not request the App key"); },
+    async reviewInstallPlan(plan) {
+      reviewedPlan = plan;
+      return false;
+    },
+    async dispose() {}
+  };
+  const status = await runCli({
+    argv: ["init"],
+    prompt,
+    output: textSink(),
+    errorOutput: textSink(),
+    runner: createRecordingRunner(() => { throw new Error("no mutation before review"); }),
+    inspect: async () => snapshot,
+    openUrl: async () => { opens += 1; },
+    loadAssets: async () => bundle
+  });
+  assert.equal(status, 1);
+  assert.equal(opens, 0);
+  assert.equal(reviewedPlan.update, true);
+  assert.deepEqual(reviewedPlan.secrets, []);
+  assert.deepEqual(reviewedPlan.variables, []);
+  assert.deepEqual(reviewedPlan.files.map((file) => file.path), [".github/codekeeper.json"]);
+  assert.equal(reviewedPlan.models.review.model, "gpt-5.6-luna");
 });
 
 test("resume command formatting is executable on POSIX and PowerShell", () => {

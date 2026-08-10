@@ -109,7 +109,8 @@ export function renderPolicy(policySource, {
   ownerLogins,
   capabilities = {},
   models = {},
-  tracing = true
+  tracing = true,
+  enforceBundledDefaults = true
 }) {
   let policy;
   try {
@@ -117,7 +118,7 @@ export function renderPolicy(policySource, {
   } catch (cause) {
     throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
   }
-  assertDisabledPolicy(policy);
+  if (enforceBundledDefaults) assertDisabledPolicy(policy);
   if (!policy.repository || !policy.merge || !Array.isArray(policy.merge.allowedUserAuthors)) {
     throw new InstallerError("Bundled policy cannot be tailored safely.", { code: "ASSET_POLICY_INVALID" });
   }
@@ -207,24 +208,28 @@ export function renderInstallFiles(bundle, {
   ownerLogins,
   capabilities = {},
   models = {},
-  tracing = true
+  tracing = true,
+  policySource = bundle.contents[`policies/${preset}.json`],
+  profileSources = bundle.contents,
+  enforceBundledDefaults = true
 }) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
   const rendered = [{
     path: POLICY_TARGET,
-    contents: renderPolicy(bundle.contents[`policies/${preset}.json`], {
+    contents: renderPolicy(policySource, {
       displayName,
       defaultBranch,
       ownerLogins,
       capabilities,
       models,
-      tracing
+      tracing,
+      enforceBundledDefaults
     })
   }];
   for (const profile of AGENT_PROFILE_IDS) {
     rendered.push({
       path: AGENT_PROFILES[profile].target,
-      contents: bundle.contents[AGENT_PROFILES[profile].asset]
+      contents: profileSources[AGENT_PROFILES[profile].target] ?? profileSources[AGENT_PROFILES[profile].asset]
     });
   }
   for (const mode of modes) {

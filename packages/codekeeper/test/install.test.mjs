@@ -410,6 +410,75 @@ test("real Git integration creates one exact generated-only commit without broad
   assert.ok(calls.every((call) => !call.args.includes("-A") && !call.args.includes("--all") && !call.args.includes("--force")));
 });
 
+test("real Git integration reruns against an existing installation and commits only changed configuration", async (t) => {
+  const { root, head } = await committedRepository(t);
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: { root, repository: "acme/widget", defaultBranch: "main", headSha: head, viewerLogin: "cory" },
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true
+    }
+  });
+  for (const file of initial.files) {
+    await mkdir(path.dirname(path.join(root, file.path)), { recursive: true });
+    await writeFile(path.join(root, file.path), file.contents);
+  }
+  await writeFile(path.join(root, ".github/codekeeper/agents/pr-reviewer.md"), `${initial.files.find((file) => file.path.endsWith("pr-reviewer.md")).contents}\nTeam preference: report API regressions first.\n`);
+  git(root, ["add", ".github"]);
+  git(root, ["commit", "-m", "install codekeeper"]);
+  const installedHead = git(root, ["rev-parse", "HEAD"]).trim();
+  const contents = {};
+  for (const file of initial.files) contents[file.path] = await readFile(path.join(root, file.path), "utf8");
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      root,
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: installedHead,
+      viewerLogin: "cory",
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: ["review", "maintain"],
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${installedHead.slice(0, 12)}`
+    },
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      models: { review: "luna-max", maintain: "sol-high" },
+      tracing: true,
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true,
+      capabilities: ["repair", "autoMerge"]
+    }
+  });
+  const commit = await createSetupCommit(update, { runner: isolatedCommandRunner(root) });
+  assert.match(commit, /^[0-9a-f]{40}$/);
+  assert.equal(git(root, ["branch", "--show-current"]).trim(), `codekeeper/update-${installedHead.slice(0, 12)}`);
+  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n"), [".github/codekeeper.json"]);
+  assert.match(await readFile(path.join(root, ".github/codekeeper/agents/pr-reviewer.md"), "utf8"), /Team preference/);
+  const policy = JSON.parse(await readFile(path.join(root, ".github/codekeeper.json"), "utf8"));
+  assert.equal(policy.ai.agents.review.model, "gpt-5.6-luna");
+});
+
 test("pre-push commit trust checks reject parent, inventory, and blob mismatches", async (t) => {
   for (const [name, expectedCode, intercept] of [
     [

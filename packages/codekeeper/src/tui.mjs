@@ -613,6 +613,9 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.return) onSubmit(true);
   });
   const guidance = completionGuidance(spec.plan.modes, spec.plan.enabled);
+  const completedSteps = spec.receipt.settingsOnly
+    ? DEFAULT_PROGRESS_STEPS.filter((step) => ["repository:verify", "settings:disable", "variables:configure"].includes(step.id))
+    : DEFAULT_PROGRESS_STEPS;
   return h(
     Shell,
     {
@@ -625,7 +628,7 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     h(
       Box,
       { flexDirection: "column" },
-      ...DEFAULT_PROGRESS_STEPS.map((step) => h(Text, { key: step.id, dimColor: true }, `✓ ${step.label}`)),
+      ...completedSteps.map((step) => h(Text, { key: step.id, dimColor: true }, `✓ ${step.label}`)),
       compact ? null : h(Text, { dimColor: true }, `Source: ${spec.plan.source.repository}@${spec.plan.source.commit}`),
       h(Text, { dimColor: true }, spec.plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge."),
       compact ? null : h(Text, { dimColor: true }, `OpenAI traces: ${spec.plan.tracing ? "enabled" : "disabled"}.`),

@@ -473,6 +473,61 @@ test("OpenAI model choices include Luna, Terra, and Sol and map Luna to one agen
   assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
 });
 
+test("a rerun creates a configuration-only update and preserves edited profiles", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  contents[".github/codekeeper/agents/pr-reviewer.md"] += "\nRepository preference: report API regressions first.\n";
+  const existingSnapshot = {
+    ...snapshot(),
+    installation: {
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
+      modes: initial.modes,
+      contents
+    },
+    existingSettings: {
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    },
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  };
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: existingSnapshot,
+    answers: answers({
+      modes: RECOMMENDED_MODES,
+      preset: RECOMMENDED_PRESET,
+      models: { review: "luna-max", maintain: "sol-high" }
+    })
+  });
+  assert.equal(update.update, true);
+  assert.equal(update.branch, `codekeeper/update-${HEAD_SHA.slice(0, 12)}`);
+  assert.deepEqual(update.variables, []);
+  assert.deepEqual(update.secrets, []);
+  assert.deepEqual(update.files.map((file) => file.path), [".github/codekeeper.json"]);
+  assert.match(contents[".github/codekeeper/agents/pr-reviewer.md"], /Repository preference/);
+  assert.equal(update.pullRequest.title, "chore(codekeeper): update configuration");
+
+  const disabled = buildInstallPlan({
+    bundle,
+    snapshot: existingSnapshot,
+    answers: answers({
+      modes: RECOMMENDED_MODES,
+      preset: RECOMMENDED_PRESET,
+      enabled: false
+    })
+  });
+  assert.equal(disabled.settingsOnly, true);
+  assert.deepEqual(disabled.files, []);
+  assert.deepEqual(disabled.variables, [{ name: "CODEKEEPER_ENABLED", value: "false" }]);
+});
+
 test("optional disabled installation keeps Codekeeper off after merge", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers({ enabled: false }) });

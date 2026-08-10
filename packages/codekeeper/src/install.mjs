@@ -29,7 +29,7 @@ function assertRelativeTarget(relativePath) {
   return parts;
 }
 
-async function ensureSafeParents(fsImpl, root, relativePath) {
+async function ensureSafeParents(fsImpl, root, relativePath, { allowExisting = false } = {}) {
   const parts = assertRelativeTarget(relativePath);
   let current = root;
   for (const part of parts.slice(0, -1)) {
@@ -44,8 +44,9 @@ async function ensureSafeParents(fsImpl, root, relativePath) {
     }
   }
   const target = path.join(root, ...parts);
-  if (await maybeLstat(fsImpl, target)) {
-    throw new InstallerError(`Generated path already exists: ${relativePath}`, { code: "PATH_COLLISION" });
+  const targetStat = await maybeLstat(fsImpl, target);
+  if (targetStat && (!allowExisting || !targetStat.isFile() || targetStat.isSymbolicLink())) {
+    throw new InstallerError(`Generated path already exists or is unsafe: ${relativePath}`, { code: "PATH_COLLISION" });
   }
   return target;
 }
@@ -92,7 +93,23 @@ async function rollbackPreCommit(plan, { runner, fsImpl }) {
     if (!stat) continue;
     if (!stat.isFile() || stat.isSymbolicLink()) return false;
     const contents = await fsImpl.readFile(target);
-    if (contents.byteLength !== file.bytes || sha256(contents) !== file.sha256) return false;
+    const digest = sha256(contents);
+    if (plan.update) {
+      if (![file.sha256, file.previousSha256].includes(digest)) return false;
+    } else if (contents.byteLength !== file.bytes || digest !== file.sha256) return false;
+  }
+
+  if (plan.update) {
+    const reset = await runner.run("git", ["reset", "--quiet", "HEAD", "--", ...paths], { cwd: plan.root });
+    if (reset.status !== 0 || reset.timedOut || reset.truncated) return false;
+    const restored = await runner.run("git", ["restore", "--worktree", "--source=HEAD", "--", ...paths], { cwd: plan.root });
+    if (restored.status !== 0 || restored.timedOut || restored.truncated) return false;
+    const status = await runner.run("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: plan.root });
+    if (status.status !== 0 || status.timedOut || status.truncated || status.stdout) return false;
+    const switched = await runner.run("git", ["switch", plan.defaultBranch], { cwd: plan.root });
+    if (switched.status !== 0 || switched.timedOut || switched.truncated) return false;
+    const deleted = await runner.run("git", ["branch", "-d", plan.branch], { cwd: plan.root });
+    return deleted.status === 0 && !deleted.timedOut && !deleted.truncated;
   }
 
   const reset = await runner.run("git", ["reset", "--quiet", "HEAD", "--", ...paths], { cwd: plan.root });
@@ -137,16 +154,18 @@ export async function configureRepositorySettings(plan, {
   withInteractiveTerminal = (callback) => callback(),
   resumeCommand = "codekeeper init"
 }) {
-  const [enabledVariable, ...remainingVariables] = plan.variables;
-  if (enabledVariable?.name !== "CODEKEEPER_ENABLED" || !["true", "false"].includes(enabledVariable.value)) {
+  const enabledVariable = plan.variables.find((variable) => variable.name === "CODEKEEPER_ENABLED");
+  const remainingVariables = plan.variables.filter((variable) => variable.name !== "CODEKEEPER_ENABLED");
+  if (enabledVariable && !["true", "false"].includes(enabledVariable.value)) {
     throw new InstallerError("Install plan must choose whether Codekeeper starts after merge.", { code: "PLAN_INVALID" });
   }
-  if (plan.secrets.filter((secret) => secret.name === APP_SECRET).length !== 1) {
-    throw new InstallerError("Install plan must contain exactly one GitHub App private-key secret.", { code: "PLAN_INVALID" });
+  const appSecretCount = plan.secrets.filter((secret) => secret.name === APP_SECRET).length;
+  if (appSecretCount > 1 || (!plan.update && appSecretCount !== 1)) {
+    throw new InstallerError("Install plan has an invalid GitHub App private-key secret count.", { code: "PLAN_INVALID" });
   }
 
-  const appInput = openInputFile(appPrivateKeyPath);
-  if (!Number.isInteger(appInput?.descriptor) || appInput.descriptor < 3 || typeof appInput.close !== "function") {
+  const appInput = appSecretCount === 1 ? openInputFile(appPrivateKeyPath) : null;
+  if (appInput && (!Number.isInteger(appInput.descriptor) || appInput.descriptor < 3 || typeof appInput.close !== "function")) {
     throw new InstallerError("The installer failed to prepare the selected private-key input safely.", {
       code: "SECRET_INPUT_FILE_INVALID"
     });
@@ -154,20 +173,24 @@ export async function configureRepositorySettings(plan, {
 
   try {
     reportProgress(onProgress, "settings:disable", "active");
-    await runMutation(
-      runner,
-      "gh",
-      ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
-      { cwd: plan.root },
-      "GitHub CLI failed to set the Codekeeper startup state. No secrets or files changed.",
-      resumeCommand
-    );
+    if (enabledVariable) {
+      await runMutation(
+        runner,
+        "gh",
+        ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
+        { cwd: plan.root },
+        "GitHub CLI failed to set the Codekeeper startup state. No secrets or files changed.",
+        resumeCommand
+      );
+    }
     reportProgress(onProgress, "settings:disable", "done");
 
-    output.write("\nRequired GitHub Actions secrets\n");
-    output.write("Setup does not call a model. API keys go directly from this terminal to GitHub CLI. Codekeeper does not display or store them.\n");
-    output.write("The selected App key file goes directly to GitHub CLI. Codekeeper does not read or display the key.\n");
-    for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
+    if (plan.secrets.length) {
+      output.write("\nRequired GitHub Actions secrets\n");
+      output.write("Setup does not call a model. API keys go directly from this terminal to GitHub CLI. Codekeeper does not display or store them.\n");
+      output.write("The selected App key file goes directly to GitHub CLI. Codekeeper does not read or display the key.\n");
+      for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
+    }
 
     let providerProgressStarted = false;
     let providerProgressFinished = false;
@@ -243,7 +266,7 @@ export async function configureRepositorySettings(plan, {
     reportProgress(onProgress, "variables:configure", "done");
   } finally {
     try {
-      appInput.close();
+      appInput?.close();
     } catch {
       // The descriptor is process-local and contains no buffered secret bytes.
     }
@@ -269,10 +292,16 @@ export async function createSetupCommit(plan, {
   );
 
   try {
-    await assertNoInstallationFiles(plan.root, { fsImpl });
+    await assertNoInstallationFiles(plan.root, { fsImpl, allowExisting: plan.update === true });
     for (const file of plan.files) {
-      const target = await ensureSafeParents(fsImpl, plan.root, file.path);
-      await fsImpl.writeFile(target, file.contents, { flag: "wx", mode: 0o644 });
+      const target = await ensureSafeParents(fsImpl, plan.root, file.path, { allowExisting: plan.update === true });
+      if (plan.update) {
+        const current = await fsImpl.readFile(target);
+        if (sha256(current) !== file.previousSha256) {
+          throw new InstallerError(`The current file changed before the update: ${file.path}`, { code: "EXISTING_INSTALLATION_CHANGED" });
+        }
+      }
+      await fsImpl.writeFile(target, file.contents, { flag: plan.update ? "w" : "wx", mode: 0o644 });
       const written = await fsImpl.readFile(target);
       if (written.byteLength !== file.bytes || sha256(written) !== file.sha256) {
         throw new InstallerError(`Generated file verification failed: ${file.path}`, { code: "GENERATED_FILE_MISMATCH" });
