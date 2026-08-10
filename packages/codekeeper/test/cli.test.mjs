@@ -24,7 +24,7 @@ function guidedPrompt(confirmations = [true, true, true, true, true, true], { pr
     },
     async select({ message, defaultValue }) {
       if (message === "Choose a starting setup") return "recommended";
-      if (message.startsWith("Choose a model for")) return defaultValue;
+      if (message.startsWith("Assign a model to")) return defaultValue;
       if (message === "Enable OpenAI traces?") return "enabled";
       if (message.startsWith("Start Codekeeper")) return "enabled";
       throw new Error("recommended setup must not ask for a custom preset");
@@ -298,7 +298,7 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
     async select(options) {
       calls.push(["select", options.message]);
       if (options.message === "Choose a starting setup") return "recommended";
-      if (options.message.startsWith("Choose a model for")) return options.defaultValue;
+      if (options.message.startsWith("Assign a model to")) return options.defaultValue;
       if (options.message === "Enable OpenAI traces?") return "enabled";
       if (options.message.startsWith("Start Codekeeper")) return "enabled";
       throw new Error(`Unexpected select prompt: ${options.message}`);

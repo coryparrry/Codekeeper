@@ -11,6 +11,7 @@ export const MODES = Object.freeze({
   review: Object.freeze({
     id: "review",
     label: "Pull request review",
+    agentLabel: "Pull request reviewer",
     description: "Reviews pull requests from this repository. Adds comments, labels, and a blocking result.",
     policyAgent: "review",
     target: ".github/workflows/codekeeper-review.yml",
@@ -20,6 +21,7 @@ export const MODES = Object.freeze({
   maintain: Object.freeze({
     id: "maintain",
     label: "Repository maintenance",
+    agentLabel: "Repository auditor",
     description: "Runs repository audits manually or on a schedule. Start with a dry run that makes no changes.",
     policyAgent: "audit",
     target: ".github/workflows/codekeeper-maintain.yml",
@@ -29,6 +31,7 @@ export const MODES = Object.freeze({
   issues: Object.freeze({
     id: "issues",
     label: "Issue triage",
+    agentLabel: "Issue triager",
     description: "Adds labels and comments to issues. Automatic duplicate closure stays off.",
     policyAgent: "issue",
     target: ".github/workflows/codekeeper-issues.yml",
@@ -38,6 +41,7 @@ export const MODES = Object.freeze({
   fix: Object.freeze({
     id: "fix",
     label: "Owner-authorized issue fix",
+    agentLabel: "Maintenance planner",
     description: "Can open a repair pull request after an owner command when issue implementation is selected.",
     policyAgent: "fix",
     target: ".github/workflows/codekeeper-fix.yml",
@@ -106,6 +110,7 @@ export const CAPABILITIES = Object.freeze({
 export const CAPABILITY_IDS = Object.freeze(Object.keys(CAPABILITIES));
 export const MODEL_OPTIONS = Object.freeze({
   openai: Object.freeze([
+    Object.freeze({ id: "luna-max", model: "gpt-5.6-luna", effort: "max", label: "GPT-5.6 Luna · max effort" }),
     Object.freeze({ id: "sol-high", model: "gpt-5.6-sol", effort: "high", label: "GPT-5.6 Sol · high effort" }),
     Object.freeze({ id: "terra-high", model: "gpt-5.6-terra", effort: "high", label: "GPT-5.6 Terra · high effort" }),
     Object.freeze({ id: "terra-medium", model: "gpt-5.6-terra", effort: "medium", label: "GPT-5.6 Terra · medium effort" })

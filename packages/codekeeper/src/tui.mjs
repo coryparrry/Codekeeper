@@ -463,7 +463,7 @@ function reviewData(plan) {
     workflows: workflowMap(plan.modes).map((item) => `${item.label} — ${item.trigger}`),
     models: plan.modes.map((mode) => {
       const agent = policy.ai.agents[MODES[mode].policyAgent];
-      return `${MODES[mode].label}: ${agent.provider} / ${agent.model} / ${agent.effort}`;
+      return `${MODES[mode].agentLabel} (${MODES[mode].label}): ${agent.provider} / ${agent.model} / ${agent.effort}`;
     }),
     documents: documents.map((item) => `${item.path} — ${item.purpose}`),
     setupDocumentPaths: documents.filter((item) => !item.path.includes("/agents/")).map((item) => item.path),

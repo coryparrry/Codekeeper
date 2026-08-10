@@ -216,10 +216,10 @@ export function setupPullRequestBody(plan) {
     documentMap(plan.files).map((item) => [`\`${item.path}\``, item.purpose])
   );
   const workflows = markdownTable(
-    ["Mode", "Trigger", "Model"],
+    ["Mode", "Agent", "Trigger", "Model"],
     workflowMap(plan.modes).map((item) => {
       const selection = plan.models[item.mode];
-      return [item.mode, item.trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
+      return [item.mode, MODES[item.mode].agentLabel, item.trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
     })
   );
   const proofs = [];
@@ -404,13 +404,13 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     const choices = MODEL_OPTIONS[agent.provider];
     const defaultChoice = choices.find((choice) => choice.model === agent.model && choice.effort === agent.effort) ?? choices[0];
     models[mode] = await prompt.select(tuiOptions(prompt, {
-      message: `Choose a model for ${MODES[mode].label}:`,
+      message: `Assign a model to the ${MODES[mode].agentLabel}:`,
       defaultValue: defaultChoice.id,
       choices: choices.map((choice) => ({ value: choice.id, label: choice.label }))
     }, {
       step: "models",
       description: [
-        `Provider: ${agent.provider}`,
+        `${MODES[mode].label} uses this agent. Provider: ${agent.provider}.`,
         "You can change this choice later in .github/codekeeper.json."
       ]
     }));

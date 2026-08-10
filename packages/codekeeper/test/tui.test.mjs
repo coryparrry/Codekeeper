@@ -607,11 +607,11 @@ test("recommended and custom setup paths produce the same semantic answers as th
     assertNamedPhase(tui, "setup");
     assert.match(semanticText(tui.output.lastSemanticFrame()), /OpenAI models/);
     await tui.send("\r");
-    await tui.waitForText("Choose a model for Pull request review");
+    await tui.waitForText("Assign a model to the Pull request reviewer");
     assertNamedPhase(tui, "models");
     await tui.send("j");
     await tui.send("\r");
-    await tui.waitForText("Choose a model for Repository maintenance");
+    await tui.waitForText("Assign a model to the Repository auditor");
     await tui.send("\r");
     await tui.waitForText("Enable OpenAI traces");
     assertNamedPhase(tui, "tracing");
@@ -674,9 +674,9 @@ test("recommended and custom setup paths produce the same semantic answers as th
     assert.match(semanticText(tui.output.lastSemanticFrame()), /use DeepSeek for issue triage/);
     await tui.send("j");
     await tui.send("\r");
-    await tui.waitForText("Choose a model for Issue triage");
+    await tui.waitForText("Assign a model to the Issue triager");
     await tui.send("\r");
-    await tui.waitForText("Choose a model for Owner-authorized issue fix");
+    await tui.waitForText("Assign a model to the Maintenance planner");
     await tui.send("\r");
     await tui.waitForText("Enable OpenAI traces");
     await tui.send("\r");

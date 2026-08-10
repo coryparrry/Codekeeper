@@ -17,6 +17,7 @@ import {
   ASSET_KEYS,
   DEEPSEEK_SECRET,
   MODE_IDS,
+  MODEL_OPTIONS,
   MODES,
   OPENAI_SECRET,
   RECOMMENDED_MODES,
@@ -362,7 +363,8 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.equal(plan.originalHead, HEAD_SHA);
   assert.equal(plan.branch, "codekeeper/setup");
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
-  assert.match(plan.pullRequest.body, /\| Mode \| Trigger \| Model \|/);
+  assert.match(plan.pullRequest.body, /\| Mode \| Agent \| Trigger \| Model \|/);
+  assert.match(plan.pullRequest.body, /\| review \| Pull request reviewer \|/);
   assert.match(plan.pullRequest.body, /OpenAI traces are \*\*enabled\*\*/);
   assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
   assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune evidence thresholds/);
@@ -447,6 +449,28 @@ test("model choices update the selected agent and optional tracing needs no trac
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, APP_SECRET]);
   assert.match(plan.pullRequest.body, /OpenAI traces are \*\*disabled\*\*/);
   assert.doesNotMatch(plan.pullRequest.body, /OPENAI_TRACE_API_KEY/);
+});
+
+test("OpenAI model choices include Luna, Terra, and Sol and map Luna to one agent", async () => {
+  assert.deepEqual(
+    [...new Set(MODEL_OPTIONS.openai.map((choice) => choice.model))],
+    ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
+  );
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: ["review"], preset: "openai", models: { review: "luna-max" } })
+  });
+  const policy = JSON.parse(plan.files[0].contents);
+  assert.deepEqual(plan.models.review, {
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    effort: "max",
+    choice: "luna-max"
+  });
+  assert.equal(policy.ai.agents.review.model, "gpt-5.6-luna");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
 });
 
 test("optional disabled installation keeps Codekeeper off after merge", async () => {
