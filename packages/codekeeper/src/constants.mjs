@@ -38,7 +38,7 @@ export const MODES = Object.freeze({
   fix: Object.freeze({
     id: "fix",
     label: "Owner-authorized issue fix",
-    description: "Can open a repair pull request after an owner command and a separate policy change. Automatic merge stays off.",
+    description: "Can open a repair pull request after an owner command when issue implementation is selected.",
     policyAgent: "fix",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
@@ -77,6 +77,33 @@ export const AGENT_PROFILE_IDS = Object.freeze(Object.keys(AGENT_PROFILES));
 export const PRESET_IDS = Object.freeze(["mixed", "openai"]);
 export const RECOMMENDED_MODES = Object.freeze(["review", "maintain"]);
 export const RECOMMENDED_PRESET = "openai";
+export const CAPABILITIES = Object.freeze({
+  repair: Object.freeze({
+    id: "repair",
+    label: "Repository repair",
+    description: "Allow owner-approved maintenance runs to create repair pull requests.",
+    modes: Object.freeze(["maintain"])
+  }),
+  issueImplementation: Object.freeze({
+    id: "issueImplementation",
+    label: "Issue implementation",
+    description: "Allow an owner command to create a pull request that implements an issue.",
+    modes: Object.freeze(["fix"])
+  }),
+  duplicateClosure: Object.freeze({
+    id: "duplicateClosure",
+    label: "Automatic duplicate closure",
+    description: "Allow issue triage to close an issue when it finds an exact duplicate.",
+    modes: Object.freeze(["issues"])
+  }),
+  autoMerge: Object.freeze({
+    id: "autoMerge",
+    label: "Automatic merge",
+    description: "Allow Codekeeper to merge validated repair pull requests within policy limits.",
+    modes: Object.freeze(["maintain", "fix"])
+  })
+});
+export const CAPABILITY_IDS = Object.freeze(Object.keys(CAPABILITIES));
 export const POLICY_TARGET = ".github/codekeeper.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
@@ -106,7 +133,6 @@ export const SECRET_PURPOSES = Object.freeze({
 });
 
 export const CONSERVATIVE_BOUNDARIES = Object.freeze([
-  "Repair, issue implementation, and automatic merge stay off until you turn them on in the policy.",
   "Agent profiles guide decisions. They cannot grant write access or change triggers, branches, or permissions.",
   "Every generated workflow pins an exact source commit.",
   "Protected paths and git diff --check stay in place.",

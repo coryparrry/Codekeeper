@@ -47,6 +47,7 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
     },
     async multiselect(options) {
       calls.push({ method: "multiselect", options });
+      if (options.message.startsWith("Choose capabilities")) return options.defaultValues;
       return modes;
     },
     async select(options) {
@@ -142,7 +143,8 @@ test("recommended setup explains consequences and returns review plus maintenanc
     preset: "openai",
     displayName: "widget",
     ownerLogins: ["cory"],
-    enabled: true
+    enabled: true,
+    capabilities: ["repair", "autoMerge"]
   });
   assert.ok(Object.isFrozen(answers));
   assert.deepEqual(
@@ -154,13 +156,16 @@ test("recommended setup explains consequences and returns review plus maintenanc
       { message: "Continue with these safety settings?", defaultValue: false }
     ]
   );
-  assert.equal(prompt.calls.some((call) => call.method === "multiselect" || call.method === "select"), false);
+  const capabilityCall = prompt.calls.find((call) => call.method === "multiselect");
+  assert.equal(capabilityCall.options.message, "Choose capabilities to turn on:");
+  assert.deepEqual(capabilityCall.options.defaultValues, ["repair", "autoMerge"]);
   const transcript = output.toString();
   assert.match(transcript, /Pull request review:.*comments, labels, and a blocking result/);
   assert.match(transcript, /Repository maintenance:.*manual dry run that makes no GitHub changes/);
   assert.match(transcript, /OpenAI preset: uses one model API key and one trace API key/);
   assert.match(transcript, /Issue triage and issue fix are not included/);
-  assert.match(transcript, /Repair, issue implementation, and automatic merge stay off/);
+  assert.match(transcript, /Repository repair: on/);
+  assert.match(transcript, /Automatic merge: on/);
   assert.match(transcript, /installer opens a setup pull request/);
   assert.match(transcript, /OPENAI_API_KEY:/);
   assert.match(transcript, /OPENAI_TRACE_API_KEY:/);
@@ -179,7 +184,8 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     preset: "mixed",
     displayName: "widget",
     ownerLogins: ["cory"],
-    enabled: true
+    enabled: true,
+    capabilities: ["issueImplementation", "duplicateClosure", "autoMerge"]
   });
   const modeCall = prompt.calls.find((call) => call.method === "multiselect");
   assert.equal(modeCall.options.message, "Choose workflows to generate:");
@@ -198,7 +204,7 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     ]
   });
   assert.match(output.toString(), /Issue triage responds to issue events/);
-  assert.match(output.toString(), /Issue fix needs a separate policy change/);
+  assert.match(output.toString(), /You choose issue implementation separately/);
   assert.match(output.toString(), /OPENAI_API_KEY:/);
   assert.match(output.toString(), /DEEPSEEK_API_KEY:/);
 });

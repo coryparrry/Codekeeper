@@ -103,7 +103,7 @@ function assertDisabledPolicy(policy) {
   }
 }
 
-export function renderPolicy(policySource, { displayName, defaultBranch, ownerLogins }) {
+export function renderPolicy(policySource, { displayName, defaultBranch, ownerLogins, capabilities = {} }) {
   let policy;
   try {
     policy = JSON.parse(policySource);
@@ -118,7 +118,16 @@ export function renderPolicy(policySource, { displayName, defaultBranch, ownerLo
   policy.repository.defaultBranch = defaultBranch;
   policy.repository.ownerLogins = [...ownerLogins];
   policy.merge.allowedUserAuthors = [...ownerLogins];
-  assertDisabledPolicy(policy);
+  policy.audit.repair.enabled = capabilities.repair === true;
+  policy.issues.allowAiImplementation = capabilities.issueImplementation === true;
+  policy.issues.closeExactDuplicates = capabilities.duplicateClosure === true;
+  policy.merge.enabled = capabilities.autoMerge === true;
+  if (!Array.isArray(policy.audit.repair.protectedPaths) || !policy.audit.repair.protectedPaths.length) {
+    throw new InstallerError("Rendered policy has no protected paths.", { code: "UNSAFE_POLICY" });
+  }
+  if (!policy.audit.repair.validationCommands.includes("git diff --check")) {
+    throw new InstallerError("Rendered policy does not require git diff --check.", { code: "UNSAFE_POLICY" });
+  }
   return `${JSON.stringify(policy, null, 2)}\n`;
 }
 
@@ -170,11 +179,11 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
   return rendered;
 }
 
-export function renderInstallFiles(bundle, { modes, preset, displayName, defaultBranch, ownerLogins }) {
+export function renderInstallFiles(bundle, { modes, preset, displayName, defaultBranch, ownerLogins, capabilities = {} }) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
   const rendered = [{
     path: POLICY_TARGET,
-    contents: renderPolicy(bundle.contents[`policies/${preset}.json`], { displayName, defaultBranch, ownerLogins })
+    contents: renderPolicy(bundle.contents[`policies/${preset}.json`], { displayName, defaultBranch, ownerLogins, capabilities })
   }];
   for (const profile of AGENT_PROFILE_IDS) {
     rendered.push({

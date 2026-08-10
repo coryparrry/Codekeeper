@@ -610,6 +610,11 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.waitForText("Start Codekeeper after the setup pull request merges");
     assertNamedPhase(tui, "startup");
     await tui.send("\r");
+    await tui.waitForText("Choose capabilities to turn on");
+    assertNamedPhase(tui, "capabilities");
+    assert.match(tui.output.lastSemanticFrame(), /Repository repair/);
+    assert.match(tui.output.lastSemanticFrame(), /Automatic merge/);
+    await tui.send("\r");
     await tui.waitForText("Name to show in Codekeeper comments");
     assertNamedPhase(tui, "identity");
     await tui.send("\r");
@@ -625,7 +630,8 @@ test("recommended and custom setup paths produce the same semantic answers as th
       preset: "openai",
       displayName: "widget",
       ownerLogins: ["cory"],
-      enabled: true
+      enabled: true,
+      capabilities: ["repair", "autoMerge"]
     });
   });
 
@@ -661,6 +667,12 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.waitForText("Start Codekeeper after the setup pull request merges");
     assertNamedPhase(tui, "startup");
     await tui.send("\r");
+    await tui.waitForText("Choose capabilities to turn on");
+    assertNamedPhase(tui, "capabilities");
+    assert.match(tui.output.lastSemanticFrame(), /Issue implementation/);
+    assert.match(tui.output.lastSemanticFrame(), /Automatic duplicate closure/);
+    assert.match(tui.output.lastSemanticFrame(), /Automatic merge/);
+    await tui.send("\r");
     await tui.waitForText("Name to show in Codekeeper comments");
     assertNamedPhase(tui, "identity");
     await tui.send("Custom");
@@ -678,7 +690,8 @@ test("recommended and custom setup paths produce the same semantic answers as th
       preset: "mixed",
       displayName: "Custom",
       ownerLogins: ["alice"],
-      enabled: true
+      enabled: true,
+      capabilities: ["issueImplementation", "duplicateClosure", "autoMerge"]
     });
   });
 });
@@ -804,7 +817,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     ["Policy and caller documents", ".github/codekeeper.json"],
     ["Editable agent profiles"],
     ["Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
-    ["Safety", "Codekeeper starts after merge"],
+    ["Settings", "Codekeeper starts after merge"],
     [guidance.reviewGateWarning, "Create setup", "› Cancel"]
   ];
   const completionMarkers = [
@@ -851,7 +864,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
       markers: [
         ["Workflows", "Models (editable", "gpt-5.6"],
         ["Document map", ".github/codekeeper/agents/pr-reviewer.md", "Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
-        ["Safety", guidance.reviewGateWarning, "Create setup", "› Cancel"]
+        ["Settings", guidance.reviewGateWarning, "Create setup", "› Cancel"]
       ],
       ...dimensions
     });

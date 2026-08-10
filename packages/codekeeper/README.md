@@ -38,7 +38,7 @@ The recommended setup includes pull-request review, repository maintenance, and 
 | Pull request review | App-owned review output for controlled same-repository pull requests after Codekeeper is deliberately enabled. |
 | Repository maintenance | Manual or scheduled audits; the first proof is a manual `dry_run=true` run with no GitHub mutation. |
 | Issue triage | Issue-event labels and comments when enabled; not needed for the starter proof. |
-| Owner-authorized issue fix | An advanced repair-PR path that still requires a separate policy opt-in and owner command. |
+| Owner-authorized issue fix | A repair pull-request path that requires an owner command. The installer asks if issue implementation is on. |
 
 The `openai` preset uses one OpenAI Platform provider key for every selected workflow. The `mixed` preset uses DeepSeek only for issue triage and OpenAI for the others, so selecting issue triage can require both provider keys. Both presets also request a separate OpenAI Platform trace-export key and the downloaded GitHub App PEM private key. A ChatGPT subscription is not an API key. Changing a model later is a small `.github/codekeeper.json` edit, not an installer change; the final preview shows each exact provider, model, and effort before mutation.
 
@@ -92,14 +92,16 @@ Do not paste the multiline App private key. Select its downloaded `.pem` file be
 
 The selected modes determine which provider secrets are requested. The `mixed` preset uses OpenAI for review, audit, and fix and DeepSeek for issue triage. The `openai` preset uses OpenAI for all selected modes. The bundled policies enable tracing, so both require a separate OpenAI trace key; a trace key is not the coordinator's provider key.
 
-## Safety defaults
+## Capability choices
 
-The installer enables the selected workflows after merge by default. You can choose a disabled install. These higher-risk controls stay off in both cases:
+The installer enables the selected workflows after merge by default. You can choose a disabled install instead. It also shows every capability that applies to your workflows:
 
-- audit repair is false;
-- issue AI implementation is false;
-- automatic exact-duplicate closure is false;
-- auto-merge is false.
+- repository repair;
+- issue implementation;
+- automatic exact-duplicate closure;
+- automatic merge.
+
+Applicable capabilities are selected by default. Clear any capability that you do not want. The final review shows each capability as on or off before the installer changes repository settings or files.
 
 Review all triggers before you merge the setup pull request. Do not add the `Codekeeper review gate` to branch protection until a controlled review passes.
 

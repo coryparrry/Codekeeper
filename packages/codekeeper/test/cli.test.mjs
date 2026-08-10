@@ -17,7 +17,8 @@ function guidedPrompt(confirmations = [true, true, true, true, true, true], { pr
       prompt.confirmations.push(options);
       return answers.shift();
     },
-    async multiselect() {
+    async multiselect({ message, defaultValues }) {
+      if (message.startsWith("Choose capabilities")) return defaultValues;
       throw new Error("recommended setup must not ask for custom workflows");
     },
     async select({ message }) {
@@ -293,7 +294,8 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
       calls.push(["select", options.message]);
       return options.message.startsWith("Start Codekeeper") ? "enabled" : "recommended";
     },
-    async multiselect() {
+    async multiselect(options) {
+      if (options.message.startsWith("Choose capabilities")) return options.defaultValues;
       throw new Error("recommended setup must not show workflow customization");
     },
     async inputText(options) {

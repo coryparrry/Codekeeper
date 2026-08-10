@@ -4,6 +4,8 @@ import {
   AGENT_PROFILES,
   APP_SECRET,
   BOT_LOGIN_VARIABLE,
+  CAPABILITIES,
+  CAPABILITY_IDS,
   CLIENT_ID_VARIABLE,
   CONSERVATIVE_BOUNDARIES,
   DEEPSEEK_SECRET,
@@ -72,6 +74,25 @@ export function normalizeOwnerLogins(ownerLogins) {
     throw new InstallerError("Owner logins must be unique GitHub login names.", { code: "PLAN_INVALID" });
   }
   return normalized;
+}
+
+export function applicableCapabilityIds(modes) {
+  const selected = normalizeModes(modes);
+  return CAPABILITY_IDS.filter((id) => CAPABILITIES[id].modes.some((mode) => selected.includes(mode)));
+}
+
+export function normalizeCapabilities(modes, selected = []) {
+  if (!Array.isArray(selected)) throw new InstallerError("Capability choices are invalid.", { code: "PLAN_INVALID" });
+  const applicable = applicableCapabilityIds(modes);
+  if (selected.some((id) => !applicable.includes(id)) || new Set(selected).size !== selected.length) {
+    throw new InstallerError("Capability choices do not match the selected workflows.", { code: "PLAN_INVALID" });
+  }
+  return Object.freeze(Object.fromEntries(CAPABILITY_IDS.map((id) => [id, selected.includes(id)])));
+}
+
+export function capabilitySummary(capabilities, modes = null) {
+  const ids = modes ? applicableCapabilityIds(modes) : CAPABILITY_IDS;
+  return ids.map((id) => `${CAPABILITIES[id].label}: ${capabilities[id] ? "on" : "off"}.`);
 }
 
 export function requiredSecretNames({ modes, preset }) {
@@ -197,6 +218,7 @@ ${workflows}
 ## Safety boundaries
 
 ${CONSERVATIVE_BOUNDARIES.map((item) => `- ${item}`).join("\n")}
+${capabilitySummary(plan.capabilities, plan.modes).map((item) => `- ${item}`).join("\n")}
 ${reviewDisabledNote}
 
 Required variables: ${plan.variables.map((item) => `\`${item.name}\``).join(", ")}.
@@ -225,12 +247,14 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (!validClientId(answers.appClientId)) throw new InstallerError("GitHub App Client ID is invalid.", { code: "PLAN_INVALID" });
   const automationBotLogin = modes.includes("review") ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
   if (modes.includes("review") && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
+  const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
   const files = renderInstallFiles(bundle, {
     modes,
     preset: answers.preset,
     displayName: answers.displayName,
     defaultBranch: snapshot.defaultBranch,
-    ownerLogins
+    ownerLogins,
+    capabilities
   });
   const enabled = answers.enabled !== false;
   const variables = [
@@ -252,6 +276,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     displayName: answers.displayName,
     ownerLogins,
     enabled,
+    capabilities,
     files,
     variables,
     secrets: requiredSecretNames({ modes, preset: answers.preset }).map((name) => ({ name })),
@@ -311,7 +336,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     preset = RECOMMENDED_PRESET;
     output.write("Using pull request review + repository maintenance with the OpenAI preset.\n");
   } else {
-    output.write("\nCustom setup: install only the workflows that you want to use. Issue triage responds to issue events. Issue fix needs a separate policy change.\n");
+    output.write("\nCustom setup: install only the workflows that you want to use. Issue triage responds to issue events. You choose issue implementation separately.\n");
     modes = await prompt.multiselect(tuiOptions(prompt, {
       message: "Choose workflows to generate:",
       defaultValues: RECOMMENDED_MODES,
@@ -350,6 +375,23 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
       ]
     }) === "enabled"
     : await prompt.confirm({ message: "Start Codekeeper after the setup pull request merges?", defaultValue: true });
+  const applicableCapabilities = applicableCapabilityIds(modes);
+  const capabilities = applicableCapabilities.length
+    ? await prompt.multiselect(tuiOptions(prompt, {
+      message: "Choose capabilities to turn on:",
+      defaultValues: applicableCapabilities,
+      choices: applicableCapabilities.map((id) => ({
+        value: id,
+        label: `${CAPABILITIES[id].label} — ${CAPABILITIES[id].description}`
+      }))
+    }, {
+      step: "capabilities",
+      description: [
+        "All capabilities that match your workflows are selected by default.",
+        "Clear any capability that you do not want Codekeeper to use."
+      ]
+    }))
+    : [];
   const displayName = await prompt.inputText(tuiOptions(prompt, {
     message: "Name to show in Codekeeper comments",
     defaultValue: snapshot.displayName,
@@ -382,6 +424,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
 
   const policy = JSON.parse(bundle.contents[`policies/${preset}.json`]);
   output.write("\nSafety settings\n");
+  capabilitySummary(normalizeCapabilities(modes, capabilities), modes).forEach((item) => output.write(`  - ${item}\n`));
   CONSERVATIVE_BOUNDARIES.forEach((item) => output.write(`  - ${item}\n`));
   output.write(`The policy has ${policy.audit.repair.protectedPaths.length} protected-path rules. Review the full list in the setup pull request.\n`);
   const confirmed = await prompt.confirm(tuiOptions(prompt, {
@@ -390,6 +433,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   }, {
     step: "safety",
     description: [
+      ...capabilitySummary(normalizeCapabilities(modes, capabilities), modes),
       ...CONSERVATIVE_BOUNDARIES,
       `${policy.audit.repair.protectedPaths.length} protected-path rules are bundled for review before merge.`
     ],
@@ -402,7 +446,8 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     preset,
     displayName,
     ownerLogins: normalizeOwnerLogins(ownersText.split(",")),
-    enabled
+    enabled,
+    capabilities
   });
 }
 

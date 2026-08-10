@@ -79,7 +79,7 @@ function snapshot() {
 }
 
 function answers(overrides = {}) {
-  return {
+  const value = {
     modes: ["review", "maintain", "issues", "fix"],
     preset: "mixed",
     displayName: "Widget",
@@ -89,6 +89,15 @@ function answers(overrides = {}) {
     enabled: true,
     ...overrides
   };
+  if (!Object.hasOwn(overrides, "capabilities")) {
+    value.capabilities = [
+      ...(value.modes.includes("maintain") ? ["repair"] : []),
+      ...(value.modes.includes("fix") ? ["issueImplementation"] : []),
+      ...(value.modes.includes("issues") ? ["duplicateClosure"] : []),
+      ...(value.modes.some((mode) => mode === "maintain" || mode === "fix") ? ["autoMerge"] : [])
+    ];
+  }
+  return value;
 }
 
 test("the ten bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
@@ -339,6 +348,17 @@ test("install plan is frozen, applies startup first, and documents selected work
     { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
   ]);
   assert.deepEqual(plan.ownerLogins, ["coryparrry", "acme-bot"]);
+  assert.deepEqual(plan.capabilities, {
+    repair: true,
+    issueImplementation: true,
+    duplicateClosure: true,
+    autoMerge: true
+  });
+  const renderedPolicy = JSON.parse(plan.files[0].contents);
+  assert.equal(renderedPolicy.audit.repair.enabled, true);
+  assert.equal(renderedPolicy.issues.allowAiImplementation, true);
+  assert.equal(renderedPolicy.issues.closeExactDuplicates, true);
+  assert.equal(renderedPolicy.merge.enabled, true);
   assert.equal(plan.originalHead, HEAD_SHA);
   assert.equal(plan.branch, "codekeeper/setup");
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
@@ -411,6 +431,22 @@ test("optional disabled installation keeps Codekeeper off after merge", async ()
   assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "false" });
   assert.match(plan.pullRequest.body, /Codekeeper stays off/);
   assert.match(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
+});
+
+test("cleared capability choices remain off in the generated policy", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers({ capabilities: [] }) });
+  const policy = JSON.parse(plan.files[0].contents);
+  assert.deepEqual(plan.capabilities, {
+    repair: false,
+    issueImplementation: false,
+    duplicateClosure: false,
+    autoMerge: false
+  });
+  assert.equal(policy.audit.repair.enabled, false);
+  assert.equal(policy.issues.allowAiImplementation, false);
+  assert.equal(policy.issues.closeExactDuplicates, false);
+  assert.equal(policy.merge.enabled, false);
 });
 
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {

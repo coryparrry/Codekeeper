@@ -11,7 +11,7 @@ import {
 } from "ink";
 import { InstallerError } from "./errors.mjs";
 import { CONSERVATIVE_BOUNDARIES, MODES, SECRET_PURPOSES } from "./constants.mjs";
-import { completionGuidance, documentMap, workflowMap } from "./plan.mjs";
+import { capabilitySummary, completionGuidance, documentMap, workflowMap } from "./plan.mjs";
 import { createPrivateKeyPickerController } from "./private-key-input.mjs";
 
 const h = React.createElement;
@@ -470,6 +470,7 @@ function reviewData(plan) {
     profileDocumentPaths: documents.filter((item) => item.path.includes("/agents/")).map((item) => item.path),
     secrets: plan.secrets.map((secret) => `${secret.name} — ${SECRET_PURPOSES[secret.name]}`),
     startup: plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge.",
+    capabilities: capabilitySummary(plan.capabilities, plan.modes),
     reviewGateWarning: completionGuidance(plan.modes, plan.enabled).reviewGateWarning
   };
 }
@@ -538,7 +539,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     !pagedDetail && page === 2 ? h(
       Box,
       { flexDirection: "column" },
-      section("Safety", [data.startup, ...CONSERVATIVE_BOUNDARIES]),
+      section("Settings", [data.startup, ...data.capabilities, ...CONSERVATIVE_BOUNDARIES]),
       data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
       h(
         Box,
@@ -559,7 +560,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     pagedDetail && page === 2 ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
     pagedDetail && page === 3 ? section("Editable agent profiles", data.profileDocumentPaths, 0) : null,
     pagedDetail && page === 4 ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
-    pagedDetail && page === 5 ? section("Safety", [data.startup, ...CONSERVATIVE_BOUNDARIES], 0) : null,
+    pagedDetail && page === 5 ? section("Settings", [data.startup, ...data.capabilities, ...CONSERVATIVE_BOUNDARIES], 0) : null,
     pagedDetail && page === 6 ? h(
       Box,
       { flexDirection: "column" },
