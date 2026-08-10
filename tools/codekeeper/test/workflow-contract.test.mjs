@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "7d5e1b0d5b46d9d9034d6cdf3677890414144e3ab354a928d1dd804c192a36e1";
+const toolingManifestSha256 = "9ea59dc54288186c0d4f84d24c86de9c6485900e876d1d3a03ceb6126fc87596";
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -398,9 +398,9 @@ test("owner-commanded pull request repair can update only the frozen existing he
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {
   const packageJson = JSON.parse(await repositoryFile("tools/codekeeper/package.json"));
   const packageLock = JSON.parse(await repositoryFile("tools/codekeeper/package-lock.json"));
-  assert.deepEqual(packageJson.dependencies, { "@openai/agents": "0.14.2", zod: "4.4.3" });
+  assert.deepEqual(packageJson.dependencies, { "@openai/agents": "0.14.3", zod: "4.4.3" });
   assert.equal(packageLock.lockfileVersion, 3);
-  assert.equal(packageLock.packages[""].dependencies["@openai/agents"], "0.14.2");
+  assert.equal(packageLock.packages[""].dependencies["@openai/agents"], "0.14.3");
   assert.equal(packageLock.packages[""].dependencies.zod, "4.4.3");
 
   for (const mode of modes) {
