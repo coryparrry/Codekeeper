@@ -41,8 +41,8 @@ export const MODES = Object.freeze({
   fix: Object.freeze({
     id: "fix",
     label: "Issue implementation and pull request repair",
-    agentLabel: "Maintenance planner",
-    description: "Implements ready issues when issue implementation is on. Owners can also request a pull request repair.",
+    agentLabel: "Fixer",
+    description: "Plans, then implements ready issues or validated pull request repairs.",
     policyAgent: "fix",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
@@ -74,6 +74,12 @@ export const AGENT_PROFILES = Object.freeze({
     id: "maintenance-planner",
     target: ".github/codekeeper/agents/maintenance-planner.md",
     asset: "agents/maintenance-planner.md",
+    purpose: "Editable implementation planning rules"
+  }),
+  fixer: Object.freeze({
+    id: "fixer",
+    target: ".github/codekeeper/agents/fixer.md",
+    asset: "agents/fixer.md",
     purpose: "Editable implementation and repair rules"
   })
 });

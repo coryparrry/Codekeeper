@@ -96,6 +96,9 @@ function reviewFindingSchema() {
     explanation: stringSchema({ maxLength: LIMITS.body }),
     severity: { enum: ["critical", "high", "medium", "low"] },
     confidence: { enum: ["high", "medium", "low"] },
+    classification: { enum: ["current", "stale", "already-fixed", "pre-existing", "preference-only", "not-actionable"] },
+    validation: stringSchema({ maxLength: LIMITS.body }),
+    preventionTest: stringSchema({ maxLength: LIMITS.summary }),
     file: nullableString(LIMITS.path),
     line: nullableInteger()
   });
@@ -216,6 +219,26 @@ export function fixSchema(target = null) {
     });
 }
 
+export function planSchema(target = null) {
+  const targetKind = target?.kind;
+  const targetNumber = target?.number;
+  if (target !== null && (!["issue", "pull_request"].includes(targetKind) || !Number.isSafeInteger(targetNumber) || targetNumber <= 0)) {
+    throw new Error("Plan schema requires a valid frozen target");
+  }
+  return object({
+    mode: { const: "plan" },
+    summary: stringSchema({ maxLength: LIMITS.summary }),
+    targetKind: target ? { const: targetKind } : { enum: ["issue", "pull_request"] },
+    targetNumber: target ? { const: targetNumber } : { type: "integer", minimum: 1 },
+    objective: stringSchema({ minLength: 0, maxLength: LIMITS.body }),
+    steps: { type: "array", items: stringSchema({ maxLength: LIMITS.body }), maxItems: 20 },
+    validation: { type: "array", items: stringSchema({ maxLength: LIMITS.command }), maxItems: 20 },
+    risks: { type: "array", items: stringSchema({ maxLength: LIMITS.summary }), maxItems: 12 },
+    readyForFixer: { type: "boolean" },
+    noActionReason: nullableString(LIMITS.body)
+  });
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(`Invalid Codex result: ${message}`);
 }
@@ -259,14 +282,18 @@ function assertEnum(value, allowed, name) {
 }
 
 function validateReviewFinding(finding, name, { blocking = false } = {}) {
-  assertExactKeys(finding, ["title", "explanation", "severity", "confidence", "file", "line"], name);
+  assertExactKeys(finding, ["title", "explanation", "severity", "confidence", "classification", "validation", "preventionTest", "file", "line"], name);
   assertString(finding.title, `${name}.title`, { maxLength: LIMITS.title });
   assertString(finding.explanation, `${name}.explanation`, { maxLength: LIMITS.body });
   assertEnum(finding.severity, ["critical", "high", "medium", "low"], `${name}.severity`);
   assertEnum(finding.confidence, ["high", "medium", "low"], `${name}.confidence`);
+  assertEnum(finding.classification, ["current", "stale", "already-fixed", "pre-existing", "preference-only", "not-actionable"], `${name}.classification`);
+  assertString(finding.validation, `${name}.validation`, { maxLength: LIMITS.body });
+  assertString(finding.preventionTest, `${name}.preventionTest`, { maxLength: LIMITS.summary });
   assertNullableString(finding.file, `${name}.file`, LIMITS.path);
   assert(finding.line === null || (Number.isInteger(finding.line) && finding.line > 0), `${name}.line must be positive integer or null`);
   if (blocking) {
+    assert(finding.classification === "current", `${name} must be a current validated finding before it can block`);
     assert(finding.confidence !== "low", `${name} cannot block with low confidence`);
     assert(finding.severity !== "low", `${name} cannot block with low severity`);
   }
@@ -449,6 +476,30 @@ export function validateFixResult(result, target) {
   assertNullableString(result.noChangeReason, "noChangeReason", LIMITS.body);
   if (result.noChangeReason !== null) {
     assert(!result.readyForReview, "no-change result cannot be ready for review");
+  }
+  return result;
+}
+
+export function validatePlanResult(result, target) {
+  assertExactKeys(result, [
+    "mode", "summary", "targetKind", "targetNumber", "objective", "steps", "validation", "risks", "readyForFixer", "noActionReason"
+  ], "result");
+  assert(result.mode === "plan", "mode must be plan");
+  assert(result.targetKind === target?.kind, "targetKind must match the frozen target");
+  assert(result.targetNumber === target?.number, "targetNumber must match the frozen target");
+  assertString(result.summary, "summary", { maxLength: LIMITS.summary });
+  assertString(result.objective, "objective", { allowEmpty: true, maxLength: LIMITS.body });
+  assertUniqueStrings(result.steps, "steps", { maximum: 20, itemMaximum: LIMITS.body });
+  assertUniqueStrings(result.validation, "validation", { maximum: 20, itemMaximum: LIMITS.command });
+  assertUniqueStrings(result.risks, "risks", { maximum: 12, itemMaximum: LIMITS.summary });
+  assert(typeof result.readyForFixer === "boolean", "readyForFixer must be boolean");
+  assertNullableString(result.noActionReason, "noActionReason", LIMITS.body);
+  if (result.readyForFixer) {
+    assert(result.objective.length > 0, "ready plans require an objective");
+    assert(result.steps.length > 0, "ready plans require at least one step");
+    assert(result.noActionReason === null, "ready plans cannot include noActionReason");
+  } else {
+    assert(result.noActionReason !== null, "plans that are not ready require noActionReason");
   }
   return result;
 }

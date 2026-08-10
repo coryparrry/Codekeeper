@@ -134,7 +134,7 @@ export function renderPolicy(policySource, {
   policy.merge.enabled = capabilities.autoMerge === true;
   policy.ai.tracing.enabled = tracing;
   for (const [mode, selection] of Object.entries(models)) {
-    const agent = policy.ai.agents[MODES[mode]?.policyAgent];
+    const agent = policy.ai.agents[MODES[mode]?.policyAgent ?? mode];
     if (!agent) throw new InstallerError(`The ${mode} workflow has no model configuration.`, { code: "PLAN_INVALID" });
     agent.provider = selection.provider;
     agent.model = selection.model;
@@ -143,7 +143,7 @@ export function renderPolicy(policySource, {
       ? { text: { verbosity: "low" } }
       : { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } };
     if (agent.workspace) {
-      agent.workspace.enabled = selection.provider === "openai" && mode !== "issues";
+      agent.workspace.enabled = selection.provider === "openai" && mode !== "issues" && mode !== "plan";
       agent.workspace.allowWrites = agent.workspace.enabled && (mode === "maintain" || mode === "fix");
       agent.workspace.model = selection.model;
       agent.workspace.effort = selection.effort;
@@ -174,7 +174,7 @@ function assertPinnedWorkflow(source, sourceRepository, sourceCommit) {
   }
 }
 
-export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, preset }) {
+export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, plannerProvider, preset }) {
   if (!MODE_IDS.includes(mode)) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   if (count(template, "OWNER/REPOSITORY") !== 3 || count(template, "FULL_COMMIT_SHA") !== 3) {
     throw new InstallerError(`Bundled ${mode} workflow has unexpected placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
@@ -195,6 +195,13 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
     throw new InstallerError(`Bundled ${mode} workflow has no model API key placeholder.`, { code: "WORKFLOW_RENDER_INVALID" });
   }
   rendered = rendered.replace(modelSecretPattern, `model_api_key: \${{ secrets.${desiredSecret} }}`);
+  if (mode === "fix") {
+    const plannerSecret = plannerProvider === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY";
+    rendered = rendered.replace(
+      /planner_model_api_key: \$\{\{ secrets\.(?:OPENAI|DEEPSEEK)_API_KEY \}\}/,
+      `planner_model_api_key: \${{ secrets.${plannerSecret} }}`
+    );
+  }
 
   if (rendered.includes("OWNER/REPOSITORY") || rendered.includes("FULL_COMMIT_SHA")) {
     throw new InstallerError(`Rendered ${mode} workflow contains unresolved placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
@@ -243,6 +250,7 @@ export function renderInstallFiles(bundle, {
         sourceCommit,
         mode,
         provider: models[mode]?.provider,
+        plannerProvider: mode === "fix" ? models.plan?.provider : undefined,
         preset
       })
     });

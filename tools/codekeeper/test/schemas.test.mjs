@@ -1,11 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { fixSchema, validateAuditResult, validateFixResult, validateReviewResult } from "../src/lib/schemas.mjs";
+import { fixSchema, planSchema, validateAuditResult, validateFixResult, validatePlanResult, validateReviewResult } from "../src/lib/schemas.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
 );
+
+test("planner output must be ready and bound before the fixer can receive it", () => {
+  const target = { kind: "pull_request", number: 26 };
+  const result = {
+    mode: "plan",
+    summary: "One current finding is ready.",
+    targetKind: "pull_request",
+    targetNumber: 26,
+    objective: "Correct the current failure.",
+    steps: ["Write the failing test.", "Apply the smallest fix."],
+    validation: ["npm test"],
+    risks: [],
+    readyForFixer: true,
+    noActionReason: null
+  };
+  assert.equal(planSchema(target).properties.mode.const, "plan");
+  assert.equal(validatePlanResult(result, target), result);
+  assert.throws(() => validatePlanResult({ ...result, targetNumber: 27 }, target), /frozen target/);
+});
 
 test("review validator rejects auto recommendation with blockers", () => {
   assert.throws(
@@ -22,6 +41,9 @@ test("review validator rejects auto recommendation with blockers", () => {
               explanation: "The new force unwrap can be nil.",
               severity: "high",
               confidence: "high",
+              classification: "current",
+              validation: "The current head still contains the failing unwrap.",
+              preventionTest: "Exercise the nil input path.",
               file: "src/App.swift",
               line: 42
             }
@@ -35,6 +57,31 @@ test("review validator rejects auto recommendation with blockers", () => {
       ),
     /blocking findings require/
   );
+});
+
+test("review validator cannot hand a stale finding to the planner", () => {
+  assert.throws(() => validateReviewResult({
+    mode: "review",
+    summary: "The comment is stale.",
+    risk: "low",
+    labels: [],
+    blockingFindings: [{
+      title: "Old failure",
+      explanation: "The reported path was changed later.",
+      severity: "medium",
+      confidence: "high",
+      classification: "stale",
+      validation: "The current head no longer reproduces the failure.",
+      preventionTest: "Keep the current regression test.",
+      file: "src/example.mjs",
+      line: 1
+    }],
+    nonBlockingFindings: [],
+    tests: { adequate: true, notes: "The current behavior is covered." },
+    diagram: null,
+    mergeRecommendation: "block",
+    noActionReason: null
+  }, config), /current validated finding/);
 });
 
 test("audit validator binds a requested repair to a finding", () => {
@@ -133,6 +180,9 @@ test("review validator rejects a critical finding hidden as non-blocking", () =>
           explanation: "The change can discard user data.",
           severity: "critical",
           confidence: "high",
+          classification: "current",
+          validation: "The current head still contains the data-loss path.",
+          preventionTest: "Exercise the data-preservation path.",
           file: "docs/README.md",
           line: 1
         }],

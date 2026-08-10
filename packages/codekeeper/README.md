@@ -67,6 +67,7 @@ Every installation includes these fixed, versioned starter files:
 - `.github/codekeeper/agents/repository-auditor.md`
 - `.github/codekeeper/agents/issue-triager.md`
 - `.github/codekeeper/agents/maintenance-planner.md`
+- `.github/codekeeper/agents/fixer.md`
 
 Edit and review these Markdown files through an ordinary pull request. After merge, their trusted default-branch versions tune priorities, work selection, implementation approach, review standards, evidence thresholds, duplicate criteria, risk decisions, writing, and when the right result is no action.
 
@@ -82,7 +83,7 @@ When repository repair is on, a live maintenance run may make one bounded repair
 - a dirty checkout, detached `HEAD`, stale local checkout, or a `HEAD` that is not the remote default branch;
 - an incomplete existing Codekeeper installation, an existing setup or update branch for the same source commit, or a generated-file collision.
 
-The same collision checks cover all four agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
+The same collision checks cover all five agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
 
 If setup fails, follow the recovery command printed by the installed binary. The installer preserves recoverable branch or pull-request state. Do not merge a partial setup.
 

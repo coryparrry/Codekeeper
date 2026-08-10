@@ -5,8 +5,8 @@ import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./g
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
 import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
-import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
-import { buildAuditPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
+import { auditSchema, fixSchema, issueSchema, planSchema, providerCompatibleJsonSchema, reviewSchema, validatePlanResult } from "./schemas.mjs";
+import { buildAuditPrompt, buildFixPrompt, buildIssuePrompt, buildPlanPrompt, buildReviewPrompt } from "./prompts.mjs";
 import { assertRunnerOwnedDirectory, runUrl } from "./workspace.mjs";
 
 function repositoryFromEvent(event) {
@@ -223,8 +223,9 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
-  const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha);
+export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, mode = "fix", planResultPath = undefined }) {
+  if (!["plan", "fix"].includes(mode)) throw new Error("Codekeeper implementation role must be plan or fix");
+  const agentProfile = await trustedAgentProfile(mode, agentProfilePath, agentProfileSourceSha);
   if (!["owner", "policy"].includes(authorizationMode)) {
     throw new Error("Codekeeper fix authorization mode must be owner or policy");
   }
@@ -305,8 +306,9 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       }
     };
   }
+  const plan = mode === "fix" ? validatePlanResult(await readJson(planResultPath), target) : undefined;
   const context = {
-    mode: "fix",
+    mode,
     repository,
     ...runMetadata({ toolingSha, configSha256 }),
     agentProfile: agentProfile.metadata,
@@ -316,14 +318,19 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     requestedBy: actor,
     authorizationMode,
     target,
+    ...(plan ? { plan } : {}),
     ...subject
   };
   await writeBundle({
     directory,
     context,
-    prompt: buildFixPrompt(context, config, agentProfile.text),
-    schema: fixSchema(target),
+    prompt: mode === "plan" ? buildPlanPrompt(context, config, agentProfile.text) : buildFixPrompt(context, config, agentProfile.text),
+    schema: mode === "plan" ? planSchema(target) : fixSchema(target),
     agentProfile
   });
   return context;
+}
+
+export function preparePlan(options) {
+  return prepareFix({ ...options, mode: "plan" });
 }

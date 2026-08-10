@@ -678,6 +678,8 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.send("\r");
     await tui.waitForText("Assign a model to the Maintenance planner");
     await tui.send("\r");
+    await tui.waitForText("Assign a model to the Fixer");
+    await tui.send("\r");
     await tui.waitForText("Enable OpenAI traces");
     await tui.send("\r");
     await tui.waitForText("Start Codekeeper after the setup pull request merges");
@@ -704,7 +706,7 @@ test("recommended and custom setup paths produce the same semantic answers as th
     assert.deepEqual(await answers, {
       modes: ["issues", "fix"],
       preset: "mixed",
-      models: { issues: "deepseek-v4-flash", fix: "terra-high" },
+      models: { issues: "deepseek-v4-flash", plan: "terra-high", fix: "terra-high" },
       tracing: true,
       displayName: "Custom",
       ownerLogins: ["alice"],

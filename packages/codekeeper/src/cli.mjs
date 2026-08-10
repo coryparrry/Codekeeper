@@ -11,6 +11,7 @@ import {
   collectSetupAnswers,
   completionGuidance,
   documentMap,
+  modelAssignments,
 } from "./plan.mjs";
 import { configureRepositorySettings, installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
@@ -76,9 +77,9 @@ function preview(plan, output) {
   output.write("  Workflows:\n");
   for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);
   output.write("  Models (editable in .github/codekeeper.json before merge):\n");
-  for (const mode of plan.modes) {
-    const agent = policy.ai.agents[MODES[mode].policyAgent];
-    output.write(`    - ${MODES[mode].label}: ${agent.provider} / ${agent.model} / ${agent.effort} effort\n`);
+  for (const { agent: agentId, label, workflow } of modelAssignments(plan.modes)) {
+    const agent = policy.ai.agents[agentId];
+    output.write(`    - ${label} (${workflow}): ${agent.provider} / ${agent.model} / ${agent.effort} effort\n`);
   }
   output.write(`  OpenAI traces: ${plan.tracing ? "enabled" : "disabled"}\n`);
   output.write("  Files:\n");

@@ -100,10 +100,18 @@ async function rollbackPreCommit(plan, { runner, fsImpl }) {
   }
 
   if (plan.update) {
-    const reset = await runner.run("git", ["reset", "--quiet", "HEAD", "--", ...paths], { cwd: plan.root });
-    if (reset.status !== 0 || reset.timedOut || reset.truncated) return false;
-    const restored = await runner.run("git", ["restore", "--worktree", "--source=HEAD", "--", ...paths], { cwd: plan.root });
-    if (restored.status !== 0 || restored.timedOut || restored.truncated) return false;
+    const existingPaths = plan.files.filter((file) => file.previousSha256 !== null).map((file) => file.path);
+    const newFiles = plan.files.filter((file) => file.previousSha256 === null);
+    if (existingPaths.length) {
+      const reset = await runner.run("git", ["reset", "--quiet", "HEAD", "--", ...existingPaths], { cwd: plan.root });
+      if (reset.status !== 0 || reset.timedOut || reset.truncated) return false;
+      const restored = await runner.run("git", ["restore", "--worktree", "--source=HEAD", "--", ...existingPaths], { cwd: plan.root });
+      if (restored.status !== 0 || restored.timedOut || restored.truncated) return false;
+    }
+    for (const file of newFiles) {
+      const target = path.join(plan.root, ...assertRelativeTarget(file.path));
+      if (await maybeLstat(fsImpl, target)) await fsImpl.unlink(target);
+    }
     const status = await runner.run("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: plan.root });
     if (status.status !== 0 || status.timedOut || status.truncated || status.stdout) return false;
     const switched = await runner.run("git", ["switch", plan.defaultBranch], { cwd: plan.root });
@@ -296,12 +304,12 @@ export async function createSetupCommit(plan, {
     for (const file of plan.files) {
       const target = await ensureSafeParents(fsImpl, plan.root, file.path, { allowExisting: plan.update === true });
       if (plan.update) {
-        const current = await fsImpl.readFile(target);
-        if (sha256(current) !== file.previousSha256) {
+        const stat = await maybeLstat(fsImpl, target);
+        if (file.previousSha256 === null ? stat !== null : !stat || sha256(await fsImpl.readFile(target)) !== file.previousSha256) {
           throw new InstallerError(`The current file changed before the update: ${file.path}`, { code: "EXISTING_INSTALLATION_CHANGED" });
         }
       }
-      await fsImpl.writeFile(target, file.contents, { flag: plan.update ? "w" : "wx", mode: 0o644 });
+      await fsImpl.writeFile(target, file.contents, { flag: !plan.update || file.previousSha256 === null ? "wx" : "w", mode: 0o644 });
       const written = await fsImpl.readFile(target);
       if (written.byteLength !== file.bytes || sha256(written) !== file.sha256) {
         throw new InstallerError(`Generated file verification failed: ${file.path}`, { code: "GENERATED_FILE_MISMATCH" });

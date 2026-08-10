@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
 import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
-import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
+import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, preparePlan, prepareReview } from "../src/lib/prepare.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -43,7 +43,7 @@ function assertWorkspaceOutputSchema(schema, mode) {
 }
 
 async function installAgentProfiles(root) {
-  for (const mode of ["review", "audit", "issue", "fix"]) {
+  for (const mode of ["review", "audit", "issue", "plan", "fix"]) {
     const destination = path.join(root, agentProfilePathForMode(mode));
     await mkdir(path.dirname(destination), { recursive: true });
     await copyFile(
@@ -51,6 +51,23 @@ async function installAgentProfiles(root) {
       destination
     );
   }
+}
+
+async function readyPlan(root, target = { kind: "issue", number: 5 }) {
+  const file = bundle(root, `plan-${target.kind}-${target.number}.json`);
+  await writeFile(file, JSON.stringify({
+    mode: "plan",
+    summary: "The target is ready for a bounded implementation.",
+    targetKind: target.kind,
+    targetNumber: target.number,
+    objective: "Implement the requested outcome.",
+    steps: ["Make the smallest complete change."],
+    validation: ["Run the focused test."],
+    risks: [],
+    readyForFixer: true,
+    noActionReason: null
+  }), "utf8");
+  return file;
 }
 
 function agentProfileOptions(root, mode, sourceSha = run("git", ["rev-parse", "HEAD"], root).trim()) {
@@ -419,6 +436,7 @@ test("manual issue and fix preparation authorize owner login casing variants", a
       directory: fixDirectory,
       config,
       token: "read-token",
+      planResultPath: await readyPlan(root),
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(issueContext.triageMode, "manual");
@@ -488,6 +506,7 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
       directory,
       config,
       token: "read-token",
+      planResultPath: await readyPlan(root),
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(prepared.authorizationMode, "policy");
@@ -547,12 +566,13 @@ test("prepare writes provider-compatible workspace output schemas for every mode
     }
     return new Response(JSON.stringify([]), { status: 200 });
   };
-  const directories = Object.fromEntries(["review", "audit", "issue", "fix"].map((mode) => [mode, path.join(root, mode)]));
+  const directories = Object.fromEntries(["review", "audit", "issue", "plan", "fix"].map((mode) => [mode, path.join(root, mode)]));
   try {
     await prepareReview({ eventPath: reviewEvent, directory: directories.review, config, ...agentProfileOptions(root, "review", revision) });
     await prepareAuditBundle({ directory: directories.audit, config, ...agentProfileOptions(root, "audit", revision) });
     await prepareIssue({ eventPath: issueEvent, actor: "reporter", triageMode: "automatic", directory: directories.issue, config, token: "read-token", ...agentProfileOptions(root, "issue", revision) });
-    await prepareFix({ targetNumber: 5, actor: "workspace-owner", directory: directories.fix, config, token: "read-token", ...agentProfileOptions(root, "fix", revision) });
+    await preparePlan({ targetNumber: 5, actor: "workspace-owner", directory: directories.plan, config, token: "read-token", ...agentProfileOptions(root, "plan", revision) });
+    await prepareFix({ targetNumber: 5, actor: "workspace-owner", directory: directories.fix, config, token: "read-token", planResultPath: await readyPlan(root), ...agentProfileOptions(root, "fix", revision) });
     for (const mode of Object.keys(directories)) {
       assertWorkspaceOutputSchema(JSON.parse(await readFile(path.join(directories[mode], "schema.json"), "utf8")), mode);
     }
@@ -721,6 +741,9 @@ test("review findings must cite a changed line hunk", async () => {
       explanation: "The changed line needs a stronger explanation.",
       severity: "medium",
       confidence: "high",
+      classification: "current",
+      validation: "The current documentation still contains the unclear changed line.",
+      preventionTest: "Check the rendered documentation wording.",
       file: "README.md",
       line: 2
     }],

@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "56e661fdba28f5a8f9af61c6759835f288db08c30e264261535c095a9c08216c";
+const toolingManifestSha256 = "2ec489602097a2625ea66a5bb54037ee5f9c9974e59388eec15d6a14c7dc799d";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -101,7 +101,7 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
   assert.ok(parsedManifest.files.some((entry) => entry.path === "scripts/verify-tooling-artifact.mjs"));
   assert.ok(parsedManifest.files.every((entry) => !entry.path.startsWith("test/") && !entry.path.startsWith("evals/")));
 
-  const expectedConsumers = { maintain: 5, fix: 6, issues: 4, review: 4 };
+  const expectedConsumers = { maintain: 5, fix: 7, issues: 4, review: 4 };
   for (const [mode, count] of Object.entries(expectedConsumers)) {
     const source = await workflow(mode);
     assert.equal([...source.matchAll(/name: Download bootstrap Codekeeper tooling/g)].length, count);
@@ -480,4 +480,12 @@ test("self-test reports through annotations with read-only repository permission
   assert.doesNotMatch(selfTest, /checks: write/);
   assert.match(selfTest, /reporter: github-annotations/);
   assert.match(selfTest, /fail_level: any/);
+});
+
+test("pull request repair runs reviewer, planner, then fixer roles", async () => {
+  const source = await workflow("fix");
+  assert.ok(source.indexOf("  plan:") < source.indexOf("  workspace:"));
+  assert.match(jobSection(source, "plan", "workspace"), /maintenance-planner\.md[\s\S]*--mode plan[\s\S]*plan-result\.json/);
+  assert.match(jobSection(source, "workspace", "analyze"), /needs: plan[\s\S]*fixer\.md[\s\S]*--plan-result/);
+  assert.match(jobSection(source, "analyze", "verify"), /fixer\.md[\s\S]*--mode fix/);
 });

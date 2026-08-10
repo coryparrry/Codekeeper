@@ -192,6 +192,7 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     preset: "mixed",
     models: {
       issues: "deepseek-v4-flash",
+      plan: "terra-high",
       fix: "terra-high"
     },
     tracing: true,

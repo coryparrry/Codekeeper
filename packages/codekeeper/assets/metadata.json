@@ -6,8 +6,8 @@
   },
   "assets": {
     "agents/pr-reviewer.md": {
-      "sha256": "a548423ea6098f3c0bcc17b0dbf60131cdd1689dec45504701b1949bc89e2894",
-      "bytes": 3901,
+      "sha256": "dfea6cff0bb9ee49fa25f0c5cb5177c65060922d5745fd707f4936b7fba96603",
+      "bytes": 4427,
       "sourcePath": "tools/codekeeper/agents/pr-reviewer.md"
     },
     "agents/repository-auditor.md": {
@@ -21,18 +21,23 @@
       "sourcePath": "tools/codekeeper/agents/issue-triager.md"
     },
     "agents/maintenance-planner.md": {
-      "sha256": "0a71d814e12be7f0b917d62827a203a0d51ea4ec4c40566f839fda70f188b15e",
-      "bytes": 3973,
+      "sha256": "17e6eb1192452b8779b10e46f49f98e8fd4e75e5bd1ff08c218eb0f3badd8cdf",
+      "bytes": 3137,
       "sourcePath": "tools/codekeeper/agents/maintenance-planner.md"
     },
+    "agents/fixer.md": {
+      "sha256": "b1604c6ff872abdcd4e7c174dc018db55705ad917152a6e338b710331fae4227",
+      "bytes": 1934,
+      "sourcePath": "tools/codekeeper/agents/fixer.md"
+    },
     "policies/mixed.json": {
-      "sha256": "420228f80d14e2bfa8bafe48d650d9123fd0547dfc05236a034d59ddb7d522cc",
-      "bytes": 9457,
+      "sha256": "26694bf8a27e1885bb903a3dd6ac1b7c6be760f8fee7604ee54c228b42dd4af5",
+      "bytes": 9794,
       "sourcePath": ".github/codekeeper.json"
     },
     "policies/openai.json": {
-      "sha256": "fbf7781d11a33de63a632ddc008c9dd32a71510ad216bf0977af39afe00f69e5",
-      "bytes": 9294,
+      "sha256": "9eee50d058bf1e2e845268925875085be20991fed5a89bca913d38d2da286794",
+      "bytes": 9631,
       "sourcePath": ".github/codekeeper.json#preset=openai"
     },
     "workflows/review.yml": {
@@ -51,8 +56,8 @@
       "sourcePath": "examples/workflows/codekeeper-issues.yml.example"
     },
     "workflows/fix.yml": {
-      "sha256": "74d1619e7f809a02a9a703f3f58671941b25e2714637192e9e1f95927f13f85f",
-      "bytes": 1909,
+      "sha256": "0171207b6bc7aef7501ecd5c8fcba351402c961f5961d572f867b0ff5ba7df38",
+      "bytes": 2049,
       "sourcePath": "examples/workflows/codekeeper-fix.yml.example"
     }
   },
@@ -63,8 +68,8 @@
       "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
     },
     "toolingManifest": {
-      "sha256": "56e661fdba28f5a8f9af61c6759835f288db08c30e264261535c095a9c08216c",
-      "bytes": 3657,
+      "sha256": "2ec489602097a2625ea66a5bb54037ee5f9c9974e59388eec15d6a14c7dc799d",
+      "bytes": 3786,
       "sourcePath": "tools/codekeeper/tooling-manifest.json"
     }
   }

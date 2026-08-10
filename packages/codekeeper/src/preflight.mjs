@@ -191,20 +191,27 @@ export async function inspectInstallationFiles(root, {
   }
   await assertNoInstallationFiles(root, { fsImpl, allowExisting: true });
   let policy;
-  const policySource = await fsImpl.readFile(policyPath, "utf8");
+  const installedPolicySource = await fsImpl.readFile(policyPath, "utf8");
   try {
-    policy = JSON.parse(policySource);
+    policy = JSON.parse(installedPolicySource);
   } catch (cause) {
     throw new InstallerError("The existing Codekeeper policy is not valid JSON.", { code: "EXISTING_INSTALLATION_INVALID", cause });
   }
   if (!policy?.ai?.agents || !policy?.repository || !policy?.audit || !policy?.issues || !policy?.merge) {
     throw new InstallerError("The existing Codekeeper policy does not have the required sections.", { code: "EXISTING_INSTALLATION_INVALID" });
   }
-  const contents = { [POLICY_TARGET]: policySource };
+  if (!policy.ai.agents.plan && policy.ai.agents.fix) {
+    policy.ai.agents.plan = structuredClone(policy.ai.agents.fix);
+    policy.ai.agents.plan.workspace.enabled = false;
+    policy.ai.agents.plan.workspace.allowWrites = false;
+  }
+  const policySource = `${JSON.stringify(policy, null, 2)}\n`;
+  const contents = { [POLICY_TARGET]: installedPolicySource };
   for (const profile of AGENT_PROFILE_IDS) {
     const target = AGENT_PROFILES[profile].target;
     const filePath = path.join(root, ...target.split("/"));
     const stat = await exists(fsImpl, filePath);
+    if (!stat && profile === "fixer") continue;
     if (!stat) throw new InstallerError(`The existing installation is missing ${target}.`, { code: "EXISTING_INSTALLATION_INVALID" });
     contents[target] = await fsImpl.readFile(filePath, "utf8");
   }

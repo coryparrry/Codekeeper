@@ -592,6 +592,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
     git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(),
     [
       ".github/codekeeper.json",
+      ".github/codekeeper/agents/fixer.md",
       ".github/codekeeper/agents/issue-triager.md",
       ".github/codekeeper/agents/maintenance-planner.md",
       ".github/codekeeper/agents/pr-reviewer.md",
@@ -602,8 +603,8 @@ test("successful init revalidates three snapshots and orders settings, exact com
   );
   assert.match(output.toString(), /Starting model set: openai/);
   assert.match(output.toString(), /OpenAI traces: enabled/);
-  assert.match(output.toString(), /Pull request review: openai \/ gpt-5\.6-sol \/ high effort/);
-  assert.match(output.toString(), /Repository maintenance: openai \/ gpt-5\.6-sol \/ high effort/);
+  assert.match(output.toString(), /Pull request reviewer \(Pull request review\): openai \/ gpt-5\.6-sol \/ high effort/);
+  assert.match(output.toString(), /Repository auditor \(Repository maintenance\): openai \/ gpt-5\.6-sol \/ high effort/);
   assert.match(output.toString(), /OPENAI_API_KEY: OpenAI Platform API key for model calls/);
   assert.match(output.toString(), /OPENAI_TRACE_API_KEY: Separate OpenAI Platform API key for trace export/);
   assert.match(output.toString(), /CODEKEEPER_APP_PRIVATE_KEY: downloaded GitHub App PEM private key used to mint App installation tokens/);

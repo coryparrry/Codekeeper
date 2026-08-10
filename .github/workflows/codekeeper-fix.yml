@@ -23,6 +23,9 @@ on:
         default: ""
         type: string
     secrets:
+      planner_model_api_key:
+        description: API key for the provider selected by ai.agents.plan.provider.
+        required: true
       model_api_key:
         description: API key for the provider selected by ai.agents.fix.provider.
         required: true
@@ -45,7 +48,7 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 56e661fdba28f5a8f9af61c6759835f288db08c30e264261535c095a9c08216c
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 2ec489602097a2625ea66a5bb54037ee5f9c9974e59388eec15d6a14c7dc799d
 
 concurrency:
   group: codekeeper-fix-${{ inputs.issue_number || github.event.issue.number }}
@@ -152,8 +155,109 @@ jobs:
             --automation-bot-login "$BOT_LOGIN" \
             --automation-bot-id "$BOT_ID"
 
+  plan:
+    name: Codekeeper maintenance plan
+    if: >-
+      inputs.enabled &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_fix') ||
+      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'codekeeper:ready') ||
+      (github.event.comment.body == '/codekeeper fix' &&
+       (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Resolve authorised repair target
+        id: target
+        env:
+          MANUAL_ISSUE: ${{ inputs.issue_number }}
+          EVENT_ISSUE: ${{ github.event.issue.number || github.event.client_payload.number }}
+        run: |
+          target="${MANUAL_ISSUE:-$EVENT_ISSUE}"
+          [[ "$target" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue or pull request number"; exit 1; }
+          echo "target_number=$target" >> "$GITHUB_OUTPUT"
+      - name: Download bootstrap Codekeeper tooling
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ github.workspace }}
+      - name: Verify bootstrap Codekeeper tooling against pinned manifest
+        env:
+          TOOLING_ROOT: ${{ github.workspace }}/tooling/tools/codekeeper
+        run: |
+          node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { lstat, readFile } from "node:fs/promises"; import { join } from "node:path";
+            const root = process.env.TOOLING_ROOT;
+            const expected = process.env.CODEKEEPER_TOOLING_MANIFEST_SHA256;
+            const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+            const regular = async (file, label) => { const stat = await lstat(file); if (!stat.isFile()) throw new Error("Codekeeper tooling integrity bootstrap rejected " + label); return readFile(file); };
+            const manifest = await regular(join(root, "tooling-manifest.json"), "manifest");
+            if (digest(manifest) !== expected) throw new Error("Codekeeper tooling manifest does not match the pinned workflow");
+            const files = JSON.parse(manifest).files;
+            const verifier = Array.isArray(files) && files.find((entry) => entry?.path === "scripts/verify-tooling-artifact.mjs");
+            if (!verifier || !/^[0-9a-f]{64}$/.test(verifier.sha256)) throw new Error("Codekeeper tooling manifest lacks its verifier");
+            const verifierBytes = await regular(join(root, "scripts", "verify-tooling-artifact.mjs"), "verifier");
+            if (digest(verifierBytes) !== verifier.sha256) throw new Error("Codekeeper tooling verifier does not match the pinned manifest");
+          '
+          node "$TOOLING_ROOT/scripts/verify-tooling-artifact.mjs" --root "$TOOLING_ROOT" --expected-manifest-sha256 "$CODEKEEPER_TOOLING_MANIFEST_SHA256"
+      - name: Check out trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          path: repository
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Install pinned Agents SDK runtime
+        working-directory: tooling/tools/codekeeper
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare runner-owned planning bundle
+        working-directory: repository
+        env:
+          CODEKEEPER_TOOLING_SHA: ${{ job.workflow_sha }}
+          BUNDLE: ${{ runner.temp }}/codekeeper-plan-bundle
+          CONFIG: ${{ runner.temp }}/codekeeper-config.json
+          SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/maintenance-planner.md
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_NUMBER: ${{ steps.target.outputs.target_number }}
+          AUTHORIZATION_MODE: ${{ (github.event_name == 'issues' || github.event_name == 'repository_dispatch') && 'policy' || 'owner' }}
+          EXPECTED_HEAD: ${{ github.event.client_payload.head_sha || '' }}
+        run: |
+          cp "$SOURCE_CONFIG" "$CONFIG"
+          node ../tooling/tools/codekeeper/src/cli.mjs prepare-plan \
+            --config "$CONFIG" --directory "$BUNDLE" --target-number "$TARGET_NUMBER" \
+            --actor "$GITHUB_ACTOR" --authorization-mode "$AUTHORIZATION_MODE" --expected-head "$EXPECTED_HEAD" \
+            --agent-profile "$AGENT_PROFILE" --agent-profile-source-sha "$(git rev-parse HEAD)" --tooling-sha "$CODEKEEPER_TOOLING_SHA"
+      - name: Create validated implementation plan
+        working-directory: repository
+        env:
+          CODEKEEPER_MODEL_API_KEY: ${{ secrets.planner_model_api_key }}
+          CODEKEEPER_TRACE_API_KEY: ${{ secrets.trace_api_key }}
+          BUNDLE: ${{ runner.temp }}/codekeeper-plan-bundle
+          CONFIG: ${{ runner.temp }}/codekeeper-config.json
+        run: |
+          node ../tooling/tools/codekeeper/src/cli.mjs run-agent --config "$CONFIG" --mode plan --directory "$BUNDLE" --result "$BUNDLE/plan-result.json"
+      - name: Upload validated maintenance plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codekeeper-fix-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codekeeper-plan-bundle/plan-result.json
+          retention-days: 1
+          if-no-files-found: error
+
   workspace:
     name: Codekeeper implementation workspace specialist
+    needs: plan
     if: >-
       inputs.enabled &&
       (github.event_name == 'workflow_dispatch' ||
@@ -228,22 +332,27 @@ jobs:
         with:
           node-version: 24.19.0
           package-manager-cache: false
-      - name: Prepare runner-owned implementation bundle
+      - name: Download validated maintenance plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codekeeper-fix-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codekeeper-plan-bundle
+      - name: Prepare runner-owned fixer bundle
         id: prepare
         working-directory: repository
         env:
           CODEKEEPER_TOOLING_SHA: ${{ job.workflow_sha }}
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
+          PLAN_BUNDLE: ${{ runner.temp }}/codekeeper-plan-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/maintenance-planner.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/fixer.md
           GITHUB_TOKEN: ${{ github.token }}
           TARGET_NUMBER: ${{ steps.target.outputs.target_number }}
           AUTHORIZATION_MODE: ${{ (github.event_name == 'issues' || github.event_name == 'repository_dispatch') && 'policy' || 'owner' }}
           EXPECTED_HEAD: ${{ github.event.client_payload.head_sha || '' }}
         run: |
-          [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
           [[ "$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).repository.defaultBranch)' "$CONFIG")" == "$DEFAULT_BRANCH" ]] || {
             echo "Configured default branch does not match the repository default branch"
@@ -256,12 +365,12 @@ jobs:
             --actor "$GITHUB_ACTOR" \
             --authorization-mode "$AUTHORIZATION_MODE" \
             --expected-head "$EXPECTED_HEAD" \
+            --plan-result "$PLAN_BUNDLE/plan-result.json" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git rev-parse HEAD)" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
-          {
-            echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
-          } >> "$GITHUB_OUTPUT"
+          cp "$PLAN_BUNDLE/plan-result.json" "$BUNDLE/plan-result.json"
+          echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - name: Check out frozen repair target
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -404,7 +513,8 @@ jobs:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/maintenance-planner.md
+          WORKSPACE: ${{ runner.temp }}/codekeeper-workspace
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/fixer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
           TARGET_NUMBER: ${{ steps.target.outputs.target_number }}
@@ -424,6 +534,7 @@ jobs:
             --actor "$GITHUB_ACTOR" \
             --authorization-mode "$AUTHORIZATION_MODE" \
             --expected-head "$EXPECTED_HEAD" \
+            --plan-result "$WORKSPACE/plan-result.json" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git rev-parse HEAD)" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
@@ -749,7 +860,7 @@ jobs:
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
-          AGENT_PROFILE: ${{ github.workspace }}/policy/.github/codekeeper/agents/maintenance-planner.md
+          AGENT_PROFILE: ${{ github.workspace }}/policy/.github/codekeeper/agents/fixer.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
           node ../tooling/tools/codekeeper/src/cli.mjs publish-fix \

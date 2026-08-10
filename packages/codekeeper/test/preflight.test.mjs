@@ -223,7 +223,9 @@ test("existing generated files are recognized as a rerunnable installation", asy
   const bundle = await loadVerifiedAssets();
   await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
   await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
-  await writeFile(path.join(root, ".github", "codekeeper.json"), bundle.contents["policies/openai.json"]);
+  const legacyPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
+  delete legacyPolicy.ai.agents.plan;
+  await writeFile(path.join(root, ".github", "codekeeper.json"), `${JSON.stringify(legacyPolicy, null, 2)}\n`);
   for (const [name, asset] of [
     ["pr-reviewer.md", "agents/pr-reviewer.md"],
     ["repository-auditor.md", "agents/repository-auditor.md"],
@@ -235,6 +237,8 @@ test("existing generated files are recognized as a rerunnable installation", asy
   const installation = await inspectInstallationFiles(root);
   assert.deepEqual(installation.modes, ["review"]);
   assert.equal(installation.policy.ai.agents.review.model, "gpt-5.6-sol");
+  assert.equal(installation.policy.ai.agents.plan.model, installation.policy.ai.agents.fix.model);
+  assert.equal(installation.contents[".github/codekeeper/agents/fixer.md"], undefined);
   const inspected = await inspectRepository({ runner: preflightRunner(root), cwd: root });
   assert.equal(inspected.updateBranch, `codekeeper/update-${HEAD_SHA.slice(0, 12)}`);
   assert.equal(inspected.existingSettings.enabled, true);

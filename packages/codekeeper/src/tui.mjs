@@ -11,7 +11,7 @@ import {
 } from "ink";
 import { InstallerError } from "./errors.mjs";
 import { CONSERVATIVE_BOUNDARIES, MODES, SECRET_PURPOSES } from "./constants.mjs";
-import { capabilitySummary, completionGuidance, documentMap, workflowMap } from "./plan.mjs";
+import { capabilitySummary, completionGuidance, documentMap, modelAssignments, workflowMap } from "./plan.mjs";
 import { createPrivateKeyPickerController } from "./private-key-input.mjs";
 
 const h = React.createElement;
@@ -461,9 +461,9 @@ function reviewData(plan) {
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
     preset: `${plan.preset} starting models`,
     workflows: workflowMap(plan.modes).map((item) => `${item.label} — ${item.trigger}`),
-    models: plan.modes.map((mode) => {
-      const agent = policy.ai.agents[MODES[mode].policyAgent];
-      return `${MODES[mode].agentLabel} (${MODES[mode].label}): ${agent.provider} / ${agent.model} / ${agent.effort}`;
+    models: modelAssignments(plan.modes).map(({ agent: agentId, label, workflow }) => {
+      const agent = policy.ai.agents[agentId];
+      return `${label} (${workflow}): ${agent.provider} / ${agent.model} / ${agent.effort}`;
     }),
     documents: documents.map((item) => `${item.path} — ${item.purpose}`),
     setupDocumentPaths: documents.filter((item) => !item.path.includes("/agents/")).map((item) => item.path),

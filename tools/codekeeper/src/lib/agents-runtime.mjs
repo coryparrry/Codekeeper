@@ -3,7 +3,7 @@ import path from "node:path";
 import { agentProfilePathForMode, loadFrozenAgentProfile, pinnedAgentProfileSection } from "./agent-profiles.mjs";
 import { getAgentConfig } from "./config.mjs";
 import { readJson, readOptionalRegularJson, writeJson } from "./io.mjs";
-import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
+import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, validateIssueResult, validatePlanResult, validateReviewResult } from "./schemas.mjs";
 
 export { providerCompatibleJsonSchema } from "./schemas.mjs";
 
@@ -11,7 +11,8 @@ const MODE_NAMES = Object.freeze({
   review: "Pull request reviewer",
   audit: "Repository auditor",
   issue: "Issue triager",
-  fix: "Maintenance planner"
+  plan: "Maintenance planner",
+  fix: "Fixer"
 });
 
 function isPlainObject(value) {
@@ -305,6 +306,10 @@ function validatorForBundle(mode, config, context) {
   if (mode === "review") return (output) => validateReviewResult(output, config);
   if (mode === "audit") return (output) => validateAuditResult(output, config);
   if (mode === "issue") return (output) => validateIssueResult(output, config);
+  if (mode === "plan") {
+    const target = context?.target;
+    return (output) => validatePlanResult(output, target);
+  }
   if (mode === "fix") {
     const target = context?.target;
     if (!target || !["issue", "pull_request"].includes(target.kind) || !Number.isSafeInteger(target.number) || target.number <= 0) {

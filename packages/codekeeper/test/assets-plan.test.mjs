@@ -45,19 +45,21 @@ import {
 } from "./helpers.mjs";
 
 const EXPECTED_ASSETS = Object.freeze({
+  "agents/fixer.md": "b1604c6ff872abdcd4e7c174dc018db55705ad917152a6e338b710331fae4227",
   "agents/issue-triager.md": "05662b59c92fae8f942b199f4ab1257c6b96014ffc45125aa71775313ce8fbac",
-  "agents/maintenance-planner.md": "0a71d814e12be7f0b917d62827a203a0d51ea4ec4c40566f839fda70f188b15e",
-  "agents/pr-reviewer.md": "a548423ea6098f3c0bcc17b0dbf60131cdd1689dec45504701b1949bc89e2894",
+  "agents/maintenance-planner.md": "17e6eb1192452b8779b10e46f49f98e8fd4e75e5bd1ff08c218eb0f3badd8cdf",
+  "agents/pr-reviewer.md": "dfea6cff0bb9ee49fa25f0c5cb5177c65060922d5745fd707f4936b7fba96603",
   "agents/repository-auditor.md": "48c4c7c088751fe9b2eda76cbf20b5ad6495bed052f5fb05b4a5156964604445",
-  "policies/mixed.json": "420228f80d14e2bfa8bafe48d650d9123fd0547dfc05236a034d59ddb7d522cc",
-  "policies/openai.json": "fbf7781d11a33de63a632ddc008c9dd32a71510ad216bf0977af39afe00f69e5",
-  "workflows/fix.yml": "74d1619e7f809a02a9a703f3f58671941b25e2714637192e9e1f95927f13f85f",
+  "policies/mixed.json": "26694bf8a27e1885bb903a3dd6ac1b7c6be760f8fee7604ee54c228b42dd4af5",
+  "policies/openai.json": "9eee50d058bf1e2e845268925875085be20991fed5a89bca913d38d2da286794",
+  "workflows/fix.yml": "0171207b6bc7aef7501ecd5c8fcba351402c961f5961d572f867b0ff5ba7df38",
   "workflows/issues.yml": "3260d387b1ae7f76e21fdd0228062e139be3a25f047bfbd5762f638b67e153ca",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
   "workflows/review.yml": "ef33b3a226330ff13253bd086f498ff51697e6825042dc6562047d525faaa54c"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
+  "agents/fixer.md": "tools/codekeeper/agents/fixer.md",
   "agents/issue-triager.md": "tools/codekeeper/agents/issue-triager.md",
   "agents/maintenance-planner.md": "tools/codekeeper/agents/maintenance-planner.md",
   "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
@@ -146,9 +148,9 @@ test("bundled starter profiles describe enabled automation and retain fixed runt
   const { contents } = await loadVerifiedAssets();
   assert.match(contents["agents/repository-auditor.md"], /live run can request one repair when repository repair is on/);
   assert.match(contents["agents/issue-triager.md"], /`ai-ready` starts a separate implementation run/);
-  assert.match(contents["agents/maintenance-planner.md"], /issue implementation is on and trusted triage marked it ready/);
-  assert.match(contents["agents/maintenance-planner.md"], /exact open same-repository pull request's frozen head branch/);
-  assert.match(contents["agents/maintenance-planner.md"], /Never propose a sibling branch, a replacement or follow-up pull request/);
+  assert.match(contents["agents/maintenance-planner.md"], /Reviewer validated against the current head/);
+  assert.match(contents["agents/maintenance-planner.md"], /readyForFixer=false/);
+  assert.match(contents["agents/fixer.md"], /Make the smallest complete change/);
   assert.match(contents["agents/pr-reviewer.md"], /Review is not repair authorization/);
   assert.match(contents["agents/pr-reviewer.md"], /it must never open a second pull request/);
 });
@@ -300,6 +302,7 @@ test("renderInstallFiles emits policy, every profile, and only selected callers 
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
     ".github/codekeeper/agents/maintenance-planner.md",
+    ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml"
   ]);
@@ -366,7 +369,7 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.equal(plan.branch, "codekeeper/setup");
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
   assert.match(plan.pullRequest.body, /\| Workflow \| Role \| What it does \| Trigger \| Provider and model \|/);
-  assert.match(plan.pullRequest.body, /\| review \| Pull request reviewer \|/);
+  assert.match(plan.pullRequest.body, /\| Pull request review \| Pull request reviewer \|/);
   assert.match(plan.pullRequest.body, /OpenAI traces are \*\*enabled\*\*/);
   assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
   assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune priorities, work selection, implementation approach/);
@@ -399,6 +402,7 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
     ".github/codekeeper/agents/maintenance-planner.md",
+    ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml"
   ]);
@@ -476,6 +480,21 @@ test("each role can use any supported provider and model", async () => {
   assert.match(reviewWorkflow, /secrets\.DEEPSEEK_API_KEY/);
   assert.match(issueWorkflow, /secrets\.OPENAI_API_KEY/);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, DEEPSEEK_SECRET, APP_SECRET]);
+});
+
+test("planner and fixer can use different supported models", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: ["fix"], preset: "openai", models: { plan: "deepseek-v4-flash", fix: "sol-high" }, tracing: false })
+  });
+  const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
+  const workflow = plan.files.find((file) => file.path === MODES.fix.target).contents;
+  assert.equal(policy.ai.agents.plan.provider, "deepseek");
+  assert.equal(policy.ai.agents.fix.model, "gpt-5.6-sol");
+  assert.match(workflow, /planner_model_api_key: \$\{\{ secrets\.DEEPSEEK_API_KEY \}\}/);
+  assert.match(workflow, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
 });
 
 test("OpenAI model choices include Luna, Terra, and Sol and map Luna to one agent", async () => {

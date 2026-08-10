@@ -68,6 +68,15 @@ export function normalizeModes(modes) {
   return MODE_IDS.filter((mode) => selected.includes(mode));
 }
 
+export function modelAssignments(modes) {
+  return normalizeModes(modes).flatMap((mode) => mode === "fix"
+    ? [
+        { key: "plan", agent: "plan", label: "Maintenance planner", workflow: MODES.fix.label },
+        { key: "fix", agent: "fix", label: "Fixer", workflow: MODES.fix.label }
+      ]
+    : [{ key: mode, agent: MODES[mode].policyAgent, label: MODES[mode].agentLabel, workflow: MODES[mode].label }]);
+}
+
 export function normalizeOwnerLogins(ownerLogins) {
   if (!Array.isArray(ownerLogins) || !ownerLogins.length) throw new InstallerError("At least one owner login is required.", { code: "PLAN_INVALID" });
   const normalized = ownerLogins.map((login) => String(login).trim().toLowerCase());
@@ -101,7 +110,7 @@ export function capabilitySummary(capabilities, modes = null) {
 export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET, tracing = true }) {
   const selected = normalizeModes(modes);
   const names = [];
-  const providers = new Set(selected.map((mode) => models?.[mode]?.provider ?? (preset === "mixed" && mode === "issues" ? "deepseek" : "openai")));
+  const providers = new Set(modelAssignments(selected).map(({ key }) => models?.[key]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
   if (providers.has("openai")) names.push(OPENAI_SECRET);
   if (providers.has("deepseek")) names.push(DEEPSEEK_SECRET);
   if (tracing) names.push(TRACE_SECRET);
@@ -110,7 +119,7 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
 }
 
 function existingSecretNames(installation) {
-  const providers = new Set(installation.modes.map((mode) => installation.policy.ai.agents[MODES[mode].policyAgent].provider));
+  const providers = new Set(modelAssignments(installation.modes).map(({ agent }) => installation.policy.ai.agents[agent].provider));
   return new Set([
     ...(providers.has("openai") ? [OPENAI_SECRET] : []),
     ...(providers.has("deepseek") ? [DEEPSEEK_SECRET] : []),
@@ -123,20 +132,22 @@ export function normalizeModelChoices({ modes, preset, bundle, choices = {}, pol
   const selected = normalizeModes(modes);
   const policy = JSON.parse(policySource);
   const normalized = {};
-  for (const mode of selected) {
-    const agent = policy.ai.agents[MODES[mode].policyAgent];
+  for (const assignment of modelAssignments(selected)) {
+    const { key, agent: agentId, workflow } = assignment;
+    const agent = policy.ai.agents[agentId];
     const defaultOption = ALL_MODEL_OPTIONS.find((option) => option.provider === agent.provider && option.model === agent.model && option.effort === agent.effort);
-    const choiceId = choices[mode] ?? defaultOption?.id;
+    const choiceId = choices[key] ?? defaultOption?.id;
     const choice = ALL_MODEL_OPTIONS.find((option) => option.id === choiceId);
-    if (!choice) throw new InstallerError(`Model choice is invalid for ${MODES[mode].label}.`, { code: "PLAN_INVALID" });
-    normalized[mode] = Object.freeze({
+    if (!choice) throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    normalized[key] = Object.freeze({
       provider: choice.provider,
       model: choice.model,
       effort: choice.effort,
       choice: choice.id
     });
   }
-  if (Object.keys(choices).some((mode) => !selected.includes(mode))) {
+  const assignmentKeys = new Set(modelAssignments(selected).map(({ key }) => key));
+  if (Object.keys(choices).some((key) => !assignmentKeys.has(key))) {
     throw new InstallerError("Model choices do not match the selected workflows.", { code: "PLAN_INVALID" });
   }
   return Object.freeze(normalized);
@@ -227,9 +238,10 @@ export function setupPullRequestBody(plan) {
   );
   const workflows = markdownTable(
     ["Workflow", "Role", "What it does", "Trigger", "Provider and model"],
-    workflowMap(plan.modes).map((item) => {
-      const selection = plan.models[item.mode];
-      return [item.mode, MODES[item.mode].agentLabel, item.description, item.trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
+    modelAssignments(plan.modes).map(({ key, label, workflow }) => {
+      const mode = plan.modes.find((candidate) => MODES[candidate].label === workflow);
+      const selection = plan.models[key];
+      return [MODES[mode].label, label, MODES[mode].description, MODES[mode].trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
     })
   );
   const proofs = [];
@@ -303,13 +315,13 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     models,
     tracing,
     policySource,
-    profileSources: installation?.contents ?? bundle.contents,
+    profileSources: installation ? { ...bundle.contents, ...installation.contents } : bundle.contents,
     enforceBundledDefaults: !installation
   });
   const changedFiles = installation
     ? files
       .filter((file) => installation.contents[file.path] !== file.contents)
-      .map((file) => ({ ...file, previousSha256: sha256(installation.contents[file.path]) }))
+      .map((file) => ({ ...file, previousSha256: installation.contents[file.path] === undefined ? null : sha256(installation.contents[file.path]) }))
     : files;
   const enabled = answers.enabled !== false;
   const variables = installation
@@ -436,18 +448,19 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   }
   const presetPolicy = installation?.policy ?? JSON.parse(bundle.contents[`policies/${preset}.json`]);
   const models = {};
-  for (const mode of normalizeModes(modes)) {
-    const agent = presetPolicy.ai.agents[MODES[mode].policyAgent];
+  for (const assignment of modelAssignments(modes)) {
+    const { key, agent: agentId, label, workflow } = assignment;
+    const agent = presetPolicy.ai.agents[agentId];
     const choices = ALL_MODEL_OPTIONS;
     const defaultChoice = choices.find((choice) => choice.provider === agent.provider && choice.model === agent.model && choice.effort === agent.effort) ?? choices[0];
-    models[mode] = await prompt.select(tuiOptions(prompt, {
-      message: `Assign a model to the ${MODES[mode].agentLabel}:`,
+    models[key] = await prompt.select(tuiOptions(prompt, {
+      message: `Assign a model to the ${label}:`,
       defaultValue: defaultChoice.id,
       choices: choices.map((choice) => ({ value: choice.id, label: choice.label }))
     }, {
       step: "models",
       description: [
-        `${MODES[mode].label} uses this role. The role is not tied to one provider.`,
+        `${workflow} uses this role. The role is not tied to one provider.`,
         "You can change this choice later in .github/codekeeper.json."
       ]
     }));
