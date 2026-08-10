@@ -198,7 +198,7 @@ export function workflowMap(modes) {
   }));
 }
 
-export function completionGuidance(modes, enabled = true) {
+export function completionGuidance(modes, enabled = true, update = false) {
   const proofs = workflowMap(modes).map((item) => Object.freeze({
     mode: item.mode,
     label: item.label,
@@ -212,7 +212,9 @@ export function completionGuidance(modes, enabled = true) {
   }));
   return Object.freeze({
     heading: enabled
-      ? "After the setup pull request merges, Codekeeper starts running the workflows you selected. Test each one before making its check required."
+      ? update
+        ? "Codekeeper is running now with the current default-branch configuration. After the setup pull request merges, test each updated workflow before making its check required."
+        : "After the setup pull request merges, Codekeeper starts running the workflows you selected. Test each one before making its check required."
       : "Codekeeper will stay off after merge. Set CODEKEEPER_ENABLED=true when you are ready to test it.",
     profileGuidance: "Edit .github/codekeeper/agents/*.md to change priorities, work selection, implementation, review standards, and reporting. Capability switches control repair, issue implementation, issue closure, and merge actions.",
     proofs: Object.freeze(proofs),
@@ -254,7 +256,7 @@ export function setupPullRequestBody(plan) {
   if (plan.modes.includes("fix")) proofs.push("Use a controlled issue that triage marks ready. Use \`/codekeeper fix\` only when repairing an existing pull request.");
   return `## Summary
 
-Codekeeper uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.
+Codekeeper uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. ${plan.update && plan.enabled ? "It is enabled now with the current default-branch configuration; this update applies after the setup pull request merges." : `It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.`}
 
 OpenAI traces are **${plan.tracing ? "enabled" : "disabled"}**.
 
@@ -281,7 +283,9 @@ Required secrets: ${plan.secrets.map((item) => `\`${item.name}\``).join(", ")}. 
 ## After merge
 
 ${plan.enabled
-    ? "Codekeeper starts running the selected workflows. Test each one before making its check required:"
+    ? plan.update
+      ? "Codekeeper continues running the current default-branch configuration now. After this pull request merges, test each updated workflow before making its check required:"
+      : "Codekeeper starts running the selected workflows. Test each one before making its check required:"
     : "Codekeeper stays off. Set `CODEKEEPER_ENABLED=true` when you are ready, then test each selected workflow:"}
 
 Edit \`.github/codekeeper/agents/*.md\` to tune priorities, work selection, implementation approach, review standards, and reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
@@ -483,8 +487,11 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   const enabled = prompt?.kind === "ink"
     ? await prompt.select({
       step: "startup",
-      message: "Start Codekeeper after the setup pull request merges?",
-      description: [
+      message: installation ? "Start Codekeeper now?" : "Start Codekeeper after the setup pull request merges?",
+      description: installation ? [
+        "Enabled changes the repository setting now and starts the current default-branch configuration.",
+        "Configuration changes from this update take effect after its pull request merges."
+      ] : [
         "Enabled starts the workflows you selected as soon as this setup is merged.",
         "Disabled installs the files and secrets but keeps every Codekeeper workflow off."
       ],
@@ -494,11 +501,19 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
         { value: "disabled", label: "Disabled" }
       ]
     }) === "enabled"
-    : await prompt.confirm({ message: "Start Codekeeper after the setup pull request merges?", defaultValue: installation ? snapshot.existingSettings.enabled : true });
+    : await prompt.confirm({
+      message: installation ? "Start Codekeeper now?" : "Start Codekeeper after the setup pull request merges?",
+      defaultValue: installation ? snapshot.existingSettings.enabled : true,
+      ...(installation ? { description: [
+        "Enabled changes the repository setting now and starts the current default-branch configuration.",
+        "Configuration changes from this update take effect after its pull request merges."
+      ] } : {})
+    });
   const applicableCapabilities = applicableCapabilityIds(modes);
   const capabilities = applicableCapabilities.length
     ? await prompt.multiselect(tuiOptions(prompt, {
       message: "Choose capabilities to turn on:",
+      allowEmpty: true,
       defaultValues: installation
         ? applicableCapabilities.filter((id) => ({
           reviewRepair: installation.policy.review.autoRepair,

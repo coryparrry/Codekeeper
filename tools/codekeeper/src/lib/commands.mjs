@@ -78,7 +78,8 @@ export async function runOwnerCommand({
     if (
       pull.draft ||
       pull.head?.repo?.full_name !== repository ||
-      pull.base?.repo?.full_name !== repository
+      pull.base?.repo?.full_name !== repository ||
+      pull.base?.ref !== config.repository.defaultBranch
     ) {
       throw new Error(`PR #${number} is not eligible for Codekeeper review`);
     }
@@ -97,6 +98,7 @@ export async function runOwnerCommand({
     if (!config.issues.allowAiImplementation)
       throw new Error("Issue implementation is off in the Codekeeper policy");
     await github.ensureLabels(config.labels, ["codekeeper:ready"]);
+    await github.removeLabel(number, "codekeeper:paused");
     await github.addLabels(number, ["codekeeper:ready"]);
     outcome = "The issue was queued for implementation.";
   } else if (command === "stop") {

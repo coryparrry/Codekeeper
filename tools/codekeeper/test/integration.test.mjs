@@ -482,6 +482,7 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
   config.issues.allowAiImplementation = true;
   const originalFetch = globalThis.fetch;
   const originalRepository = process.env.GITHUB_REPOSITORY;
+  let issueLabels = [{ name: "codekeeper:ready" }];
   process.env.GITHUB_REPOSITORY = "acme/example";
   globalThis.fetch = async (url) => {
     if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
@@ -493,7 +494,7 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
         html_url: "https://github.com/acme/example/issues/5",
         user: { login: "reporter" },
         state: "open",
-        labels: [{ name: "codekeeper:ready" }]
+        labels: issueLabels
       }), { status: 200 });
     }
     return new Response(JSON.stringify([]), { status: 200 });
@@ -511,6 +512,20 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
     });
     assert.equal(prepared.authorizationMode, "policy");
     assert.equal(prepared.requestedBy, "codekeeper-app[bot]");
+    issueLabels = [{ name: "codekeeper:ready" }, { name: "codekeeper:paused" }];
+    await assert.rejects(
+      prepareFix({
+        targetNumber: 5,
+        actor: "codekeeper-app[bot]",
+        authorizationMode: "policy",
+        directory: bundle(root, "paused-automatic-fix-input"),
+        config,
+        token: "read-token",
+        planResultPath: await readyPlan(root),
+        ...agentProfileOptions(root, "fix")
+      }),
+      /paused/
+    );
   } finally {
     globalThis.fetch = originalFetch;
     if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;

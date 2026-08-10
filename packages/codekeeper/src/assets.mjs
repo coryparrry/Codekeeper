@@ -111,7 +111,8 @@ export function renderPolicy(policySource, {
   capabilities = {},
   models = {},
   tracing = true,
-  enforceBundledDefaults = true
+  enforceBundledDefaults = true,
+  requiredPolicySource = policySource
 }) {
   let policy;
   try {
@@ -120,6 +121,12 @@ export function renderPolicy(policySource, {
     throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
   }
   if (enforceBundledDefaults) assertDisabledPolicy(policy);
+  let requiredPolicy;
+  try {
+    requiredPolicy = JSON.parse(requiredPolicySource);
+  } catch (cause) {
+    throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
+  }
   if (!policy.repository || !policy.merge || !Array.isArray(policy.merge.allowedUserAuthors)) {
     throw new InstallerError("Bundled policy cannot be tailored safely.", { code: "ASSET_POLICY_INVALID" });
   }
@@ -127,6 +134,10 @@ export function renderPolicy(policySource, {
   policy.repository.defaultBranch = defaultBranch;
   policy.repository.ownerLogins = [...ownerLogins];
   policy.merge.allowedUserAuthors = [...ownerLogins];
+  policy.labels ??= {};
+  for (const [name, definition] of Object.entries(requiredPolicy.labels ?? {})) {
+    if (!Object.hasOwn(policy.labels, name)) policy.labels[name] = structuredClone(definition);
+  }
   policy.audit.repair.enabled = capabilities.repair === true;
   policy.review.autoRepair = capabilities.reviewRepair === true;
   policy.issues.allowAiImplementation = capabilities.issueImplementation === true;
@@ -233,7 +244,8 @@ export function renderInstallFiles(bundle, {
       capabilities,
       models,
       tracing,
-      enforceBundledDefaults
+      enforceBundledDefaults,
+      requiredPolicySource: bundle.contents[`policies/${preset}.json`]
     })
   }];
   for (const profile of AGENT_PROFILE_IDS) {

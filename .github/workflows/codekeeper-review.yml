@@ -46,7 +46,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 2ec489602097a2625ea66a5bb54037ee5f9c9974e59388eec15d6a14c7dc799d
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 30075b865ce7f34d9b2d24e59baf2775298e0f7b6d429e046703adac6e842d09
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
@@ -57,12 +57,12 @@ jobs:
     name: Codekeeper review workspace specialist
     if: >-
       inputs.enabled &&
-      inputs.auto_review &&
-      ((github.event_name != 'repository_dispatch' &&
+      ((github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review') ||
+       (inputs.auto_review &&
+        github.event_name != 'repository_dispatch' &&
         !github.event.pull_request.draft &&
         github.event.pull_request.head.repo.full_name == github.repository &&
-        github.event.pull_request.base.ref == github.event.repository.default_branch) ||
-       (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review'))
+        github.event.pull_request.base.ref == github.event.repository.default_branch))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -551,6 +551,7 @@ jobs:
         env:
           ENABLED: ${{ inputs.enabled }}
           AUTO_REVIEW: ${{ inputs.auto_review }}
+          IS_COMMAND_REVIEW: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review' }}
           IS_DRAFT: ${{ github.event.pull_request.draft || github.event.client_payload.draft }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.event.client_payload.head_repository }}
           REPOSITORY: ${{ github.repository }}
@@ -561,7 +562,7 @@ jobs:
           PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
           [[ "$ENABLED" == "true" ]] || { echo "Codekeeper is disabled; this required gate fails closed."; exit 1; }
-          [[ "$AUTO_REVIEW" == "true" ]] || { echo "Automatic PR review is disabled; this required gate fails closed."; exit 1; }
+          [[ "$IS_COMMAND_REVIEW" == "true" || "$AUTO_REVIEW" == "true" ]] || { echo "Automatic PR review is disabled; this required gate fails closed."; exit 1; }
           [[ "$IS_DRAFT" != "true" ]] || { echo "Draft pull requests require manual review."; exit 1; }
           [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]] || { echo "Fork pull requests require manual review."; exit 1; }
           [[ "$BASE_REF" == "$DEFAULT_BRANCH" ]] || { echo "Only default-branch pull request targets are supported."; exit 1; }

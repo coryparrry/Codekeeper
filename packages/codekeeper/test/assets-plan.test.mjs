@@ -29,6 +29,7 @@ import {
 import {
   appRegistrationUrl,
   buildInstallPlan,
+  completionGuidance,
   documentMap,
   normalizeModes,
   normalizeOwnerLogins,
@@ -52,7 +53,7 @@ const EXPECTED_ASSETS = Object.freeze({
   "agents/repository-auditor.md": "48c4c7c088751fe9b2eda76cbf20b5ad6495bed052f5fb05b4a5156964604445",
   "policies/mixed.json": "26694bf8a27e1885bb903a3dd6ac1b7c6be760f8fee7604ee54c228b42dd4af5",
   "policies/openai.json": "9eee50d058bf1e2e845268925875085be20991fed5a89bca913d38d2da286794",
-  "workflows/fix.yml": "0171207b6bc7aef7501ecd5c8fcba351402c961f5961d572f867b0ff5ba7df38",
+  "workflows/fix.yml": "66cd05e2dc27ae7c150d2911561dfb8a24c2a8d0f6093fe245671df3307f26fd",
   "workflows/issues.yml": "3260d387b1ae7f76e21fdd0228062e139be3a25f047bfbd5762f638b67e153ca",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
   "workflows/review.yml": "ef33b3a226330ff13253bd086f498ff51697e6825042dc6562047d525faaa54c"
@@ -228,6 +229,25 @@ test("a same-provider model change stays in policy and does not rewrite a workfl
     });
     assert.doesNotMatch(rendered, /gpt-5\.6-(?:sol|terra|luna)/);
   }
+});
+
+test("policy reruns add newly required labels without replacing adopter customizations", async () => {
+  const bundle = await loadVerifiedAssets();
+  const bundledPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
+  const previous = structuredClone(bundledPolicy);
+  delete previous.labels["codekeeper:paused"];
+  delete previous.labels["codekeeper:auto-repaired"];
+  previous.labels["codekeeper:ready"].description = "Repository-specific ready label";
+  const rendered = JSON.parse(renderPolicy(JSON.stringify(previous), {
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    enforceBundledDefaults: false,
+    requiredPolicySource: bundle.contents["policies/openai.json"]
+  }));
+  assert.equal(rendered.labels["codekeeper:ready"].description, "Repository-specific ready label");
+  assert.deepEqual(rendered.labels["codekeeper:paused"], bundledPolicy.labels["codekeeper:paused"]);
+  assert.deepEqual(rendered.labels["codekeeper:auto-repaired"], bundledPolicy.labels["codekeeper:auto-repaired"]);
 });
 
 test("openai preset changes only issue-triage model policy from the mixed preset", async () => {
@@ -559,6 +579,9 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
   assert.deepEqual(update.files.map((file) => file.path), [".github/codekeeper.json"]);
   assert.match(contents[".github/codekeeper/agents/pr-reviewer.md"], /Repository preference/);
   assert.equal(update.pullRequest.title, "chore(codekeeper): update configuration");
+  assert.match(update.pullRequest.body, /enabled now with the current default-branch configuration/i);
+  assert.match(update.pullRequest.body, /continues running the current default-branch configuration now/i);
+  assert.match(completionGuidance(update.modes, update.enabled, update.update).heading, /running now with the current default-branch configuration/i);
 
   const providerUpdate = buildInstallPlan({
     bundle,

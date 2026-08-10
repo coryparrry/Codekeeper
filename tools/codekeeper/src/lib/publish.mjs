@@ -117,10 +117,13 @@ function managedIssueLabels(config) {
   return config.issues.managedLabels;
 }
 
-async function currentOpenIssue(github, frozenIssue, staleAction) {
+async function currentOpenIssue(github, frozenIssue, staleAction, { rejectPaused = false } = {}) {
   const issue = await github.getIssue(frozenIssue.number);
   if (issue.pull_request) throw new Error(`Issue #${issue.number} is no longer eligible`);
   if (issue.state !== "open") throw new Error(`Issue #${issue.number} is not open`);
+  if (rejectPaused && issueLabelNames(issue).includes("codekeeper:paused")) {
+    throw new Error(`Issue #${issue.number} is paused; automatic publication stopped`);
+  }
   if (frozenIssue.updatedAt && issue.updated_at !== frozenIssue.updatedAt) {
     throw new Error(`Issue #${issue.number} changed after ${staleAction}; stale action will not publish`);
   }
@@ -796,7 +799,9 @@ export async function publishFix({ artifactDirectory, config, configSha256, expe
   if (context.issue?.number !== context.target.number) {
     throw new Error("Frozen issue fix context does not match its target");
   }
-  const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started");
+  const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started", {
+    rejectPaused: context.authorizationMode === "policy"
+  });
   const issue = await currentIssue();
 
   if (!manifest.patch?.valid) {

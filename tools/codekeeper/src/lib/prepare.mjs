@@ -284,6 +284,9 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
     }
     const labels = boundedLabels(issue.labels);
+    if (authorizationMode === "policy" && labels.includes("codekeeper:paused")) {
+      throw new Error(`Issue #${targetNumber} is paused`);
+    }
     if (authorizationMode === "policy" && !labels.includes("codekeeper:ready")) {
       throw new Error("Automatic issue implementation requires the codekeeper:ready label");
     }

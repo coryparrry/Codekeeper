@@ -8,7 +8,7 @@ import { loadVerifiedAssets } from "../src/assets.mjs";
 import { runCli } from "../src/cli.mjs";
 import { STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
 import { buildInstallPlan, collectAppAnswers, collectSetupAnswers, completionGuidance } from "../src/plan.mjs";
-import { defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
+import { createPrivateKeyPickerController, defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
 import {
   DEFAULT_PROGRESS_STEPS,
   containsPrivateKeyPemEnvelope,
@@ -414,6 +414,36 @@ test("private-key picker hides directories that it does not need", async (t) => 
   assert.doesNotMatch(observable, new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("private-key picker navigates safely to a key outside Downloads", async () => {
+  const home = "/virtual/codekeeper-home";
+  const downloads = path.join(home, "Downloads");
+  const desktop = path.join(home, "Desktop");
+  const keyPath = path.join(desktop, "github-app.pem");
+  const fsImpl = {
+    async lstat(target) {
+      if ([home, downloads, desktop].includes(target)) return fakeStat("directory");
+      if (target === keyPath) return fakeStat("file", 1024);
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    async readdir(target) {
+      if (target === downloads) return [];
+      if (target === home) return [fakeDirent("Downloads", "directory"), fakeDirent("Desktop", "directory")];
+      if (target === desktop) return [fakeDirent("github-app.pem", "file")];
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    }
+  };
+  const picker = await createPrivateKeyPickerController({ fsImpl, homeDirectory: home });
+  const downloadsListing = await picker.list();
+  const parent = downloadsListing.choices.find((choice) => choice.type === "parent");
+  assert.ok(parent);
+  const homeListing = await picker.activate(parent.id);
+  const desktopChoice = homeListing.listing.choices.find((choice) => choice.label === "Desktop");
+  assert.equal(desktopChoice.type, "directory");
+  const desktopListing = await picker.activate(desktopChoice.id);
+  const keyChoice = desktopListing.listing.choices.find((choice) => choice.label === "github-app.pem");
+  assert.deepEqual(await picker.activate(keyChoice.id), { selected: true, value: keyPath });
+});
+
 test("progress preserves stage order and always resumes after terminal handoff", async () => {
   const states = [];
   const handoff = [];
@@ -567,6 +597,17 @@ test("Ink controls support arrows, j/k, checkboxes, text editing, Escape, and Ct
   await tui.send(" ");
   await tui.send("\r");
   assert.deepEqual(await modes, ["maintain", "issues"]);
+
+  const capabilities = tui.prompt.multiselect({
+    message: "Choose capabilities",
+    choices: [{ value: "repair", label: "Repair" }],
+    defaultValues: ["repair"],
+    allowEmpty: true
+  });
+  await tui.waitForText("Choose capabilities");
+  await tui.send(" ");
+  await tui.send("\r");
+  assert.deepEqual(await capabilities, []);
 
   const text = tui.prompt.inputText({ message: "Display name", validate: () => true });
   await tui.waitForText("Display name");
@@ -775,6 +816,61 @@ test("final review supports paged Back navigation and requires explicit creation
   const cancelled = tui.prompt.reviewInstallPlan(plan);
   const cancellation = assert.rejects(cancelled, (error) => error.code === "PROMPT_ABORTED");
   await tui.waitForText("Review the setup · 1 of 3");
+  await tui.send("\u001b");
+  await cancellation;
+});
+
+test("settings-only updates can be reviewed without a changed policy file", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: repositorySnapshot(),
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true,
+      capabilities: ["repair", "autoMerge"]
+    }
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...repositorySnapshot(),
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: ["review", "maintain"],
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: false,
+      capabilities: ["repair", "autoMerge"]
+    }
+  });
+  assert.equal(plan.settingsOnly, true);
+  assert.deepEqual(plan.files, []);
+  const tui = await createTuiHarness(t);
+  const review = tui.prompt.reviewInstallPlan(plan);
+  const cancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
+  await tui.waitForText("Review the setup");
   await tui.send("\u001b");
   await cancellation;
 });

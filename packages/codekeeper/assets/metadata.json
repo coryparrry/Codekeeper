@@ -56,8 +56,8 @@
       "sourcePath": "examples/workflows/codekeeper-issues.yml.example"
     },
     "workflows/fix.yml": {
-      "sha256": "0171207b6bc7aef7501ecd5c8fcba351402c961f5961d572f867b0ff5ba7df38",
-      "bytes": 2049,
+      "sha256": "66cd05e2dc27ae7c150d2911561dfb8a24c2a8d0f6093fe245671df3307f26fd",
+      "bytes": 2121,
       "sourcePath": "examples/workflows/codekeeper-fix.yml.example"
     }
   },
@@ -68,7 +68,7 @@
       "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
     },
     "toolingManifest": {
-      "sha256": "2ec489602097a2625ea66a5bb54037ee5f9c9974e59388eec15d6a14c7dc799d",
+      "sha256": "30075b865ce7f34d9b2d24e59baf2775298e0f7b6d429e046703adac6e842d09",
       "bytes": 3786,
       "sourcePath": "tools/codekeeper/tooling-manifest.json"
     }

@@ -54,9 +54,10 @@ export function createTerminalPrompter({ input = defaultInput, output = defaultO
       });
       return choices[Number(selected) - 1].value;
     },
-    async multiselect({ message, choices, defaultValues = [] }) {
+    async multiselect({ message, choices, defaultValues = [], allowEmpty = false }) {
       output.write(`${message}\n`);
       choices.forEach((choice, index) => output.write(`  ${index + 1}. ${choice.label}\n`));
+      if (allowEmpty) output.write("  Enter none to leave every capability off.\n");
       const defaultNumbers = defaultValues.map((value) => choices.findIndex((choice) => choice.value === value) + 1);
       if (defaultNumbers.some((number) => number < 1)) {
         throw new InstallerError("A multi-select default is not one of the available choices.", { code: "PROMPT_INVALID" });
@@ -65,12 +66,14 @@ export function createTerminalPrompter({ input = defaultInput, output = defaultO
         message: "Choose one or more comma-separated numbers",
         defaultValue: defaultNumbers.join(", "),
         validate(value) {
+          if (allowEmpty && value.trim().toLowerCase() === "none") return true;
           const numbers = value.split(",").map((item) => Number(item.trim()));
           return numbers.length > 0 && numbers.every((number) => Number.isInteger(number) && choices[number - 1])
             ? true
             : "Choose at least one listed number.";
         }
       });
+      if (allowEmpty && selected.trim().toLowerCase() === "none") return [];
       return [...new Set(selected.split(",").map((item) => choices[Number(item.trim()) - 1].value))];
     }
   });

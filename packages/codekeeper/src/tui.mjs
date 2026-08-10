@@ -216,7 +216,7 @@ function MultiSelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     }
     if (key.return) {
       const values = spec.choices.filter((choice) => selected.has(choice.value)).map((choice) => choice.value);
-      if (!values.length) setError("Select at least one workflow.");
+      if (!values.length && !spec.allowEmpty) setError("Select at least one workflow.");
       else onSubmit(values);
     }
   });
@@ -412,6 +412,11 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       if (!choice) return;
       spec.picker.activate(choice.id).then((result) => {
         if (result.selected) onSubmit(result.value);
+        else if (result.listing) {
+          setListing(result.listing);
+          setIndex(0);
+          setError("");
+        }
       }).catch(() => {
         setError("The picker failed to open that item safely.");
       });
@@ -423,8 +428,8 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       step: spec.step,
       title: "Choose the downloaded GitHub App key",
       description: [
-        "Only .pem key files are shown. The newest files are first.",
-        "Folders, other files, and links are hidden. The picker does not open the key or display its path."
+        "Open folders to find the downloaded .pem key. The newest key files are first.",
+        "Other files and links are hidden. The picker does not open the key or display its path."
       ],
       footer: "↑/↓ move  •  Enter select  •  Esc cancel",
       colorEnabled
@@ -432,7 +437,7 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     h(Text, { bold: true }, `Keys in ${listing?.folderLabel ?? "Loading…"}`),
     error ? h(Text, { color: colorEnabled ? "red" : undefined }, error) : null,
     !error && !listing ? h(Text, { dimColor: true }, "Finding key files...") : null,
-    listing && !choices.length ? h(Text, { dimColor: true }, `No usable .pem keys found in ${listing.folderLabel}. Download a new GitHub App key, then retry.`) : null,
+    listing && !choices.length ? h(Text, { dimColor: true }, `No usable .pem keys or folders found in ${listing.folderLabel}. Download a new GitHub App key, then retry.`) : null,
     h(
       Box,
       { flexDirection: "column", marginTop: 1 },
@@ -453,25 +458,25 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 }
 
 function reviewData(plan) {
-  const policyFile = plan.files.find((file) => file.path === ".github/codekeeper.json");
-  const policy = JSON.parse(policyFile.contents);
   const documents = documentMap(plan.files);
   return {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
     preset: `${plan.preset} starting models`,
     workflows: workflowMap(plan.modes).map((item) => `${item.label} — ${item.trigger}`),
-    models: modelAssignments(plan.modes).map(({ agent: agentId, label, workflow }) => {
-      const agent = policy.ai.agents[agentId];
-      return `${label} (${workflow}): ${agent.provider} / ${agent.model} / ${agent.effort}`;
+    models: modelAssignments(plan.modes).map(({ key, label, workflow }) => {
+      const selection = plan.models[key];
+      return `${label} (${workflow}): ${selection.provider} / ${selection.model} / ${selection.effort}`;
     }),
     documents: documents.map((item) => `${item.path} — ${item.purpose}`),
     setupDocumentPaths: documents.filter((item) => !item.path.includes("/agents/")).map((item) => item.path),
     profileDocumentPaths: documents.filter((item) => item.path.includes("/agents/")).map((item) => item.path),
     secrets: plan.secrets.map((secret) => `${secret.name} — ${SECRET_PURPOSES[secret.name]}`),
-    startup: plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge.",
+    startup: plan.update && plan.enabled
+      ? "Codekeeper starts now with the current configuration; this update applies after merge."
+      : plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge.",
     capabilities: capabilitySummary(plan.capabilities, plan.modes),
-    reviewGateWarning: completionGuidance(plan.modes, plan.enabled).reviewGateWarning
+    reviewGateWarning: completionGuidance(plan.modes, plan.enabled, plan.update).reviewGateWarning
   };
 }
 
@@ -613,7 +618,7 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     cancel(input, key);
     if (key.return) onSubmit(true);
   });
-  const guidance = completionGuidance(spec.plan.modes, spec.plan.enabled);
+  const guidance = completionGuidance(spec.plan.modes, spec.plan.enabled, spec.plan.update);
   const completedSteps = spec.receipt.settingsOnly
     ? DEFAULT_PROGRESS_STEPS.filter((step) => ["repository:verify", "settings:disable", "variables:configure"].includes(step.id))
     : DEFAULT_PROGRESS_STEPS;

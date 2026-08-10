@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "2ec489602097a2625ea66a5bb54037ee5f9c9974e59388eec15d6a14c7dc799d";
+const toolingManifestSha256 = "30075b865ce7f34d9b2d24e59baf2775298e0f7b6d429e046703adac6e842d09";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -387,6 +387,9 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(gate, /exit 1/);
   assert.match(source, /auto_review:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(jobSection(source, "workspace", "analyze"), /inputs\.auto_review/);
+  assert.match(jobSection(source, "workspace", "analyze"), /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_review'/);
+  assert.doesNotMatch(jobSection(source, "workspace", "analyze"), /inputs\.auto_review &&\s*\(\(github\.event_name/);
+  assert.match(gate, /IS_COMMAND_REVIEW/);
   assert.match(caller, /auto_review: true/);
   assert.doesNotMatch(source, /publish-review-status|pull_request_target|state="success"/);
 });
@@ -419,9 +422,16 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(fix, /github\.event_name == 'issues'/);
   assert.match(fix, /github\.event\.action == 'labeled'/);
   assert.match(fix, /github\.event\.label\.name == 'codekeeper:ready'/);
+  assert.match(fix, /automation_bot_login:/);
+  assert.match(fix, /github\.event\.sender\.login == inputs\.automation_bot_login/);
+  assert.match(fix, /format\('codekeeper-command-\{0\}', github\.run_id\)/);
   assert.match(fix, /--authorization-mode "\$AUTHORIZATION_MODE"/);
   const fixCaller = await repositoryFile("examples/workflows/codekeeper-fix.yml.example");
   assert.match(fixCaller, /issues:\n\s+types: \[labeled\]/);
+  assert.match(fixCaller, /automation_bot_login: \$\{\{ vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN \}\}/);
+  const commands = await repositoryFile("tools/codekeeper/src/lib/commands.mjs");
+  assert.match(commands, /pull\.base\?\.ref !== config\.repository\.defaultBranch/);
+  assert.match(commands, /removeLabel\(number, "codekeeper:paused"\)/);
 });
 
 test("owner-commanded pull request repair can update only the frozen existing head", async () => {

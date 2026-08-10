@@ -8,6 +8,11 @@ on:
         required: false
         default: true
         type: boolean
+      automation_bot_login:
+        description: Installed GitHub App bot login that may authorize ready-label implementation.
+        required: false
+        default: ""
+        type: string
       issue_number:
         description: Issue or pull request number for a workflow_dispatch caller.
         required: false
@@ -48,10 +53,14 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 2ec489602097a2625ea66a5bb54037ee5f9c9974e59388eec15d6a14c7dc799d
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 30075b865ce7f34d9b2d24e59baf2775298e0f7b6d429e046703adac6e842d09
 
 concurrency:
-  group: codekeeper-fix-${{ inputs.issue_number || github.event.issue.number }}
+  group: >-
+    ${{ github.event_name == 'issue_comment' &&
+        (github.event.comment.body == '/codekeeper stop' || github.event.comment.body == '/codekeeper status') &&
+        format('codekeeper-command-{0}', github.run_id) ||
+        format('codekeeper-fix-{0}', inputs.issue_number || github.event.issue.number) }}
   cancel-in-progress: false
 
 jobs:
@@ -161,7 +170,8 @@ jobs:
       inputs.enabled &&
       (github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_fix') ||
-      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'codekeeper:ready') ||
+      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'codekeeper:ready' &&
+       github.event.sender.login == inputs.automation_bot_login) ||
       (github.event.comment.body == '/codekeeper fix' &&
        (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR')))
     runs-on: ubuntu-latest
@@ -264,7 +274,8 @@ jobs:
       (github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_fix') ||
       (github.event_name == 'issues' &&
        github.event.action == 'labeled' &&
-       github.event.label.name == 'codekeeper:ready') ||
+       github.event.label.name == 'codekeeper:ready' &&
+       github.event.sender.login == inputs.automation_bot_login) ||
       (github.event.comment.body == '/codekeeper fix' &&
         (github.event.comment.author_association == 'OWNER' ||
          github.event.comment.author_association == 'MEMBER' ||

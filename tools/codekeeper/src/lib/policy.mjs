@@ -110,7 +110,9 @@ export function evaluateAutoMerge({
 }) {
   const policy = config.merge;
   const reasons = [];
+  const labels = (pullRequest.labels ?? []).map((label) => typeof label === "string" ? label : label.name);
   if (!policy.enabled) reasons.push("Auto-merge is disabled by policy");
+  if (labels.includes("codekeeper:paused")) reasons.push("Pull request is paused");
   if (pullRequest.draft) reasons.push("Pull request is a draft");
   if (pullRequest.state !== "open") reasons.push(`Pull request state is ${pullRequest.state}`);
   if (pullRequest.head?.repo?.full_name !== pullRequest.base?.repo?.full_name) reasons.push("Pull request comes from a fork");

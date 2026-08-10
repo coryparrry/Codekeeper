@@ -104,6 +104,21 @@ test("typed workflow numbers select issue triage and issue fix instead of the de
   assert.match(transcript(), /Choose one or more comma-separated numbers \[1, 2\]:/);
 });
 
+test("terminal capability selection can explicitly leave every capability off", async () => {
+  const { prompt, transcript } = terminal("none\n");
+  const choices = [
+    { value: "repair", label: "Repository repair" },
+    { value: "autoMerge", label: "Automatic merge" }
+  ];
+  assert.deepEqual(await prompt.multiselect({
+    message: "Choose capabilities to turn on:",
+    choices,
+    defaultValues: ["repair", "autoMerge"],
+    allowEmpty: true
+  }), []);
+  assert.match(transcript(), /Enter none to leave every capability off/);
+});
+
 test("blank terminal custom preset selection accepts the first recommended OpenAI choice", async () => {
   const { prompt, transcript } = terminal("\n");
   const choices = [
@@ -266,6 +281,35 @@ test("an existing installation reuses its workflows, identity, and settings", as
   assert.equal(prompt.calls.some((call) => call.options.message === "Choose workflows to generate:"), false);
   assert.match(output.toString(), /current GitHub App settings and existing API keys stay unchanged/);
   assert.doesNotMatch(output.toString(), /OPENAI_API_KEY:/);
+});
+
+test("enabling an existing installation explicitly describes immediate activation", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = JSON.parse(bundle.contents["policies/openai.json"]);
+  const prompt = setupPrompt({ recommended: true });
+  await collectSetupAnswers({
+    prompt,
+    bundle,
+    output: textSink(),
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy,
+        policySource: `${JSON.stringify(policy, null, 2)}\n`,
+        modes: ["review", "maintain"],
+        contents: {}
+      },
+      existingSettings: {
+        enabled: false,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    }
+  });
+  const startup = prompt.calls.find((call) => call.options.message.startsWith("Start Codekeeper"));
+  assert.equal(startup.options.message, "Start Codekeeper now?");
+  assert.ok(startup.options.description.some((line) => line.includes("current default-branch configuration")));
 });
 
 test("GitHub App identity asks for the App name in plain language", async () => {

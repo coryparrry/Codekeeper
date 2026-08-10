@@ -65,8 +65,6 @@ function assertSameSnapshot(expected, actual, resumeCommand) {
 }
 
 function preview(plan, output) {
-  const policyFile = plan.files.find((file) => file.path === ".github/codekeeper.json");
-  const policy = JSON.parse(policyFile.contents);
   output.write("\nSetup preview\n");
   output.write(`  Repository: ${plan.repository}\n`);
   output.write(`  Default branch: ${plan.defaultBranch}\n`);
@@ -77,9 +75,9 @@ function preview(plan, output) {
   output.write("  Workflows:\n");
   for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);
   output.write("  Models (editable in .github/codekeeper.json before merge):\n");
-  for (const { agent: agentId, label, workflow } of modelAssignments(plan.modes)) {
-    const agent = policy.ai.agents[agentId];
-    output.write(`    - ${label} (${workflow}): ${agent.provider} / ${agent.model} / ${agent.effort} effort\n`);
+  for (const { key, label, workflow } of modelAssignments(plan.modes)) {
+    const selection = plan.models[key];
+    output.write(`    - ${label} (${workflow}): ${selection.provider} / ${selection.model} / ${selection.effort} effort\n`);
   }
   output.write(`  OpenAI traces: ${plan.tracing ? "enabled" : "disabled"}\n`);
   output.write("  Files:\n");
@@ -89,7 +87,7 @@ function preview(plan, output) {
   output.write("  Secrets sent directly to GitHub CLI. Codekeeper does not display or store their values:\n");
   for (const secret of plan.secrets) output.write(`    - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
   output.write("  The GitHub App PEM is supplied from its downloaded file, never pasted into a terminal prompt.\n");
-  output.write(`  Startup: ${plan.enabled ? "enabled after merge" : "disabled after merge"}\n`);
+  output.write(`  Startup: ${plan.update && plan.enabled ? "enabled now; update applies after merge" : plan.enabled ? "enabled after merge" : "disabled after merge"}\n`);
   output.write("  The installer will not merge the setup pull request.\n");
   if (plan.modes.includes("review")) {
     output.write("  Do not make the Codekeeper review gate required until a controlled review passes.\n");
@@ -103,7 +101,7 @@ function printCompletion(plan, receipt, output) {
   output.write(`Pinned source: ${plan.source.repository}@${plan.source.commit}\n`);
   output.write("\nDocument map\n");
   for (const item of documentMap(plan.files)) output.write(`  - ${item.path}: ${item.purpose}\n`);
-  const guidance = completionGuidance(plan.modes, plan.enabled);
+  const guidance = completionGuidance(plan.modes, plan.enabled, plan.update);
   output.write(`\n${guidance.profileGuidance}\n`);
   output.write(`\n${guidance.heading}\n`);
   for (const item of guidance.proofs) output.write(`  - ${item.mode}: ${item.instruction}\n`);
