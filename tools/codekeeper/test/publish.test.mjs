@@ -382,7 +382,7 @@ test("maintenance publication adopts an App-created issue only after its marker 
   }
 });
 
-test("maintenance publication recovers a single App-created issue after issue creation response loss", async () => {
+test("maintenance publication does not adopt an App-created issue without marker evidence", async () => {
   const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-pre-marker-retry-test-"));
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-pre-marker-retry-artifact-"));
   const configSha256 = "f".repeat(64);
@@ -398,21 +398,23 @@ test("maintenance publication recovers a single App-created issue after issue cr
     async ensureLabels() {},
     async createIssue(input) {
       creates += 1;
-      issues.push({
-        number: 1,
+      const issue = {
+        number: creates,
         state: "open",
         body: input.body,
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
-      });
-      throw new Error("connection lost after issue creation");
+      };
+      if (creates === 1) {
+        issues.push(issue);
+        throw new Error("connection lost after issue creation");
+      }
+      return issue;
     },
     async createComment(number, body) {
-      assert.equal(number, 1);
+      assert.equal(number, 2);
       comments.push({ body, user: { login: identity.login, id: Number(identity.id), type: "Bot" } });
     },
-    async updateIssue(number, changes) {
-      Object.assign(issues.find((issue) => issue.number === number), changes);
-    },
+    async updateIssue() { throw new Error("unmarked issue must not be adopted"); },
     async replaceManagedLabels() {}
   });
   try {
@@ -442,14 +444,14 @@ test("maintenance publication recovers a single App-created issue after issue cr
       /connection lost after issue creation/
     );
     const retry = await publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
-    assert.equal(creates, 1);
-    assert.equal(issues.length, 1);
+    assert.equal(creates, 2);
+    assert.equal(issues.length, 2);
     assert.deepEqual(comments, [{
       body: findingMarker(findingFingerprint(finding)),
       user: { login: identity.login, id: Number(identity.id), type: "Bot" }
     }]);
     assert.deepEqual(retry.findings.map(({ state, issueNumber }) => ({ state, issueNumber })), [
-      { state: "updated", issueNumber: 1 }
+      { state: "created", issueNumber: 2 }
     ]);
   } finally {
     process.chdir(originalDirectory);
@@ -463,14 +465,15 @@ test("maintenance publication recovers a single App-created issue after issue cr
   }
 });
 
-test("maintenance publication ignores untrusted candidates and fails closed for ambiguous App-created pre-marker issues", async () => {
+test("maintenance publication creates a fresh issue when unmarked App candidates match", async () => {
   const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-ambiguous-retry-test-"));
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-ambiguous-retry-artifact-"));
   const configSha256 = "1".repeat(64);
   const originalDirectory = process.cwd();
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
-  let mutations = 0;
+  const createdIssues = [];
+  const markerComments = [];
   try {
     await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
     git(repository, ["init", "-q", "-b", "main"]);
@@ -508,21 +511,31 @@ test("maintenance publication ignores untrusted candidates and fails closed for 
     const restoreGitHub = replaceGitHubMethods({
       async listMaintenanceIssues() { return issues; },
       async listIssueComments() { return []; },
-      async ensureLabels() { mutations += 1; },
-      async createIssue() { mutations += 1; },
-      async createComment() { mutations += 1; },
-      async updateIssue() { mutations += 1; },
-      async replaceManagedLabels() { mutations += 1; }
+      async ensureLabels() {},
+      async createIssue(input) {
+        const issue = {
+          number: 3,
+          state: "open",
+          body: input.body,
+          user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+        };
+        createdIssues.push(issue);
+        return issue;
+      },
+      async createComment(number, body) { markerComments.push({ number, body }); },
+      async updateIssue() { throw new Error("unmarked issue must not be updated"); },
+      async replaceManagedLabels() {}
     });
     try {
       process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
       process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
       process.chdir(repository);
-      await assert.rejects(
-        publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
-        /Ambiguous maintenance issue recovery.*among 2 unmarked App-authored issues/
-      );
-      assert.equal(mutations, 0);
+      const publication = await publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
+      assert.deepEqual(publication.findings.map(({ state, issueNumber }) => ({ state, issueNumber })), [
+        { state: "created", issueNumber: 3 }
+      ]);
+      assert.equal(createdIssues.length, 1);
+      assert.deepEqual(markerComments, [{ number: 3, body: marker }]);
     } finally {
       restoreGitHub();
     }
