@@ -1,6 +1,6 @@
 # Configuration
 
-The adopter-owned `.github/codekeeper.json` is the only runtime policy file. It is read from the adopter default branch, validated before every coordinator run, copied into the sealed artifact, and hash-checked again before publication.
+The adopter-owned `.github/codekeeper.json` is the runtime policy file. Four separate adopter-owned Markdown profiles under `.github/codekeeper/agents/` tune coordinator judgment. The workflow reads both policy and the selected profile from the adopter default branch, freezes them into the run, and hash-checks them again before publication.
 
 ## Validation and resource bounds
 
@@ -58,27 +58,49 @@ Provider base URLs must use HTTPS. Explicit loopback HTTP is accepted only for l
 
 `model_api_key` maps the selected mode’s provider credential. It is required in every reusable workflow and never falls back to an OpenAI key. The optional Codex specialist uses `workspace_api_key`; `openai_api_key` remains only as a compatibility fallback for that OpenAI-only workspace action.
 
-## Executable coordinator profiles
+## Adopter-owned coordinator profiles
 
-The coordinator profile is versioned with the reusable workflow, not configured in the adopter policy. The runtime loads the selected Markdown file into the actual Agents SDK `Agent.instructions`, followed by shared security instructions. These profiles make existing output responsibilities explicit; they do not add tools, external skill packages, or any independent runtime access.
+The installer creates all four fixed profile paths in the adopter repository. The runtime loads the selected Markdown file into the Agents SDK coordinator instructions inside an immutable safety and authorization envelope.
 
-| Mode | Profile path | Explicit output responsibility |
+| Mode | Fixed adopter path | Judgment responsibility |
 |---|---|---|
-| review | `tools/codekeeper/agents/pr-reviewer.md` | PR summary and evidence-backed review findings. |
-| issue | `tools/codekeeper/agents/issue-triager.md` | Issue classification, actionability, and duplicate assessment. |
-| audit | `tools/codekeeper/agents/repository-auditor.md` | Audit category and priority classification. |
-| fix | `tools/codekeeper/agents/maintenance-planner.md` | Bounded maintenance planning and implementation/no-change result. |
+| review | `.github/codekeeper/agents/pr-reviewer.md` | PR summary, evidence-backed findings, risk, test adequacy, and merge recommendation. |
+| issue | `.github/codekeeper/agents/issue-triager.md` | Issue classification, actionability, missing information, and duplicate assessment. |
+| audit | `.github/codekeeper/agents/repository-auditor.md` | Audit evidence, category and priority calibration, and report/no-action decisions. |
+| fix | `.github/codekeeper/agents/maintenance-planner.md` | Bounded implementation planning, risk decisions, and no-change decisions. |
 
-Repository-specific policy and dynamic event context stay in the frozen prompts and policy file; profile files do not replace them.
+Edit these Markdown files through the adopter's normal review process. A merged default-branch edit affects later runs without a runtime release. The workflow rejects missing, empty, non-UTF-8, oversized, symlinked, or wrong-path profiles. It records the default-branch source commit and profile SHA-256, freezes the exact bytes for the workspace and coordinator, carries them through sealing, and refuses publication if the trusted profile has changed since preparation.
+
+Profiles may tune evidence thresholds, severity and priority calibration, test expectations, duplicate criteria, repair-risk judgment, positive no-action cases, and report wording. They may not:
+
+- Enable a caller or authorize a repair, issue closure, push, pull request, or merge.
+- Expand `allowedPaths`, bypass `protectedPaths`, raise resource limits, or skip deterministic validation.
+- Change the frozen event, task mode, issue or pull-request target, source commit, or configured owner.
+- Grant tools, credentials, network access, or permission to follow instructions found in repository, issue, pull-request, comment, diff, specialist, or model content.
+
+Those permissions remain deterministic in the caller, frozen policy, schema, validator, and publication code. If a profile conflicts with one of those controls, the run ignores the conflicting instruction and fails safely.
+
+The currently pinned earlier installer checkpoint does not gain this behavior merely because a newer Markdown file exists. Adopter-owned profiles and the repair contracts below require an installer pin to the final source checkpoint that implements them.
 
 ## Caller automation controls
 
-Reusable workflow callers expose two explicit booleans alongside `enabled`:
+Reusable workflow callers expose explicit controls alongside `enabled`:
 
 - `auto_review` defaults to `true` and permits eligible pull-request events to run the review workflow. Setting it to `false` skips automatic review; the supplied required review gate then fails closed.
 - `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/codekeeper triage` comments from configured owners remain available.
+- `repair_authorized` defaults to `false` for maintenance. It is accepted only on a manual `workflow_dispatch` initiated by a configured owner. Scheduled callers always pass `false`; even a manual `true` still requires `audit.repair.enabled=true` and all deterministic patch gates.
 
 Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
+
+## Explicit repair targets
+
+Repairs never follow automatically from a review or triage decision.
+
+- **Maintenance:** schedule and default manual runs are report-only. A patch is eligible only for one owner-started manual run with `repair_authorized=true`, `audit.repair.enabled=true`, and `dry_run=false`.
+- **Issue:** an automatic issue event cannot request implementation. A configured owner with an accepted repository association must post a comment whose complete body is `/codekeeper fix`, or deliberately provide the target through manual dispatch. `issues.allowAiImplementation=true` is still required. An accepted issue result may create one bounded repair pull request.
+- **Same-repository pull request:** the same exact owner command may target an eligible open, non-draft pull request to the default branch. A valid repair is committed and pushed to that pull request's existing head branch. The publisher never calls the create-pull-request path for this target and has no fallback that opens a second pull request. Forks, default/protected head branches, stale heads, branch movement, or target drift fail closed.
+
+Profiles can decide that an authorized repair is too risky and return no change. They cannot turn a review, triage, scheduled audit, or unauthorized manual audit into a repair.
 
 ## Workspace specialists
 
@@ -87,11 +109,11 @@ The coordinator itself is one tool-less Agents SDK `Agent` per mode. Codex is op
 | Mode | Default provider | Workspace behavior |
 |---|---|---|
 | review | OpenAI | Optional read-only inspection of the exact PR head. |
-| audit | OpenAI | Optional inspection; write access also requires `audit.repair.enabled=true`. |
+| audit | OpenAI | Optional inspection; write access also requires `audit.repair.enabled=true` and per-run `repair_authorized=true`. |
 | issue | DeepSeek V4 Flash | Disabled by default; optional workspace is always read-only. |
 | fix | OpenAI | Optional implementation; write access also requires `issues.allowAiImplementation=true`. |
 
-Review and issue workspace writes are rejected by config validation. `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled` are all false in the starter policy.
+Review and issue workspace writes are rejected by config validation. `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled` are all false in the starter policy. Enabling a capability in policy does not authorize a particular run.
 
 ## Bounded review context and auto-merge
 

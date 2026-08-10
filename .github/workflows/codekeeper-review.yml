@@ -1,6 +1,6 @@
 name: Codekeeper review
 
-# GitHub.com only: job.workflow_repository/job.workflow_sha are unavailable on GHES.
+# GitHub.com only: job.workflow_sha is unavailable on GHES.
 # Forks, drafts, merge queues, disabled runs, and non-default-branch PR targets fail
 # closed. Do not make this gate required for merge queues unless merge_group support
 # is intentionally added and verified.
@@ -45,6 +45,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 9ea59dc54288186c0d4f84d24c86de9c6485900e876d1d3a03ceb6126fc87596
+
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -66,13 +69,37 @@ jobs:
     outputs:
       context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
     steps:
-      - name: Check out frozen maintainer tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download bootstrap Codekeeper tooling
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: tooling
-          persist-credentials: false
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ github.workspace }}
+      - name: Verify bootstrap Codekeeper tooling against pinned manifest
+        env:
+          TOOLING_ROOT: ${{ github.workspace }}/tooling/tools/codekeeper
+        run: |
+          node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { lstat, readFile } from "node:fs/promises"; import { join } from "node:path";
+            const root = process.env.TOOLING_ROOT;
+            const expected = process.env.CODEKEEPER_TOOLING_MANIFEST_SHA256;
+            const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+            const regular = async (file, label) => {
+              const stat = await lstat(file);
+              if (!stat.isFile()) throw new Error("Codekeeper tooling integrity bootstrap rejected " + label);
+              return readFile(file);
+            };
+            const manifest = await regular(join(root, "tooling-manifest.json"), "manifest");
+            if (digest(manifest) !== expected) throw new Error("Codekeeper tooling manifest does not match the pinned workflow");
+            const files = JSON.parse(manifest).files;
+            const verifier = Array.isArray(files) && files.find((entry) => entry?.path === "scripts/verify-tooling-artifact.mjs");
+            if (!verifier || !/^[0-9a-f]{64}$/.test(verifier.sha256)) throw new Error("Codekeeper tooling manifest lacks its verifier");
+            const verifierBytes = await regular(join(root, "scripts", "verify-tooling-artifact.mjs"), "verifier");
+            if (digest(verifierBytes) !== verifier.sha256) throw new Error("Codekeeper tooling verifier does not match the pinned manifest");
+          '
+          node "$TOOLING_ROOT/scripts/verify-tooling-artifact.mjs" \
+            --root "$TOOLING_ROOT" \
+            --expected-manifest-sha256 "$CODEKEEPER_TOOLING_MANIFEST_SHA256"
 
       - name: Check out trusted default-branch configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -103,6 +130,7 @@ jobs:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
@@ -111,9 +139,12 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
+          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-review \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
             --event "$GITHUB_EVENT_PATH" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {
@@ -177,13 +208,37 @@ jobs:
       candidate_sha256: ${{ steps.validate.outputs.candidate_sha256 }}
       context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
     steps:
-      - name: Check out frozen maintainer tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download bootstrap Codekeeper tooling
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: tooling
-          persist-credentials: false
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ github.workspace }}
+      - name: Verify bootstrap Codekeeper tooling against pinned manifest
+        env:
+          TOOLING_ROOT: ${{ github.workspace }}/tooling/tools/codekeeper
+        run: |
+          node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { lstat, readFile } from "node:fs/promises"; import { join } from "node:path";
+            const root = process.env.TOOLING_ROOT;
+            const expected = process.env.CODEKEEPER_TOOLING_MANIFEST_SHA256;
+            const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+            const regular = async (file, label) => {
+              const stat = await lstat(file);
+              if (!stat.isFile()) throw new Error("Codekeeper tooling integrity bootstrap rejected " + label);
+              return readFile(file);
+            };
+            const manifest = await regular(join(root, "tooling-manifest.json"), "manifest");
+            if (digest(manifest) !== expected) throw new Error("Codekeeper tooling manifest does not match the pinned workflow");
+            const files = JSON.parse(manifest).files;
+            const verifier = Array.isArray(files) && files.find((entry) => entry?.path === "scripts/verify-tooling-artifact.mjs");
+            if (!verifier || !/^[0-9a-f]{64}$/.test(verifier.sha256)) throw new Error("Codekeeper tooling manifest lacks its verifier");
+            const verifierBytes = await regular(join(root, "scripts", "verify-tooling-artifact.mjs"), "verifier");
+            if (digest(verifierBytes) !== verifier.sha256) throw new Error("Codekeeper tooling verifier does not match the pinned manifest");
+          '
+          node "$TOOLING_ROOT/scripts/verify-tooling-artifact.mjs" \
+            --root "$TOOLING_ROOT" \
+            --expected-manifest-sha256 "$CODEKEEPER_TOOLING_MANIFEST_SHA256"
 
       - name: Check out trusted default-branch configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -224,6 +279,7 @@ jobs:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
@@ -232,9 +288,12 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
+          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-review \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
             --event "$GITHUB_EVENT_PATH" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {
@@ -303,13 +362,37 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Check out frozen maintainer tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download bootstrap Codekeeper tooling
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: tooling
-          persist-credentials: false
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ github.workspace }}
+      - name: Verify bootstrap Codekeeper tooling against pinned manifest
+        env:
+          TOOLING_ROOT: ${{ github.workspace }}/tooling/tools/codekeeper
+        run: |
+          node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { lstat, readFile } from "node:fs/promises"; import { join } from "node:path";
+            const root = process.env.TOOLING_ROOT;
+            const expected = process.env.CODEKEEPER_TOOLING_MANIFEST_SHA256;
+            const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+            const regular = async (file, label) => {
+              const stat = await lstat(file);
+              if (!stat.isFile()) throw new Error("Codekeeper tooling integrity bootstrap rejected " + label);
+              return readFile(file);
+            };
+            const manifest = await regular(join(root, "tooling-manifest.json"), "manifest");
+            if (digest(manifest) !== expected) throw new Error("Codekeeper tooling manifest does not match the pinned workflow");
+            const files = JSON.parse(manifest).files;
+            const verifier = Array.isArray(files) && files.find((entry) => entry?.path === "scripts/verify-tooling-artifact.mjs");
+            if (!verifier || !/^[0-9a-f]{64}$/.test(verifier.sha256)) throw new Error("Codekeeper tooling manifest lacks its verifier");
+            const verifierBytes = await regular(join(root, "scripts", "verify-tooling-artifact.mjs"), "verifier");
+            if (digest(verifierBytes) !== verifier.sha256) throw new Error("Codekeeper tooling verifier does not match the pinned manifest");
+          '
+          node "$TOOLING_ROOT/scripts/verify-tooling-artifact.mjs" \
+            --root "$TOOLING_ROOT" \
+            --expected-manifest-sha256 "$CODEKEEPER_TOOLING_MANIFEST_SHA256"
 
       - name: Check out trusted default-branch configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -386,13 +469,37 @@ jobs:
           echo "login=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).login))')" >> "$GITHUB_OUTPUT"
           echo "id=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).id))')" >> "$GITHUB_OUTPUT"
 
-      - name: Check out frozen maintainer tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download bootstrap Codekeeper tooling
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: tooling
-          persist-credentials: false
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ github.workspace }}
+      - name: Verify bootstrap Codekeeper tooling against pinned manifest
+        env:
+          TOOLING_ROOT: ${{ github.workspace }}/tooling/tools/codekeeper
+        run: |
+          node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { lstat, readFile } from "node:fs/promises"; import { join } from "node:path";
+            const root = process.env.TOOLING_ROOT;
+            const expected = process.env.CODEKEEPER_TOOLING_MANIFEST_SHA256;
+            const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+            const regular = async (file, label) => {
+              const stat = await lstat(file);
+              if (!stat.isFile()) throw new Error("Codekeeper tooling integrity bootstrap rejected " + label);
+              return readFile(file);
+            };
+            const manifest = await regular(join(root, "tooling-manifest.json"), "manifest");
+            if (digest(manifest) !== expected) throw new Error("Codekeeper tooling manifest does not match the pinned workflow");
+            const files = JSON.parse(manifest).files;
+            const verifier = Array.isArray(files) && files.find((entry) => entry?.path === "scripts/verify-tooling-artifact.mjs");
+            if (!verifier || !/^[0-9a-f]{64}$/.test(verifier.sha256)) throw new Error("Codekeeper tooling manifest lacks its verifier");
+            const verifierBytes = await regular(join(root, "scripts", "verify-tooling-artifact.mjs"), "verifier");
+            if (digest(verifierBytes) !== verifier.sha256) throw new Error("Codekeeper tooling verifier does not match the pinned manifest");
+          '
+          node "$TOOLING_ROOT/scripts/verify-tooling-artifact.mjs" \
+            --root "$TOOLING_ROOT" \
+            --expected-manifest-sha256 "$CODEKEEPER_TOOLING_MANIFEST_SHA256"
 
       - name: Check out trusted default-branch configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -420,10 +527,12 @@ jobs:
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
           node tools/codekeeper/src/cli.mjs publish-review \
             --config "$CONFIG" \
+            --agent-profile "$AGENT_PROFILE" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"
 

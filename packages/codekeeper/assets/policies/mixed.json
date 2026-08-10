@@ -1,0 +1,354 @@
+{
+  "version": 2,
+  "repository": {
+    "displayName": "Example Repository",
+    "defaultBranch": "main",
+    "ownerLogins": [
+      "repository-owner"
+    ],
+    "automationBranchPrefix": "automation/codekeeper/"
+  },
+  "projectInvariants": [
+    "Keep changes narrow, understandable, and directly supported by repository evidence.",
+    "Do not add accounts, external services, permissions, or architectural machinery unless the approved issue requires them.",
+    "Do not change repository automation, security policy, release configuration, or credentials outside the explicit path policy."
+  ],
+  "ai": {
+    "tracing": {
+      "enabled": true,
+      "includeSensitiveData": false
+    },
+    "providers": {
+      "openai": {
+        "baseUrl": "https://api.openai.com/v1",
+        "api": "responses",
+        "structuredOutputs": true,
+        "supportsReasoningEffort": true
+      },
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com",
+        "api": "chat_completions",
+        "structuredOutputs": false,
+        "supportsReasoningEffort": false
+      }
+    },
+    "agents": {
+      "review": {
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "maxTurns": 2,
+        "maximumAttempts": 2,
+        "modelSettings": {
+          "text": {
+            "verbosity": "low"
+          }
+        },
+        "workspace": {
+          "enabled": true,
+          "allowWrites": false,
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      },
+      "audit": {
+        "provider": "openai",
+        "model": "gpt-5.6-sol",
+        "effort": "high",
+        "maxTurns": 2,
+        "maximumAttempts": 2,
+        "modelSettings": {
+          "text": {
+            "verbosity": "low"
+          }
+        },
+        "workspace": {
+          "enabled": true,
+          "allowWrites": true,
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      },
+      "issue": {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "effort": "none",
+        "maxTurns": 2,
+        "maximumAttempts": 2,
+        "modelSettings": {
+          "temperature": 0.2,
+          "providerData": {
+            "thinking": {
+              "type": "disabled"
+            },
+            "response_format": {
+              "type": "json_object"
+            }
+          }
+        },
+        "workspace": {
+          "enabled": false,
+          "allowWrites": false,
+          "model": "gpt-5.6-sol",
+          "effort": "low"
+        }
+      },
+      "fix": {
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "effort": "high",
+        "maxTurns": 2,
+        "maximumAttempts": 2,
+        "modelSettings": {
+          "text": {
+            "verbosity": "low"
+          }
+        },
+        "workspace": {
+          "enabled": true,
+          "allowWrites": true,
+          "model": "gpt-5.6-terra",
+          "effort": "high"
+        }
+      }
+    }
+  },
+  "labels": {
+    "codekeeper:reviewed": {
+      "color": "5319E7",
+      "description": "Reviewed by Codekeeper"
+    },
+    "codekeeper:maintenance": {
+      "color": "0E8A16",
+      "description": "Created or managed by Codekeeper"
+    },
+    "codekeeper:ready": {
+      "color": "1D76DB",
+      "description": "Sufficiently bounded for implementation"
+    },
+    "codekeeper:blocked": {
+      "color": "B60205",
+      "description": "AI review found a blocking problem"
+    },
+    "codekeeper:manual-review": {
+      "color": "FBCA04",
+      "description": "Requires human judgment before merge"
+    },
+    "codekeeper:auto-merge": {
+      "color": "0E8A16",
+      "description": "Eligible for policy-controlled auto-merge"
+    },
+    "codekeeper:duplicate-candidate": {
+      "color": "CFD3D7",
+      "description": "Likely duplicate requiring confirmation"
+    },
+    "codekeeper:needs-tests": {
+      "color": "D4C5F9",
+      "description": "Additional tests are required"
+    },
+    "codekeeper:priority-p1": {
+      "color": "B60205",
+      "description": "Highest priority"
+    },
+    "codekeeper:priority-p2": {
+      "color": "FBCA04",
+      "description": "Important but not urgent"
+    },
+    "codekeeper:priority-p3": {
+      "color": "C5DEF5",
+      "description": "Normal priority"
+    },
+    "codekeeper:risk-low": {
+      "color": "0E8A16",
+      "description": "Low-risk change"
+    },
+    "codekeeper:risk-medium": {
+      "color": "FBCA04",
+      "description": "Medium-risk change"
+    },
+    "codekeeper:risk-high": {
+      "color": "B60205",
+      "description": "High-risk change"
+    },
+    "codekeeper:type-bug": {
+      "color": "D73A4A",
+      "description": "Correctness defect"
+    },
+    "codekeeper:type-enhancement": {
+      "color": "A2EEEF",
+      "description": "Feature or product enhancement"
+    },
+    "codekeeper:type-documentation": {
+      "color": "0075CA",
+      "description": "Documentation work"
+    },
+    "codekeeper:type-question": {
+      "color": "D876E3",
+      "description": "Question or clarification"
+    },
+    "codekeeper:type-maintenance": {
+      "color": "C5DEF5",
+      "description": "Repository maintenance"
+    },
+    "codekeeper:type-security": {
+      "color": "B60205",
+      "description": "Security-sensitive work"
+    },
+    "codekeeper:type-testing": {
+      "color": "BFDADC",
+      "description": "Test coverage or infrastructure"
+    }
+  },
+  "review": {
+    "maximumBlockingFindings": 8,
+    "maximumNonBlockingFindings": 8,
+    "allowedLabels": [
+      "codekeeper:type-bug",
+      "codekeeper:type-documentation",
+      "codekeeper:type-enhancement",
+      "codekeeper:type-maintenance",
+      "codekeeper:type-question",
+      "codekeeper:type-security",
+      "codekeeper:type-testing",
+      "codekeeper:needs-tests"
+    ],
+    "managedLabels": [
+      "codekeeper:reviewed",
+      "codekeeper:blocked",
+      "codekeeper:manual-review",
+      "codekeeper:auto-merge",
+      "codekeeper:needs-tests",
+      "codekeeper:risk-low",
+      "codekeeper:risk-medium",
+      "codekeeper:risk-high",
+      "codekeeper:type-bug",
+      "codekeeper:type-documentation",
+      "codekeeper:type-enhancement",
+      "codekeeper:type-maintenance",
+      "codekeeper:type-question",
+      "codekeeper:type-security",
+      "codekeeper:type-testing"
+    ],
+    "maximumDiffBytes": 262144,
+    "maximumChangedFiles": 500,
+    "includeDiffInAgentContext": true
+  },
+  "audit": {
+    "maximumIssuesPerRun": 5,
+    "repair": {
+      "enabled": false,
+      "allowedPaths": [
+        "README.md",
+        "*.md",
+        "docs/**/*.md",
+        "src/**",
+        "lib/**",
+        "app/**",
+        "packages/**",
+        "test/**",
+        "tests/**",
+        "scripts/**"
+      ],
+      "protectedPaths": [
+        ".github/**",
+        ".codex/**",
+        ".claude/**",
+        "**/AGENTS.md",
+        "**/CLAUDE.md",
+        "**/SECURITY.md",
+        "**/CODEOWNERS",
+        ".gitattributes",
+        ".gitmodules",
+        "LICENSE",
+        "LICENSE.*",
+        "tools/codekeeper/**",
+        "**/*.xcodeproj/**",
+        "**/*.xcworkspace/**",
+        "**/*.entitlements",
+        "**/*Info.plist",
+        "**/*Signing*",
+        "**/*signing*",
+        "**/*Migration*",
+        "**/*migration*",
+        "**/*Security*",
+        "**/*security*",
+        "Package.resolved"
+      ],
+      "allowAdd": true,
+      "maximumFiles": 8,
+      "maximumChangedLines": 500,
+      "maximumPatchBytes": 524288,
+      "maximumFileBytes": 262144,
+      "validationCommands": [
+        "git diff --check"
+      ]
+    }
+  },
+  "issues": {
+    "allowAiImplementation": false,
+    "closeExactDuplicates": false,
+    "maximumOpenIssueContext": 50,
+    "managedLabels": [
+      "codekeeper:maintenance",
+      "codekeeper:ready",
+      "codekeeper:manual-review",
+      "codekeeper:duplicate-candidate",
+      "codekeeper:priority-p1",
+      "codekeeper:priority-p2",
+      "codekeeper:priority-p3",
+      "codekeeper:risk-low",
+      "codekeeper:risk-medium",
+      "codekeeper:risk-high",
+      "codekeeper:type-bug",
+      "codekeeper:type-documentation",
+      "codekeeper:type-enhancement",
+      "codekeeper:type-maintenance",
+      "codekeeper:type-question",
+      "codekeeper:type-security",
+      "codekeeper:type-testing",
+      "codekeeper:needs-tests"
+    ]
+  },
+  "merge": {
+    "enabled": false,
+    "method": "SQUASH",
+    "allowAutomationPullRequests": true,
+    "allowUserPullRequests": false,
+    "allowedUserAuthors": [
+      "repository-owner"
+    ],
+    "maximumFiles": 5,
+    "maximumChangedLines": 250,
+    "allowedPaths": [
+      "README.md",
+      "*.md",
+      "docs/**/*.md"
+    ],
+    "blockedPaths": [
+      ".github/**",
+      ".codex/**",
+      ".claude/**",
+      "**/AGENTS.md",
+      "**/CLAUDE.md",
+      "**/SECURITY.md",
+      "**/CODEOWNERS",
+      ".gitattributes",
+      ".gitmodules",
+      "LICENSE",
+      "LICENSE.*",
+      "tools/codekeeper/**",
+      "src/**",
+      "lib/**",
+      "app/**",
+      "packages/**",
+      "test/**",
+      "tests/**",
+      "**/*.xcodeproj/**",
+      "**/*.xcworkspace/**",
+      "**/*.entitlements",
+      "**/*Info.plist",
+      ".gitignore",
+      "Package.resolved"
+    ]
+  }
+}

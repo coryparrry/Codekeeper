@@ -1,10 +1,12 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { AGENT_PROFILE_BUNDLE_FILE, loadFrozenAgentProfile } from "./agent-profiles.mjs";
 import { applyPatch, changedFilesBetween, changedLineHunksBetween, collectWorkingTreeChanges, createPatch, currentHead, ensureClean, runValidationCommands } from "./git.mjs";
 import { readRegularFile, readRegularJson, writeJson } from "./io.mjs";
 import { sha256 } from "./markers.mjs";
 import { validatePatch } from "./policy.mjs";
+import { frozenPullRepairTarget } from "./pr-repair.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
 function assertTrustedContext(context, expectedMode) {
@@ -39,17 +41,19 @@ async function createFreshDirectory(directory) {
   }
 }
 
-function candidateComponents({ contextBytes, resultBytes, patchBytes, validationBytes }) {
+function candidateComponents({ contextBytes, resultBytes, patchBytes, validationBytes, agentProfileBytes }) {
   return {
     contextSha256: sha256(contextBytes),
     resultSha256: sha256(resultBytes),
     patchSha256: patchBytes ? sha256(patchBytes) : null,
-    validationSha256: sha256(validationBytes)
+    validationSha256: sha256(validationBytes),
+    agentProfileSha256: sha256(agentProfileBytes)
   };
 }
 
-async function writeCandidate({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null }) {
+async function writeCandidate({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, agentProfileBytes }) {
   await createFreshDirectory(artifactDirectory);
+  await writeFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE), agentProfileBytes);
   await writeJson(path.join(artifactDirectory, "context.json"), context);
   await writeJson(path.join(artifactDirectory, "result.json"), result);
   await writeJson(path.join(artifactDirectory, "validation.json"), validation);
@@ -58,7 +62,7 @@ async function writeCandidate({ artifactDirectory, context, result, patch = null
   const contextBytes = await readRegularFile(path.join(artifactDirectory, "context.json"));
   const resultBytes = await readRegularFile(path.join(artifactDirectory, "result.json"));
   const validationBytes = await readRegularFile(path.join(artifactDirectory, "validation.json"));
-  const components = candidateComponents({ contextBytes, resultBytes, patchBytes, validationBytes });
+  const components = candidateComponents({ contextBytes, resultBytes, patchBytes, validationBytes, agentProfileBytes });
   const candidate = {
     version: 1,
     mode: context.mode,
@@ -74,8 +78,9 @@ async function writeCandidate({ artifactDirectory, context, result, patch = null
   };
 }
 
-async function writeArtifact({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, config, configSha256 }) {
+async function writeArtifact({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, config, configSha256, agentProfileBytes }) {
   await createFreshDirectory(artifactDirectory);
+  await writeFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE), agentProfileBytes);
   await writeJson(path.join(artifactDirectory, "context.json"), context);
   await writeJson(path.join(artifactDirectory, "result.json"), result);
   await writeJson(path.join(artifactDirectory, "config.json"), config);
@@ -98,7 +103,7 @@ async function writeArtifact({ artifactDirectory, context, result, patch = null,
     validation,
     configSha256,
     configFileSha256: sha256(configBytes),
-    ...candidateComponents({ contextBytes, resultBytes, patchBytes: sealedPatchBytes, validationBytes })
+    ...candidateComponents({ contextBytes, resultBytes, patchBytes: sealedPatchBytes, validationBytes, agentProfileBytes })
   };
   const manifestPath = path.join(artifactDirectory, "manifest.json");
   await writeJson(manifestPath, manifest);
@@ -140,7 +145,8 @@ export async function validateReview({ directory, contextPath = path.join(direct
   if (changes.files.length > 0) {
     throw new Error(`Review mode modified the checkout: ${changes.files.map((file) => file.path).join(", ")}`);
   }
-  return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["head", "diff-hunks", "clean-worktree"] } });
+  const agentProfile = await loadFrozenAgentProfile({ mode: "review", directory, context });
+  return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["head", "diff-hunks", "clean-worktree"] }, agentProfileBytes: agentProfile.bytes });
 }
 
 export async function validateIssue({ directory, contextPath = path.join(directory, "context.json"), resultPath, artifactDirectory, config, configSha256 }) {
@@ -165,7 +171,8 @@ export async function validateIssue({ directory, contextPath = path.join(directo
   if (changes.files.length > 0) {
     throw new Error(`Issue triage modified the checkout: ${changes.files.map((file) => file.path).join(", ")}`);
   }
-  return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["duplicate-target", "clean-worktree"] } });
+  const agentProfile = await loadFrozenAgentProfile({ mode: "issue", directory, context });
+  return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["duplicate-target", "clean-worktree"] }, agentProfileBytes: agentProfile.bytes });
 }
 
 async function capturePatch(cwd = process.cwd()) {
@@ -215,13 +222,17 @@ export async function validateAudit({ directory, contextPath = path.join(directo
   assertTrustedContext(context, "audit");
   assertFrozenPolicy(context, configSha256);
   const result = validateAuditResult(await readRegularJson(resultPath), config);
-  if (!config.audit.repair.enabled && result.repair.requested) {
-    throw new Error("Audit requested a repair while audit.repair.enabled=false");
+  if (typeof context.repairAuthorized !== "boolean") {
+    throw new Error("Trusted audit context is missing explicit repair authorization");
   }
-  if (!config.audit.repair.enabled) {
+  const repairPermitted = config.audit.repair.enabled && context.repairAuthorized;
+  if (!repairPermitted && result.repair.requested) {
+    throw new Error("Audit requested a repair without frozen explicit repair authorization");
+  }
+  if (!repairPermitted) {
     const changes = await collectWorkingTreeChanges();
     if (changes.files.length > 0) {
-      throw new Error("Audit changed files while audit.repair.enabled=false");
+      throw new Error("Audit changed files without frozen explicit repair authorization");
     }
   }
   const { patch, patchBytes } = await captureWorkspacePatch({
@@ -230,17 +241,28 @@ export async function validateAudit({ directory, contextPath = path.join(directo
     repairRequested: result.repair.requested,
     risk: result.repair.risk
   });
-  return writeCandidate({ artifactDirectory, context, result, patch, patchBytes, validation: { checks: ["head", "patch-policy"] } });
+  const agentProfile = await loadFrozenAgentProfile({ mode: "audit", directory, context });
+  return writeCandidate({ artifactDirectory, context, result, patch, patchBytes, validation: { checks: ["head", "patch-policy"] }, agentProfileBytes: agentProfile.bytes });
 }
 
-export async function validateFix({ directory, contextPath = path.join(directory, "context.json"), resultPath, artifactDirectory, config, configSha256, issueNumber }) {
+export async function validateFix({ directory, contextPath = path.join(directory, "context.json"), resultPath, artifactDirectory, config, configSha256, targetNumber }) {
   const context = await readRegularJson(contextPath);
   assertTrustedContext(context, "fix");
   assertFrozenPolicy(context, configSha256);
-  if (context.issue?.number !== issueNumber) {
-    throw new Error(`Trusted fix context targets issue #${context.issue?.number ?? "missing"}; expected #${issueNumber}`);
+  if (!context.target || !["issue", "pull_request"].includes(context.target.kind)) {
+    throw new Error("Trusted fix context is missing a valid target kind");
   }
-  const result = validateFixResult(await readRegularJson(resultPath), issueNumber);
+  if (context.target.number !== targetNumber) {
+    throw new Error(`Trusted fix context targets #${context.target.number ?? "missing"}; expected #${targetNumber}`);
+  }
+  if (context.target.kind === "issue") {
+    if (context.issue?.number !== context.target.number) {
+      throw new Error("Trusted issue fix context does not match its frozen target");
+    }
+  } else {
+    frozenPullRepairTarget(context, config);
+  }
+  const result = validateFixResult(await readRegularJson(resultPath), context.target);
   const changes = await collectWorkingTreeChanges();
   const repairRequested = changes.files.length > 0;
   if (!repairRequested && !result.noChangeReason) {
@@ -261,14 +283,15 @@ export async function validateFix({ directory, contextPath = path.join(directory
     repairRequested,
     risk: result.risk
   });
-  return writeCandidate({ artifactDirectory, context, result, patch, patchBytes, validation: { checks: ["head", "patch-policy"] } });
+  const agentProfile = await loadFrozenAgentProfile({ mode: "fix", directory, context });
+  return writeCandidate({ artifactDirectory, context, result, patch, patchBytes, validation: { checks: ["head", "patch-policy"] }, agentProfileBytes: agentProfile.bytes });
 }
 
-function validateResultForMode(mode, result, config) {
+function validateResultForMode(mode, result, context, config) {
   if (mode === "review") return validateReviewResult(result, config);
   if (mode === "audit") return validateAuditResult(result, config);
   if (mode === "issue") return validateIssueResult(result, config);
-  if (mode === "fix") return validateFixResult(result, result.issueNumber);
+  if (mode === "fix") return validateFixResult(result, context.target);
   throw new Error(`Unsupported candidate mode: ${mode}`);
 }
 
@@ -288,6 +311,7 @@ async function readCandidate({ mode, candidateDirectory, expectedCandidateSha256
   const contextBytes = await readRegularFile(contextPath);
   const resultBytes = await readRegularFile(resultPath);
   const validationBytes = await readRegularFile(validationPath);
+  const agentProfileBytes = await readRegularFile(path.join(candidateDirectory, AGENT_PROFILE_BUNDLE_FILE));
   const context = await readRegularJson(contextPath);
   const result = await readRegularJson(resultPath);
   const validation = await readRegularJson(validationPath);
@@ -297,10 +321,13 @@ async function readCandidate({ mode, candidateDirectory, expectedCandidateSha256
   if (sha256(resultBytes) !== candidate.resultSha256 || sha256(validationBytes) !== candidate.validationSha256) {
     throw new Error("Candidate content hash does not match metadata");
   }
+  if (sha256(agentProfileBytes) !== candidate.agentProfileSha256 || sha256(agentProfileBytes) !== context.agentProfile?.sha256) {
+    throw new Error("Candidate agent profile is not the frozen trusted profile");
+  }
   assertTrustedContext(context, mode);
   if (candidate.repository !== context.repository) throw new Error("Candidate repository does not match its context");
   assertFrozenPolicy(context, configSha256);
-  validateResultForMode(mode, result, config);
+  validateResultForMode(mode, result, context, config);
 
   let patchBytes = null;
   if (candidate.patch?.valid) {
@@ -314,7 +341,7 @@ async function readCandidate({ mode, candidateDirectory, expectedCandidateSha256
   } else if (candidate.patchSha256 !== null) {
     throw new Error("Candidate contains an unexpected patch hash");
   }
-  return { candidate, context, result, validation, patchBytes };
+  return { candidate, context, result, validation, patchBytes, agentProfileBytes };
 }
 
 async function verifyPatchCandidate({ mode, candidateDirectory, expectedCandidateSha256, config, configSha256 }) {
@@ -356,7 +383,7 @@ async function verifyPatchCandidate({ mode, candidateDirectory, expectedCandidat
 
 async function seal({ mode, candidateDirectory, artifactDirectory, expectedCandidateSha256, expectedContextSha256, config, configSha256 }) {
   if (!/^[a-f0-9]{64}$/i.test(expectedContextSha256)) throw new Error("--expected-context-sha must be a SHA-256 digest");
-  const { candidate, context, result, validation, patchBytes } = await readCandidate({
+  const { candidate, context, result, validation, patchBytes, agentProfileBytes } = await readCandidate({
     mode,
     candidateDirectory,
     expectedCandidateSha256,
@@ -375,7 +402,8 @@ async function seal({ mode, candidateDirectory, artifactDirectory, expectedCandi
     patchBytes,
     validation,
     config,
-    configSha256
+    configSha256,
+    agentProfileBytes
   });
 }
 

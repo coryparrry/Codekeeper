@@ -195,5 +195,6 @@ test("workspace writes remain gated by mode-specific mutation policy", () => {
   enabled.audit.repair.enabled = true;
   enabled.issues.allowAiImplementation = true;
   assert.equal(getAgentRuntimeSettings(enabled, "audit").workspaceSandbox, "workspace-write");
+  assert.equal(getAgentRuntimeSettings(enabled, "audit", { mutationAuthorized: false }).workspaceSandbox, "read-only");
   assert.equal(getAgentRuntimeSettings(enabled, "fix").workspaceSandbox, "workspace-write");
 });

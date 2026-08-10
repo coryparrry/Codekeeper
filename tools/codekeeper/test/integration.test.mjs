@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, lstat, mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
+import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
-import { prepareFix, prepareIssue } from "../src/lib/prepare.mjs";
+import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -31,6 +33,36 @@ function digest(value) {
 
 function bundle(root, name = "bundle") {
   return `${root}-${name}`;
+}
+
+function assertWorkspaceOutputSchema(schema, mode) {
+  assert.equal(schema.type, "object");
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.properties?.mode, { type: "string", enum: [mode] });
+  assert.doesNotMatch(JSON.stringify(schema), /"const"/);
+}
+
+async function installAgentProfiles(root) {
+  for (const mode of ["review", "audit", "issue", "fix"]) {
+    const destination = path.join(root, agentProfilePathForMode(mode));
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(
+      path.join(projectRoot, "tools/codekeeper/agents", path.basename(destination)),
+      destination
+    );
+  }
+}
+
+function agentProfileOptions(root, mode, sourceSha = run("git", ["rev-parse", "HEAD"], root).trim()) {
+  return {
+    agentProfilePath: path.join(root, agentProfilePathForMode(mode)),
+    agentProfileSourceSha: sourceSha
+  };
+}
+
+function agentProfileCliArgs(root, mode, sourceSha = run("git", ["rev-parse", "HEAD"], root).trim()) {
+  const options = agentProfileOptions(root, mode, sourceSha);
+  return ["--agent-profile", options.agentProfilePath, "--agent-profile-source-sha", options.agentProfileSourceSha];
 }
 
 function auditResult({ repair = false } = {}) {
@@ -74,6 +106,7 @@ async function createRepository() {
   const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-test-"));
   await mkdir(path.join(root, ".github"), { recursive: true });
   await copyFile(configSource, path.join(root, ".github/codekeeper.json"));
+  await installAgentProfiles(root);
   await writeFile(path.join(root, "README.md"), "# Example\n", "utf8");
   run("git", ["init", "-q"], root);
   run("git", ["config", "user.name", "Test"], root);
@@ -125,10 +158,14 @@ test("review context terminates a large bounded diff and rejects excessive chang
   );
 });
 
-function prepareAudit(root, directory, env = {}) {
+function prepareAudit(root, directory, env = {}, repairAuthorized = false) {
   run(
     "node",
-    [cli, "prepare-audit", "--config", ".github/codekeeper.json", "--directory", directory],
+    [
+      cli, "prepare-audit", "--config", ".github/codekeeper.json", "--directory", directory,
+      "--actor", "repository-owner", "--repair-authorized", String(repairAuthorized),
+      ...agentProfileCliArgs(root, "audit")
+    ],
     root,
     { GITHUB_REPOSITORY: "acme/example", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "2", ...env }
   );
@@ -152,6 +189,57 @@ test("prepare requires an external runner-owned directory and cannot follow chec
   prepareAudit(root, externalDirectory);
   assert.equal((await lstat(path.join(externalDirectory, "context.json"))).isFile(), true);
   assert.equal(await readFile(victim, "utf8"), "safe\n");
+});
+
+test("preparation freezes one trusted profile whose exact bytes reach workspace and coordinator prompts", async (context) => {
+  const root = await createRepository();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const directory = bundle(root, "profile-proof");
+  const profilePath = path.join(root, agentProfilePathForMode("audit"));
+  const profile = "# Repository behavior — owner controlled\n\nReport drift, but never invent work.\n";
+  await writeFile(profilePath, profile, "utf8");
+  run("git", ["add", agentProfilePathForMode("audit")], root);
+  run("git", ["commit", "-qm", "customize audit behavior"], root);
+  const sourceSha = run("git", ["rev-parse", "HEAD"], root).trim();
+  const config = structuredClone(templateConfig);
+  config.ai.tracing.enabled = false;
+  await prepareAuditBundle({
+    directory,
+    config,
+    ...agentProfileOptions(root, "audit", sourceSha)
+  });
+
+  const frozenBytes = await readFile(path.join(directory, "agent-profile.md"));
+  const frozenContext = JSON.parse(await readFile(path.join(directory, "context.json"), "utf8"));
+  const workspacePrompt = await readFile(path.join(directory, "prompt.md"), "utf8");
+  assert.deepEqual(frozenBytes, Buffer.from(profile));
+  assert.deepEqual(frozenContext.agentProfile, {
+    path: agentProfilePathForMode("audit"),
+    sha256: digest(frozenBytes),
+    sourceSha
+  });
+  assert.ok(workspacePrompt.includes(profile));
+  assert.ok(workspacePrompt.indexOf("IMMUTABLE CODEKEEPER SAFETY") < workspacePrompt.indexOf(profile));
+
+  const calls = {};
+  class FakeProvider { async close() {} }
+  class FakeAgent { constructor(options) { calls.instructions = options.instructions; } }
+  class FakeRunner {
+    async run(_agent, input) {
+      calls.input = input;
+      return { finalOutput: auditResult() };
+    }
+  }
+  await runAgentFromBundle({
+    mode: "audit",
+    directory,
+    config,
+    resultPath: path.join(directory, "result.json"),
+    apiKey: "provider-secret",
+    sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider })
+  });
+  assert.ok(calls.instructions.includes(profile));
+  assert.ok(calls.input.includes(profile));
 });
 
 test("workspace patch handoff applies captured regular-file bytes in a fresh checkout", async () => {
@@ -246,13 +334,54 @@ test("manual issue preparation requires an explicitly authorised actor", async (
   }), "utf8");
 
   assert.throws(
-    () => run("node", [cli, "prepare-issue", "--config", ".github/codekeeper.json", "--event", event, "--triage-mode", "manual", "--directory", directory], root, { GITHUB_REPOSITORY: "acme/example" }),
+    () => run("node", [cli, "prepare-issue", "--config", ".github/codekeeper.json", "--event", event, "--triage-mode", "manual", "--directory", directory, ...agentProfileCliArgs(root, "issue")], root, { GITHUB_REPOSITORY: "acme/example" }),
     /Command failed/
   );
   assert.throws(
-    () => run("node", [cli, "prepare-issue", "--config", ".github/codekeeper.json", "--event", event, "--actor", "untrusted-user", "--triage-mode", "manual", "--directory", directory], root, { GITHUB_REPOSITORY: "acme/example" }),
+    () => run("node", [cli, "prepare-issue", "--config", ".github/codekeeper.json", "--event", event, "--actor", "untrusted-user", "--triage-mode", "manual", "--directory", directory, ...agentProfileCliArgs(root, "issue")], root, { GITHUB_REPOSITORY: "acme/example" }),
     /Command failed/
   );
+});
+
+test("maintenance repair authorization requires enabled policy and a configured owner", async (context) => {
+  const root = await createRepository();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const revision = run("git", ["rev-parse", "HEAD"], root).trim();
+  const disabled = structuredClone(templateConfig);
+
+  await assert.rejects(
+    prepareAuditBundle({
+      directory: bundle(root, "disabled-repair"),
+      config: disabled,
+      actor: "repository-owner",
+      repairAuthorized: true,
+      ...agentProfileOptions(root, "audit", revision)
+    }),
+    /audit\.repair\.enabled=false/
+  );
+
+  const enabled = structuredClone(disabled);
+  enabled.audit.repair.enabled = true;
+  await assert.rejects(
+    prepareAuditBundle({
+      directory: bundle(root, "unauthorised-repair"),
+      config: enabled,
+      actor: "not-an-owner",
+      repairAuthorized: true,
+      ...agentProfileOptions(root, "audit", revision)
+    }),
+    /not authorised/
+  );
+
+  const prepared = await prepareAuditBundle({
+    directory: bundle(root, "owner-repair"),
+    config: enabled,
+    actor: "REPOSITORY-OWNER",
+    repairAuthorized: true,
+    ...agentProfileOptions(root, "audit", revision)
+  });
+  assert.equal(prepared.repairAuthorized, true);
+  assert.equal(prepared.repairAuthorizedBy, "REPOSITORY-OWNER");
 });
 
 test("manual issue and fix preparation authorize owner login casing variants", async () => {
@@ -292,14 +421,16 @@ test("manual issue and fix preparation authorize owner login casing variants", a
       triageMode: "manual",
       directory: issueDirectory,
       config,
-      token: "read-token"
+      token: "read-token",
+      ...agentProfileOptions(root, "issue")
     });
     const fixContext = await prepareFix({
-      issueNumber: 5,
+      targetNumber: 5,
       actor: "repository-owner",
       directory: fixDirectory,
       config,
-      token: "read-token"
+      token: "read-token",
+      ...agentProfileOptions(root, "fix")
     });
     assert.equal(issueContext.triageMode, "manual");
     assert.equal(fixContext.requestedBy, "repository-owner");
@@ -327,12 +458,79 @@ test("automatic issue preparation records trusted mode without an owner command"
       triageMode: "automatic",
       directory,
       config: templateConfig,
-      token: "read-token"
+      token: "read-token",
+      ...agentProfileOptions(root, "issue")
     });
     assert.equal(context.triageMode, "automatic");
     assert.equal(context.issue.number, 5);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("prepare writes provider-compatible workspace output schemas for every mode", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-workspace-schema-test-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await installAgentProfiles(root);
+  const config = structuredClone(templateConfig);
+  config.issues.allowAiImplementation = true;
+  config.repository.ownerLogins = ["workspace-owner"];
+  const revision = run("git", ["rev-parse", "HEAD"], projectRoot).trim();
+  const reviewEvent = path.join(root, "review-event.json");
+  const issueEvent = path.join(root, "issue-event.json");
+  await writeFile(reviewEvent, JSON.stringify({
+    repository: { full_name: "acme/example" },
+    pull_request: {
+      number: 7,
+      title: "Schema fixture review",
+      body: "",
+      draft: false,
+      html_url: "https://github.com/acme/example/pull/7",
+      user: { login: "contributor" },
+      base: { ref: "main", sha: revision },
+      head: { ref: "main", sha: revision, repo: { full_name: "acme/example" } }
+    }
+  }), "utf8");
+  await writeFile(issueEvent, JSON.stringify({
+    repository: { full_name: "acme/example" },
+    issue: { number: 5, title: "Schema fixture issue", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
+  }), "utf8");
+
+  const originalFetch = globalThis.fetch;
+  const savedEnvironment = Object.fromEntries(["GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"].map((name) => [name, process.env[name]]));
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  process.env.GITHUB_RUN_ID = "123";
+  process.env.GITHUB_RUN_ATTEMPT = "2";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/issues/5/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Schema fixture issue",
+        body: "Details",
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        labels: []
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  const directories = Object.fromEntries(["review", "audit", "issue", "fix"].map((mode) => [mode, path.join(root, mode)]));
+  try {
+    await prepareReview({ eventPath: reviewEvent, directory: directories.review, config, ...agentProfileOptions(root, "review", revision) });
+    await prepareAuditBundle({ directory: directories.audit, config, ...agentProfileOptions(root, "audit", revision) });
+    await prepareIssue({ eventPath: issueEvent, actor: "reporter", triageMode: "automatic", directory: directories.issue, config, token: "read-token", ...agentProfileOptions(root, "issue", revision) });
+    await prepareFix({ targetNumber: 5, actor: "workspace-owner", directory: directories.fix, config, token: "read-token", ...agentProfileOptions(root, "fix", revision) });
+    for (const mode of Object.keys(directories)) {
+      assertWorkspaceOutputSchema(JSON.parse(await readFile(path.join(directories[mode], "schema.json"), "utf8")), mode);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of Object.entries(savedEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });
 
@@ -349,7 +547,7 @@ test("audit candidate validation preserves caller changes and clears repository 
   run("git", ["add", ".github/codekeeper.json"], root);
   run("git", ["commit", "-qm", "configure validation"], root);
 
-  prepareAudit(root, directory);
+  prepareAudit(root, directory, {}, true);
   await writeFile(path.join(root, "README.md"), "# Example\n\nUpdated guidance.\n", "utf8");
   await writeFile(path.join(directory, "codex-result.json"), JSON.stringify(auditResult({ repair: true })), "utf8");
   run(
@@ -477,7 +675,7 @@ test("review findings must cite a changed line hunk", async () => {
   }), "utf8");
   run(
     "node",
-    [cli, "prepare-review", "--config", ".github/codekeeper.json", "--event", event, "--directory", directory],
+    [cli, "prepare-review", "--config", ".github/codekeeper.json", "--event", event, "--directory", directory, ...agentProfileCliArgs(root, "review")],
     root,
     { GITHUB_REPOSITORY: "acme/example" }
   );

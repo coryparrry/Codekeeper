@@ -368,14 +368,18 @@ export class GitHubClient {
     return pulls.find((pull) => pull.head?.ref === branch && pull.head?.repo?.full_name === this.repository) ?? null;
   }
 
-  async getBranchTip(branch) {
-    let branchData;
+  async getBranch(branch) {
     try {
-      branchData = (await this.request("GET", this.repoPath(`/branches/${encodeURIComponent(branch)}`))).data;
+      return (await this.request("GET", this.repoPath(`/branches/${encodeURIComponent(branch)}`))).data;
     } catch (error) {
       if (error.status === 404) return null;
       throw error;
     }
+  }
+
+  async getBranchTip(branch) {
+    const branchData = await this.getBranch(branch);
+    if (!branchData) return null;
     const treeSha = branchData?.commit?.commit?.tree?.sha;
     const parentShas = branchData?.commit?.parents?.map((parent) => parent?.sha);
     if (typeof treeSha !== "string" || !Array.isArray(parentShas) || parentShas.some((sha) => typeof sha !== "string")) {

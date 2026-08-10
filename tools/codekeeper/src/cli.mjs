@@ -18,6 +18,13 @@ function integer(value, name) {
   return parsed;
 }
 
+function strictBoolean(value, name) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  throw new Error(`${name} must be true or false`);
+}
+
 function bundleFile(directory, filePath, flag) {
   const resolved = path.resolve(filePath);
   const relative = path.relative(directory, resolved);
@@ -31,6 +38,13 @@ function runnerFile(filePath, flag) {
   const resolved = path.resolve(filePath);
   assertRunnerOwnedDirectory(path.dirname(resolved));
   return resolved;
+}
+
+function agentProfileInputs(args) {
+  return {
+    agentProfilePath: args.require("agent-profile"),
+    agentProfileSourceSha: args.require("agent-profile-source-sha")
+  };
 }
 
 async function applyUntrustedWorkspacePatch(patchPath) {
@@ -79,7 +93,14 @@ async function main() {
       result = { valid: true, version: config.version };
       break;
     case "agent-settings":
-      result = getAgentRuntimeSettings(config, args.require("mode"));
+      {
+        const mode = args.require("mode");
+        result = getAgentRuntimeSettings(config, mode, {
+          mutationAuthorized: mode === "audit"
+            ? strictBoolean(args.get("mutation-authorized", "false"), "mutation-authorized")
+            : true
+        });
+      }
       break;
     case "run-agent":
       result = await runAgentFromBundle({
@@ -108,23 +129,32 @@ async function main() {
       result = { applied: true };
       break;
     case "prepare-review":
-      result = await prepareReview({ eventPath: args.require("event"), directory, config, toolingSha, configSha256 });
+      result = await prepareReview({ eventPath: args.require("event"), directory, config, toolingSha, configSha256, ...agentProfileInputs(args) });
       break;
     case "prepare-audit":
-      result = await prepareAudit({ directory, config, toolingSha, configSha256 });
+      result = await prepareAudit({
+        directory,
+        config,
+        toolingSha,
+        configSha256,
+        actor: args.require("actor"),
+        repairAuthorized: strictBoolean(args.require("repair-authorized"), "repair-authorized"),
+        ...agentProfileInputs(args)
+      });
       break;
     case "prepare-issue":
-      result = await prepareIssue({ eventPath: args.require("event"), actor: args.require("actor"), triageMode: args.require("triage-mode"), directory, config, token, toolingSha, configSha256 });
+      result = await prepareIssue({ eventPath: args.require("event"), actor: args.require("actor"), triageMode: args.require("triage-mode"), directory, config, token, toolingSha, configSha256, ...agentProfileInputs(args) });
       break;
     case "prepare-fix":
       result = await prepareFix({
-        issueNumber: integer(args.require("issue-number"), "issue-number"),
+        targetNumber: integer(args.require("target-number"), "target-number"),
         actor: args.require("actor"),
         directory,
         config,
         token,
         toolingSha,
-        configSha256
+        configSha256,
+        ...agentProfileInputs(args)
       });
       break;
     case "validate-review":
@@ -144,7 +174,7 @@ async function main() {
         artifactDirectory: assertRunnerOwnedDirectory(args.require("artifact")),
         config,
         configSha256,
-        issueNumber: integer(args.require("issue-number"), "issue-number")
+        targetNumber: integer(args.require("target-number"), "target-number")
       });
       break;
     case "seal-review":
@@ -176,16 +206,16 @@ async function main() {
       });
       break;
     case "publish-review":
-      result = await publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun });
+      result = await publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath: args.require("agent-profile"), token, dryRun });
       break;
     case "publish-audit":
-      result = await publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun });
+      result = await publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath: args.require("agent-profile"), token, dryRun });
       break;
     case "publish-issue":
-      result = await publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun });
+      result = await publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath: args.require("agent-profile"), token, dryRun });
       break;
     case "publish-fix":
-      result = await publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun });
+      result = await publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath: args.require("agent-profile"), token, dryRun });
       break;
     default:
       throw new Error(`Unknown command: ${command}`);

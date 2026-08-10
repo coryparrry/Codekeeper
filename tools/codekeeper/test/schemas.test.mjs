@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { validateAuditResult, validateReviewResult } from "../src/lib/schemas.mjs";
+import { fixSchema, validateAuditResult, validateFixResult, validateReviewResult } from "../src/lib/schemas.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -67,6 +67,33 @@ test("audit validator binds a requested repair to a finding", () => {
     config
   );
   assert.equal(result.repair.findingIndex, 0);
+});
+
+test("fix schema and validator bind output to the frozen issue or pull request target", () => {
+  const target = { kind: "pull_request", number: 42 };
+  const schema = fixSchema(target);
+  assert.deepEqual(schema.properties.targetKind, { const: "pull_request" });
+  assert.deepEqual(schema.properties.targetNumber, { const: 42 });
+  const result = {
+    mode: "fix",
+    summary: "Updated the existing pull request.",
+    risk: "low",
+    targetKind: "pull_request",
+    targetNumber: 42,
+    changedSummary: "Added a regression test.",
+    testsRun: [{ command: "npm test", result: "passed" }],
+    readyForReview: true,
+    noChangeReason: null
+  };
+  assert.equal(validateFixResult(result, target), result);
+  assert.throws(
+    () => validateFixResult({ ...result, targetNumber: 43 }, target),
+    /targetNumber does not match requested target/
+  );
+  assert.throws(
+    () => validateFixResult({ ...result, targetKind: "issue" }, target),
+    /targetKind does not match requested target/
+  );
 });
 
 

@@ -6,7 +6,11 @@ Codekeeper is a source repository of reusable workflows. An adopter keeps the ev
 Adopter event and default-branch policy
         |
         v
-Pinned reusable workflow revision
+Pinned bootstrap action and reusable workflow revision (same full SHA)
+        |
+        +-- direct private action stages only tools/codekeeper as a one-day artifact
+        |     - no caller-provided source credential or source checkout
+        |     - every reusable job verifies pinned manifest, inventory, hashes, no symlinks or hidden paths
         |
         +-- workspace specialist: optional workspace key and read-only GitHub token
         |     - frozen policy, exact-head context, bounded review diff, and schema
@@ -31,7 +35,7 @@ Pinned reusable workflow revision
 
 ## Trust boundaries
 
-The reusable workflow checks out its own revision with `job.workflow_repository` and `job.workflow_sha`. It reads the adopter policy only from the adopter default branch. The review caller is a default-branch `pull_request_target` definition that only invokes the reusable workflow; it never checks out or executes PR code. Pull request heads, issue data, comments, repository files, and model output are untrusted.
+The caller pins a direct Codekeeper action and reusable workflow to the same full commit SHA. GitHub's private-action access retrieves that action without a caller-provided PAT or source-repository App installation. The direct action stages only the production `tools/codekeeper` payload as a one-day artifact. Hidden paths are refused to match GitHub artifact uploads' secure default. That artifact is untrusted until every reusable job verifies the source-pinned manifest's raw SHA-256, the verifier's manifest hash, an exact inventory, every file hash, and the absence of symlinks or hidden paths; only then may `npm` or the Codekeeper CLI run. The reusable workflow uses `job.workflow_sha` for provenance and reads adopter policy only from the adopter default branch. The review caller is a default-branch `pull_request_target` definition that only invokes the reusable workflow; it never checks out or executes PR code. Pull request heads, issue data, comments, repository files, and model output are untrusted.
 
 The workspace specialist and coordinator are separate jobs on fresh runners. A Codex job may receive only its workspace credential and the read-only GitHub access needed to form context; it never receives the provider, trace, or App credential. The coordinator rebuilds its frozen bundle from trusted checkouts and must match that bundle’s context digest to the workspace job output before reading specialist data. It reads only the specialist JSON result and, for write-capable audit/fix modes, a patch artifact as untrusted evidence; it rejects non-regular artifact files and applies that patch only after the model call completes.
 

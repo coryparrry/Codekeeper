@@ -1,0 +1,34 @@
+{
+  "name": "codekeeper",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Guided, disabled-by-default installer for Codekeeper GitHub workflows",
+  "type": "module",
+  "bin": {
+    "codekeeper": "bin/codekeeper.mjs"
+  },
+  "files": [
+    "assets/",
+    "bin/",
+    "src/",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "github",
+    "automation",
+    "codekeeper"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "ink": "7.1.1",
+    "react": "19.2.8"
+  }
+}

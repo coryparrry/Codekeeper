@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "source": {
+    "repository": "coryparrry/Codekeeper",
+    "commit": "38c0306a78888346208aae992a0786d7414e3c0a"
+  },
+  "assets": {
+    "agents/pr-reviewer.md": {
+      "sha256": "9b90b3ae1d2ac501924b0a38d4a559c8fb8e7e84ab309a41fc5b33739a40ce76",
+      "bytes": 3162,
+      "sourcePath": "tools/codekeeper/agents/pr-reviewer.md"
+    },
+    "agents/repository-auditor.md": {
+      "sha256": "82af520eee898bb55136d448116cf68308645c714f9626c0b099850a2e94b7ff",
+      "bytes": 2823,
+      "sourcePath": "tools/codekeeper/agents/repository-auditor.md"
+    },
+    "agents/issue-triager.md": {
+      "sha256": "866e45a5431d9e08fe036d47d3334106f0e0734dfeef0421bd5465a1f472b5d2",
+      "bytes": 3377,
+      "sourcePath": "tools/codekeeper/agents/issue-triager.md"
+    },
+    "agents/maintenance-planner.md": {
+      "sha256": "8ff0abe5c7b232b595f6e4f43c947314e7d0cce5c15d1b7cd0884f7526e17479",
+      "bytes": 3402,
+      "sourcePath": "tools/codekeeper/agents/maintenance-planner.md"
+    },
+    "policies/mixed.json": {
+      "sha256": "37e32105ba2300e465af8132b241633833130394eb5c15a300c0a6bf1c1f589d",
+      "bytes": 9183,
+      "sourcePath": ".github/codekeeper.json"
+    },
+    "policies/openai.json": {
+      "sha256": "753741a11159d48a9c6bd7d938edd3310b1e9d0d242e86098715db0e499faad0",
+      "bytes": 9020,
+      "sourcePath": ".github/codekeeper.json#preset=openai"
+    },
+    "workflows/review.yml": {
+      "sha256": "b77995d237b98fa02f79ea3bcd3363e63a38cd4580de126e1e64fab18c683730",
+      "bytes": 1493,
+      "sourcePath": "examples/workflows/codekeeper-review.yml.example"
+    },
+    "workflows/maintain.yml": {
+      "sha256": "1df21ec555e467813a086ef6c63a30fe1edfcf93389e4147f607b51d0a40082a",
+      "bytes": 1904,
+      "sourcePath": "examples/workflows/codekeeper-maintain.yml.example"
+    },
+    "workflows/issues.yml": {
+      "sha256": "3260d387b1ae7f76e21fdd0228062e139be3a25f047bfbd5762f638b67e153ca",
+      "bytes": 1257,
+      "sourcePath": "examples/workflows/codekeeper-issues.yml.example"
+    },
+    "workflows/fix.yml": {
+      "sha256": "60e142109c0ff184d61ba1c149a96b134a038c5d3f41edb4c67876e6a7e6d5fc",
+      "bytes": 1789,
+      "sourcePath": "examples/workflows/codekeeper-fix.yml.example"
+    }
+  },
+  "provenance": {
+    "presetCatalogue": {
+      "sha256": "bcc71060b4fb3281c4157760e84da530d98ff8b547bab28de9e661a3beb1059d",
+      "bytes": 1710,
+      "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
+    },
+    "toolingManifest": {
+      "sha256": "9ea59dc54288186c0d4f84d24c86de9c6485900e876d1d3a03ceb6126fc87596",
+      "bytes": 3523,
+      "sourcePath": "tools/codekeeper/tooling-manifest.json"
+    }
+  }
+}

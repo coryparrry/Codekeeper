@@ -1,11 +1,13 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
+import { publishPullRequestRepair } from "./pr-repair.mjs";
 import { renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
@@ -29,11 +31,11 @@ function validateArtifactResult(mode, result, context, config) {
   if (mode === "review") return validateReviewResult(result, config);
   if (mode === "audit") return validateAuditResult(result, config);
   if (mode === "issue") return validateIssueResult(result, config);
-  if (mode === "fix") return validateFixResult(result, context.issue?.number);
+  if (mode === "fix") return validateFixResult(result, context.target);
   throw new Error(`Unsupported artifact mode: ${mode}`);
 }
 
-async function loadArtifact(artifactDirectory, expectedMode, config, configSha256, expectedManifestSha256) {
+async function loadArtifact(artifactDirectory, expectedMode, config, configSha256, expectedManifestSha256, agentProfilePath) {
   if (!/^[a-f0-9]{64}$/i.test(String(expectedManifestSha256 ?? ""))) {
     throw new Error("Publisher requires the trusted sealed manifest SHA-256");
   }
@@ -48,17 +50,19 @@ async function loadArtifact(artifactDirectory, expectedMode, config, configSha25
     throw new Error("Publisher requires the SHA-256 of its frozen configuration");
   }
 
-  const [contextBytes, resultBytes, configBytes, validationBytes] = await Promise.all([
+  const [contextBytes, resultBytes, configBytes, validationBytes, agentProfileBytes] = await Promise.all([
     readRegularFile(path.join(artifactDirectory, "context.json")),
     readRegularFile(path.join(artifactDirectory, "result.json")),
     readRegularFile(path.join(artifactDirectory, "config.json")),
-    readRegularFile(path.join(artifactDirectory, "validation.json"))
+    readRegularFile(path.join(artifactDirectory, "validation.json")),
+    readRegularFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE))
   ]);
   if (
     sha256(contextBytes) !== manifest.contextSha256 ||
     sha256(resultBytes) !== manifest.resultSha256 ||
     sha256(configBytes) !== manifest.configFileSha256 ||
-    sha256(validationBytes) !== manifest.validationSha256
+    sha256(validationBytes) !== manifest.validationSha256 ||
+    sha256(agentProfileBytes) !== manifest.agentProfileSha256
   ) {
     throw new Error("Sealed artifact component changed after sealing");
   }
@@ -82,6 +86,17 @@ async function loadArtifact(artifactDirectory, expectedMode, config, configSha25
   }
   if (JSON.stringify(manifest.validation) !== JSON.stringify(validation)) {
     throw new Error("Artifact validation does not match its trusted manifest");
+  }
+  if (sha256(agentProfileBytes) !== context.agentProfile?.sha256) {
+    throw new Error("Sealed artifact agent profile does not match its frozen context");
+  }
+  const liveProfile = await loadTrustedAgentProfile({
+    mode: expectedMode,
+    sourcePath: agentProfilePath,
+    sourceSha: context.agentProfile?.sourceSha
+  });
+  if (liveProfile.metadata.path !== context.agentProfile?.path || liveProfile.metadata.sha256 !== context.agentProfile?.sha256) {
+    throw new Error("Agent profile changed after preparation; stale action will not publish");
   }
   if (manifest.patch?.valid) {
     const patchBytes = await readRegularFile(path.join(artifactDirectory, "patch.diff"));
@@ -110,6 +125,56 @@ async function currentOpenIssue(github, frozenIssue, staleAction) {
     throw new Error(`Issue #${issue.number} changed after ${staleAction}; stale action will not publish`);
   }
   return issue;
+}
+
+function issueLabelNames(issue) {
+  if (!Array.isArray(issue?.labels)) throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid label metadata`);
+  const names = issue.labels.map((label) => typeof label === "string" ? label : label?.name);
+  if (names.some((label) => typeof label !== "string" || label.length === 0) || new Set(names).size !== names.length) {
+    throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid or duplicate label metadata`);
+  }
+  return names;
+}
+
+function issuePublicationSubject(issue) {
+  return {
+    number: issue?.number,
+    title: issue?.title ?? null,
+    body: issue?.body ?? null,
+    state: issue?.state ?? null,
+    stateReason: issue?.state_reason ?? null,
+    locked: issue?.locked ?? null,
+    activeLockReason: issue?.active_lock_reason ?? null,
+    htmlUrl: issue?.html_url ?? null,
+    author: {
+      id: issue?.user?.id ?? null,
+      login: issue?.user?.login ?? null,
+      type: issue?.user?.type ?? null
+    },
+    assignees: (issue?.assignees ?? [])
+      .map((assignee) => ({ id: assignee?.id ?? null, login: assignee?.login ?? null, type: assignee?.type ?? null }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    milestone: issue?.milestone?.number ?? null
+  };
+}
+
+function assertExpectedManagedLabelMutation(before, after, desired, managed) {
+  if (after?.pull_request || after?.state !== "open") throw new Error(`Issue #${before.number} is no longer eligible`);
+  if (JSON.stringify(issuePublicationSubject(after)) !== JSON.stringify(issuePublicationSubject(before))) {
+    throw new Error(`Issue #${before.number} changed while Codekeeper reconciled labels`);
+  }
+  const managedSet = new Set(managed);
+  const expectedLabels = new Set([
+    ...issueLabelNames(before).filter((label) => !managedSet.has(label)),
+    ...desired
+  ]);
+  const actualLabels = new Set(issueLabelNames(after));
+  const exactLabels = actualLabels.size === expectedLabels.size && [...expectedLabels].every((label) => actualLabels.has(label));
+  if (!exactLabels) throw new Error(`Issue #${before.number} labels changed while Codekeeper reconciled labels`);
+  if (typeof after.updated_at !== "string" || !Number.isFinite(Date.parse(after.updated_at))) {
+    throw new Error(`Issue #${before.number} has no updated timestamp after label reconciliation`);
+  }
+  return after;
 }
 
 function branchSlug(value) {
@@ -203,11 +268,12 @@ async function currentReviewPull(github, context, config) {
   return pull;
 }
 
-export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
-  const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256);
+export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
+  const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
   const pull = await currentReviewPull(github, context, config);
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
+  const runUrl = trustedPublicationRunUrl(context);
   const automationBotLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
@@ -225,7 +291,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     }
     return {
       desiredLabels: [...desiredSet],
-      comment: renderReviewComment(result, autoMerge)
+      comment: renderReviewComment(result, autoMerge, runUrl)
     };
   };
 
@@ -296,17 +362,19 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, blocking };
 }
 
-export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
-  const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256);
+export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
+  const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
-  const currentIssue = () => currentOpenIssue(github, context.issue, "analysis");
+  let expectedUpdatedAt = context.issue.updatedAt;
+  const currentIssue = () => currentOpenIssue(github, { ...context.issue, updatedAt: expectedUpdatedAt }, "analysis");
   const issue = await currentIssue();
+  const runUrl = trustedPublicationRunUrl(context);
 
   const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
   if (result.implementationRecommendation === "ai-ready") desired.add("codekeeper:ready");
   if (result.duplicateOf && result.duplicateConfidence === "high") desired.add("codekeeper:duplicate-candidate");
   const desiredLabels = [...desired];
-  const comment = renderIssueTriage(result);
+  const comment = renderIssueTriage(result, runUrl);
 
   if (dryRun) {
     log(`DRY RUN issue triage #${issue.number}`, { desiredLabels, comment });
@@ -317,9 +385,21 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   // checks fail closed on observed drift immediately before each mutation boundary.
   await currentIssue();
   await github.ensureLabels(config.labels, desiredLabels);
-  await currentIssue();
+  const beforeLabelMutation = await currentIssue();
   await github.replaceManagedLabels(issue.number, desiredLabels, managedIssueLabels(config));
-  await currentIssue();
+  const afterLabelMutation = assertExpectedManagedLabelMutation(
+    beforeLabelMutation,
+    await github.getIssue(issue.number),
+    desiredLabels,
+    managedIssueLabels(config)
+  );
+  expectedUpdatedAt = afterLabelMutation.updated_at;
+  assertExpectedManagedLabelMutation(
+    afterLabelMutation,
+    await currentIssue(),
+    desiredLabels,
+    managedIssueLabels(config)
+  );
   await github.upsertMarkerComment(
     issue.number,
     ISSUE_TRIAGE_MARKER,
@@ -421,6 +501,27 @@ function expectedAutomationIdentity() {
     throw new Error("CODEKEEPER_AUTOMATION_BOT_LOGIN and CODEKEEPER_AUTOMATION_BOT_ID must identify the configured GitHub App bot");
   }
   return identity;
+}
+
+function trustedPublicationRunUrl(context) {
+  const repository = String(context?.repository ?? "");
+  const runId = String(context?.runId ?? "");
+  const raw = String(context?.runUrl ?? "");
+  if (!/^[A-Za-z0-9_.-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/.test(repository) || !/^[1-9]\d{0,19}$/.test(runId) || raw.length > 2048) {
+    throw new Error("Publication context has no valid workflow run URL");
+  }
+  let run;
+  let server;
+  try {
+    run = new URL(raw);
+    server = new URL(process.env.GITHUB_SERVER_URL ?? "https://github.com");
+  } catch {
+    throw new Error("Publication context has no valid workflow run URL");
+  }
+  if (run.protocol !== "https:" || run.origin !== server.origin || run.username || run.password || run.search || run.hash || run.pathname !== `/${repository}/actions/runs/${runId}`) {
+    throw new Error("Publication context has no valid workflow run URL");
+  }
+  return run.toString();
 }
 
 export function repairBranch(config, mode, fingerprint) {
@@ -600,8 +701,14 @@ async function publishPatchPullRequest({
     : { created: false, reason: "Existing repair PR", pullRequest: pull.number, url: pull.html_url };
 }
 
-export async function publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
-  const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", config, configSha256, expectedManifestSha256);
+export async function publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
+  const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", config, configSha256, expectedManifestSha256, agentProfilePath);
+  if (typeof context.repairAuthorized !== "boolean") {
+    throw new Error("Trusted audit artifact is missing explicit repair authorization");
+  }
+  if (result.repair.requested && (!config.audit.repair.enabled || !context.repairAuthorized)) {
+    throw new Error("Audit repair publication lacks frozen explicit repair authorization");
+  }
   const liveHead = currentHead();
   if (liveHead !== context.baseSha) {
     throw new Error(`Default branch moved from ${context.baseSha} to ${liveHead}; stale audit will not publish`);
@@ -648,9 +755,28 @@ export async function publishAudit({ artifactDirectory, config, configSha256, ex
   return { findings, repair, dryRun };
 }
 
-export async function publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, token, dryRun = false }) {
-  const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", config, configSha256, expectedManifestSha256);
+export async function publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false, prRepairGit }) {
+  const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
+  if (context.target?.kind === "pull_request") {
+    return publishPullRequestRepair({
+      github,
+      artifactDirectory,
+      manifest,
+      context,
+      result,
+      config,
+      automationIdentity: expectedAutomationIdentity(),
+      dryRun,
+      ...(prRepairGit ? { gitOperations: prRepairGit } : {})
+    });
+  }
+  if (context.target?.kind !== "issue" || !Number.isSafeInteger(context.target.number) || context.target.number <= 0) {
+    throw new Error("Frozen fix context has no valid issue or pull request target");
+  }
+  if (context.issue?.number !== context.target.number) {
+    throw new Error("Frozen issue fix context does not match its target");
+  }
   const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started");
   const issue = await currentIssue();
 

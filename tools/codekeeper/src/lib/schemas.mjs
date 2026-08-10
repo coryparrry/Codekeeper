@@ -9,6 +9,53 @@ const LIMITS = Object.freeze({
   result: 8000
 });
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function cloneJson(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function providerConstType(value) {
+  if (value === null) return "null";
+  if (typeof value === "string") return "string";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Number.isInteger(value) ? "integer" : "number";
+  }
+  throw new Error("Provider schema projection supports only JSON primitive const values");
+}
+
+function providerConstSchema(source) {
+  const inferredType = providerConstType(source.const);
+  if (Object.hasOwn(source, "enum") && (!Array.isArray(source.enum) || source.enum.length !== 1 || !Object.is(source.enum[0], source.const))) {
+    throw new Error("Provider schema projection const requires an identical singleton enum");
+  }
+  if (!Object.hasOwn(source, "type")) return { type: inferredType, enum: [cloneJson(source.const)] };
+  if (typeof source.type !== "string" || !["string", "boolean", "null", "number", "integer"].includes(source.type)) {
+    throw new Error("Provider schema projection requires a supported primitive type for const");
+  }
+  const typeMatches = source.type === inferredType || (source.type === "number" && inferredType === "integer");
+  if (!typeMatches) throw new Error("Provider schema projection const does not match its type");
+  return { type: source.type, enum: [cloneJson(source.const)] };
+}
+
+// The Codex workspace action consumes this file through its provider's strict
+// output-schema API. The local validators continue to use the source schemas;
+// this creates only the provider-wire representation it requires.
+export function providerCompatibleJsonSchema(value) {
+  if (Array.isArray(value)) return value.map((item) => providerCompatibleJsonSchema(item));
+  if (!isPlainObject(value)) return cloneJson(value);
+  const hasConst = Object.hasOwn(value, "const");
+  const projected = hasConst ? providerConstSchema(value) : {};
+  for (const [key, item] of Object.entries(value)) {
+    if (hasConst && (key === "const" || key === "enum" || key === "type")) continue;
+    projected[key] = providerCompatibleJsonSchema(item);
+  }
+  return projected;
+}
+
 function stringSchema({ minLength = 1, maxLength = LIMITS.summary } = {}) {
   return { type: "string", minLength, maxLength };
 }
@@ -127,12 +174,18 @@ export function issueSchema(config) {
     });
 }
 
-export function fixSchema() {
+export function fixSchema(target = null) {
+  const targetKind = target?.kind;
+  const targetNumber = target?.number;
+  if (target !== null && (!["issue", "pull_request"].includes(targetKind) || !Number.isSafeInteger(targetNumber) || targetNumber <= 0)) {
+    throw new Error("Fix schema requires a valid frozen target");
+  }
   return object({
       mode: { const: "fix" },
       summary: stringSchema({ maxLength: LIMITS.summary }),
       risk: { enum: ["low", "medium", "high"] },
-      issueNumber: { type: "integer", minimum: 1 },
+      targetKind: target ? { const: targetKind } : { enum: ["issue", "pull_request"] },
+      targetNumber: target ? { const: targetNumber } : { type: "integer", minimum: 1 },
       changedSummary: stringSchema({ minLength: 0, maxLength: LIMITS.body }),
       testsRun: {
         type: "array",
@@ -324,14 +377,20 @@ export function validateIssueResult(result, config) {
   return result;
 }
 
-export function validateFixResult(result, issueNumber) {
+export function validateFixResult(result, target) {
   assertExactKeys(result, [
-    "mode", "summary", "risk", "issueNumber", "changedSummary", "testsRun", "readyForReview", "noChangeReason"
+    "mode", "summary", "risk", "targetKind", "targetNumber", "changedSummary", "testsRun", "readyForReview", "noChangeReason"
   ], "result");
   assert(result.mode === "fix", "mode must be fix");
   assertString(result.summary, "summary", { maxLength: LIMITS.summary });
   assertEnum(result.risk, ["low", "medium", "high"], "risk");
-  assert(result.issueNumber === issueNumber, "issueNumber does not match requested issue");
+  assertEnum(result.targetKind, ["issue", "pull_request"], "targetKind");
+  assert(Number.isSafeInteger(result.targetNumber) && result.targetNumber > 0, "targetNumber must be a positive integer");
+  if (target !== undefined) {
+    assert(target && typeof target === "object" && !Array.isArray(target), "trusted target must be an object");
+    assert(result.targetKind === target.kind, "targetKind does not match requested target");
+    assert(result.targetNumber === target.number, "targetNumber does not match requested target");
+  }
   assertString(result.changedSummary, "changedSummary", { allowEmpty: true, maxLength: LIMITS.body });
   assert(Array.isArray(result.testsRun), "testsRun must be an array");
   assert(result.testsRun.length <= 20, "testsRun has too many entries");

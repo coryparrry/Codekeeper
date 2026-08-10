@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -17,6 +18,13 @@ const actionPins = {
   "openai/codex-action": "52fe01ec70a42f454c9d2ebd47598f9fd6893d56",
   "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
 };
+const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
+const toolingManifestSha256 = "9ea59dc54288186c0d4f84d24c86de9c6485900e876d1d3a03ceb6126fc87596";
+const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
 
 async function repositoryFile(relativePath) {
   return readFile(path.join(repositoryRoot, relativePath), "utf8");
@@ -47,7 +55,6 @@ test("four generic mode workflows expose workflow_call and caller templates rema
     assert.ok(files.includes(`codekeeper-${mode}.yml`));
     const source = await workflow(mode);
     assert.match(source, /on:\n\s+workflow_call:/);
-    assert.match(source, /job\.workflow_repository/);
     assert.match(source, /job\.workflow_sha/);
 
     const caller = await repositoryFile(`examples/workflows/codekeeper-${mode}.yml.example`);
@@ -58,7 +65,94 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.match(reviewCaller, /on:\n\s+pull_request_target:/);
   assert.doesNotMatch(reviewCaller, /on:\n\s+pull_request:/);
   assert.match(reviewCaller, /pull-requests: read/);
+  assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \}\} @\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/);
+  const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
+  assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
+});
+
+test("caller bootstrap fetches the same immutable private action release as its reusable workflow", async () => {
+  const releaseSha = "a".repeat(40);
+  for (const mode of modes) {
+    const template = await repositoryFile(`examples/workflows/codekeeper-${mode}.yml.example`);
+    const generated = template.replaceAll("OWNER/REPOSITORY", "octo/private-codekeeper").replaceAll("FULL_COMMIT_SHA", releaseSha);
+    const pins = [...generated.matchAll(/uses:\s+octo\/private-codekeeper\/(?:tools\/codekeeper|\.github\/workflows\/codekeeper-[a-z-]+\.yml)@([0-9a-f]{40})/g)]
+      .map((match) => match[1]);
+    assert.deepEqual(pins, [releaseSha, releaseSha], `${mode} caller must pin bootstrap and reusable workflow identically`);
+    assert.match(template, /bootstrap:\n\s+name: Codekeeper pinned tooling bootstrap\n\s+runs-on: ubuntu-latest/);
+    assert.match(template, new RegExp(`(?:maintain|fix|triage|review):\\n\\s+needs: bootstrap\\n\\s+uses: OWNER/REPOSITORY/\\.github/workflows/codekeeper-${mode}\\.yml@FULL_COMMIT_SHA`));
+    const bootstrap = template.slice(template.indexOf("  bootstrap:\n"), template.indexOf(`  ${mode === "issues" ? "triage" : mode === "maintain" ? "maintain" : mode}:\n`));
+    const bootstrapArtifactNames = [...bootstrap.matchAll(/^ {10}artifact-name: ([^\n]+)$/gm)].map((match) => match[1]);
+    assert.deepEqual(
+      bootstrapArtifactNames,
+      [bootstrapToolingArtifactName],
+      `${mode} caller must produce exactly the run-scoped bootstrap artifact`
+    );
+    assert.doesNotMatch(bootstrap, /secrets:|GITHUB_TOKEN|GH_TOKEN|APP_PRIVATE_KEY/);
+  }
+});
+
+test("reusable workflows consume only a source-manifest-bound bootstrap artifact", async () => {
+  const manifest = await readFile(path.join(repositoryRoot, toolingManifestPath));
+  assert.equal(sha256(manifest), toolingManifestSha256);
+  const parsedManifest = JSON.parse(manifest);
+  assert.equal(parsedManifest.version, 1);
+  assert.ok(parsedManifest.files.some((entry) => entry.path === "src/cli.mjs"));
+  assert.ok(parsedManifest.files.some((entry) => entry.path === "scripts/verify-tooling-artifact.mjs"));
+  assert.ok(parsedManifest.files.every((entry) => !entry.path.startsWith("test/") && !entry.path.startsWith("evals/")));
+
+  const expectedConsumers = { maintain: 5, fix: 5, issues: 4, review: 4 };
+  for (const [mode, count] of Object.entries(expectedConsumers)) {
+    const source = await workflow(mode);
+    assert.equal([...source.matchAll(/name: Download bootstrap Codekeeper tooling/g)].length, count);
+    assert.equal([...source.matchAll(/name: Verify bootstrap Codekeeper tooling against pinned manifest/g)].length, count);
+    assert.equal([...source.matchAll(/name: Check out frozen maintainer tooling/g)].length, 0);
+    assert.match(source, new RegExp(`CODEKEEPER_TOOLING_MANIFEST_SHA256: ${toolingManifestSha256}`));
+    assert.match(source, /node --input-type=module -e/);
+    assert.match(source, /manifest does not match the pinned workflow/);
+    assert.match(source, /verifier does not match the pinned manifest/);
+    assert.match(source, /verify-tooling-artifact\.mjs/);
+    assert.equal(
+      [...source.matchAll(/import \{ lstat, readFile \} from "node:fs\/promises"; import \{ join \} from "node:path";/g)].length,
+      count
+    );
+    assert.doesNotMatch(source, /^\s*import \{ join \} from "node:path";$/m);
+    assert.doesNotMatch(source, /\$\{(?:root|label)\}/);
+    const bootstrapArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-tooling-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    assert.deepEqual(
+      bootstrapArtifactNames,
+      Array(count).fill(bootstrapToolingArtifactName),
+      `${mode} must consume the caller bootstrap artifact by run ID only so failed-job reruns reuse verified tooling`
+    );
+    const workspaceArtifactName = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-workspace-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    const workspaceArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-workspace-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    assert.deepEqual(
+      workspaceArtifactNames,
+      [workspaceArtifactName, workspaceArtifactName],
+      `${mode} workspace handoff must remain attempt-scoped`
+    );
+    assert.doesNotMatch(source, /job\.workflow_repository/);
+    assert.doesNotMatch(source, /repository: \$\{\{ job\.workflow_repository \}\}/);
+  }
+});
+
+test("private-action bootstrap stages only the production runtime and retains it for one day", async () => {
+  const action = await repositoryFile("tools/codekeeper/action.yml");
+  assert.match(action, /using: composite/);
+  assert.match(action, /ACTION_PATH: \$\{\{ github\.action_path \}\}/);
+  assert.match(action, /for file in package\.json package-lock\.json tooling-manifest\.json/);
+  assert.match(action, /for directory in agents presets src/);
+  assert.match(action, /scripts\/verify-tooling-artifact\.mjs/);
+  assert.match(action, /find "\$target" -type l/);
+  assert.match(action, /if find "\$target" -type l -print -quit \| grep -q \.; then/);
+  assert.doesNotMatch(action, /grep -q \. &&/);
+  assert.match(action, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
+  assert.match(action, /description: Exact run-scoped bootstrap artifact name derived from github\.run_id; reruns replace this verified tooling artifact\./);
+  assert.match(action, /name: \$\{\{ inputs\.artifact-name \}\}\n\s+path: \$\{\{ runner\.temp \}\}\/codekeeper-tooling\n\s+retention-days: 1\n\s+if-no-files-found: error\n\s+overwrite: true/);
+  assert.match(action, /retention-days: 1/);
+  assert.doesNotMatch(action, /secrets\.|GITHUB_TOKEN|GH_TOKEN|actions\/checkout/);
 });
 
 test("workflow and caller surfaces contain no Treebar or Cory-specific identity", async () => {
@@ -120,6 +214,7 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(workspace, /Configured default branch does not match the repository default branch/);
     assert.match(workspace, new RegExp(`prepare-${effectiveMode}`));
     assert.match(workspace, /openai\/codex-action@/);
+    assert.match(workspace, /output-schema-file: \$\{\{ runner\.temp \}\}\/codekeeper-bundle\/schema\.json/);
     assert.match(workspace, /outputs:\n\s+context_sha256: \$\{\{ steps\.prepare\.outputs\.context_sha256 \}\}/);
     if (repairMode) {
       assert.match(workspace, /capture-workspace-patch/);
@@ -176,22 +271,45 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(publish, /\$GITHUB_API_URL\/users\/\$\{APP_SLUG\}\[bot\]/);
     assert.doesNotMatch(publish, /\$GITHUB_API_URL\/user(?:["']|\))/);
     assert.match(publish, /codekeeper-artifact/);
-    assert.match(
-      publish,
-      /ref: \$\{\{ github\.event\.repository\.default_branch \}\}[\s\S]*?path: repository/
-    );
-    assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/);
+    if (mode === "fix") {
+      assert.match(publish, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}[\s\S]*?path: policy/);
+      assert.match(publish, /ref: \$\{\{ needs\.analyze\.outputs\.base_sha \}\}[\s\S]*?path: repository/);
+      assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/policy\/\.github\/codekeeper\.json/);
+    } else {
+      assert.match(
+        publish,
+        /ref: \$\{\{ github\.event\.repository\.default_branch \}\}[\s\S]*?path: repository/
+      );
+      assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/);
+    }
     assert.match(publish, /--config "\$CONFIG"/);
+    assert.match(publish, /--agent-profile "\$AGENT_PROFILE"/);
     assert.match(publish, /--expected-manifest-sha "\$MANIFEST_SHA256"/);
     assert.doesNotMatch(publish, /openai\/codex-action@|validate-|seal-/);
   }
 });
 
-test("candidate and sealed artifact names include run id and retry attempt", async () => {
+test("candidate and sealed artifact handoffs retain exact run-and-attempt names", async () => {
   for (const mode of modes) {
     const source = await workflow(mode);
-    assert.match(source, new RegExp(`codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-candidate-\\$\\{\\{ github\\.run_id \\}\\}-\\$\\{\\{ github\\.run_attempt \\}\\}`));
-    assert.match(source, new RegExp(`codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-artifact-\\$\\{\\{ github\\.run_id \\}\\}-\\$\\{\\{ github\\.run_attempt \\}\\}`));
+    const artifactPrefix = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}`;
+    const candidateArtifactName = `${artifactPrefix}-candidate-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    const sealedArtifactName = `${artifactPrefix}-artifact-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    const candidateHandoffCount = mode === "maintain" || mode === "fix" ? 3 : 2;
+    const candidateArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-candidate-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    const sealedArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-artifact-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    assert.deepEqual(
+      candidateArtifactNames,
+      Array(candidateHandoffCount).fill(candidateArtifactName),
+      `${mode} candidate producer and consumer must use the same run-and-attempt artifact name`
+    );
+    assert.deepEqual(
+      sealedArtifactNames,
+      [sealedArtifactName, sealedArtifactName],
+      `${mode} sealed artifact producer and consumer must use the same run-and-attempt artifact name`
+    );
   }
 });
 
@@ -225,6 +343,24 @@ test("maintenance and fix dry runs do not require App credentials, but publicati
     assert.match(caller, /app_client_id: \$\{\{ vars\.CODEKEEPER_APP_CLIENT_ID \}\}/);
     assert.match(caller, /app_private_key: \$\{\{ secrets\.CODEKEEPER_APP_PRIVATE_KEY \}\}/);
   }
+});
+
+test("maintenance repair requires a frozen configured-owner authorization on each manual run", async () => {
+  const source = await workflow("maintain");
+  const caller = await repositoryFile("examples/workflows/codekeeper-maintain.yml.example");
+  const workspace = jobSection(source, "workspace", "analyze");
+
+  assert.match(source, /repair_authorized:\n\s+description:[^\n]*\n\s+required: false\n\s+default: false\n\s+type: boolean/);
+  assert.match(workspace, /--actor "\$GITHUB_ACTOR"/);
+  assert.match(workspace, /--repair-authorized "\$REPAIR_AUTHORIZED"/);
+  assert.match(workspace, /--mutation-authorized "\$REPAIR_AUTHORIZED"/);
+  assert.equal(
+    [...source.matchAll(/REPAIR_AUTHORIZED: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.repair_authorized \|\| false \}\}/g)].length,
+    3,
+    "the reusable workflow must deny repair authorization to every non-manual caller"
+  );
+  assert.match(caller, /repair_authorized:\n\s+description:[^\n]*\n\s+required: true\n\s+type: boolean\n\s+default: false/);
+  assert.match(caller, /repair_authorized: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.repair_authorized \|\| false \}\}/);
 });
 
 test("review and issue-triage retain mandatory App credentials", async () => {
@@ -271,20 +407,38 @@ test("issue triage allows only bounded automatic events while owner commands and
   assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
   assert.match(caller, /issues:\n\s+types: \[opened, reopened, edited\]/);
   assert.match(caller, /auto_triage: true/);
+  assert.match(caller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \}\}"/);
 
   assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
-  assert.match(fix, /startsWith\(github\.event\.comment\.body, '\/codekeeper fix '\)/);
+  assert.doesNotMatch(fix, /startsWith\(github\.event\.comment\.body, '\/codekeeper fix '\)/);
   assert.match(fix, /github\.event\.comment\.author_association == 'OWNER'/);
   assert.match(fix, /allow-users: \$\{\{ github\.actor \}\}/);
+  assert.match(fix, /--target-number "\$TARGET_NUMBER"/);
+  assert.match(fix, /fromJSON\(steps\.prepare\.outputs\.result\)\.baseSha/);
+  assert.match(fix, /ref: \$\{\{ needs\.analyze\.outputs\.base_sha \}\}/);
+  assert.match(fix, /Check out frozen repair target/);
   assert.doesNotMatch(fix, /github\.event_name == 'issues'/);
+});
+
+test("owner-commanded pull request repair can update only the frozen existing head", async () => {
+  const fix = await workflow("fix");
+  const publisher = await repositoryFile("tools/codekeeper/src/lib/pr-repair.mjs");
+  assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
+  assert.doesNotMatch(fix, /!github\.event\.issue\.pull_request/);
+  assert.match(fix, /target_kind: \$\{\{ fromJSON\(steps\.prepare\.outputs\.result\)\.target\.kind \}\}/);
+  assert.equal([...fix.matchAll(/Check out frozen repair target/g)].length, 4);
+  assert.match(publisher, /createCommitOnCurrentHead/);
+  assert.match(publisher, /pushHeadToBranch\(target\.headRef/);
+  assert.match(publisher, /expectedHeadSha: commitSha/);
+  assert.doesNotMatch(publisher, /createPull|createBranchAndCommit|pushBranch|enableAutoMerge|updateIssue|deleteBranch/);
 });
 
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {
   const packageJson = JSON.parse(await repositoryFile("tools/codekeeper/package.json"));
   const packageLock = JSON.parse(await repositoryFile("tools/codekeeper/package-lock.json"));
-  assert.deepEqual(packageJson.dependencies, { "@openai/agents": "0.14.2", zod: "4.4.3" });
+  assert.deepEqual(packageJson.dependencies, { "@openai/agents": "0.14.3", zod: "4.4.3" });
   assert.equal(packageLock.lockfileVersion, 3);
-  assert.equal(packageLock.packages[""].dependencies["@openai/agents"], "0.14.2");
+  assert.equal(packageLock.packages[""].dependencies["@openai/agents"], "0.14.3");
   assert.equal(packageLock.packages[""].dependencies.zod, "4.4.3");
 
   for (const mode of modes) {
