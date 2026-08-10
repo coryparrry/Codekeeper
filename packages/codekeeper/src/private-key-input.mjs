@@ -22,7 +22,7 @@ async function listDirectoryMetadata(fsImpl, directory) {
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("unsafe directory");
     return await fsImpl.readdir(directory, { withFileTypes: true });
   } catch (cause) {
-    throw new InstallerError("The private-key picker could not list that folder safely.", {
+    throw new InstallerError("The private-key picker failed to list that folder safely.", {
       code: "SECRET_INPUT_DIRECTORY_INVALID",
       cause
     });
@@ -34,7 +34,7 @@ export async function defaultPrivateKeyDirectory({
   homeDirectory = homedir()
 } = {}) {
   if (typeof homeDirectory !== "string" || !path.isAbsolute(homeDirectory)) {
-    throw new InstallerError("The private-key picker could not determine a safe starting folder.", {
+    throw new InstallerError("The private-key picker failed to find a safe starting folder.", {
       code: "SECRET_INPUT_DIRECTORY_INVALID"
     });
   }
@@ -46,7 +46,7 @@ export async function defaultPrivateKeyDirectory({
       // Prefer a listable Downloads folder, then fall back to a listable home folder.
     }
   }
-  throw new InstallerError("The private-key picker could not determine a safe starting folder.", {
+  throw new InstallerError("The private-key picker failed to find a safe starting folder.", {
     code: "SECRET_INPUT_DIRECTORY_INVALID"
   });
 }

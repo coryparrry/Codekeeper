@@ -362,7 +362,8 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.equal(plan.originalHead, HEAD_SHA);
   assert.equal(plan.branch, "codekeeper/setup");
   assert.match(plan.pullRequest.body, /\| Document \| Purpose \|/);
-  assert.match(plan.pullRequest.body, /\| Mode \| Trigger \| Policy agent \|/);
+  assert.match(plan.pullRequest.body, /\| Mode \| Trigger \| Model \|/);
+  assert.match(plan.pullRequest.body, /OpenAI traces are \*\*enabled\*\*/);
   assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
   assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune evidence thresholds/);
   assert.match(plan.pullRequest.body, /cannot grant writes, change triggers or branches, authorize repairs, close issues, or enable merge/);
@@ -423,6 +424,29 @@ test("normal installation enables selected workflows after the setup pull reques
   });
   assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "true" });
   assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
+});
+
+test("model choices update the selected agent and optional tracing needs no trace key", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      models: { review: "terra-medium" },
+      tracing: false
+    })
+  });
+  const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
+  assert.equal(policy.ai.agents.review.model, "gpt-5.6-terra");
+  assert.equal(policy.ai.agents.review.effort, "medium");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-terra");
+  assert.equal(policy.ai.agents.review.workspace.effort, "medium");
+  assert.equal(policy.ai.tracing.enabled, false);
+  assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, APP_SECRET]);
+  assert.match(plan.pullRequest.body, /OpenAI traces are \*\*disabled\*\*/);
+  assert.doesNotMatch(plan.pullRequest.body, /OPENAI_TRACE_API_KEY/);
 });
 
 test("optional disabled installation keeps Codekeeper off after merge", async () => {

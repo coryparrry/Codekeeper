@@ -71,7 +71,7 @@ function preview(plan, output) {
   output.write(`  Default branch: ${plan.defaultBranch}\n`);
   output.write(`  Comment display name: ${plan.displayName}\n`);
   output.write(`  Owner-command users: ${plan.ownerLogins.join(", ")}\n`);
-  output.write(`  Provider preset: ${plan.preset}${plan.preset === "openai" ? " (one OpenAI model-provider key plus a separate OpenAI trace key)" : " (provider keys vary by workflow, plus a separate OpenAI trace key)"}\n`);
+  output.write(`  Model-provider preset: ${plan.preset}\n`);
   output.write(`  Setup branch: ${plan.branch}\n`);
   output.write("  Workflows:\n");
   for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);
@@ -80,6 +80,7 @@ function preview(plan, output) {
     const agent = policy.ai.agents[MODES[mode].policyAgent];
     output.write(`    - ${MODES[mode].label}: ${agent.provider} / ${agent.model} / ${agent.effort} effort\n`);
   }
+  output.write(`  OpenAI traces: ${plan.tracing ? "enabled" : "disabled"}\n`);
   output.write("  Files:\n");
   for (const file of plan.files) output.write(`    - ${file.path}\n`);
   output.write("  You can edit decision guidance in .github/codekeeper/agents. These files cannot grant access.\n");
@@ -156,7 +157,7 @@ export async function runCli({
         try {
           tui = await import("./tui.mjs");
         } catch (cause) {
-          throw new InstallerError("The interactive terminal UI could not be loaded.", { code: "TUI_UNAVAILABLE", cause });
+          throw new InstallerError("The interactive terminal UI failed to load.", { code: "TUI_UNAVAILABLE", cause });
         }
         activePrompt = tui.shouldUseInkTui({ interactive, input, output, environment })
           ? await tui.createInkPrompter({ input, output, errorOutput, environment })
@@ -187,7 +188,8 @@ export async function runCli({
         step: "GitHub App",
         description: [
           `Required for: ${snapshot.repository}`,
-          "The App needs contents, issues, and pull requests read-write; metadata read-only; webhooks disabled.",
+          "The App needs read and write access to contents, issues, and pull requests.",
+          "The App needs read-only access to metadata. Webhooks stay disabled.",
           "Create or inspect the App in the browser, install it only on this repository, then download a new private key.",
           registrationUrl
         ],

@@ -15,14 +15,17 @@ function guidedPrompt(confirmations = [true, true, true, true, true, true], { pr
     confirmations: [],
     async confirm(options) {
       prompt.confirmations.push(options);
+      if (options.message === "Enable OpenAI traces?") return true;
       return answers.shift();
     },
     async multiselect({ message, defaultValues }) {
       if (message.startsWith("Choose capabilities")) return defaultValues;
       throw new Error("recommended setup must not ask for custom workflows");
     },
-    async select({ message }) {
+    async select({ message, defaultValue }) {
       if (message === "Choose a starting setup") return "recommended";
+      if (message.startsWith("Choose a model for")) return defaultValue;
+      if (message === "Enable OpenAI traces?") return "enabled";
       if (message.startsWith("Start Codekeeper")) return "enabled";
       throw new Error("recommended setup must not ask for a custom preset");
     },
@@ -144,7 +147,7 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   assert.match(output.toString(), new RegExp(openedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(errorOutput.toString(), /Complete GitHub App creation/);
   assert.match(errorOutput.toString(), new RegExp(resumeCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.equal(prompt.confirmations.length, 5);
+  assert.equal(prompt.confirmations.length, 6);
   assert.deepEqual(runner.calls, []);
 });
 
@@ -203,6 +206,7 @@ test("declining conservative boundaries on the recommended path performs no muta
   assert.deepEqual(prompt.confirmations, [
     { message: "Install into acme/widget on default branch main?", defaultValue: false },
     { message: "Use the recommended starter setup?", defaultValue: true },
+    { message: "Enable OpenAI traces?", defaultValue: true },
     { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
     { message: "Continue with these safety settings?", defaultValue: false }
   ]);
@@ -257,6 +261,7 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   assert.deepEqual(prompt.confirmations, [
     { message: "Install into acme/widget on default branch main?", defaultValue: false },
     { message: "Use the recommended starter setup?", defaultValue: true },
+    { message: "Enable OpenAI traces?", defaultValue: true },
     { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
     { message: "Continue with these safety settings?", defaultValue: false },
     { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: false },
@@ -292,7 +297,11 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
     },
     async select(options) {
       calls.push(["select", options.message]);
-      return options.message.startsWith("Start Codekeeper") ? "enabled" : "recommended";
+      if (options.message === "Choose a starting setup") return "recommended";
+      if (options.message.startsWith("Choose a model for")) return options.defaultValue;
+      if (options.message === "Enable OpenAI traces?") return "enabled";
+      if (options.message.startsWith("Start Codekeeper")) return "enabled";
+      throw new Error(`Unexpected select prompt: ${options.message}`);
     },
     async multiselect(options) {
       if (options.message.startsWith("Choose capabilities")) return options.defaultValues;
@@ -521,7 +530,8 @@ test("successful init revalidates three snapshots and orders settings, exact com
       ".github/workflows/codekeeper-review.yml"
     ]
   );
-  assert.match(output.toString(), /Provider preset: openai \(one OpenAI model-provider key plus a separate OpenAI trace key\)/);
+  assert.match(output.toString(), /Model-provider preset: openai/);
+  assert.match(output.toString(), /OpenAI traces: enabled/);
   assert.match(output.toString(), /Pull request review: openai \/ gpt-5\.6-sol \/ high effort/);
   assert.match(output.toString(), /Repository maintenance: openai \/ gpt-5\.6-sol \/ high effort/);
   assert.match(output.toString(), /OPENAI_API_KEY: OpenAI Platform API key for model calls/);

@@ -147,7 +147,7 @@ export async function configureRepositorySettings(plan, {
 
   const appInput = openInputFile(appPrivateKeyPath);
   if (!Number.isInteger(appInput?.descriptor) || appInput.descriptor < 3 || typeof appInput.close !== "function") {
-    throw new InstallerError("The selected private-key input could not be prepared safely.", {
+    throw new InstallerError("The installer failed to prepare the selected private-key input safely.", {
       code: "SECRET_INPUT_FILE_INVALID"
     });
   }
@@ -159,7 +159,7 @@ export async function configureRepositorySettings(plan, {
       "gh",
       ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
       { cwd: plan.root },
-      "GitHub CLI could not set Codekeeper's startup state. No secrets or files were changed.",
+      "GitHub CLI failed to set the Codekeeper startup state. No secrets or files changed.",
       resumeCommand
     );
     reportProgress(onProgress, "settings:disable", "done");
@@ -333,13 +333,13 @@ export async function createSetupCommit(plan, {
     for (const file of plan.files) {
       const blob = await runner.run("git", ["show", `HEAD:${file.path}`], { cwd: plan.root });
       if (blob.status !== 0 || blob.timedOut || blob.truncated) {
-        throw new InstallerError(`Could not verify committed bytes for ${file.path}; nothing was pushed.`, {
+        throw new InstallerError(`The installer failed to verify the committed bytes for ${file.path}. Nothing was pushed.`, {
           code: "COMMITTED_FILE_READ_FAILED",
           resume: formatCommand("git", ["show", "--stat", "--oneline", "HEAD"], platform)
         });
       }
       if (Buffer.byteLength(blob.stdout) !== file.bytes || sha256(blob.stdout) !== file.sha256) {
-        throw new InstallerError(`Committed bytes changed for ${file.path}; nothing was pushed.`, {
+        throw new InstallerError(`The committed bytes changed for ${file.path}. Nothing was pushed.`, {
           code: "COMMITTED_FILE_MISMATCH",
           resume: formatCommand("git", ["show", "--no-ext-diff", "--", file.path], platform)
         });
@@ -347,7 +347,7 @@ export async function createSetupCommit(plan, {
     }
     const status = await requireSuccess(runner, "git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: plan.root }, "Could not verify the setup worktree.");
     if (status) {
-      throw new InstallerError("The worktree changed while the setup commit was created; nothing was pushed.", {
+      throw new InstallerError("The worktree changed while the installer created the setup commit. Nothing was pushed.", {
         code: "WORKTREE_CHANGED",
         resume: statusCommand(platform)
       });
@@ -378,8 +378,8 @@ async function assertRemoteSetupCommit(plan, commit, runner, platform, pullReque
   if (remoteResult.status !== 0 || remoteResult.timedOut || remoteResult.truncated) {
     throw new InstallerError(
       pullRequestUrl
-        ? "The setup pull request may exist, but its remote branch could not be verified."
-        : "The setup branch may have been pushed, but its remote commit could not be verified.",
+        ? "The setup pull request can exist. The installer failed to verify its remote branch."
+        : "The setup branch can exist on the remote. The installer failed to verify its remote commit.",
       {
         code: "REMOTE_COMMIT_READ_FAILED",
         resume: remoteInspectionResume(plan, platform, pullRequestUrl)

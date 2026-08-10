@@ -103,7 +103,14 @@ function assertDisabledPolicy(policy) {
   }
 }
 
-export function renderPolicy(policySource, { displayName, defaultBranch, ownerLogins, capabilities = {} }) {
+export function renderPolicy(policySource, {
+  displayName,
+  defaultBranch,
+  ownerLogins,
+  capabilities = {},
+  models = {},
+  tracing = true
+}) {
   let policy;
   try {
     policy = JSON.parse(policySource);
@@ -122,6 +129,19 @@ export function renderPolicy(policySource, { displayName, defaultBranch, ownerLo
   policy.issues.allowAiImplementation = capabilities.issueImplementation === true;
   policy.issues.closeExactDuplicates = capabilities.duplicateClosure === true;
   policy.merge.enabled = capabilities.autoMerge === true;
+  policy.ai.tracing.enabled = tracing;
+  for (const [mode, selection] of Object.entries(models)) {
+    const agent = policy.ai.agents[MODES[mode]?.policyAgent];
+    if (!agent || agent.provider !== selection.provider) {
+      throw new InstallerError(`The model provider does not match the ${mode} workflow.`, { code: "PLAN_INVALID" });
+    }
+    agent.model = selection.model;
+    agent.effort = selection.effort;
+    if (agent.workspace?.enabled && agent.provider === "openai") {
+      agent.workspace.model = selection.model;
+      agent.workspace.effort = selection.effort;
+    }
+  }
   if (!Array.isArray(policy.audit.repair.protectedPaths) || !policy.audit.repair.protectedPaths.length) {
     throw new InstallerError("Rendered policy has no protected paths.", { code: "UNSAFE_POLICY" });
   }
@@ -179,11 +199,27 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
   return rendered;
 }
 
-export function renderInstallFiles(bundle, { modes, preset, displayName, defaultBranch, ownerLogins, capabilities = {} }) {
+export function renderInstallFiles(bundle, {
+  modes,
+  preset,
+  displayName,
+  defaultBranch,
+  ownerLogins,
+  capabilities = {},
+  models = {},
+  tracing = true
+}) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
   const rendered = [{
     path: POLICY_TARGET,
-    contents: renderPolicy(bundle.contents[`policies/${preset}.json`], { displayName, defaultBranch, ownerLogins, capabilities })
+    contents: renderPolicy(bundle.contents[`policies/${preset}.json`], {
+      displayName,
+      defaultBranch,
+      ownerLogins,
+      capabilities,
+      models,
+      tracing
+    })
   }];
   for (const profile of AGENT_PROFILE_IDS) {
     rendered.push({

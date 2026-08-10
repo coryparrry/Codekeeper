@@ -41,6 +41,7 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
       calls.push({ method: "confirm", options });
       if (options.message.startsWith("Install into")) return true;
       if (options.message === "Use the recommended starter setup?") return recommended;
+      if (options.message === "Enable OpenAI traces?") return true;
       if (options.message.startsWith("Start Codekeeper")) return true;
       if (options.message.startsWith("Continue with")) return boundaries;
       throw new Error(`Unexpected confirmation: ${options.message}`);
@@ -52,7 +53,8 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
     },
     async select(options) {
       calls.push({ method: "select", options });
-      return preset;
+      if (options.message === "Choose the model-provider preset:") return preset;
+      return options.defaultValue;
     },
     async inputText(options) {
       calls.push({ method: "inputText", options });
@@ -105,24 +107,24 @@ test("typed workflow numbers select issue triage and issue fix instead of the de
 test("blank terminal custom preset selection accepts the first recommended OpenAI choice", async () => {
   const { prompt, transcript } = terminal("\n");
   const choices = [
-    { value: "openai", label: "openai — one OpenAI model-provider key plus a separate OpenAI trace key (recommended)" },
-    { value: "mixed", label: "mixed — provider keys vary by workflow, plus a separate OpenAI trace key" }
+    { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
+    { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
   ];
   assert.equal(await prompt.select({
     message: "Choose the model-provider preset:",
     choices,
     defaultValue: "openai"
   }), "openai");
-  assert.match(transcript(), /1\. openai — one OpenAI model-provider key plus a separate OpenAI trace key.*recommended/);
-  assert.match(transcript(), /2\. mixed — provider keys vary by workflow, plus a separate OpenAI trace key/);
+  assert.match(transcript(), /1\. openai — use OpenAI for every selected workflow.*recommended/);
+  assert.match(transcript(), /2\. mixed — use DeepSeek for issue triage and OpenAI for other workflows/);
   assert.match(transcript(), /Choose one \[1\]:/);
 });
 
 test("typed preset number selects the non-default mixed preset", async () => {
   const { prompt, transcript } = terminal("2\n");
   const choices = [
-    { value: "openai", label: "openai — one OpenAI model-provider key plus a separate OpenAI trace key (recommended)" },
-    { value: "mixed", label: "mixed — provider keys vary by workflow, plus a separate OpenAI trace key" }
+    { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
+    { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
   ];
   assert.equal(await prompt.select({
     message: "Choose the model-provider preset:",
@@ -141,6 +143,11 @@ test("recommended setup explains consequences and returns review plus maintenanc
   assert.deepEqual(answers, {
     modes: ["review", "maintain"],
     preset: "openai",
+    models: {
+      review: "sol-high",
+      maintain: "sol-high"
+    },
+    tracing: true,
     displayName: "widget",
     ownerLogins: ["cory"],
     enabled: true,
@@ -152,6 +159,7 @@ test("recommended setup explains consequences and returns review plus maintenanc
     [
       { message: "Install into acme/widget on default branch main?", defaultValue: false },
       { message: "Use the recommended starter setup?", defaultValue: true },
+      { message: "Enable OpenAI traces?", defaultValue: true },
       { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
       { message: "Continue with these safety settings?", defaultValue: false }
     ]
@@ -162,7 +170,7 @@ test("recommended setup explains consequences and returns review plus maintenanc
   const transcript = output.toString();
   assert.match(transcript, /Pull request review:.*comments, labels, and a blocking result/);
   assert.match(transcript, /Repository maintenance:.*manual dry run that makes no GitHub changes/);
-  assert.match(transcript, /OpenAI preset: uses one model API key and one trace API key/);
+  assert.match(transcript, /OpenAI preset: uses one OpenAI Platform API key for model calls/);
   assert.match(transcript, /Issue triage and issue fix are not included/);
   assert.match(transcript, /Repository repair: on/);
   assert.match(transcript, /Automatic merge: on/);
@@ -182,6 +190,11 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
   assert.deepEqual(answers, {
     modes: ["issues", "fix"],
     preset: "mixed",
+    models: {
+      issues: "deepseek-v4-flash",
+      fix: "terra-high"
+    },
+    tracing: true,
     displayName: "widget",
     ownerLogins: ["cory"],
     enabled: true,
@@ -194,13 +207,13 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     value: mode,
     label: `${MODES[mode].label} — ${MODES[mode].description}`
   })));
-  const presetCall = prompt.calls.find((call) => call.method === "select");
+  const presetCall = prompt.calls.find((call) => call.method === "select" && call.options.message === "Choose the model-provider preset:");
   assert.deepEqual(presetCall.options, {
     message: "Choose the model-provider preset:",
     defaultValue: RECOMMENDED_PRESET,
     choices: [
-      { value: "openai", label: "openai — one OpenAI model-provider key plus a separate OpenAI trace key (recommended)" },
-      { value: "mixed", label: "mixed — provider keys vary by workflow, plus a separate OpenAI trace key" }
+      { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
+      { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
     ]
   });
   assert.match(output.toString(), /Issue triage responds to issue events/);

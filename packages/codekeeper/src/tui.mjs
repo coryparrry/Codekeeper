@@ -22,7 +22,7 @@ const PRIVATE_KEY_INPUT_ERROR = "Private keys cannot be pasted here. Press Ctrl-
 const DEFAULT_PROGRESS_STEPS = Object.freeze([
   Object.freeze({ id: "repository:verify", label: "Recheck the confirmed repository" }),
   Object.freeze({ id: "settings:disable", label: "Set the startup choice" }),
-  Object.freeze({ id: "secret:provider", label: "Store provider and trace keys" }),
+  Object.freeze({ id: "secret:provider", label: "Store API keys" }),
   Object.freeze({ id: "secret:app", label: "Store the GitHub App key safely" }),
   Object.freeze({ id: "variables:configure", label: "Set non-secret repository variables" }),
   Object.freeze({ id: "git:commit", label: "Create and verify the setup commit" }),
@@ -116,7 +116,7 @@ function Shell({ step, title, description = [], footer, colorEnabled, compactDet
       h(
         Box,
         { marginTop: 1 },
-        h(Text, { dimColor: true }, isRawModeSupported ? footer : "This terminal does not support keyboard input; rerun in an interactive terminal.")
+        h(Text, { dimColor: true }, isRawModeSupported ? footer : "This terminal does not support keyboard input. Run the installer in an interactive terminal.")
       )
     )
   );
@@ -349,7 +349,7 @@ function SecretInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       setReceived(true);
       setError("");
     } catch {
-      setError("The credential could not be sent safely. Cancel and retry.");
+      setError("The credential failed to send safely. Cancel the setup and try again.");
     }
   }, [received, spec]);
   usePaste(accept);
@@ -397,7 +397,7 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       })
       .catch(() => {
         if (!live) return;
-        setError("That folder could not be opened safely.");
+        setError("The picker failed to open that folder safely.");
       });
     return () => { live = false; };
   }, [spec]);
@@ -413,7 +413,7 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       spec.picker.activate(choice.id).then((result) => {
         if (result.selected) onSubmit(result.value);
       }).catch(() => {
-        setError("That item could not be opened safely.");
+        setError("The picker failed to open that item safely.");
       });
     }
   });
@@ -510,7 +510,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       step: "final review",
       title: `Review the setup · ${page + 1} of ${lastPage + 1}`,
       description: pagedDetail
-        ? [page === 0 ? "The App key is selected; its path and contents stay hidden." : "Nothing has changed yet."]
+        ? [page === 0 ? "The App key is selected. Its path and contents stay hidden." : "Nothing has changed yet."]
         : [
           "The App key file is selected. Its path and contents are not shown.",
           "Nothing has changed. Select Create setup to apply these choices."
@@ -604,93 +604,34 @@ function ProgressScreen({ state, colorEnabled }) {
 }
 
 function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
-  const [page, setPage] = useState(0);
   const cancel = useCancel(onCancel);
   const { stdout } = useStdout();
-  const pagedDetail = usesPagedDetailLayout(stdout);
-  const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
-  const lastPage = pagedDetail ? 3 : 0;
+  const compact = Number.isFinite(stdout?.rows) && stdout.rows < 30;
   usePaste(() => {});
   useInput((input, key) => {
     cancel(input, key);
-    if (page < lastPage) {
-      if (key.leftArrow || input === "h") setPage((value) => Math.max(0, value - 1));
-      if (key.rightArrow || input === "l" || key.tab || key.return) setPage((value) => Math.min(lastPage, value + 1));
-      return;
-    }
-    if (key.backspace || key.leftArrow || input === "h") {
-      if (lastPage > 0) setPage(lastPage - 1);
-      return;
-    }
     if (key.return) onSubmit(true);
   });
-  const documents = documentMap(spec.plan.files);
-  const setupDocuments = documents.filter((item) => !item.path.includes("/agents/"));
-  const profileDocuments = documents.filter((item) => item.path.includes("/agents/"));
   const guidance = completionGuidance(spec.plan.modes, spec.plan.enabled);
   return h(
     Shell,
     {
       step: "complete",
-      title: pagedDetail ? `Setup complete · ${page + 1} of ${lastPage + 1}` : "Your setup pull request is ready",
-      description: pagedDetail
-        ? [page === 0
-          ? spec.receipt.pullRequestUrl
-          : page === 1
-            ? `Pinned source: ${spec.plan.source.repository}@${spec.plan.source.commit}`
-            : page === 2
-              ? (spec.plan.enabled ? "Codekeeper starts after this pull request merges." : "Codekeeper stays off after this pull request merges.")
-              : "Editable profiles tune judgment inside deterministic runtime boundaries."]
-        : [
-          spec.receipt.pullRequestUrl,
-          `Pinned source: ${spec.plan.source.repository}@${spec.plan.source.commit}`
-        ],
-      footer: page < lastPage
-        ? "←/→ page  •  Enter next  •  Esc close"
-        : lastPage > 0
-          ? "Backspace previous  •  Enter finish  •  Esc close"
-          : "Enter finish  •  Esc close",
-      colorEnabled,
-      compactDetail
+      title: "Setup complete",
+      description: [spec.receipt.pullRequestUrl],
+      footer: "Enter finish  •  Esc close",
+      colorEnabled
     },
-    !pagedDetail ? h(
+    h(
       Box,
       { flexDirection: "column" },
-      h(Text, { bold: true }, "Document map"),
-      ...documents.map((item) => h(Text, { key: item.path, dimColor: true }, `  ${item.path} — ${item.purpose}`)),
-      h(Text, { dimColor: true }, guidance.profileGuidance),
-      h(Box, { marginTop: 1 }, h(Text, { bold: true }, "Next proofs")),
-      h(Text, { dimColor: true }, guidance.heading),
-      ...guidance.proofs.map((item) => h(Text, { key: item.mode, dimColor: true }, `  - ${item.mode}: ${item.instruction}`)),
-      guidance.reviewGateWarning ? h(Text, { dimColor: true }, guidance.reviewGateWarning) : null,
-      h(Text, { dimColor: true }, guidance.closing)
-    ) : null,
-    pagedDetail && page === 0 ? h(
-      Box,
-      { flexDirection: "column" },
-      h(Text, { bold: true }, "Policy and caller documents"),
-      ...setupDocuments.map((item) => h(Text, { key: item.path, dimColor: true }, `  ${item.path}`))
-    ) : null,
-    pagedDetail && page === 1 ? h(
-      Box,
-      { flexDirection: "column" },
-      h(Text, { bold: true }, "Editable agent profiles"),
-      ...profileDocuments.map((item) => h(Text, { key: item.path, dimColor: true }, `  ${item.path}`))
-    ) : null,
-    pagedDetail && page === 2 ? h(
-      Box,
-      { flexDirection: "column" },
-      h(Text, { bold: true }, "Next proofs"),
-      h(Text, { dimColor: true }, guidance.heading),
-      ...guidance.proofs.map((item) => h(Text, { key: item.mode, dimColor: true }, `  - ${item.mode}: ${item.instruction}`))
-    ) : null,
-    pagedDetail && page === 3 ? h(
-      Box,
-      { flexDirection: "column" },
-      h(Text, { dimColor: true }, guidance.profileGuidance),
-      guidance.reviewGateWarning ? h(Text, { dimColor: true }, guidance.reviewGateWarning) : null,
-      h(Text, { dimColor: true }, guidance.closing)
-    ) : null
+      ...DEFAULT_PROGRESS_STEPS.map((step) => h(Text, { key: step.id, dimColor: true }, `✓ ${step.label}`)),
+      compact ? null : h(Text, { dimColor: true }, `Source: ${spec.plan.source.repository}@${spec.plan.source.commit}`),
+      h(Text, { dimColor: true }, spec.plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge."),
+      compact ? null : h(Text, { dimColor: true }, `OpenAI traces: ${spec.plan.tracing ? "enabled" : "disabled"}.`),
+      !compact && guidance.reviewGateWarning ? h(Text, { dimColor: true }, guidance.reviewGateWarning) : null,
+      h(Text, { dimColor: true }, compact ? "Review the setup pull request." : guidance.closing)
+    )
   );
 }
 

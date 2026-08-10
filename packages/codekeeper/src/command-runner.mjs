@@ -295,7 +295,7 @@ export function openSafeStdinFile(stdinFilePath, { fileOperations = DEFAULT_FILE
       }
     }
     if (cause instanceof InstallerError) throw cause;
-    throw new InstallerError("The selected private-key file could not be opened safely.", {
+    throw new InstallerError("The installer failed to open the selected private-key file safely.", {
       code: "SECRET_INPUT_FILE_INVALID",
       cause
     });
@@ -422,7 +422,7 @@ export function createCommandRunner({
           settled = true;
           clearTimers();
           if (inputFailed) {
-            reject(new InstallerError("Credential input was cancelled or could not be sent safely.", { code: "COMMAND_INPUT_FAILED" }));
+            reject(new InstallerError("The credential input was cancelled or failed to send safely.", { code: "COMMAND_INPUT_FAILED" }));
             return;
           }
           resolve(Object.freeze({

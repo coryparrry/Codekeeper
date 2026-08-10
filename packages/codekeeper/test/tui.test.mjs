@@ -166,7 +166,7 @@ async function assertPagedScreenFits(tui, { kind, columns, rows, markers }) {
   const title = kind === "review" ? "Review the setup" : "Setup complete";
   const firstPattern = kind === "review"
     ? /Review the setup · 1 of \d+/
-    : /(?:Your setup pull request is ready|Setup complete · 1 of \d+)/;
+    : /Setup complete(?: · 1 of \d+)?/;
   let first;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     await tui.flush();
@@ -605,7 +605,16 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.send("\r");
     await tui.waitForText("Choose a starting setup");
     assertNamedPhase(tui, "setup");
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /one OpenAI model-provider key plus a separate OpenAI trace key/);
+    assert.match(semanticText(tui.output.lastSemanticFrame()), /OpenAI models/);
+    await tui.send("\r");
+    await tui.waitForText("Choose a model for Pull request review");
+    assertNamedPhase(tui, "models");
+    await tui.send("j");
+    await tui.send("\r");
+    await tui.waitForText("Choose a model for Repository maintenance");
+    await tui.send("\r");
+    await tui.waitForText("Enable OpenAI traces");
+    assertNamedPhase(tui, "tracing");
     await tui.send("\r");
     await tui.waitForText("Start Codekeeper after the setup pull request merges");
     assertNamedPhase(tui, "startup");
@@ -628,6 +637,8 @@ test("recommended and custom setup paths produce the same semantic answers as th
     assert.deepEqual(await answers, {
       modes: ["review", "maintain"],
       preset: "openai",
+      models: { review: "terra-high", maintain: "sol-high" },
+      tracing: true,
       displayName: "widget",
       ownerLogins: ["cory"],
       enabled: true,
@@ -658,11 +669,16 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.send("\r");
     await tui.waitForText("Choose the model-provider preset");
     assertNamedPhase(tui, "models");
-    assert.match(tui.output.lastSemanticFrame(), /You can change them in/);
-    assert.match(tui.output.lastSemanticFrame(), /\.github\/codekeeper\.json/);
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /one OpenAI model-provider key plus a separate OpenAI trace key/);
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /provider keys vary by workflow, plus a separate OpenAI trace key/);
+    assert.match(tui.output.lastSemanticFrame(), /model provider for each workflow/);
+    assert.match(semanticText(tui.output.lastSemanticFrame()), /use OpenAI for every selected workflow/);
+    assert.match(semanticText(tui.output.lastSemanticFrame()), /use DeepSeek for issue triage/);
     await tui.send("j");
+    await tui.send("\r");
+    await tui.waitForText("Choose a model for Issue triage");
+    await tui.send("\r");
+    await tui.waitForText("Choose a model for Owner-authorized issue fix");
+    await tui.send("\r");
+    await tui.waitForText("Enable OpenAI traces");
     await tui.send("\r");
     await tui.waitForText("Start Codekeeper after the setup pull request merges");
     assertNamedPhase(tui, "startup");
@@ -688,6 +704,8 @@ test("recommended and custom setup paths produce the same semantic answers as th
     assert.deepEqual(await answers, {
       modes: ["issues", "fix"],
       preset: "mixed",
+      models: { issues: "deepseek-v4-flash", fix: "terra-high" },
+      tracing: true,
       displayName: "Custom",
       ownerLogins: ["alice"],
       enabled: true,
@@ -759,7 +777,7 @@ test("final review supports paged Back navigation and requires explicit creation
   await cancellation;
 });
 
-test("Ink completion renders the canonical proof instructions and review warning for selected modes", async (t) => {
+test("Ink completion shows every completed step on one screen", async (t) => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
     bundle,
@@ -778,20 +796,14 @@ test("Ink completion renders the canonical proof instructions and review warning
     commit: "c".repeat(40),
     pullRequestUrl: "https://github.com/acme/widget/pull/42"
   };
-  const guidance = completionGuidance(plan.modes);
   const tui = await createTuiHarness(t);
   const completion = tui.prompt.showCompletion(plan, receipt);
-  await tui.waitForText("Your setup pull request is ready");
+  await tui.waitForText("Setup complete");
   assertNamedPhase(tui, "complete");
-  const normalized = (value) => value.replace(/\s+/g, " ").trim();
   const rendered = semanticText(tui.output.lastSemanticFrame());
-  assert.ok(rendered.includes(normalized(guidance.heading)), `missing completion heading: ${rendered}`);
-  assert.ok(rendered.includes(normalized(guidance.profileGuidance)), `missing profile guidance: ${rendered}`);
-  for (const proof of guidance.proofs) {
-    assert.ok(rendered.includes(normalized(`- ${proof.mode}: ${proof.instruction}`)), `missing ${proof.mode} proof`);
-  }
-  assert.ok(rendered.includes(normalized(guidance.reviewGateWarning)));
-  assert.ok(rendered.includes(normalized(guidance.closing)));
+  for (const step of DEFAULT_PROGRESS_STEPS) assert.match(rendered, new RegExp(`✓ ${step.label}`));
+  assert.match(rendered, /OpenAI traces: enabled/);
+  assert.doesNotMatch(rendered, /Setup complete · \d+ of \d+/);
   await tui.send("\r");
   assert.equal(await completion, true);
 });
@@ -820,12 +832,17 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     ["Settings", "Codekeeper starts after merge"],
     [guidance.reviewGateWarning, "Create setup", "› Cancel"]
   ];
-  const completionMarkers = [
-    ["Policy and caller documents", ".github/codekeeper.json"],
-    ["Editable agent profiles"],
-    ["Next proofs", ...guidance.proofs.map((proof) => `- ${proof.mode}: ${proof.instruction}`)],
-    [guidance.profileGuidance, guidance.reviewGateWarning, guidance.closing]
-  ];
+  const completionMarkers = [[
+    "✓ Recheck the confirmed repository",
+    "✓ Set the startup choice",
+    "✓ Store API keys",
+    "✓ Store the GitHub App key safely",
+    "✓ Set non-secret repository variables",
+    "✓ Create and verify the setup commit",
+    "✓ Push the setup branch",
+    "✓ Open the setup pull request",
+    "Codekeeper starts after merge"
+  ]];
   for (const dimensions of [
     { columns: 40, rows: 24 },
     { columns: 40, rows: 29 },
@@ -878,15 +895,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     });
     await assertPagedScreenFits(tui, {
       kind: "completion",
-      markers: [[
-        "Document map",
-        ".github/codekeeper/agents/maintenance-planner.md",
-        guidance.profileGuidance,
-        "Next proofs",
-        ...guidance.proofs.map((proof) => `- ${proof.mode}: ${proof.instruction}`),
-        guidance.reviewGateWarning,
-        guidance.closing
-      ]],
+      markers: [[...completionMarkers[0], "OpenAI traces: enabled", guidance.reviewGateWarning, guidance.closing]],
       ...dimensions
     });
     assertFrameFits(tui.output.lastSemanticFrame(), dimensions);

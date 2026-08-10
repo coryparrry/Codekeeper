@@ -104,6 +104,16 @@ export const CAPABILITIES = Object.freeze({
   })
 });
 export const CAPABILITY_IDS = Object.freeze(Object.keys(CAPABILITIES));
+export const MODEL_OPTIONS = Object.freeze({
+  openai: Object.freeze([
+    Object.freeze({ id: "sol-high", model: "gpt-5.6-sol", effort: "high", label: "GPT-5.6 Sol · high effort" }),
+    Object.freeze({ id: "terra-high", model: "gpt-5.6-terra", effort: "high", label: "GPT-5.6 Terra · high effort" }),
+    Object.freeze({ id: "terra-medium", model: "gpt-5.6-terra", effort: "medium", label: "GPT-5.6 Terra · medium effort" })
+  ]),
+  deepseek: Object.freeze([
+    Object.freeze({ id: "deepseek-v4-flash", model: "deepseek-v4-flash", effort: "none", label: "DeepSeek V4 Flash" })
+  ])
+});
 export const POLICY_TARGET = ".github/codekeeper.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,

@@ -11,6 +11,7 @@ import {
   DEEPSEEK_SECRET,
   ENABLED_VARIABLE,
   MODE_IDS,
+  MODEL_OPTIONS,
   MODES,
   OPENAI_SECRET,
   PRESET_IDS,
@@ -95,15 +96,40 @@ export function capabilitySummary(capabilities, modes = null) {
   return ids.map((id) => `${CAPABILITIES[id].label}: ${capabilities[id] ? "on" : "off"}.`);
 }
 
-export function requiredSecretNames({ modes, preset }) {
+export function requiredSecretNames({ modes, preset, tracing = true }) {
   const selected = normalizeModes(modes);
   if (!PRESET_IDS.includes(preset)) throw new InstallerError(`Unsupported preset: ${preset}`, { code: "PLAN_INVALID" });
   const names = [];
   const openaiNeeded = selected.some((mode) => mode !== "issues") || (selected.includes("issues") && preset === "openai");
   if (openaiNeeded) names.push(OPENAI_SECRET);
   if (selected.includes("issues") && preset === "mixed") names.push(DEEPSEEK_SECRET);
-  names.push(TRACE_SECRET, APP_SECRET);
+  if (tracing) names.push(TRACE_SECRET);
+  names.push(APP_SECRET);
   return Object.freeze(names);
+}
+
+export function normalizeModelChoices({ modes, preset, bundle, choices = {} }) {
+  const selected = normalizeModes(modes);
+  const policy = JSON.parse(bundle.contents[`policies/${preset}.json`]);
+  const normalized = {};
+  for (const mode of selected) {
+    const agent = policy.ai.agents[MODES[mode].policyAgent];
+    const options = MODEL_OPTIONS[agent.provider];
+    const defaultOption = options?.find((option) => option.model === agent.model && option.effort === agent.effort);
+    const choiceId = choices[mode] ?? defaultOption?.id;
+    const choice = options?.find((option) => option.id === choiceId);
+    if (!choice) throw new InstallerError(`Model choice is invalid for ${MODES[mode].label}.`, { code: "PLAN_INVALID" });
+    normalized[mode] = Object.freeze({
+      provider: agent.provider,
+      model: choice.model,
+      effort: choice.effort,
+      choice: choice.id
+    });
+  }
+  if (Object.keys(choices).some((mode) => !selected.includes(mode))) {
+    throw new InstallerError("Model choices do not match the selected workflows.", { code: "PLAN_INVALID" });
+  }
+  return Object.freeze(normalized);
 }
 
 export function appRegistrationUrl({ repository, displayName, ownerType = "User" }) {
@@ -156,7 +182,7 @@ export function completionGuidance(modes, enabled = true) {
     mode: item.mode,
     label: item.label,
     instruction: item.mode === "maintain"
-      ? "manual workflow_dispatch with dry_run=true; report-only unless an owner explicitly commands repair through a supporting runtime"
+      ? "Run manual workflow_dispatch with dry_run=true. It is report-only unless an owner commands repair through a supporting runtime."
       : item.mode === "review"
         ? "controlled same-repository pull request"
         : item.mode === "issues"
@@ -190,8 +216,11 @@ export function setupPullRequestBody(plan) {
     documentMap(plan.files).map((item) => [`\`${item.path}\``, item.purpose])
   );
   const workflows = markdownTable(
-    ["Mode", "Trigger", "Policy agent"],
-    workflowMap(plan.modes).map((item) => [item.mode, item.trigger, `\`${item.policyAgent}\``])
+    ["Mode", "Trigger", "Model"],
+    workflowMap(plan.modes).map((item) => {
+      const selection = plan.models[item.mode];
+      return [item.mode, item.trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
+    })
   );
   const proofs = [];
   const reviewDisabledNote = plan.modes.includes("review") && !plan.enabled
@@ -204,6 +233,8 @@ export function setupPullRequestBody(plan) {
   return `## Summary
 
 Codekeeper is configured with the **${plan.preset}** preset at source commit \`${plan.source.commit}\`. It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.
+
+OpenAI traces are **${plan.tracing ? "enabled" : "disabled"}**.
 
 Source: [${plan.source.repository}@${plan.source.commit}](https://github.com/${plan.source.repository}/tree/${plan.source.commit})
 
@@ -248,13 +279,17 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const automationBotLogin = modes.includes("review") ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
   if (modes.includes("review") && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
+  const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models });
+  const tracing = answers.tracing !== false;
   const files = renderInstallFiles(bundle, {
     modes,
     preset: answers.preset,
     displayName: answers.displayName,
     defaultBranch: snapshot.defaultBranch,
     ownerLogins,
-    capabilities
+    capabilities,
+    models,
+    tracing
   });
   const enabled = answers.enabled !== false;
   const variables = [
@@ -277,9 +312,11 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     ownerLogins,
     enabled,
     capabilities,
+    models,
+    tracing,
     files,
     variables,
-    secrets: requiredSecretNames({ modes, preset: answers.preset }).map((name) => ({ name })),
+    secrets: requiredSecretNames({ modes, preset: answers.preset, tracing }).map((name) => ({ name })),
     branch: SETUP_BRANCH,
     commitMessage: SETUP_COMMIT_MESSAGE,
     pullRequest: { title: SETUP_PR_TITLE }
@@ -308,7 +345,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   output.write("Recommended starter setup\n");
   output.write("  - Pull request review: your GitHub App posts comments, labels, and a blocking result on controlled same-repository PRs\n");
   output.write("  - Repository maintenance: begin with a manual dry run that makes no GitHub changes\n");
-  output.write("  - OpenAI preset: uses one model API key and one trace API key\n");
+  output.write("  - OpenAI preset: uses one OpenAI Platform API key for model calls\n");
   output.write("  - Issue triage and issue fix are not included\n");
   output.write("  - You choose whether Codekeeper starts when the setup pull request merges\n");
   output.write("  - The maintenance workflow includes a schedule after merge\n");
@@ -318,12 +355,12 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
       step: "setup",
       message: "Choose a starting setup",
       description: [
-        "Recommended installs pull-request review and maintenance with one OpenAI model-provider key plus a separate OpenAI trace key.",
+        "Recommended installs pull-request review and maintenance with OpenAI models.",
         "Custom lets you select issue triage, the separately gated fix workflow, or the mixed provider preset."
       ],
       defaultValue: "recommended",
       choices: [
-        { value: "recommended", label: "Recommended — review + maintenance, OpenAI preset" },
+        { value: "recommended", label: "Recommended — review + maintenance, OpenAI models" },
         { value: "custom", label: "Custom — choose workflows and provider preset" }
       ]
     }) === "recommended"
@@ -349,17 +386,50 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
       message: "Choose the model-provider preset:",
       defaultValue: RECOMMENDED_PRESET,
       choices: [
-        { value: "openai", label: "openai — one OpenAI model-provider key plus a separate OpenAI trace key (recommended)" },
-        { value: "mixed", label: "mixed — provider keys vary by workflow, plus a separate OpenAI trace key" }
+        { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
+        { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
       ]
     }, {
       step: "models",
       description: [
-        "The preset chooses the starting models. You can change them in .github/codekeeper.json.",
-        "Provider credentials are requested later and never stored in generated files."
+        "The preset chooses the model provider for each workflow.",
+        "You choose a model for each selected workflow on the next screens."
       ]
     }));
   }
+  const presetPolicy = JSON.parse(bundle.contents[`policies/${preset}.json`]);
+  const models = {};
+  for (const mode of normalizeModes(modes)) {
+    const agent = presetPolicy.ai.agents[MODES[mode].policyAgent];
+    const choices = MODEL_OPTIONS[agent.provider];
+    const defaultChoice = choices.find((choice) => choice.model === agent.model && choice.effort === agent.effort) ?? choices[0];
+    models[mode] = await prompt.select(tuiOptions(prompt, {
+      message: `Choose a model for ${MODES[mode].label}:`,
+      defaultValue: defaultChoice.id,
+      choices: choices.map((choice) => ({ value: choice.id, label: choice.label }))
+    }, {
+      step: "models",
+      description: [
+        `Provider: ${agent.provider}`,
+        "You can change this choice later in .github/codekeeper.json."
+      ]
+    }));
+  }
+  const tracing = prompt?.kind === "ink"
+    ? await prompt.select({
+      step: "tracing",
+      message: "Enable OpenAI traces?",
+      description: [
+        "Traces record model runs in OpenAI Platform Logs.",
+        "Enabled needs a separate OpenAI Platform API key. Disabled does not request the trace key."
+      ],
+      defaultValue: "enabled",
+      choices: [
+        { value: "enabled", label: "Enabled" },
+        { value: "disabled", label: "Disabled" }
+      ]
+    }) === "enabled"
+    : await prompt.confirm({ message: "Enable OpenAI traces?", defaultValue: true });
   const enabled = prompt?.kind === "ink"
     ? await prompt.select({
       step: "startup",
@@ -414,13 +484,13 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     }
   }, {
     step: "identity",
-    description: ["Keep the authenticated user unless another maintainer should be allowed to run owner-only commands."]
+    description: ["Keep the authenticated user unless another maintainer can run owner-only commands."]
   }));
 
   output.write("\nCredentials this setup will request later through GitHub CLI\n");
   output.write("Setup does not call a model. API keys go directly to GitHub CLI. Codekeeper does not display or store their values.\n");
   output.write("The installer sends the selected App key file directly to GitHub CLI. It does not read or display the key.\n");
-  for (const name of requiredSecretNames({ modes, preset })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
+  for (const name of requiredSecretNames({ modes, preset, tracing })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
 
   const policy = JSON.parse(bundle.contents[`policies/${preset}.json`]);
   output.write("\nSafety settings\n");
@@ -444,6 +514,8 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   return Object.freeze({
     modes: normalizeModes(modes),
     preset,
+    models,
+    tracing,
     displayName,
     ownerLogins: normalizeOwnerLogins(ownersText.split(",")),
     enabled,
@@ -456,7 +528,7 @@ export async function collectAppAnswers({ prompt, modes, output }) {
   output.write("  - Client ID: find the value that starts with Iv in the App settings\n");
   if (modes.includes("review")) output.write("  - App URL name: find the name at the end of the App settings URL\n");
   const appClientId = await prompt.inputText(tuiOptions(prompt, {
-    message: "GitHub App Client ID (starts with Iv; not the numeric App ID)",
+    message: "GitHub App Client ID (starts with Iv, not the numeric App ID)",
     validate: (value) => validClientId(value) || "Enter the App Client ID shown in GitHub App settings."
   }, {
     step: "GitHub App",
