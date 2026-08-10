@@ -16,7 +16,7 @@ const actionPins = {
   "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
   "actions/create-github-app-token": "bcd2ba49218906704ab6c1aa796996da409d3eb1",
   "openai/codex-action": "52fe01ec70a42f454c9d2ebd47598f9fd6893d56",
-  "reviewdog/action-actionlint": "50842263c20a7c46bd0065b9e624d3c569db061e"
+  "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
 const toolingManifestSha256 = "2ec489602097a2625ea66a5bb54037ee5f9c9974e59388eec15d6a14c7dc799d";
