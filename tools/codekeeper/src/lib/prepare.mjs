@@ -347,6 +347,9 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
   if (mode === "fix") {
     assertPlanTargetUnchanged(await readJson(planContextPath), context);
     context.plan = validatePlanResult(await readJson(planResultPath), target);
+    if (!context.plan.readyForFixer) {
+      throw new Error("Planner did not approve the requested fix");
+    }
   }
   await writeBundle({
     directory,

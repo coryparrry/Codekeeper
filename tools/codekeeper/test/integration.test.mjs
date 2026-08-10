@@ -695,6 +695,76 @@ test("fix preparation rejects a planner result after the frozen issue changes", 
   }
 });
 
+test("fix preparation stops before creating a bundle when the planner rejects the request", async (context) => {
+  const root = await createRepository();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const planDirectory = bundle(root, "rejected-plan-input");
+  const fixDirectory = bundle(root, "rejected-fix-input");
+  const planResultPath = bundle(root, "rejected-plan-result.json");
+  const config = structuredClone(templateConfig);
+  config.issues.allowAiImplementation = true;
+  config.repository.ownerLogins = ["repository-owner"];
+  const originalFetch = globalThis.fetch;
+  const originalRepository = process.env.GITHUB_REPOSITORY;
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/issues/5")) {
+      return new Response(JSON.stringify({
+        number: 5,
+        title: "Unclear request",
+        body: "The requested outcome is not proven.",
+        html_url: "https://github.com/acme/example/issues/5",
+        user: { login: "reporter" },
+        state: "open",
+        updated_at: "2026-08-10T10:00:00Z",
+        labels: []
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+  try {
+    await preparePlan({
+      targetNumber: 5,
+      actor: "repository-owner",
+      directory: planDirectory,
+      config,
+      token: "read-token",
+      ...agentProfileOptions(root, "plan")
+    });
+    await writeFile(planResultPath, JSON.stringify({
+      mode: "plan",
+      summary: "The request is not safe to implement.",
+      targetKind: "issue",
+      targetNumber: 5,
+      objective: "",
+      steps: [],
+      validation: [],
+      risks: ["The requested behavior is not established."],
+      readyForFixer: false,
+      noActionReason: "The desired outcome needs clarification before implementation."
+    }), "utf8");
+    await assert.rejects(
+      prepareFix({
+        targetNumber: 5,
+        actor: "repository-owner",
+        directory: fixDirectory,
+        config,
+        token: "read-token",
+        planResultPath,
+        planContextPath: path.join(planDirectory, "context.json"),
+        ...agentProfileOptions(root, "fix")
+      }),
+      /planner did not approve the requested fix/i
+    );
+    await assert.rejects(lstat(fixDirectory), (error) => error.code === "ENOENT");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+    else process.env.GITHUB_REPOSITORY = originalRepository;
+  }
+});
+
 test("prepare writes provider-compatible workspace output schemas for every mode", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-workspace-schema-test-"));
   context.after(() => rm(root, { recursive: true, force: true }));
