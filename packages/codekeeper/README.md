@@ -1,6 +1,6 @@
 # Codekeeper installer
 
-`codekeeper` is the Node.js installer for Codekeeper's versioned GitHub Actions workflows. `npx codekeeper init` opens a terminal UI, creates a setup branch, pushes it, and opens a setup pull request. By default, the selected workflows start after that pull request merges. You can choose a disabled install instead. The installer does not copy the private runtime into the adopter repository.
+`codekeeper` is the Node.js installer and configuration editor for Codekeeper's versioned GitHub Actions workflows. `npx codekeeper init` opens a terminal UI, creates a setup or update branch, pushes it, and opens a pull request. By default, the selected workflows start after the first pull request merges. You can choose a disabled install instead. The installer does not copy the private runtime into the adopter repository.
 
 The package is currently **unpublished** while private acceptance is in progress. Exercise the exact local tarball from a clean adopter checkout:
 
@@ -23,11 +23,11 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and proof sequence. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/38c0306a78888346208aae992a0786d7414e3c0a/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/9e467bd868a4c68ad84312e6c1532a42a22bea19/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/38c0306a78888346208aae992a0786d7414e3c0a/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
+| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/9e467bd868a4c68ad84312e6c1532a42a22bea19/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
@@ -36,22 +36,28 @@ The recommended setup includes pull-request review, repository maintenance, and 
 | Choice | What it adds |
 |---|---|
 | Pull request review | App-owned review output for controlled same-repository pull requests after Codekeeper is deliberately enabled. |
-| Repository maintenance | Manual or scheduled audits; the first proof is a manual `dry_run=true` run with no GitHub mutation. |
+| Repository maintenance | Manual or scheduled audits. When repository repair is on, each live run can create one bounded repair pull request. |
 | Issue triage | Issue-event labels and comments when enabled; not needed for the starter proof. |
-| Owner-authorized issue fix | A repair pull-request path that requires an owner command. The installer asks if issue implementation is on. |
+| Issue implementation and pull request repair | Automatically implements issues that triage marks ready when issue implementation is on. An owner can also use `/codekeeper fix` to repair an existing pull request. |
 
-The `openai` preset uses one OpenAI Platform provider key for every selected workflow. The `mixed` preset uses DeepSeek only for issue triage and OpenAI for the others, so selecting issue triage can require both provider keys. Both presets also request a separate OpenAI Platform trace-export key and the downloaded GitHub App PEM private key. A ChatGPT subscription is not an API key. Changing a model later is a small `.github/codekeeper.json` edit, not an installer change; the final preview shows each exact provider, model, and effort before mutation.
+The `openai` preset lists Luna, Sol, and Terra. You assign a model to each selected agent. The final preview shows the agent, provider, model, and effort. The `mixed` preset uses DeepSeek only for issue triage and OpenAI for the other agents. OpenAI traces are optional. When traces are on, the installer requests a separate OpenAI Platform trace-export key. A ChatGPT subscription is not an API key.
 
 After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
 1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, and only the selected caller workflows.
-2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `38c0306a78888346208aae992a0786d7414e3c0a`.
+2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `9e467bd868a4c68ad84312e6c1532a42a22bea19`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
 6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add setup`, pushes the branch, and opens a setup pull request.
 
 It never merges the pull request, runs a workflow, publishes an npm package, copies the runtime, or creates a hosted service.
+
+## Change an existing installation
+
+Run `npx codekeeper init` again from the current default branch. The installer detects the merged installation and reuses the current workflows, GitHub App settings, secrets, policy, and edited profiles. You can change the model assigned to each agent, capability switches, display name, owner logins, tracing, and the global enabled switch.
+
+The installer writes only values that changed. It preserves edited profiles and does not ask for secrets again. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
 
 ## Editable agent behavior
 
@@ -62,11 +68,11 @@ Every installation includes these fixed, versioned starter files:
 - `.github/codekeeper/agents/issue-triager.md`
 - `.github/codekeeper/agents/maintenance-planner.md`
 
-Edit and review these Markdown files through an ordinary pull request. After merge, their trusted default-branch versions tune future decisions: evidence and confidence thresholds, introduced-versus-pre-existing findings, severity and priority, test adequacy, duplicate criteria, risk calibration, and when the right result is no action or manual review.
+Edit and review these Markdown files through an ordinary pull request. After merge, their trusted default-branch versions tune priorities, work selection, implementation approach, review standards, evidence thresholds, duplicate criteria, risk decisions, writing, and when the right result is no action.
 
-Profiles are guidance inside an immutable security envelope. They cannot enable a workflow, change an event trigger, grant workspace writes, expand allowed paths, remove protected paths, authorize a repair, choose a branch, create or merge a pull request, close an issue, expose a secret, or change GitHub App permissions. Those powers remain in the pinned runtime, caller workflows, `.github/codekeeper.json`, and GitHub repository settings.
+Profiles control how an agent does its selected job. Capability switches control what GitHub actions it may take. Profiles cannot enable a disabled capability, change an event trigger, expand allowed paths, remove protected paths, expose a secret, or change GitHub App permissions.
 
-In particular, issue triage does not authorize implementation. Issue repair requires an explicit configured-owner command and its separate policy gate. Maintenance remains report-only unless an owner explicitly commands a repair after the runtime supporting that command is installed. A repair requested on an existing same-repository pull request belongs on that pull request's current head branch; it must not open a second pull request. These mutation guarantees are runtime rules, not promises that profile prose can grant or waive.
+When repository repair is on, a live maintenance run may make one bounded repair. When issue implementation is on, trusted triage can mark an issue ready and start implementation. The `CODEKEEPER_ENABLED` repository variable turns the whole installation on or off. A repair requested on an existing same-repository pull request stays on that pull request's current head branch; it does not open a second pull request.
 
 ## Preflight and safe failure
 
@@ -74,7 +80,7 @@ In particular, issue triage does not authorize implementation. Issue repair requ
 
 - a missing or unauthenticated `gh`, GitHub Enterprise Server, or missing repository admin access;
 - a dirty checkout, detached `HEAD`, stale local checkout, or a `HEAD` that is not the remote default branch;
-- an existing Codekeeper policy or caller, an existing `codekeeper/setup` branch, or a generated-file collision.
+- an incomplete existing Codekeeper installation, an existing setup or update branch for the same source commit, or a generated-file collision.
 
 The same collision checks cover all four agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
 
@@ -152,6 +158,6 @@ If you chose the enabled install, Codekeeper starts after the setup pull request
 | Maintenance | Manually dispatch with `dry_run=true`; confirm a sealed artifact and no GitHub mutation. |
 | Review | Open a controlled same-repository PR against the default branch and confirm the App-owned review and blocking gate. |
 | Issues | Open or update a controlled issue and confirm bounded triage without a false duplicate closure. |
-| Fix | Only after an owner deliberately sets `issues.allowAiImplementation=true`, use an owner-authorized command on a low-risk issue; confirm the PR is bounded and not auto-merged. |
+| Fix | Use a controlled issue that triage marks ready and confirm that implementation opens a bounded pull request. Use `/codekeeper fix` only to test repair on an existing pull request. |
 
-Codekeeper v1 has no upgrade, overwrite, force, non-interactive, GHES, verify, or automatic-merge command.
+Codekeeper v1 has no force, non-interactive, GHES, or separate verify command.

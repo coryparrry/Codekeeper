@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "38c0306a78888346208aae992a0786d7414e3c0a";
+export const SOURCE_COMMIT = "9e467bd868a4c68ad84312e6c1532a42a22bea19";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -22,11 +22,11 @@ export const MODES = Object.freeze({
     id: "maintain",
     label: "Repository maintenance",
     agentLabel: "Repository auditor",
-    description: "Runs repository audits manually or on a schedule. Start with a dry run that makes no changes.",
+    description: "Runs repository audits manually or on a schedule. Live runs can repair the repository when repair is on.",
     policyAgent: "audit",
     target: ".github/workflows/codekeeper-maintain.yml",
     asset: "workflows/maintain.yml",
-    trigger: "schedule or manual dry run"
+    trigger: "schedule or manual run"
   }),
   issues: Object.freeze({
     id: "issues",
@@ -40,13 +40,13 @@ export const MODES = Object.freeze({
   }),
   fix: Object.freeze({
     id: "fix",
-    label: "Owner-authorized issue fix",
+    label: "Issue implementation and pull request repair",
     agentLabel: "Maintenance planner",
-    description: "Can open a repair pull request after an owner command when issue implementation is selected.",
+    description: "Implements ready issues when issue implementation is on. Owners can also request a pull request repair.",
     policyAgent: "fix",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
-    trigger: "owner command or manual dry run"
+    trigger: "ready issue, owner command, or manual run"
   })
 });
 
@@ -74,7 +74,7 @@ export const AGENT_PROFILES = Object.freeze({
     id: "maintenance-planner",
     target: ".github/codekeeper/agents/maintenance-planner.md",
     asset: "agents/maintenance-planner.md",
-    purpose: "Editable owner-commanded repair judgment rules"
+    purpose: "Editable implementation and repair rules"
   })
 });
 export const AGENT_PROFILE_IDS = Object.freeze(Object.keys(AGENT_PROFILES));
@@ -85,13 +85,13 @@ export const CAPABILITIES = Object.freeze({
   repair: Object.freeze({
     id: "repair",
     label: "Repository repair",
-    description: "Allow owner-approved maintenance runs to create repair pull requests.",
+    description: "Allow live maintenance runs to create repair pull requests.",
     modes: Object.freeze(["maintain"])
   }),
   issueImplementation: Object.freeze({
     id: "issueImplementation",
     label: "Issue implementation",
-    description: "Allow an owner command to create a pull request that implements an issue.",
+    description: "Automatically implement issues that triage marks ready.",
     modes: Object.freeze(["fix"])
   }),
   duplicateClosure: Object.freeze({

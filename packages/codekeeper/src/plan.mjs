@@ -182,18 +182,18 @@ export function completionGuidance(modes, enabled = true) {
     mode: item.mode,
     label: item.label,
     instruction: item.mode === "maintain"
-      ? "Run manual workflow_dispatch with dry_run=true. It is report-only unless an owner commands repair through a supporting runtime."
+      ? "Run workflow_dispatch with dry_run=true to check the audit. A live run can repair when repository repair is on."
       : item.mode === "review"
         ? "controlled same-repository pull request"
         : item.mode === "issues"
           ? "controlled issue event"
-          : "owner command after you turn on issue implementation in the policy"
+          : "controlled ready issue; use /codekeeper fix for a pull request repair"
   }));
   return Object.freeze({
     heading: enabled
       ? "After the setup pull request merges, Codekeeper starts running the workflows you selected. Test each one before making its check required."
       : "Codekeeper will stay off after merge. Set CODEKEEPER_ENABLED=true when you are ready to test it.",
-    profileGuidance: "Edit .github/codekeeper/agents/*.md to change decision guidance. Profiles cannot grant write, trigger, branch, repair, issue closure, or merge access.",
+    profileGuidance: "Edit .github/codekeeper/agents/*.md to change priorities, work selection, implementation, review standards, and reporting. Capability switches control repair, issue implementation, issue closure, and merge actions.",
     proofs: Object.freeze(proofs),
     reviewGateWarning: proofs.some((item) => item.mode === "review")
       ? "Do not make the Codekeeper review gate required until its controlled review proof passes."
@@ -229,7 +229,7 @@ export function setupPullRequestBody(plan) {
   if (plan.modes.includes("maintain")) proofs.push("Run maintenance manually with `dry_run=true`.");
   if (plan.modes.includes("review")) proofs.push("Open a controlled same-repository pull request and verify the App-owned review.");
   if (plan.modes.includes("issues")) proofs.push("Use a controlled issue event and verify bounded triage.");
-  if (plan.modes.includes("fix")) proofs.push("Only after a deliberate policy change, use an owner-authorized fix command on a low-risk issue.");
+  if (plan.modes.includes("fix")) proofs.push("Use a controlled issue that triage marks ready. Use \`/codekeeper fix\` only when repairing an existing pull request.");
   return `## Summary
 
 Codekeeper is configured with the **${plan.preset}** preset at source commit \`${plan.source.commit}\`. It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.
@@ -262,7 +262,7 @@ ${plan.enabled
     ? "Codekeeper starts running the selected workflows. Test each one before making its check required:"
     : "Codekeeper stays off. Set `CODEKEEPER_ENABLED=true` when you are ready, then test each selected workflow:"}
 
-Edit \`.github/codekeeper/agents/*.md\` to tune evidence thresholds, risk judgment, and no-action decisions. These profiles cannot grant writes, change triggers or branches, authorize repairs, close issues, or enable merge. Maintenance remains report-only unless an owner explicitly commands a repair after the supporting runtime is installed.
+Edit \`.github/codekeeper/agents/*.md\` to tune priorities, work selection, implementation approach, review standards, and reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
 
 ${proofs.map((item) => `- ${item}`).join("\n")}
 

@@ -45,15 +45,15 @@ import {
 } from "./helpers.mjs";
 
 const EXPECTED_ASSETS = Object.freeze({
-  "agents/issue-triager.md": "866e45a5431d9e08fe036d47d3334106f0e0734dfeef0421bd5465a1f472b5d2",
-  "agents/maintenance-planner.md": "8ff0abe5c7b232b595f6e4f43c947314e7d0cce5c15d1b7cd0884f7526e17479",
-  "agents/pr-reviewer.md": "9b90b3ae1d2ac501924b0a38d4a559c8fb8e7e84ab309a41fc5b33739a40ce76",
-  "agents/repository-auditor.md": "82af520eee898bb55136d448116cf68308645c714f9626c0b099850a2e94b7ff",
+  "agents/issue-triager.md": "05662b59c92fae8f942b199f4ab1257c6b96014ffc45125aa71775313ce8fbac",
+  "agents/maintenance-planner.md": "0a71d814e12be7f0b917d62827a203a0d51ea4ec4c40566f839fda70f188b15e",
+  "agents/pr-reviewer.md": "a548423ea6098f3c0bcc17b0dbf60131cdd1689dec45504701b1949bc89e2894",
+  "agents/repository-auditor.md": "48c4c7c088751fe9b2eda76cbf20b5ad6495bed052f5fb05b4a5156964604445",
   "policies/mixed.json": "37e32105ba2300e465af8132b241633833130394eb5c15a300c0a6bf1c1f589d",
   "policies/openai.json": "753741a11159d48a9c6bd7d938edd3310b1e9d0d242e86098715db0e499faad0",
-  "workflows/fix.yml": "60e142109c0ff184d61ba1c149a96b134a038c5d3f41edb4c67876e6a7e6d5fc",
+  "workflows/fix.yml": "50c134c5e05efda61589b60d35bea5ba797c268e8e580dc4c059a39fdfae6995",
   "workflows/issues.yml": "3260d387b1ae7f76e21fdd0228062e139be3a25f047bfbd5762f638b67e153ca",
-  "workflows/maintain.yml": "1df21ec555e467813a086ef6c63a30fe1edfcf93389e4147f607b51d0a40082a",
+  "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
   "workflows/review.yml": "b77995d237b98fa02f79ea3bcd3363e63a38cd4580de126e1e64fab18c683730"
 });
 
@@ -141,11 +141,11 @@ test("bundled starter profiles are byte-for-byte canonical current-branch profil
   }
 });
 
-test("bundled starter profiles preserve the deterministic mutation boundary", async () => {
+test("bundled starter profiles describe enabled automation and retain fixed runtime limits", async () => {
   const { contents } = await loadVerifiedAssets();
-  assert.match(contents["agents/repository-auditor.md"], /report-only unless the frozen trusted context explicitly records/);
-  assert.match(contents["agents/issue-triager.md"], /Triage never starts or authorizes implementation/);
-  assert.match(contents["agents/issue-triager.md"], /exact `\/codekeeper fix` command from a configured owner/);
+  assert.match(contents["agents/repository-auditor.md"], /live run can request one repair when repository repair is on/);
+  assert.match(contents["agents/issue-triager.md"], /`ai-ready` starts a separate implementation run/);
+  assert.match(contents["agents/maintenance-planner.md"], /issue implementation is on and trusted triage marked it ready/);
   assert.match(contents["agents/maintenance-planner.md"], /exact open same-repository pull request's frozen head branch/);
   assert.match(contents["agents/maintenance-planner.md"], /Never propose a sibling branch, a replacement or follow-up pull request/);
   assert.match(contents["agents/pr-reviewer.md"], /Review is not repair authorization/);
@@ -367,9 +367,9 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.match(plan.pullRequest.body, /\| review \| Pull request reviewer \|/);
   assert.match(plan.pullRequest.body, /OpenAI traces are \*\*enabled\*\*/);
   assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
-  assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune evidence thresholds/);
-  assert.match(plan.pullRequest.body, /cannot grant writes, change triggers or branches, authorize repairs, close issues, or enable merge/);
-  assert.match(plan.pullRequest.body, /Maintenance remains report-only unless an owner explicitly commands a repair/);
+  assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune priorities, work selection, implementation approach/);
+  assert.match(plan.pullRequest.body, /capability switches above control which GitHub actions Codekeeper can take/);
+  assert.match(plan.pullRequest.body, /live maintenance run can repair when repository repair is on/);
   assert.doesNotMatch(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
   assert.match(plan.pullRequest.body, /did not merge this pull request or run a workflow/);
   assert.doesNotMatch(plan.pullRequest.body, /PRIVATE KEY|sk-[A-Za-z0-9]/i);

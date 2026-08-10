@@ -2,7 +2,7 @@
   "name": "codekeeper",
   "version": "0.2.0",
   "private": true,
-  "description": "Guided, disabled-by-default installer for Codekeeper GitHub workflows",
+  "description": "Guided installer and configuration editor for Codekeeper GitHub workflows",
   "type": "module",
   "bin": {
     "codekeeper": "bin/codekeeper.mjs"

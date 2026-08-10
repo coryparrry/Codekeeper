@@ -612,7 +612,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-maintain\.yml/);
   assert.match(output.toString(), /\.github\/codekeeper\/agents\/pr-reviewer\.md/);
   assert.match(output.toString(), /edit decision guidance in \.github\/codekeeper\/agents/);
-  assert.match(output.toString(), /Profiles cannot grant write, trigger, branch, repair, issue closure, or merge access/);
+  assert.match(output.toString(), /Capability switches control repair, issue implementation, issue closure, and merge actions/);
   assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
   assert.match(output.toString(), /After the setup pull request merges, Codekeeper starts running the workflows you selected/);
   assert.match(output.toString(), /Do not make the Codekeeper review gate required until its controlled review proof passes/);
