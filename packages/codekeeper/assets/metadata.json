@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "repository": "coryparrry/Codekeeper",
-    "commit": "6bb41449df9fbf96a3d187fea62e07e45ada8823"
+    "commit": "c923632280783d4bdfd5183d59e42deec238b94b"
   },
   "assets": {
     "agents/pr-reviewer.md": {
