@@ -27,7 +27,7 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/94df55ad6bf97b26f4449593ef44a8745282636c/tools/codekeeper/agents) | Immutable source and provenance for the five starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
+| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/94df55ad6bf97b26f4449593ef44a8745282636c/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
@@ -66,7 +66,6 @@ Every installation includes these fixed, versioned starter files:
 - `.github/codekeeper/agents/pr-reviewer.md`
 - `.github/codekeeper/agents/repository-auditor.md`
 - `.github/codekeeper/agents/issue-triager.md`
-- `.github/codekeeper/agents/maintenance-planner.md`
 - `.github/codekeeper/agents/fixer.md`
 
 Edit and review these Markdown files through an ordinary pull request. After merge, their trusted default-branch versions tune priorities, work selection, implementation approach, review standards, evidence thresholds, duplicate criteria, risk decisions, writing, and when the right result is no action.
@@ -83,7 +82,7 @@ When repository repair is on, a live maintenance run may make one bounded repair
 - a dirty checkout, detached `HEAD`, stale local checkout, or a `HEAD` that is not the remote default branch;
 - an incomplete existing Codekeeper installation, an existing setup or update branch for the same source commit, or a generated-file collision.
 
-The same collision checks cover all five agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
+The same collision checks cover all four agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
 
 If setup fails, follow the recovery command printed by the installed binary. The installer preserves recoverable branch or pull-request state. Do not merge a partial setup.
 

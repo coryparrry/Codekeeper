@@ -9,7 +9,6 @@ export const AGENT_PROFILE_PATHS = Object.freeze({
   review: ".github/codekeeper/agents/pr-reviewer.md",
   audit: ".github/codekeeper/agents/repository-auditor.md",
   issue: ".github/codekeeper/agents/issue-triager.md",
-  plan: ".github/codekeeper/agents/maintenance-planner.md",
   fix: ".github/codekeeper/agents/fixer.md"
 });
 

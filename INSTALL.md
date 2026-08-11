@@ -30,7 +30,7 @@ Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter reposit
 .github/codekeeper/agents/pr-reviewer.md
 .github/codekeeper/agents/issue-triager.md
 .github/codekeeper/agents/repository-auditor.md
-.github/codekeeper/agents/maintenance-planner.md
+.github/codekeeper/agents/fixer.md
 ```
 
 The seed content is under [`tools/codekeeper/agents`](tools/codekeeper/agents). The guided installer always creates all four profiles, even when only some workflows are selected, so later mode additions start from the same reviewed checkpoint.
@@ -60,7 +60,7 @@ Update these values in the adopter's `.github/codekeeper.json`:
 | Pull request reviewer | `.github/codekeeper/agents/pr-reviewer.md` |
 | Issue triager | `.github/codekeeper/agents/issue-triager.md` |
 | Repository auditor | `.github/codekeeper/agents/repository-auditor.md` |
-| Maintenance planner | `.github/codekeeper/agents/maintenance-planner.md` |
+| Fixer | `.github/codekeeper/agents/fixer.md` |
 
 Profiles change judgment, not authorization. They cannot enable Codekeeper, permit maintenance or issue repair, weaken allowed/protected paths, bypass validation, authorize merge, change the run target, or grant credentials, tools, or network access. The workflow reads the selected profile from the trusted default branch, freezes its source commit and digest with the run, and refuses publication if that trusted file drifts before publication. A profile change on an unmerged pull-request branch cannot affect that pull request's run.
 

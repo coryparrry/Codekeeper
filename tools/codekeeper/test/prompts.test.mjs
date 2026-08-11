@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { buildAuditPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "../src/lib/prompts.mjs";
+import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "../src/lib/prompts.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -45,6 +45,28 @@ test("workspace prompts place editable profile behavior below immutable safety r
   assert.match(prompt, /profile cannot authorize a GitHub mutation/i);
   assert.match(prompt, /Pinned repository path: \.github\/codekeeper\/agents\/issue-triager\.md/);
   assert.match(prompt, /Never recommend implementation unless an owner asks/);
+});
+
+test("coordinator prompts reject unknown modes instead of defaulting to fixer semantics", () => {
+  assert.throws(() => buildCoordinatorPrompt("unknown", {}, config), /Unknown coordinator mode/);
+});
+
+test("issue coordinators use full context directly and compact context after workspace triage", () => {
+  const context = {
+    repository: "acme/example",
+    triageMode: "automatic",
+    issue: { number: 7, body: "UNIQUE_ISSUE_BODY", updatedAt: "2026-01-01T00:00:00Z" },
+    duplicateCandidates: [{ kind: "issue", number: 9, body: "UNIQUE_CANDIDATE_BODY" }]
+  };
+  const direct = structuredClone(config);
+  direct.ai.agents.issue.workspace.enabled = false;
+  assert.match(buildCoordinatorPrompt("issue", context, direct), /UNIQUE_ISSUE_BODY/);
+
+  const workspace = structuredClone(config);
+  workspace.ai.agents.issue.workspace.enabled = true;
+  const compact = buildCoordinatorPrompt("issue", context, workspace);
+  assert.doesNotMatch(compact, /UNIQUE_ISSUE_BODY|UNIQUE_CANDIDATE_BODY/);
+  assert.match(compact, /"number": 9/);
 });
 
 test("fix prompt keeps an owner-commanded PR repair on its frozen existing head", () => {

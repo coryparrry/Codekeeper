@@ -41,30 +41,56 @@ async function createFreshDirectory(directory) {
   }
 }
 
-function candidateComponents({ contextBytes, resultBytes, patchBytes, validationBytes, agentProfileBytes }) {
+function candidateComponents({ contextBytes, resultBytes, patchBytes, validationBytes, agentProfileBytes, runtimeMetadataBytes }) {
   return {
     contextSha256: sha256(contextBytes),
     resultSha256: sha256(resultBytes),
     patchSha256: patchBytes ? sha256(patchBytes) : null,
     validationSha256: sha256(validationBytes),
-    agentProfileSha256: sha256(agentProfileBytes)
+    agentProfileSha256: sha256(agentProfileBytes),
+    runtimeMetadataSha256: sha256(runtimeMetadataBytes)
   };
 }
 
-async function writeCandidate({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, agentProfileBytes }) {
+function assertRuntimeMetadata(metadata, mode) {
+  if (!metadata || metadata.mode !== mode || !metadata.usage || typeof metadata.usage !== "object") {
+    throw new Error("Coordinator runtime metadata is missing or invalid");
+  }
+  for (const field of ["attempt", "maxTurns", "durationMs", "promptBytes", "evidenceBytes", "outputBytes"]) {
+    if (!Number.isFinite(metadata[field]) || metadata[field] < 0) {
+      throw new Error(`Coordinator runtime metadata has an invalid ${field}`);
+    }
+  }
+  for (const field of ["requests", "inputTokens", "outputTokens", "totalTokens", "cachedInputTokens"]) {
+    if (!Number.isFinite(metadata.usage[field]) || metadata.usage[field] < 0) {
+      throw new Error(`Coordinator runtime metadata has invalid usage.${field}`);
+    }
+  }
+  return metadata;
+}
+
+async function readRuntimeMetadata(directory, mode) {
+  const filePath = path.join(directory, "runtime-metadata.json");
+  const bytes = await readRegularFile(filePath);
+  assertRuntimeMetadata(await readRegularJson(filePath), mode);
+  return bytes;
+}
+
+async function writeCandidate({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, agentProfileBytes, runtimeMetadataBytes }) {
   await createFreshDirectory(artifactDirectory);
   await writeFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE), agentProfileBytes);
   await writeJson(path.join(artifactDirectory, "context.json"), context);
   await writeJson(path.join(artifactDirectory, "result.json"), result);
   await writeJson(path.join(artifactDirectory, "validation.json"), validation);
+  await writeFile(path.join(artifactDirectory, "runtime-metadata.json"), runtimeMetadataBytes);
   if (patchBytes) await writeFile(path.join(artifactDirectory, "patch.diff"), patchBytes);
 
   const contextBytes = await readRegularFile(path.join(artifactDirectory, "context.json"));
   const resultBytes = await readRegularFile(path.join(artifactDirectory, "result.json"));
   const validationBytes = await readRegularFile(path.join(artifactDirectory, "validation.json"));
-  const components = candidateComponents({ contextBytes, resultBytes, patchBytes, validationBytes, agentProfileBytes });
+  const components = candidateComponents({ contextBytes, resultBytes, patchBytes, validationBytes, agentProfileBytes, runtimeMetadataBytes });
   const candidate = {
-    version: 1,
+    version: 2,
     mode: context.mode,
     repository: context.repository,
     patch,
@@ -78,13 +104,14 @@ async function writeCandidate({ artifactDirectory, context, result, patch = null
   };
 }
 
-async function writeArtifact({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, config, configSha256, agentProfileBytes }) {
+async function writeArtifact({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, config, configSha256, agentProfileBytes, runtimeMetadataBytes }) {
   await createFreshDirectory(artifactDirectory);
   await writeFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE), agentProfileBytes);
   await writeJson(path.join(artifactDirectory, "context.json"), context);
   await writeJson(path.join(artifactDirectory, "result.json"), result);
   await writeJson(path.join(artifactDirectory, "config.json"), config);
   await writeJson(path.join(artifactDirectory, "validation.json"), validation);
+  await writeFile(path.join(artifactDirectory, "runtime-metadata.json"), runtimeMetadataBytes);
   if (patchBytes) await writeFile(path.join(artifactDirectory, "patch.diff"), patchBytes);
 
   const contextBytes = await readRegularFile(path.join(artifactDirectory, "context.json"));
@@ -93,7 +120,7 @@ async function writeArtifact({ artifactDirectory, context, result, patch = null,
   const validationBytes = await readRegularFile(path.join(artifactDirectory, "validation.json"));
   const sealedPatchBytes = patchBytes ? await readRegularFile(path.join(artifactDirectory, "patch.diff")) : null;
   const manifest = {
-    version: 2,
+    version: 3,
     sealed: true,
     mode: context.mode,
     repository: context.repository,
@@ -103,7 +130,7 @@ async function writeArtifact({ artifactDirectory, context, result, patch = null,
     validation,
     configSha256,
     configFileSha256: sha256(configBytes),
-    ...candidateComponents({ contextBytes, resultBytes, patchBytes: sealedPatchBytes, validationBytes, agentProfileBytes })
+    ...candidateComponents({ contextBytes, resultBytes, patchBytes: sealedPatchBytes, validationBytes, agentProfileBytes, runtimeMetadataBytes })
   };
   const manifestPath = path.join(artifactDirectory, "manifest.json");
   await writeJson(manifestPath, manifest);
@@ -146,7 +173,8 @@ export async function validateReview({ directory, contextPath = path.join(direct
     throw new Error(`Review mode modified the checkout: ${changes.files.map((file) => file.path).join(", ")}`);
   }
   const agentProfile = await loadFrozenAgentProfile({ mode: "review", directory, context });
-  return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["head", "diff-hunks", "clean-worktree"] }, agentProfileBytes: agentProfile.bytes });
+  const runtimeMetadataBytes = await readRuntimeMetadata(directory, "review");
+  return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["head", "diff-hunks", "clean-worktree"] }, agentProfileBytes: agentProfile.bytes, runtimeMetadataBytes });
 }
 
 export async function validateIssue({ directory, contextPath = path.join(directory, "context.json"), resultPath, artifactDirectory, config, configSha256 }) {
@@ -159,12 +187,13 @@ export async function validateIssue({ directory, contextPath = path.join(directo
       throw new Error(`Issue #${context.issue.number} cannot be its own duplicate`);
     }
     const trustedCandidates = new Set(
-      (context.existingOpenIssues ?? [])
+      (context.duplicateCandidates ?? [])
+        .filter((candidate) => candidate?.kind === "issue")
         .map((candidate) => candidate?.number)
         .filter((number) => Number.isSafeInteger(number) && number > 0)
     );
     if (!trustedCandidates.has(result.duplicateOf)) {
-      throw new Error(`Duplicate target #${result.duplicateOf} was not present in trusted open-issue context`);
+      throw new Error(`Duplicate target #${result.duplicateOf} was not present in the trusted issue shortlist`);
     }
   }
   const changes = await collectWorkingTreeChanges();
@@ -172,7 +201,8 @@ export async function validateIssue({ directory, contextPath = path.join(directo
     throw new Error(`Issue triage modified the checkout: ${changes.files.map((file) => file.path).join(", ")}`);
   }
   const agentProfile = await loadFrozenAgentProfile({ mode: "issue", directory, context });
-  return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["duplicate-target", "clean-worktree"] }, agentProfileBytes: agentProfile.bytes });
+  const runtimeMetadataBytes = await readRuntimeMetadata(directory, "issue");
+  return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["duplicate-target", "clean-worktree"] }, agentProfileBytes: agentProfile.bytes, runtimeMetadataBytes });
 }
 
 async function capturePatch(cwd = process.cwd()) {
@@ -242,7 +272,8 @@ export async function validateAudit({ directory, contextPath = path.join(directo
     risk: result.repair.risk
   });
   const agentProfile = await loadFrozenAgentProfile({ mode: "audit", directory, context });
-  return writeCandidate({ artifactDirectory, context, result, patch, patchBytes, validation: { checks: ["head", "patch-policy"] }, agentProfileBytes: agentProfile.bytes });
+  const runtimeMetadataBytes = await readRuntimeMetadata(directory, "audit");
+  return writeCandidate({ artifactDirectory, context, result, patch, patchBytes, validation: { checks: ["head", "patch-policy"] }, agentProfileBytes: agentProfile.bytes, runtimeMetadataBytes });
 }
 
 export async function validateFix({ directory, contextPath = path.join(directory, "context.json"), resultPath, artifactDirectory, config, configSha256, targetNumber }) {
@@ -284,7 +315,8 @@ export async function validateFix({ directory, contextPath = path.join(directory
     risk: result.risk
   });
   const agentProfile = await loadFrozenAgentProfile({ mode: "fix", directory, context });
-  return writeCandidate({ artifactDirectory, context, result, patch, patchBytes, validation: { checks: ["head", "patch-policy"] }, agentProfileBytes: agentProfile.bytes });
+  const runtimeMetadataBytes = await readRuntimeMetadata(directory, "fix");
+  return writeCandidate({ artifactDirectory, context, result, patch, patchBytes, validation: { checks: ["head", "patch-policy"] }, agentProfileBytes: agentProfile.bytes, runtimeMetadataBytes });
 }
 
 function validateResultForMode(mode, result, context, config) {
@@ -303,7 +335,7 @@ async function readCandidate({ mode, candidateDirectory, expectedCandidateSha256
     throw new Error("Candidate artifact changed after validation");
   }
   const candidate = await readRegularJson(candidatePath);
-  if (candidate.version !== 1 || candidate.mode !== mode) throw new Error("Candidate metadata is invalid");
+  if (candidate.version !== 2 || candidate.mode !== mode) throw new Error("Candidate metadata is invalid");
 
   const contextPath = path.join(candidateDirectory, "context.json");
   const resultPath = path.join(candidateDirectory, "result.json");
@@ -312,6 +344,9 @@ async function readCandidate({ mode, candidateDirectory, expectedCandidateSha256
   const resultBytes = await readRegularFile(resultPath);
   const validationBytes = await readRegularFile(validationPath);
   const agentProfileBytes = await readRegularFile(path.join(candidateDirectory, AGENT_PROFILE_BUNDLE_FILE));
+  const runtimeMetadataPath = path.join(candidateDirectory, "runtime-metadata.json");
+  const runtimeMetadataBytes = await readRegularFile(runtimeMetadataPath);
+  assertRuntimeMetadata(await readRegularJson(runtimeMetadataPath), mode);
   const context = await readRegularJson(contextPath);
   const result = await readRegularJson(resultPath);
   const validation = await readRegularJson(validationPath);
@@ -323,6 +358,9 @@ async function readCandidate({ mode, candidateDirectory, expectedCandidateSha256
   }
   if (sha256(agentProfileBytes) !== candidate.agentProfileSha256 || sha256(agentProfileBytes) !== context.agentProfile?.sha256) {
     throw new Error("Candidate agent profile is not the frozen trusted profile");
+  }
+  if (sha256(runtimeMetadataBytes) !== candidate.runtimeMetadataSha256) {
+    throw new Error("Candidate runtime metadata hash does not match metadata");
   }
   assertTrustedContext(context, mode);
   if (candidate.repository !== context.repository) throw new Error("Candidate repository does not match its context");
@@ -341,7 +379,7 @@ async function readCandidate({ mode, candidateDirectory, expectedCandidateSha256
   } else if (candidate.patchSha256 !== null) {
     throw new Error("Candidate contains an unexpected patch hash");
   }
-  return { candidate, context, result, validation, patchBytes, agentProfileBytes };
+  return { candidate, context, result, validation, patchBytes, agentProfileBytes, runtimeMetadataBytes };
 }
 
 async function verifyPatchCandidate({ mode, candidateDirectory, expectedCandidateSha256, config, configSha256 }) {
@@ -383,7 +421,7 @@ async function verifyPatchCandidate({ mode, candidateDirectory, expectedCandidat
 
 async function seal({ mode, candidateDirectory, artifactDirectory, expectedCandidateSha256, expectedContextSha256, config, configSha256 }) {
   if (!/^[a-f0-9]{64}$/i.test(expectedContextSha256)) throw new Error("--expected-context-sha must be a SHA-256 digest");
-  const { candidate, context, result, validation, patchBytes, agentProfileBytes } = await readCandidate({
+  const { candidate, context, result, validation, patchBytes, agentProfileBytes, runtimeMetadataBytes } = await readCandidate({
     mode,
     candidateDirectory,
     expectedCandidateSha256,
@@ -403,7 +441,8 @@ async function seal({ mode, candidateDirectory, artifactDirectory, expectedCandi
     validation,
     config,
     configSha256,
-    agentProfileBytes
+    agentProfileBytes,
+    runtimeMetadataBytes
   });
 }
 

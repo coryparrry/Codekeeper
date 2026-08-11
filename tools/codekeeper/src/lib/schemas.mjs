@@ -1,13 +1,13 @@
 const LIMITS = Object.freeze({
   title: 512,
-  summary: 12000,
-  body: 20000,
+  summary: 2000,
+  body: 6000,
   path: 2048,
   key: 512,
   label: 128,
-  command: 2000,
-  result: 8000,
-  diagram: 6000
+  command: 500,
+  result: 2000,
+  diagram: 4000
 });
 
 function isPlainObject(value) {
@@ -212,31 +212,11 @@ export function fixSchema(target = null) {
           command: stringSchema({ maxLength: LIMITS.command }),
           result: stringSchema({ maxLength: LIMITS.result })
         }),
-        maxItems: 20
+        maxItems: 8
       },
       readyForReview: { type: "boolean" },
       noChangeReason: nullableString(LIMITS.body)
     });
-}
-
-export function planSchema(target = null) {
-  const targetKind = target?.kind;
-  const targetNumber = target?.number;
-  if (target !== null && (!["issue", "pull_request"].includes(targetKind) || !Number.isSafeInteger(targetNumber) || targetNumber <= 0)) {
-    throw new Error("Plan schema requires a valid frozen target");
-  }
-  return object({
-    mode: { const: "plan" },
-    summary: stringSchema({ maxLength: LIMITS.summary }),
-    targetKind: target ? { const: targetKind } : { enum: ["issue", "pull_request"] },
-    targetNumber: target ? { const: targetNumber } : { type: "integer", minimum: 1 },
-    objective: stringSchema({ minLength: 0, maxLength: LIMITS.body }),
-    steps: { type: "array", items: stringSchema({ maxLength: LIMITS.body }), maxItems: 20 },
-    validation: { type: "array", items: stringSchema({ maxLength: LIMITS.command }), maxItems: 20 },
-    risks: { type: "array", items: stringSchema({ maxLength: LIMITS.summary }), maxItems: 12 },
-    readyForFixer: { type: "boolean" },
-    noActionReason: nullableString(LIMITS.body)
-  });
 }
 
 function assert(condition, message) {
@@ -466,7 +446,7 @@ export function validateFixResult(result, target) {
   }
   assertString(result.changedSummary, "changedSummary", { allowEmpty: true, maxLength: LIMITS.body });
   assert(Array.isArray(result.testsRun), "testsRun must be an array");
-  assert(result.testsRun.length <= 20, "testsRun has too many entries");
+  assert(result.testsRun.length <= 8, "testsRun has too many entries");
   for (const [index, test] of result.testsRun.entries()) {
     assertExactKeys(test, ["command", "result"], `testsRun[${index}]`);
     assertString(test.command, `testsRun[${index}].command`, { maxLength: LIMITS.command });
@@ -476,30 +456,6 @@ export function validateFixResult(result, target) {
   assertNullableString(result.noChangeReason, "noChangeReason", LIMITS.body);
   if (result.noChangeReason !== null) {
     assert(!result.readyForReview, "no-change result cannot be ready for review");
-  }
-  return result;
-}
-
-export function validatePlanResult(result, target) {
-  assertExactKeys(result, [
-    "mode", "summary", "targetKind", "targetNumber", "objective", "steps", "validation", "risks", "readyForFixer", "noActionReason"
-  ], "result");
-  assert(result.mode === "plan", "mode must be plan");
-  assert(result.targetKind === target?.kind, "targetKind must match the frozen target");
-  assert(result.targetNumber === target?.number, "targetNumber must match the frozen target");
-  assertString(result.summary, "summary", { maxLength: LIMITS.summary });
-  assertString(result.objective, "objective", { allowEmpty: true, maxLength: LIMITS.body });
-  assertUniqueStrings(result.steps, "steps", { maximum: 20, itemMaximum: LIMITS.body });
-  assertUniqueStrings(result.validation, "validation", { maximum: 20, itemMaximum: LIMITS.command });
-  assertUniqueStrings(result.risks, "risks", { maximum: 12, itemMaximum: LIMITS.summary });
-  assert(typeof result.readyForFixer === "boolean", "readyForFixer must be boolean");
-  assertNullableString(result.noActionReason, "noActionReason", LIMITS.body);
-  if (result.readyForFixer) {
-    assert(result.objective.length > 0, "ready plans require an objective");
-    assert(result.steps.length > 0, "ready plans require at least one step");
-    assert(result.noActionReason === null, "ready plans cannot include noActionReason");
-  } else {
-    assert(result.noActionReason !== null, "plans that are not ready require noActionReason");
   }
   return result;
 }

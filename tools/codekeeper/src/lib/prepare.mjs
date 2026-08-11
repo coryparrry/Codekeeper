@@ -5,8 +5,8 @@ import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./g
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
 import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
-import { auditSchema, fixSchema, issueSchema, planSchema, providerCompatibleJsonSchema, reviewSchema, validatePlanResult } from "./schemas.mjs";
-import { buildAuditPrompt, buildFixPrompt, buildIssuePrompt, buildPlanPrompt, buildReviewPrompt } from "./prompts.mjs";
+import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
+import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
 import { assertRunnerOwnedDirectory, runUrl } from "./workspace.mjs";
 
 function repositoryFromEvent(event) {
@@ -25,10 +25,13 @@ function boundedLabels(labels, maximum = 30) {
     .map((label) => boundedText(typeof label === "string" ? label : label?.name, 128, "…"));
 }
 
+function configuredOwnerLogins(config) {
+  return new Set((config.repository.ownerLogins ?? []).map((login) => String(login).trim().toLowerCase()));
+}
+
 function isConfiguredOwner(config, actor) {
   const normalizedActor = String(actor ?? "").trim().toLowerCase();
-  return normalizedActor.length > 0 && (config.repository.ownerLogins ?? [])
-    .some((owner) => String(owner).trim().toLowerCase() === normalizedActor);
+  return normalizedActor.length > 0 && configuredOwnerLogins(config).has(normalizedActor);
 }
 
 function ensureSameRepositoryPullRequest(event, repository) {
@@ -41,7 +44,7 @@ function ensureSameRepositoryPullRequest(event, repository) {
   return pull;
 }
 
-async function writeBundle({ directory, context, prompt, schema, agentProfile }) {
+async function writeBundle({ directory, context, prompt, workspacePrompt, schema, agentProfile }) {
   assertRunnerOwnedDirectory(directory);
   await mkdir(path.dirname(directory), { recursive: true });
   try {
@@ -53,6 +56,7 @@ async function writeBundle({ directory, context, prompt, schema, agentProfile })
   await writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), agentProfile.bytes, { flag: "wx" });
   await writeJson(path.join(directory, "context.json"), context);
   await writeText(path.join(directory, "prompt.md"), `${prompt}\n`);
+  await writeText(path.join(directory, "workspace-prompt.md"), `${workspacePrompt}\n`);
   await writeJson(path.join(directory, "schema.json"), providerCompatibleJsonSchema(schema));
 }
 
@@ -73,22 +77,49 @@ function runMetadata({ toolingSha = process.env.CODEKEEPER_TOOLING_SHA ?? "", co
   };
 }
 
-function frozenFixTarget(context) {
-  return {
-    repository: context.repository,
-    baseSha: context.baseSha,
-    defaultBranch: context.defaultBranch,
-    target: context.target,
-    issue: context.issue ?? null,
-    pullRequest: context.pullRequest ?? null
-  };
+function normalizedWords(value) {
+  return new Set(String(value ?? "").toLowerCase().match(/[a-z0-9]{3,}/g) ?? []);
 }
 
-function assertPlanTargetUnchanged(planContext, currentContext) {
-  if (planContext?.mode !== "plan") throw new Error("Fix preparation requires a planner context");
-  if (JSON.stringify(frozenFixTarget(planContext)) !== JSON.stringify(frozenFixTarget(currentContext))) {
-    throw new Error(`Target #${currentContext.target.number} changed after planning; stale plan will not continue`);
-  }
+function overlapScore(a, right) {
+  const b = normalizedWords(right);
+  if (!a.size || !b.size) return 0;
+  let overlap = 0;
+  for (const word of a) if (b.has(word)) overlap += 1;
+  return overlap / (a.size + b.size - overlap);
+}
+
+function duplicateCandidates(issue, issues, pulls, maximum = 5) {
+  const needle = `${issue.title ?? ""}\n${issue.body ?? ""}`;
+  const needleWords = normalizedWords(needle);
+  return [
+    ...issues.filter((candidate) => candidate.number !== issue.number).map((candidate) => ({ kind: "issue", candidate })),
+    ...pulls.map((candidate) => ({ kind: "pull_request", candidate }))
+  ]
+    .map(({ kind, candidate }) => ({
+      kind,
+      number: candidate.number,
+      title: boundedText(candidate.title, 512, "…"),
+      body: boundedText(candidate.body, 2000),
+      labels: boundedLabels(candidate.labels),
+      url: boundedText(candidate.html_url, 2048, "…"),
+      score: overlapScore(needleWords, `${candidate.title ?? ""}\n${candidate.body ?? ""}`)
+    }))
+    .sort((a, b) => b.score - a.score || a.number - b.number)
+    .slice(0, maximum)
+    .map(({ score: _score, ...candidate }) => candidate);
+}
+
+function boundedOwnerComments(comments, config) {
+  const owners = configuredOwnerLogins(config);
+  return comments
+    .filter((comment) => owners.has(String(comment.user?.login ?? "").trim().toLowerCase()))
+    .slice(-5)
+    .map((comment) => ({
+      author: boundedText(comment.user?.login, 256, "…"),
+      body: boundedText(comment.body, 2000),
+      createdAt: comment.created_at ?? ""
+    }));
 }
 
 export async function prepareReview({ eventPath, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
@@ -126,30 +157,34 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
   if (!context.pullRequest.baseSha || !context.pullRequest.headSha) {
     throw new Error("Pull request base/head SHA is missing");
   }
-  context.pullRequest.changedFiles = await boundedChangedFilesBetween(
-    context.pullRequest.baseSha,
-    context.pullRequest.headSha,
-    config.review.maximumChangedFiles
-  );
-  if (config.review.includeDiffInAgentContext) {
-    context.pullRequest.diff = await boundedDiffBetween(
+  const disabledDiff = {
+    patch: "",
+    bytes: 0,
+    includedBytes: 0,
+    truncated: false,
+    disabled: true
+  };
+  const [changedFiles, diff] = await Promise.all([
+    boundedChangedFilesBetween(
       context.pullRequest.baseSha,
       context.pullRequest.headSha,
-      config.review.maximumDiffBytes
-    );
-  } else {
-    context.pullRequest.diff = {
-      patch: "",
-      bytes: 0,
-      includedBytes: 0,
-      truncated: false,
-      disabled: true
-    };
-  }
+      config.review.maximumChangedFiles
+    ),
+    config.review.includeDiffInAgentContext
+      ? boundedDiffBetween(
+          context.pullRequest.baseSha,
+          context.pullRequest.headSha,
+          config.review.maximumDiffBytes
+        )
+      : disabledDiff
+  ]);
+  context.pullRequest.changedFiles = changedFiles;
+  context.pullRequest.diff = diff;
   await writeBundle({
     directory,
     context,
-    prompt: buildReviewPrompt(context, config, agentProfile.text),
+    prompt: buildCoordinatorPrompt("review", context, config),
+    workspacePrompt: buildReviewPrompt(context, config, agentProfile.text),
     schema: reviewSchema(config),
     agentProfile
   });
@@ -177,7 +212,8 @@ export async function prepareAudit({ directory, config, toolingSha, configSha256
   await writeBundle({
     directory,
     context,
-    prompt: buildAuditPrompt(context, config, agentProfile.text),
+    prompt: buildCoordinatorPrompt("audit", context, config),
+    workspacePrompt: buildAuditPrompt(context, config, agentProfile.text),
     schema: auditSchema(config),
     agentProfile
   });
@@ -216,34 +252,21 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
       url: boundedText(issue.html_url, 2048, "…"),
       updatedAt: issue.updated_at ?? ""
     },
-    existingOpenIssues: existing
-      .filter((candidate) => candidate.number !== issue.number)
-      .map((candidate) => ({
-        number: candidate.number,
-        title: boundedText(candidate.title, 512, "…"),
-        labels: boundedLabels(candidate.labels)
-      })),
-    existingOpenPullRequests: pulls.map((pull) => ({
-      number: pull.number,
-      title: boundedText(pull.title, 512, "…"),
-      body: boundedText(pull.body, 4000),
-      labels: boundedLabels(pull.labels),
-      url: boundedText(pull.html_url, 2048, "…")
-    }))
+    duplicateCandidates: duplicateCandidates(issue, existing, pulls)
   };
   await writeBundle({
     directory,
     context,
-    prompt: buildIssuePrompt(context, config, agentProfile.text),
+    prompt: buildCoordinatorPrompt("issue", context, config),
+    workspacePrompt: buildIssuePrompt(context, config, agentProfile.text),
     schema: issueSchema(config),
     agentProfile
   });
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, mode = "fix", planResultPath = undefined, planContextPath = undefined }) {
-  if (!["plan", "fix"].includes(mode)) throw new Error("Codekeeper implementation role must be plan or fix");
-  const agentProfile = await trustedAgentProfile(mode, agentProfilePath, agentProfileSourceSha);
+export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+  const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha);
   if (!["owner", "policy"].includes(authorizationMode)) {
     throw new Error("Codekeeper fix authorization mode must be owner or policy");
   }
@@ -252,10 +275,12 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
   }
   const repository = process.env.GITHUB_REPOSITORY;
   const github = new GitHubClient({ token, repository });
-  const issue = await github.getIssue(targetNumber);
+  const [issue, comments] = await Promise.all([
+    github.getIssue(targetNumber),
+    github.listIssueComments(targetNumber)
+  ]);
   if (issue.number !== targetNumber) throw new Error(`GitHub returned an unexpected target for #${targetNumber}`);
   if (issue.state !== "open") throw new Error(`#${targetNumber} is not open`);
-  const comments = await github.listIssueComments(targetNumber);
   let target;
   let baseSha;
   let subject;
@@ -297,8 +322,13 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       baseRepository: pull.base.repo.full_name
     };
     baseSha = target.headSha;
+    const frozenSubject = frozenPullRepairSubject(pull, comments);
     subject = {
-      pullRequest: frozenPullRepairSubject(pull, comments)
+      pullRequest: {
+        ...frozenSubject,
+        body: boundedText(frozenSubject.body, 12000),
+        comments: boundedOwnerComments(comments, config)
+      }
     };
     target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments);
   } else {
@@ -318,21 +348,17 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       issue: {
         number: issue.number,
         title: boundedText(issue.title, 512, "…"),
-        body: boundedText(issue.body, 30000),
+        body: boundedText(issue.body, 12000),
         author: boundedText(issue.user?.login, 256, "…"),
         url: boundedText(issue.html_url, 2048, "…"),
         updatedAt: issue.updated_at ?? "",
         labels,
-        comments: comments.slice(-20).map((comment) => ({
-          author: boundedText(comment.user?.login, 256, "…"),
-          body: boundedText(comment.body, 12000),
-          createdAt: comment.created_at ?? ""
-        }))
+        comments: boundedOwnerComments(comments, config)
       }
     };
   }
   const context = {
-    mode,
+    mode: "fix",
     repository,
     ...runMetadata({ toolingSha, configSha256 }),
     agentProfile: agentProfile.metadata,
@@ -344,23 +370,13 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     target,
     ...subject
   };
-  if (mode === "fix") {
-    assertPlanTargetUnchanged(await readJson(planContextPath), context);
-    context.plan = validatePlanResult(await readJson(planResultPath), target);
-    if (!context.plan.readyForFixer) {
-      throw new Error("Planner did not approve the requested fix");
-    }
-  }
   await writeBundle({
     directory,
     context,
-    prompt: mode === "plan" ? buildPlanPrompt(context, config, agentProfile.text) : buildFixPrompt(context, config, agentProfile.text),
-    schema: mode === "plan" ? planSchema(target) : fixSchema(target),
+    prompt: buildCoordinatorPrompt("fix", context, config),
+    workspacePrompt: buildFixPrompt(context, config, agentProfile.text),
+    schema: fixSchema(target),
     agentProfile
   });
   return context;
-}
-
-export function preparePlan(options) {
-  return prepareFix({ ...options, mode: "plan" });
 }

@@ -97,6 +97,22 @@ async function writeSealedArtifact(artifactDirectory, {
     result: Buffer.from(JSON.stringify(result)),
     config: Buffer.from(JSON.stringify(artifactConfig)),
     validation: Buffer.from(JSON.stringify(validation)),
+    "runtime-metadata": Buffer.from(JSON.stringify({
+      mode,
+      provider: "offline",
+      model: "offline-fixture",
+      attempt: 1,
+      structuredOutputs: true,
+      workspaceSpecialistUsed: true,
+      maxTurns: 1,
+      durationMs: 1,
+      promptBytes: 1,
+      evidenceBytes: 1,
+      outputBytes: 1,
+      cacheKey: "offline-fixture",
+      cacheMode: "unsupported",
+      usage: { requests: 1, inputTokens: 1, outputTokens: 1, totalTokens: 2, cachedInputTokens: 0 }
+    })),
     [AGENT_PROFILE_BUNDLE_FILE]: agentProfile
   };
   await Promise.all(Object.entries(components).map(([name, bytes]) => writeFile(
@@ -105,7 +121,7 @@ async function writeSealedArtifact(artifactDirectory, {
   )));
   const patchBytes = patch?.valid ? await readFile(path.join(artifactDirectory, "patch.diff")) : null;
   const manifest = {
-    version: 2,
+    version: 3,
     sealed: true,
     mode,
     repository: context.repository,
@@ -118,6 +134,7 @@ async function writeSealedArtifact(artifactDirectory, {
     configFileSha256: sha256(components.config),
     validationSha256: sha256(components.validation),
     agentProfileSha256: sha256(agentProfile),
+    runtimeMetadataSha256: sha256(components["runtime-metadata"]),
     patchSha256: patchBytes ? sha256(patchBytes) : null
   };
   const manifestBytes = Buffer.from(JSON.stringify(manifest));

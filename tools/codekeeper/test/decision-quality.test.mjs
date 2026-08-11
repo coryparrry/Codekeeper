@@ -179,8 +179,8 @@ test("related reports reject a schema-valid duplicate classification", async () 
     scenario: "related-not-duplicate",
     preset: "mixed",
     model: "deepseek-v4-flash",
-    attempt: 1,
-    stage: "semantic-assertion",
+    attempt: 2,
+    stage: "evidence-boundary",
     pass: false,
     repeat: 1
   }]);
@@ -206,8 +206,8 @@ test("semantic assertions fail closed and evaluation never reports provider keys
   });
   assert.equal(summary.failed, 1);
   assert.equal(summary.results[0].scenario, "prompt-injection");
-  assert.equal(summary.results[0].attempt, 1);
-  assert.equal(summary.results[0].stage, "semantic-assertion");
+  assert.equal(summary.results[0].attempt, 2);
+  assert.equal(summary.results[0].stage, "evidence-boundary");
   assert.equal(summary.results[0].pass, false);
   assert.doesNotMatch(reports.join("\n"), /provider-key-secret|provider-result-secret/);
   assert.deepEqual((await readdir(new URL("../evals/", import.meta.url))).sort(), ["decision-quality.mjs"]);

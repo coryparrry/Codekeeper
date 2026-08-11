@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "a72a80dfe365d178cd35078ff4bf2d4d5d44b1317a0623b9a08dd4228db221c1";
+const toolingManifestSha256 = "e913116fa4da56c4e06e2e358271933e63de15800cac97e2366551ceb8581b8c";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -101,7 +101,7 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
   assert.ok(parsedManifest.files.some((entry) => entry.path === "scripts/verify-tooling-artifact.mjs"));
   assert.ok(parsedManifest.files.every((entry) => !entry.path.startsWith("test/") && !entry.path.startsWith("evals/")));
 
-  const expectedConsumers = { maintain: 5, fix: 7, issues: 4, review: 4 };
+  const expectedConsumers = { maintain: 5, fix: 6, issues: 4, review: 4 };
   for (const [mode, count] of Object.entries(expectedConsumers)) {
     const source = await workflow(mode);
     assert.equal([...source.matchAll(/name: Download bootstrap Codekeeper tooling/g)].length, count);
@@ -430,10 +430,8 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(fix, /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_fix'[\s\S]*github\.actor == inputs\.automation_bot_login/);
   assert.match(fix, /format\('codekeeper-command-\{0\}', github\.run_id\)/);
   assert.match(fix, /--authorization-mode "\$AUTHORIZATION_MODE"/);
-  assert.match(fix, /codekeeper-plan-bundle\/context\.json/);
-  assert.match(fix, /--plan-context "\$PLAN_BUNDLE\/context\.json"/);
-  assert.match(fix, /cp "\$PLAN_BUNDLE\/context\.json" "\$BUNDLE\/plan-context\.json"/);
-  assert.match(fix, /--plan-context "\$WORKSPACE\/plan-context\.json"/);
+  assert.doesNotMatch(fix, /planner_model_api_key|prepare-plan|plan-result|plan-context/);
+  assert.match(fix, /workspace:\n[\s\S]*needs: command/);
   const fixCaller = await repositoryFile("examples/workflows/codekeeper-fix.yml.example");
   assert.match(fixCaller, /issues:\n\s+types: \[labeled\]/);
   assert.match(fixCaller, /automation_bot_login: \$\{\{ vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN \}\}/);
@@ -445,9 +443,9 @@ test("issue triage can start enabled issue implementation while owner PR repair 
 test("owner-commanded pull request repair can update only the frozen existing head", async () => {
   const fix = await workflow("fix");
   const publisher = await repositoryFile("tools/codekeeper/src/lib/pr-repair.mjs");
-  const command = jobSection(fix, "command", "plan");
+  const command = jobSection(fix, "command", "workspace");
   assert.match(command, /github\.event\.comment\.body == '\/codekeeper fix'/);
-  assert.match(fix, /plan:\n[\s\S]*needs: command[\s\S]*needs\.command\.result == 'success'/);
+  assert.match(fix, /workspace:\n[\s\S]*needs: command[\s\S]*needs\.command\.result == 'success'/);
   assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
   assert.doesNotMatch(fix, /!github\.event\.issue\.pull_request/);
   assert.match(fix, /target_kind: \$\{\{ fromJSON\(steps\.prepare\.outputs\.result\)\.target\.kind \}\}/);
@@ -479,6 +477,17 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
     assert.match(workspace, new RegExp(`agent-settings[\\s\\S]*--mode ${effectiveMode}`));
     assert.match(workspace, /secrets\.workspace_api_key \|\| secrets\.openai_api_key/);
     assert.doesNotMatch(workspace, /secrets\.(?:model_api_key|trace_api_key|app_private_key)/);
+    assert.match(workspace, /codex-home: \$\{\{ runner\.temp \}\}\/codekeeper-codex-home/);
+    assert.match(workspace, /project_doc_max_bytes = 0/);
+    assert.match(workspace, /project_doc_fallback_filenames = \[\]/);
+    assert.match(workspace, /include_instructions = false/);
+    assert.match(workspace, /bundled = \{ enabled = false \}/);
+    assert.match(workspace, /Refusing symlinked \.agents instruction root/);
+    assert.match(workspace, /Refusing symlinked \.codex instruction root/);
+    assert.match(workspace, /\.agents\/skills \.codex\/skills/);
+    assert.match(workspace, /if \[ -e "\$surface" \] \|\| \[ -L "\$surface" \]; then[\s\S]*contaminated=true[\s\S]*if \[ -e "\$QUARANTINE\/\$surface" \]/);
+    assert.match(workspace, /workspace-prompt\.md/);
+    assert.doesNotMatch(workspace, /prompt-file: .*\/prompt\.md/);
     assert.match(analyze, /npm ci --ignore-scripts --no-audit --no-fund/);
     assert.match(analyze, /run-agent/);
     assert.match(analyze, /CODEKEEPER_MODEL_API_KEY: \$\{\{ secrets\.model_api_key \}\}/);
@@ -503,10 +512,9 @@ test("self-test reports through annotations with read-only repository permission
   assert.match(selfTest, /fail_level: any/);
 });
 
-test("pull request repair runs reviewer, planner, then fixer roles", async () => {
+test("pull request repair runs reviewer then one-pass fixer roles", async () => {
   const source = await workflow("fix");
-  assert.ok(source.indexOf("  plan:") < source.indexOf("  workspace:"));
-  assert.match(jobSection(source, "plan", "workspace"), /maintenance-planner\.md[\s\S]*--mode plan[\s\S]*plan-result\.json/);
-  assert.match(jobSection(source, "workspace", "analyze"), /needs: plan[\s\S]*fixer\.md[\s\S]*--plan-result/);
+  assert.doesNotMatch(source, /\n  plan:|maintenance-planner\.md|--mode plan|plan-result\.json/);
+  assert.match(jobSection(source, "workspace", "analyze"), /needs: command[\s\S]*fixer\.md[\s\S]*workspace-prompt\.md/);
   assert.match(jobSection(source, "analyze", "verify"), /fixer\.md[\s\S]*--mode fix/);
 });

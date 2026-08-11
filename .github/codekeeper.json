@@ -37,7 +37,7 @@
         "provider": "openai",
         "model": "gpt-5.6-sol",
         "effort": "high",
-        "maxTurns": 2,
+        "maxTurns": 1,
         "maximumAttempts": 2,
         "modelSettings": {
           "text": {
@@ -55,7 +55,7 @@
         "provider": "openai",
         "model": "gpt-5.6-sol",
         "effort": "high",
-        "maxTurns": 2,
+        "maxTurns": 1,
         "maximumAttempts": 2,
         "modelSettings": {
           "text": {
@@ -73,7 +73,7 @@
         "provider": "deepseek",
         "model": "deepseek-v4-flash",
         "effort": "none",
-        "maxTurns": 2,
+        "maxTurns": 1,
         "maximumAttempts": 2,
         "modelSettings": {
           "temperature": 0.2,
@@ -93,20 +93,11 @@
           "effort": "low"
         }
       },
-      "plan": {
-        "provider": "openai",
-        "model": "gpt-5.6-terra",
-        "effort": "high",
-        "maxTurns": 2,
-        "maximumAttempts": 2,
-        "modelSettings": { "text": { "verbosity": "low" } },
-        "workspace": { "enabled": false, "allowWrites": false, "model": "gpt-5.6-terra", "effort": "high" }
-      },
       "fix": {
         "provider": "openai",
         "model": "gpt-5.6-terra",
         "effort": "high",
-        "maxTurns": 2,
+        "maxTurns": 1,
         "maximumAttempts": 2,
         "modelSettings": {
           "text": {

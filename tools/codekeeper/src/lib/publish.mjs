@@ -44,25 +44,27 @@ async function loadArtifact(artifactDirectory, expectedMode, config, configSha25
     throw new Error("Sealed artifact manifest changed after sealing");
   }
   const manifest = parseArtifactJson(manifestBytes, "manifest.json");
-  if (manifest.version !== 2) throw new Error("Unsupported artifact manifest version");
+  if (manifest.version !== 3) throw new Error("Unsupported artifact manifest version");
   if (manifest.sealed !== true) throw new Error("Only sealed artifacts may be published");
   if (!/^[a-f0-9]{64}$/i.test(String(configSha256 ?? ""))) {
     throw new Error("Publisher requires the SHA-256 of its frozen configuration");
   }
 
-  const [contextBytes, resultBytes, configBytes, validationBytes, agentProfileBytes] = await Promise.all([
+  const [contextBytes, resultBytes, configBytes, validationBytes, agentProfileBytes, runtimeMetadataBytes] = await Promise.all([
     readRegularFile(path.join(artifactDirectory, "context.json")),
     readRegularFile(path.join(artifactDirectory, "result.json")),
     readRegularFile(path.join(artifactDirectory, "config.json")),
     readRegularFile(path.join(artifactDirectory, "validation.json")),
-    readRegularFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE))
+    readRegularFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE)),
+    readRegularFile(path.join(artifactDirectory, "runtime-metadata.json"))
   ]);
   if (
     sha256(contextBytes) !== manifest.contextSha256 ||
     sha256(resultBytes) !== manifest.resultSha256 ||
     sha256(configBytes) !== manifest.configFileSha256 ||
     sha256(validationBytes) !== manifest.validationSha256 ||
-    sha256(agentProfileBytes) !== manifest.agentProfileSha256
+    sha256(agentProfileBytes) !== manifest.agentProfileSha256 ||
+    sha256(runtimeMetadataBytes) !== manifest.runtimeMetadataSha256
   ) {
     throw new Error("Sealed artifact component changed after sealing");
   }

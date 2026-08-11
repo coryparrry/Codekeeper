@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: a72a80dfe365d178cd35078ff4bf2d4d5d44b1317a0623b9a08dd4228db221c1
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: e913116fa4da56c4e06e2e358271933e63de15800cac97e2366551ceb8581b8c
 
 concurrency:
   group: codekeeper-maintenance-${{ github.repository }}
@@ -148,20 +148,70 @@ jobs:
             echo "workspace_api_key is required because ai.agents.audit.workspace.enabled=true"
             exit 1
           }
+      - name: Isolate Codex from repository instruction surfaces
+        if: steps.settings.outputs.workspace_enabled == 'true'
+        working-directory: repository
+        env:
+          CODEX_HOME: ${{ runner.temp }}/codekeeper-codex-home
+          QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
+          REPOSITORY_PATH: ${{ github.workspace }}/repository
+        run: |
+          test ! -e "$CODEX_HOME" || { echo "Isolated Codex home already exists"; exit 1; }
+          test ! -e "$QUARANTINE" || { echo "Repository skill quarantine already exists"; exit 1; }
+          test ! -L .agents || { echo "Refusing symlinked .agents instruction root"; exit 1; }
+          test ! -L .codex || { echo "Refusing symlinked .codex instruction root"; exit 1; }
+          install -d -m 700 "$CODEX_HOME" "$QUARANTINE"
+          {
+            echo 'project_doc_max_bytes = 0'
+            echo 'project_doc_fallback_filenames = []'
+            echo
+            echo '[skills]'
+            echo 'include_instructions = false'
+            echo 'bundled = { enabled = false }'
+            echo
+            printf '[projects.%s]\n' "$(node -p 'JSON.stringify(process.env.REPOSITORY_PATH)')"
+            echo 'trust_level = "untrusted"'
+          } > "$CODEX_HOME/config.toml"
+          for surface in .agents/skills .codex/skills; do
+            if [ -e "$surface" ] || [ -L "$surface" ]; then
+              mkdir -p "$QUARANTINE/$(dirname "$surface")"
+              mv -- "$surface" "$QUARANTINE/$surface"
+            fi
+          done
       - name: Audit checkout with optional Codex specialist
         if: steps.settings.outputs.workspace_enabled == 'true'
         uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
         with:
           openai-api-key: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
+          codex-home: ${{ runner.temp }}/codekeeper-codex-home
           codex-version: 0.146.0
           model: ${{ steps.settings.outputs.workspace_model }}
           effort: ${{ steps.settings.outputs.workspace_effort }}
           sandbox: ${{ steps.settings.outputs.workspace_sandbox }}
           safety-strategy: drop-sudo
           working-directory: repository
-          prompt-file: ${{ runner.temp }}/codekeeper-bundle/prompt.md
+          prompt-file: ${{ runner.temp }}/codekeeper-bundle/workspace-prompt.md
           output-file: ${{ runner.temp }}/codekeeper-bundle/workspace-result.json
           output-schema-file: ${{ runner.temp }}/codekeeper-bundle/schema.json
+      - name: Restore quarantined repository skills
+        if: always() && steps.settings.outputs.workspace_enabled == 'true'
+        working-directory: repository
+        env:
+          QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
+        run: |
+          contaminated=false
+          for surface in .agents/skills .codex/skills; do
+            if [ -e "$surface" ] || [ -L "$surface" ]; then
+              mkdir -p "$QUARANTINE/generated/$(dirname "$surface")"
+              mv -- "$surface" "$QUARANTINE/generated/$surface"
+              contaminated=true
+            fi
+            if [ -e "$QUARANTINE/$surface" ] || [ -L "$QUARANTINE/$surface" ]; then
+              mkdir -p "$(dirname "$surface")"
+              mv -- "$QUARANTINE/$surface" "$surface"
+            fi
+          done
+          [ "$contaminated" = false ] || { echo "Codex created a quarantined instruction surface"; exit 1; }
       - name: Capture untrusted workspace patch
         working-directory: repository
         env:
