@@ -22,6 +22,16 @@ for (const [mode, relativePath] of Object.entries(AGENT_PROFILE_PATHS)) {
 }
 test.after(() => rm(profileFixtureRoot, { recursive: true, force: true }));
 
+const ambientGitHubEnvironment = ["GITHUB_REPOSITORY", "GITHUB_GRAPHQL_URL"]
+  .map((name) => [name, process.env[name]]);
+for (const [name] of ambientGitHubEnvironment) delete process.env[name];
+test.after(() => {
+  for (const [name, value] of ambientGitHubEnvironment) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
+
 const identity = { login: "codekeeper[bot]", id: "123456" };
 
 async function writeSealedArtifact(artifactDirectory, {
