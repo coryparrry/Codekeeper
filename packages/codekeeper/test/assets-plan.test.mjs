@@ -32,6 +32,7 @@ import {
   buildInstallPlan,
   completionGuidance,
   documentMap,
+  normalizeModelChoices,
   normalizeModes,
   normalizeOwnerLogins,
   requiredSecretNames,
@@ -242,14 +243,35 @@ test("rendered policies personalize only repository identity while retaining con
 test("a same-provider model change stays in policy and does not rewrite a workflow", async () => {
   const bundle = await loadVerifiedAssets();
   const custom = JSON.parse(bundle.contents["policies/openai.json"]);
-  custom.ai.agents.review.model = "gpt-5.6-luna";
+  custom.ai.agents.review.provider = "openrouter";
+  custom.ai.agents.review.model = "anthropic/claude-sonnet-4.5";
+  custom.ai.agents.review.effort = "none";
+  custom.ai.agents.review.modelSettings = {
+    temperature: 0.7,
+    providerData: { route: "latency" }
+  };
   custom.ai.agents.review.workspace.model = "gpt-5.6-luna";
+  const models = normalizeModelChoices({
+    modes: ["review"],
+    preset: "openai",
+    bundle,
+    policySource: JSON.stringify(custom),
+    choices: {
+      review: {
+        provider: "openrouter",
+        model: "anthropic/claude-sonnet-4.5",
+        effort: "none"
+      }
+    }
+  });
   const renderedPolicy = JSON.parse(renderPolicy(JSON.stringify(custom), {
     displayName: "Widget",
     defaultBranch: "main",
-    ownerLogins: ["coryparrry"]
+    ownerLogins: ["coryparrry"],
+    models
   }));
-  assert.equal(renderedPolicy.ai.agents.review.model, "gpt-5.6-luna");
+  assert.equal(renderedPolicy.ai.agents.review.model, "anthropic/claude-sonnet-4.5");
+  assert.deepEqual(renderedPolicy.ai.agents.review.modelSettings, custom.ai.agents.review.modelSettings);
   assert.equal(renderedPolicy.ai.agents.review.workspace.model, "gpt-5.6-luna");
   for (const mode of MODE_IDS) {
     const rendered = renderWorkflow(bundle.contents[MODES[mode].asset], {
@@ -612,6 +634,60 @@ test("arbitrary OpenRouter coordinator models preserve the OpenAI workspace spec
   assert.equal(policy.ai.providers.openrouter.structuredOutputs, false);
   assert.match(workflow, /secrets\.OPENROUTER_API_KEY/);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, OPENROUTER_SECRET, APP_SECRET]);
+});
+
+test("rerunning an OpenRouter coordinator with an enabled workspace does not request its existing OpenAI key", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: initial.modes,
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-acme[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      displayName: "Renamed Widget",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+
+  assert.deepEqual(update.secrets, []);
 });
 
 test("fixer can use any supported model without a separate planner credential", async () => {

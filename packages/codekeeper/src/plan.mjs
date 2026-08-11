@@ -131,6 +131,10 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
 
 function existingSecretNames(installation) {
   const providers = new Set(modelAssignments(installation.modes).map(({ agent }) => installation.policy.ai.agents[agent].provider));
+  for (const mode of installation.modes) {
+    const agent = installation.policy.ai.agents[MODES[mode].policyAgent];
+    if (agent.workspace?.enabled && MODES[mode].workspaceProvider) providers.add(MODES[mode].workspaceProvider);
+  }
   return new Set([
     ...Object.entries(MODEL_PROVIDER_SECRETS)
       .filter(([provider]) => providers.has(provider))
@@ -162,11 +166,16 @@ export function normalizeModelChoices({ modes, preset, bundle, choices = {}, pol
       || (effort !== "none" && !policy.ai.providers[provider]?.supportsReasoningEffort)) {
       throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
     }
+    const preservesCurrentSettings = typeof requested !== "string"
+      && provider === agent.provider
+      && model === agent.model
+      && effort === agent.effort;
     normalized[key] = Object.freeze({
       provider,
       model,
       effort,
-      choice: typeof requested === "string" ? choice.id : null
+      choice: typeof requested === "string" ? choice.id : null,
+      ...(preservesCurrentSettings ? { modelSettings: structuredClone(agent.modelSettings) } : {})
     });
   }
   const assignmentKeys = new Set(modelAssignments(selected).map(({ key }) => key));

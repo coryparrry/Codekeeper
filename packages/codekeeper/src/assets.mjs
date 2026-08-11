@@ -152,11 +152,13 @@ export function renderPolicy(policySource, {
     agent.provider = selection.provider;
     agent.model = selection.model;
     agent.effort = selection.effort;
-    agent.modelSettings = selection.provider === "openai"
-      ? { text: { verbosity: "low" } }
-      : selection.provider === "deepseek"
-        ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
-        : {};
+    agent.modelSettings = Object.hasOwn(selection, "modelSettings")
+      ? structuredClone(selection.modelSettings)
+      : selection.provider === "openai"
+        ? { text: { verbosity: "low" } }
+        : selection.provider === "deepseek"
+          ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
+          : {};
   }
   if (!Array.isArray(policy.audit.repair.protectedPaths) || !policy.audit.repair.protectedPaths.length) {
     throw new InstallerError("Rendered policy has no protected paths.", { code: "UNSAFE_POLICY" });
