@@ -115,7 +115,11 @@ async function main() {
         automationIdentity: {
           login: args.require("automation-bot-login"),
           id: args.require("automation-bot-id")
-        }
+        },
+        installedModes: args.get("installed-modes", "review,maintain,issues,fix")
+          .split(",")
+          .map((mode) => mode.trim())
+          .filter(Boolean)
       });
       break;
     case "agent-settings":

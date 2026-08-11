@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "520ddd58da375ea15019b9d4162dc3e297bdb1bed0c79d68e7adcbfdbce9ce1e";
+const toolingManifestSha256 = "0c0577e932aca9963693b820dfe76837659ba17eccc5dd9f7577ca191f482eaa";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -420,6 +420,7 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(caller, /const mentioned = mentionBot && new RegExp\(`/);
   assert.match(caller, /appendFileSync\(process\.env\.GITHUB_OUTPUT, `owner_command=\$\{commandIntent\}\\nroute=\$\{route\}\\n`\)/);
   assert.match(caller, /owner_command: \$\{\{ needs\.intent\.outputs\.owner_command == 'true' \}\}/);
+  assert.match(source, /!\(github\.event_name == 'pull_request_review_comment'[\s\S]*github\.event\.comment\.user\.login == inputs\.automation_bot_login\)/);
   assert.doesNotMatch(source, /publish-review-status|on:\n\s+pull_request_target|state="success"/);
 });
 
@@ -436,6 +437,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(issue, /prepare-issue[\s\S]*--actor "\$REQUESTED_BY"/);
   assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
   assert.match(caller, /issues:\n\s+types: \[opened, reopened, edited\]/);
+  assert.doesNotMatch(caller, /issue_comment:/);
   assert.match(caller, /auto_triage: true/);
   assert.match(caller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
 
@@ -471,8 +473,13 @@ test("owner-commanded pull request repair can update only the frozen existing he
   const assistantCaller = await repositoryFile("examples/workflows/codekeeper-assistant.yml.example");
   const publisher = await repositoryFile("tools/codekeeper/src/lib/pr-repair.mjs");
   assert.match(assistant, /owner_requests:/);
+  assert.match(assistant, /installed_modes:/);
   assert.match(assistant, /owner-command/);
+  assert.match(assistant, /--installed-modes "\$INSTALLED_MODES"/);
   assert.match(assistantCaller, /issue_comment:[\s\S]*pull_request_review_comment:/);
+  assert.match(assistantCaller, /intent:\n[\s\S]*route=/);
+  assert.match(assistantCaller, /bootstrap:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/);
+  assert.match(assistantCaller, /installed_modes: review,maintain,issues,fix/);
   assert.match(assistantCaller, /codekeeper-assistant\.yml@FULL_COMMIT_SHA/);
   assert.doesNotMatch(fix, /\n  command:|github\.event\.comment\.body/);
   assert.doesNotMatch(fix, /!github\.event\.issue\.pull_request/);
@@ -484,6 +491,15 @@ test("owner-commanded pull request repair can update only the frozen existing he
   assert.match(publisher, /resolveReviewThread/);
   assert.match(publisher, /listPullReviewThreads/);
   assert.doesNotMatch(publisher, /createPull|createBranchAndCommit|pushBranch|enableAutoMerge|updateIssue|deleteBranch/);
+});
+
+test("Fixer repository dispatches retain their target and explicit policy authorization", async () => {
+  const fix = await workflow("fix");
+  const analyze = jobSection(fix, "analyze", "verify");
+  const publisher = await repositoryFile("tools/codekeeper/src/lib/publish.mjs");
+  assert.match(analyze, /EVENT_ISSUE: \$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}/);
+  assert.match(publisher, /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*authorization_mode: "policy"/);
+  assert.match(publisher, /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*requested_by: automationIdentity\.login/);
 });
 
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {

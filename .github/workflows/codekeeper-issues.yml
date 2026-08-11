@@ -43,7 +43,7 @@ permissions:
   issues: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 520ddd58da375ea15019b9d4162dc3e297bdb1bed0c79d68e7adcbfdbce9ce1e
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 0c0577e932aca9963693b820dfe76837659ba17eccc5dd9f7577ca191f482eaa
 
 concurrency:
   group: codekeeper-issue-${{ github.event.issue.number || github.event.client_payload.number }}
@@ -53,7 +53,7 @@ jobs:
   workspace:
     name: Codekeeper issue workspace specialist
     # Automatic triage is limited to trusted issue lifecycle events. Owner requests
-    # remain restricted by both the caller gate and prepare-issue.
+    # arrive only through the App-authenticated repository assistant dispatch.
     if: >-
       inputs.enabled &&
       !github.event.issue.pull_request &&

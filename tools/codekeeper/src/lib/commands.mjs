@@ -14,6 +14,8 @@ const COMMANDS = new Set([
   "stop",
 ]);
 const ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const MODES = new Set(["review", "maintain", "issues", "fix"]);
+const ALL_MODES = Object.freeze([...MODES]);
 
 function labels(issue) {
   return (issue.labels ?? []).map((label) =>
@@ -56,6 +58,34 @@ function isOwner(config, actor) {
   );
 }
 
+function requireInstalledMode(command, issue, installedModes) {
+  const selected = new Set(installedModes);
+  if (
+    selected.size !== installedModes.length ||
+    [...selected].some((mode) => !MODES.has(mode))
+  ) {
+    throw new Error("Installed Codekeeper workflows are invalid");
+  }
+  const required =
+    command === "review" || command === "rerun"
+      ? "review"
+      : command === "triage"
+        ? issue.pull_request
+          ? "review"
+          : "issues"
+        : command === "implement" || command === "fix"
+          ? "fix"
+          : null;
+  if (!required || selected.has(required)) return;
+  const label =
+    required === "review"
+      ? "Pull request review"
+      : required === "issues"
+        ? "Issue triage"
+        : "Fixer";
+  throw new Error(`/${command} requires the ${label} workflow`);
+}
+
 function statusBody(issue, command, outcome) {
   const active = labels(issue).filter((label) =>
     label.startsWith("codekeeper:"),
@@ -76,6 +106,7 @@ export async function runOwnerCommand({
   config,
   token,
   automationIdentity,
+  installedModes = ALL_MODES,
 }) {
   const event = await readJson(eventPath);
   const directCommand = parseCommand(event.comment?.body);
@@ -113,6 +144,7 @@ export async function runOwnerCommand({
   const github = new GitHubClient({ token, repository });
   let issue = await github.getIssue(number);
   if (issue.state !== "open") throw new Error(`#${number} is not open`);
+  requireInstalledMode(command, issue, installedModes);
   let outcome;
 
   if (command === "review" || command === "rerun") {

@@ -13,6 +13,10 @@ on:
         required: false
         default: true
         type: boolean
+      installed_modes:
+        description: Comma-separated workflow modes installed in the adopter repository.
+        required: true
+        type: string
       automation_bot_login:
         description: Installed GitHub App bot login.
         required: true
@@ -29,7 +33,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 520ddd58da375ea15019b9d4162dc3e297bdb1bed0c79d68e7adcbfdbce9ce1e
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 0c0577e932aca9963693b820dfe76837659ba17eccc5dd9f7577ca191f482eaa
 
 concurrency:
   group: codekeeper-assistant-${{ github.run_id }}
@@ -124,9 +128,11 @@ jobs:
           CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
           BOT_LOGIN: ${{ steps.bot.outputs.login }}
           BOT_ID: ${{ steps.bot.outputs.id }}
+          INSTALLED_MODES: ${{ inputs.installed_modes }}
         run: |
           node tooling/tools/codekeeper/src/cli.mjs owner-command \
             --config "$CONFIG" \
             --event "$GITHUB_EVENT_PATH" \
             --automation-bot-login "$BOT_LOGIN" \
-            --automation-bot-id "$BOT_ID"
+            --automation-bot-id "$BOT_ID" \
+            --installed-modes "$INSTALLED_MODES"

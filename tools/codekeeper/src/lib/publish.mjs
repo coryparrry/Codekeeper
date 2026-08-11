@@ -459,6 +459,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
       number: pull.number,
       head_sha: pull.head.sha,
       authorization_mode: "policy",
+      requested_by: automationIdentity.login,
       review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
     });
     automaticRepair.dispatched = true;

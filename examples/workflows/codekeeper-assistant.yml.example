@@ -15,7 +15,35 @@ permissions:
   pull-requests: read
 
 jobs:
+  intent:
+    name: Detect a Codekeeper owner request
+    runs-on: ubuntu-latest
+    outputs:
+      route: ${{ steps.intent.outputs.route }}
+    steps:
+      - name: Match one supported command or bot mention
+        id: intent
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          AUTOMATION_BOT_LOGIN: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
+        run: |
+          node --input-type=module -e '
+            import { appendFileSync } from "node:fs";
+            const body = String(process.env.COMMENT_BODY ?? "").trim().toLowerCase();
+            const association = String(process.env.AUTHOR_ASSOCIATION ?? "");
+            const bot = String(process.env.AUTOMATION_BOT_LOGIN ?? "").replace(/\[bot\]$/i, "").toLowerCase();
+            const actions = ["status", "review", "rerun", "triage", "defer", "implement", "fix", "stop"];
+            const slash = new RegExp(`^/codekeeper\\s+(${actions.join("|")})$`, "i").test(body);
+            const mentioned = bot && body.includes(`@${bot}`)
+              ? actions.filter((action) => new RegExp(`\\b${action}\\b`, "i").test(body)).length === 1
+              : false;
+            const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
+            appendFileSync(process.env.GITHUB_OUTPUT, `route=${trustedAssociation && (slash || mentioned)}\n`);
+          '
   bootstrap:
+    needs: intent
+    if: needs.intent.outputs.route == 'true'
     name: Codekeeper pinned tooling bootstrap
     runs-on: ubuntu-latest
     steps:
@@ -23,11 +51,13 @@ jobs:
         with:
           artifact-name: codekeeper-tooling-${{ github.run_id }}
   assistant:
-    needs: bootstrap
+    needs: [intent, bootstrap]
+    if: needs.intent.outputs.route == 'true' && needs.bootstrap.result == 'success'
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-assistant.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       owner_requests: true
+      installed_modes: review,maintain,issues,fix
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:

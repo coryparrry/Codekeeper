@@ -52,6 +52,100 @@ test("owner commands require an exact supported command", () => {
   );
 });
 
+test("ordinary collaborator comments are ignored without touching GitHub", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-command-ignore-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "This implementation looks ready to merge.",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originalGetIssue = GitHubClient.prototype.getIssue;
+  GitHubClient.prototype.getIssue = async () => {
+    throw new Error("ordinary comments must not call GitHub");
+  };
+  try {
+    assert.deepEqual(
+      await runOwnerCommand({
+        eventPath,
+        config: {
+          automation: { ownerRequests: true },
+          repository: { ownerLogins: ["repository-owner"] },
+        },
+        token: "app-token",
+        automationIdentity: { login: "codekeeper[bot]", id: "123" },
+      }),
+      {
+        number: 42,
+        command: null,
+        skipped: true,
+        outcome: "No supported Codekeeper command was found.",
+      },
+    );
+  } finally {
+    GitHubClient.prototype.getIssue = originalGetIssue;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("commands fail before dispatch when their workflow is not installed", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-command-mode-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "/codekeeper implement",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    createRepositoryDispatch: GitHubClient.prototype.createRepositoryDispatch,
+  };
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    labels: [],
+  });
+  GitHubClient.prototype.createRepositoryDispatch = async () => {
+    throw new Error("an unavailable workflow must not be dispatched");
+  };
+  try {
+    await assert.rejects(
+      runOwnerCommand({
+        eventPath,
+        config: {
+          automation: { ownerRequests: true },
+          repository: { ownerLogins: ["repository-owner"] },
+        },
+        token: "app-token",
+        automationIdentity: { login: "codekeeper[bot]", id: "123" },
+        installedModes: ["review", "maintain"],
+      }),
+      /requires the Fixer workflow/,
+    );
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("non-owners and ambiguous mention text cannot grant mutation authority", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "codekeeper-owner-command-rejection-"),
