@@ -374,6 +374,7 @@ test("review publication activates auto-merge last and falls back safely", async
   let rejectLabels = false;
   let mutateHeadAfterEnable = false;
   let pauseAfterEnable = false;
+  let hideAutoMergeAfterEnable = false;
   let enabledThisRun = false;
   const restoreGitHub = replaceGitHubMethods({
     async getPull() {
@@ -382,6 +383,12 @@ test("review publication activates auto-merge last and falls back safely", async
         if (pauseAfterEnable) pull.labels = [{ name: "codekeeper:paused" }];
         pull.auto_merge = { enabled_at: "now" };
         enabledThisRun = false;
+      }
+      if (hideAutoMergeAfterEnable && enabledThisRun) {
+        hideAutoMergeAfterEnable = false;
+        const hidden = structuredClone(pull);
+        hidden.auto_merge = null;
+        return hidden;
       }
       return structuredClone(pull);
     },
@@ -436,6 +443,17 @@ test("review publication activates auto-merge last and falls back safely", async
     const successful = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" });
     assert.equal(successful.autoMergeResult.enabled, true);
     assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable"]);
+
+    calls.length = 0;
+    pull.auto_merge = null;
+    enabledThisRun = false;
+    hideAutoMergeAfterEnable = true;
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
+      /auto-merge.*postcondition/i
+    );
+    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "disable"]);
+    assert.equal(pull.auto_merge, null);
 
     calls.length = 0;
     pull.auto_merge = null;

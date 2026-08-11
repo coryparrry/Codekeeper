@@ -412,6 +412,7 @@ export function validateIssueResult(result, config) {
     assertString(result.decision.rationale, "decision.rationale", { maxLength: LIMITS.summary });
     assert(result.decision.options.length > 0, "a required decision needs options");
     assert(result.decision.options.filter((option) => option.recommended).length === 1, "a required decision needs one recommendation");
+    assert(result.implementationRecommendation !== "ai-ready", "a required maintainer decision cannot be AI-ready");
   } else {
     assert(result.decision.question === "" && result.decision.rationale === "" && result.decision.options.length === 0, "an unused decision must be empty");
   }

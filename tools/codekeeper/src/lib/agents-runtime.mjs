@@ -191,7 +191,7 @@ function runtimeEnvironment(tracing) {
   process.env.OPENAI_AGENTS_DISABLE_TRACING = tracing.enabled ? "0" : "1";
 }
 
-function retryMessage(previousOutput, error, attempt, schema, structuredOutputs, cache) {
+function retryMessage(previousOutput, error, attempt, schema, structuredOutputs, cache, specialistResult = null) {
   const previousResponse = typeof previousOutput === "string"
     ? previousOutput
     : JSON.stringify(previousOutput ?? "") ?? "";
@@ -199,6 +199,9 @@ function retryMessage(previousOutput, error, attempt, schema, structuredOutputs,
     `Repair the previous Codekeeper response attempt ${attempt}; do not repeat the underlying task.`,
     `Validation error: ${String(error.message ?? error).slice(0, 1000)}`,
     `Previous response:\n${previousResponse.slice(0, 8000)}`,
+    ...(specialistResult === null ? [] : [
+      `Authoritative workspace specialist result; restore every required evidence-bound value exactly:\n${JSON.stringify(specialistResult)}`
+    ]),
     ...(structuredOutputs ? [] : [`Required JSON schema:\n${JSON.stringify(schema)}`]),
     "Return exactly one corrected JSON object and introduce no new claims."
   ].join("\n");
@@ -533,7 +536,15 @@ export async function runConfiguredAgent({
         lastError = error;
         lastFailureAttempt = attempt;
         if (attempt >= agent.maximumAttempts || !retryableFailure(lastFailureStage)) break;
-        input = retryMessage(previousOutput, error, attempt, schema, provider.structuredOutputs, provider.api === "responses");
+        input = retryMessage(
+          previousOutput,
+          error,
+          attempt,
+          schema,
+          provider.structuredOutputs,
+          provider.api === "responses",
+          lastFailureStage === "evidence-boundary" ? specialistResult : null
+        );
       }
     }
     throw new Error(`Codekeeper ${mode} agent failed after ${agent.maximumAttempts} attempt(s): ${lastError?.message ?? lastError}`);

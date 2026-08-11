@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { fixSchema, validateAuditResult, validateFixResult, validateReviewResult } from "../src/lib/schemas.mjs";
+import { fixSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "../src/lib/schemas.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -95,6 +95,31 @@ test("audit validator binds a requested repair to a finding", () => {
     config
   );
   assert.equal(result.repair.findingIndex, 0);
+});
+
+test("issue validator rejects AI implementation while a maintainer decision is required", () => {
+  assert.throws(
+    () => validateIssueResult({
+      mode: "issue",
+      summary: "The issue is clear but requires a compatibility choice.",
+      type: "bug",
+      priority: "p2",
+      labels: [],
+      actionable: true,
+      missingInformation: [],
+      duplicateOf: null,
+      duplicateConfidence: "none",
+      implementationRecommendation: "ai-ready",
+      decision: {
+        required: true,
+        question: "Which compatibility behavior should apply?",
+        rationale: "The implementation depends on a maintainer-owned policy choice.",
+        options: [{ label: "Preserve behavior", description: "Keep compatibility.", recommended: true }]
+      },
+      comment: "A maintainer decision is required before implementation."
+    }, config),
+    /required maintainer decision cannot be AI-ready/
+  );
 });
 
 test("fix schema and validator bind output to the frozen issue or pull request target", () => {

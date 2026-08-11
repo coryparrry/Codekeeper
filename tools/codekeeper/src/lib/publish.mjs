@@ -321,10 +321,11 @@ async function verifyAutoMergePostcondition({
     const reason = !verifiedPull.auto_merge
       ? "GitHub did not report auto-merge as active"
       : verifiedDecision.reasons.join("; ") || "the pull request is no longer eligible";
-    if (verifiedPull.auto_merge) {
-      return disableFailedAutoMergePostcondition(github, verifiedPull, new Error(reason));
-    }
-    throw new Error(`Auto-merge postcondition failed for PR #${activationPull.number}: ${reason}`);
+    return disableFailedAutoMergePostcondition(
+      github,
+      verifiedPull.auto_merge ? verifiedPull : activationPull,
+      new Error(reason)
+    );
   }
   return verifiedDecision;
 }

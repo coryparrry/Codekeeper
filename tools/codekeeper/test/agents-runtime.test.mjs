@@ -367,6 +367,39 @@ test("contract retries repair only the previous output without replaying the tas
   assert.doesNotMatch(inputs[2], /attempt 1/i);
 });
 
+test("evidence-boundary retries include the authoritative specialist result", async () => {
+  const retryConfig = withoutTracing();
+  retryConfig.ai.agents.review.maximumAttempts = 2;
+  const blocker = { title: "UNIQUE_SPECIALIST_BLOCKER" };
+  const specialistResult = { blockingFindings: [blocker], nonBlockingFindings: [] };
+  const inputs = [];
+  class FakeProvider { async close() {} }
+  class FakeAgent {}
+  class FakeRunner {
+    async run(_agent, input) {
+      inputs.push(input);
+      return {
+        finalOutput: inputs.length === 1
+          ? { blockingFindings: [], nonBlockingFindings: [] }
+          : specialistResult
+      };
+    }
+  }
+  await runConfiguredAgent({
+    mode: "review",
+    config: retryConfig,
+    prompt: "UNIQUE_REVIEW_TASK",
+    schema,
+    specialistResult,
+    apiKey: "provider-secret",
+    sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider })
+  });
+  assert.equal(inputs.length, 2);
+  const retryInput = JSON.stringify(inputs[1]);
+  assert.doesNotMatch(retryInput, /UNIQUE_REVIEW_TASK/);
+  assert.match(retryInput, /UNIQUE_SPECIALIST_BLOCKER/);
+});
+
 test("Responses retries preserve the explicit cache breakpoint without replaying evidence", async () => {
   const retryConfig = withoutTracing();
   retryConfig.ai.agents.issue = {
