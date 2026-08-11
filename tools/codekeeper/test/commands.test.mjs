@@ -38,6 +38,13 @@ test("owner commands require an exact supported command", () => {
   );
   assert.equal(
     parseMentionIntent(
+      "@codekeeper-acme please rerun this",
+      "codekeeper-acme[bot]",
+    ),
+    null,
+  );
+  assert.equal(
+    parseMentionIntent(
       "@codekeeper-acme review and fix this",
       "codekeeper-acme[bot]",
     ),
