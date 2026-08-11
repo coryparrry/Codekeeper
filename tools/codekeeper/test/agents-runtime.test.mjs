@@ -402,6 +402,8 @@ test("Responses retries preserve the explicit cache breakpoint without replaying
   assert.deepEqual(inputs[1][0].content[0].promptCacheBreakpoint, { mode: "explicit" });
   assert.doesNotMatch(inputs[1][0].content[1].text, /UNIQUE_RESPONSES_PROMPT/);
   assert.match(inputs[1][0].content[1].text, /previous Codekeeper response attempt 1/i);
+  assert.match(inputs[1][0].content[1].text, /"implementationRecommendation":"unsupported"/);
+  assert.doesNotMatch(inputs[1][0].content[1].text, /\[object Object\]/);
 });
 
 test("structured coordinators omit textual schemas and mark a stable cache breakpoint", () => {
@@ -748,6 +750,54 @@ test("workspace-result symlinks are rejected before coordinator execution", asyn
     runAgentFromBundle({ mode: "issue", directory, config: withoutTracing(), resultPath: path.join(directory, "result.json") }),
     /Expected a regular file: .*workspace-result\.json/
   );
+});
+
+test("enabled issue workspaces require specialist evidence before provider construction", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-agent-bundle-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const profile = "# Trusted issue behavior\n";
+  const metadata = {
+    path: agentProfilePathForMode("issue"),
+    sha256: sha256(Buffer.from(profile)),
+    sourceSha: trustedSourceSha
+  };
+  await Promise.all([
+    writeFile(path.join(directory, "prompt.md"), "Classify the issue.\n"),
+    writeFile(path.join(directory, "schema.json"), JSON.stringify(schema)),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", agentProfile: metadata })),
+    writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), profile)
+  ]);
+
+  const workspaceConfig = withoutTracing();
+  workspaceConfig.ai.agents.issue.workspace.enabled = true;
+  let providers = 0;
+  class FakeProvider {
+    constructor() { providers += 1; }
+    async close() {}
+  }
+  class FakeAgent {}
+  class FakeRunner {
+    async run() { return { finalOutput: validIssue() }; }
+  }
+  const sdkLoader = async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider });
+
+  await assert.rejects(
+    runAgentFromBundle({ mode: "issue", directory, config: workspaceConfig, resultPath: path.join(directory, "result.json"), apiKey: "provider-secret", sdkLoader }),
+    /issue requires the configured workspace specialist result/
+  );
+  assert.equal(providers, 0);
+
+  workspaceConfig.ai.agents.issue.workspace.enabled = false;
+  const metadataResult = await runAgentFromBundle({
+    mode: "issue",
+    directory,
+    config: workspaceConfig,
+    resultPath: path.join(directory, "result.json"),
+    apiKey: "provider-secret",
+    sdkLoader
+  });
+  assert.equal(metadataResult.workspaceSpecialistUsed, false);
+  assert.equal(providers, 1);
 });
 
 test("bundle execution rejects a tampered or wrong-mode frozen profile before provider construction", async (context) => {

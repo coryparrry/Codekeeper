@@ -192,10 +192,13 @@ function runtimeEnvironment(tracing) {
 }
 
 function retryMessage(previousOutput, error, attempt, schema, structuredOutputs, cache) {
+  const previousResponse = typeof previousOutput === "string"
+    ? previousOutput
+    : JSON.stringify(previousOutput ?? "") ?? "";
   const dynamicInput = [
     `Repair the previous Codekeeper response attempt ${attempt}; do not repeat the underlying task.`,
     `Validation error: ${String(error.message ?? error).slice(0, 1000)}`,
-    `Previous response:\n${String(previousOutput ?? "").slice(0, 8000)}`,
+    `Previous response:\n${previousResponse.slice(0, 8000)}`,
     ...(structuredOutputs ? [] : [`Required JSON schema:\n${JSON.stringify(schema)}`]),
     "Return exactly one corrected JSON object and introduce no new claims."
   ].join("\n");
@@ -616,10 +619,10 @@ export async function runAgentFromBundle({
   }
   const validateOutput = validatorForBundle(mode, config, context);
   const frozenProfile = await loadFrozenAgentProfile({ mode, directory, context });
+  if (specialistResult === null && config.ai.agents[mode].workspace.enabled === true) {
+    throw new Error(`Codekeeper ${mode} requires the configured workspace specialist result`);
+  }
   if (specialistResult === null && mode !== "issue") {
-    if (config.ai.agents[mode].workspace.enabled === true) {
-      throw new Error(`Codekeeper ${mode} requires the configured workspace specialist result`);
-    }
     const output = validateOutput(deterministicNoWorkspaceResult(mode, context));
     const metadata = deterministicRuntimeMetadata(mode, prompt, output);
     await writeJson(resultPath, output);
