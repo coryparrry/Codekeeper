@@ -720,6 +720,20 @@ test("coordinator binds every rendered claim to specialist evidence", () => {
     ),
     /maintainer decision/
   );
+  const readyIssueWithDecision = {
+    ...issueWithDecision,
+    actionable: true,
+    missingInformation: [],
+    implementationRecommendation: "ai-ready"
+  };
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "issue",
+      { ...readyIssueWithDecision, decision: { required: false, question: "", rationale: "", options: [] } },
+      readyIssueWithDecision
+    ),
+    /maintainer decision/
+  );
 
   const audit = {
     summary: "Specialist audit summary.",

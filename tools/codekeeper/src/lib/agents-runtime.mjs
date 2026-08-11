@@ -348,10 +348,8 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
         throw new Error("Coordinator introduced missing issue information not present in workspace evidence");
       }
     }
-    if (output.decision?.required === true && (
-      specialistResult.decision?.required !== true ||
-      !isDeepStrictEqual(output.decision, specialistResult.decision)
-    )) {
+    if ((specialistResult.decision?.required === true || output.decision?.required === true) &&
+      !isDeepStrictEqual(output.decision, specialistResult.decision)) {
       throw new Error("Coordinator maintainer decision differs from workspace evidence");
     }
   }

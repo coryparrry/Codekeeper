@@ -235,6 +235,6 @@ ${embeddedContext(coordinatorContext(mode, context))}
 
 TASK:
 ${action}
-Do not inspect or reason about source code independently. Use only the workspace result supplied separately by the trusted runtime. When that evidence is incomplete, stale, internally inconsistent, or unsafe, fail closed. Copy required text verbatim. Every emitted finding, test record, list item, label, diagram, maintainer decision, repair field, or explanatory reason must match that evidence exactly; do not move findings between classifications. You may only omit optional evidence or select an enum state that is strictly more conservative. Emit a maintainer decision only by copying a required workspace decision exactly.
+Do not inspect or reason about source code independently. Use only the workspace result supplied separately by the trusted runtime. When that evidence is incomplete, stale, internally inconsistent, or unsafe, fail closed. Copy required text verbatim. Every emitted finding, test record, list item, label, diagram, maintainer decision, repair field, or explanatory reason must match that evidence exactly; do not move findings between classifications. You may only omit optional evidence or select an enum state that is strictly more conservative. Emit a maintainer decision only by copying a required workspace decision exactly; a required workspace decision must remain required.
 Return only JSON matching the provider-enforced schema.`;
 }
