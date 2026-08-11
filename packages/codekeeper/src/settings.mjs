@@ -1,4 +1,4 @@
-import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODES, SOURCE_COMMIT, SOURCE_REPOSITORY } from "./constants.mjs";
+import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODEL_OPTIONS, MODES, SOURCE_COMMIT, SOURCE_REPOSITORY } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 
 const AGENT_IDS = Object.freeze(["review", "audit", "issue", "fix"]);
@@ -200,6 +200,7 @@ export function setSetting(settings, row, value) {
     setPath(next.policy, row.path, value);
     if (/^ai\.agents\.[^.]+\.provider$/.test(row.path)) {
       const agent = row.path.split(".")[2];
+      next.policy.ai.agents[agent].model = MODEL_OPTIONS[value][0].model;
       next.policy.ai.agents[agent].modelSettings = value === "openai"
         ? { text: { verbosity: "low" } }
         : value === "deepseek"

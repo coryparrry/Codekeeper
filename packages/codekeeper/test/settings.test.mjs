@@ -76,6 +76,17 @@ test("one settings object keeps coordinator and workspace models independent", a
   validateEditableSettings(boundedSchedule, policy);
 });
 
+test("changing a provider selects a compatible default model", async () => {
+  const { settings } = await fixture(["review"]);
+  const provider = row(settings, "policy:ai.agents.review.provider");
+
+  const deepseek = setSetting(settings, provider, "deepseek");
+  assert.equal(deepseek.policy.ai.agents.review.model, "deepseek-v4-flash");
+
+  const openrouter = setSetting(settings, provider, "openrouter");
+  assert.equal(openrouter.policy.ai.agents.review.model, "openai/gpt-5.6-sol");
+});
+
 test("settings reject runtime-incompatible model settings and managed-label removal", async () => {
   const { policy, settings } = await fixture(["review", "issues"]);
   const nestedEffort = structuredClone(settings);

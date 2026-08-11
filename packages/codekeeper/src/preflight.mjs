@@ -446,7 +446,9 @@ export async function inspectRepository({
     existingSettings = Object.freeze({
       enabled: (await repositoryVariable(runner, root, repository, ENABLED_VARIABLE)) === "true",
       appClientId: await repositoryVariable(runner, root, repository, CLIENT_ID_VARIABLE),
-      automationBotLogin: installation.modes.includes("review") || (installation.modes.includes("fix") && installation.policy.issues.allowAiImplementation)
+      automationBotLogin: installation.modes.includes("review")
+        || installation.policy.automation.ownerRequests
+        || (installation.modes.includes("fix") && installation.policy.issues.allowAiImplementation)
         ? await optionalRepositoryVariable(runner, root, repository, BOT_LOGIN_VARIABLE)
         : null
     });

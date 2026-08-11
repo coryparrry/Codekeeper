@@ -284,6 +284,22 @@ test("existing generated files are recognized as a rerunnable installation", asy
     cwd: root
   });
   assert.equal(legacy.existingSettings.automationBotLogin, null);
+
+  const issuesRoot = await temporaryDirectory(t);
+  await mkdir(path.join(issuesRoot, ".github", "codekeeper", "agents"), { recursive: true });
+  await mkdir(path.join(issuesRoot, ".github", "workflows"), { recursive: true });
+  await writeFile(path.join(issuesRoot, ".github", "codekeeper.json"), bundle.contents["policies/openai.json"]);
+  for (const [name, asset] of [
+    ["pr-reviewer.md", "agents/pr-reviewer.md"],
+    ["repository-auditor.md", "agents/repository-auditor.md"],
+    ["issue-triager.md", "agents/issue-triager.md"]
+  ]) await writeFile(path.join(issuesRoot, ".github", "codekeeper", "agents", name), bundle.contents[asset]);
+  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper-issues.yml"), bundle.contents["workflows/issues.yml"]);
+  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper-assistant.yml"), bundle.contents["workflows/assistant.yml"]);
+  const issuesOnly = await inspectRepository({ runner: preflightRunner(issuesRoot), cwd: issuesRoot });
+  assert.deepEqual(issuesOnly.installation.modes, ["issues"]);
+  assert.equal(issuesOnly.installation.policy.automation.ownerRequests, true);
+  assert.equal(issuesOnly.existingSettings.automationBotLogin, "codekeeper-widget[bot]");
 });
 
 test("setup branch collision detection covers local refs, remote refs, and prior pull requests", async () => {
