@@ -46,14 +46,13 @@ import {
 } from "./helpers.mjs";
 
 const EXPECTED_ASSETS = Object.freeze({
-  "agents/fixer.md": "b1604c6ff872abdcd4e7c174dc018db55705ad917152a6e338b710331fae4227",
-  "agents/issue-triager.md": "05662b59c92fae8f942b199f4ab1257c6b96014ffc45125aa71775313ce8fbac",
-  "agents/maintenance-planner.md": "17e6eb1192452b8779b10e46f49f98e8fd4e75e5bd1ff08c218eb0f3badd8cdf",
-  "agents/pr-reviewer.md": "dfea6cff0bb9ee49fa25f0c5cb5177c65060922d5745fd707f4936b7fba96603",
-  "agents/repository-auditor.md": "48c4c7c088751fe9b2eda76cbf20b5ad6495bed052f5fb05b4a5156964604445",
-  "policies/mixed.json": "26694bf8a27e1885bb903a3dd6ac1b7c6be760f8fee7604ee54c228b42dd4af5",
-  "policies/openai.json": "9eee50d058bf1e2e845268925875085be20991fed5a89bca913d38d2da286794",
-  "workflows/fix.yml": "66cd05e2dc27ae7c150d2911561dfb8a24c2a8d0f6093fe245671df3307f26fd",
+  "agents/fixer.md": "6770753275c0df9a6546cfe0453b82e6bae985819ddb57998eeb94b14c6ae38a",
+  "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
+  "agents/pr-reviewer.md": "6b89c645090e0684a677f57d8d08c87db4b823f1f5a2c271710a7c8a061ae283",
+  "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
+  "policies/mixed.json": "1aa32a2ccbd4e92654c656abe9b0c438d059682b12f6831cba3f3721ccc28c89",
+  "policies/openai.json": "21aeaeb91356c4240c8083a629e64210bc8c037b2d23f821b4f12defd4b01793",
+  "workflows/fix.yml": "947ee9bde8a1e4f5a99126792038a0e65c0a66ebe73a8c3fb2687bc3681f75e8",
   "workflows/issues.yml": "3260d387b1ae7f76e21fdd0228062e139be3a25f047bfbd5762f638b67e153ca",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
   "workflows/review.yml": "ef33b3a226330ff13253bd086f498ff51697e6825042dc6562047d525faaa54c"
@@ -62,7 +61,6 @@ const EXPECTED_ASSETS = Object.freeze({
 const CHECKPOINT_PATHS = Object.freeze({
   "agents/fixer.md": "tools/codekeeper/agents/fixer.md",
   "agents/issue-triager.md": "tools/codekeeper/agents/issue-triager.md",
-  "agents/maintenance-planner.md": "tools/codekeeper/agents/maintenance-planner.md",
   "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
   "agents/repository-auditor.md": "tools/codekeeper/agents/repository-auditor.md",
   "policies/mixed.json": ".github/codekeeper.json",
@@ -70,6 +68,11 @@ const CHECKPOINT_PATHS = Object.freeze({
   "workflows/issues.yml": "examples/workflows/codekeeper-issues.yml.example",
   "workflows/maintain.yml": "examples/workflows/codekeeper-maintain.yml.example",
   "workflows/review.yml": "examples/workflows/codekeeper-review.yml.example"
+});
+
+const CHECKPOINT_PROVENANCE_PATHS = Object.freeze({
+  presetCatalogue: "tools/codekeeper/presets/catalogue.mjs",
+  toolingManifest: "tools/codekeeper/tooling-manifest.json"
 });
 
 function snapshot() {
@@ -136,6 +139,19 @@ test("checkpoint-backed assets are byte-for-byte source release files", async ()
   }
 });
 
+test("bundled provenance is byte-for-byte metadata from the pinned source release", async () => {
+  const bundle = await loadVerifiedAssets();
+  assert.deepEqual(Object.keys(bundle.metadata.provenance).sort(), Object.keys(CHECKPOINT_PROVENANCE_PATHS).sort());
+  for (const [name, sourcePath] of Object.entries(CHECKPOINT_PROVENANCE_PATHS)) {
+    const source = execFileSync("git", ["show", `${PINNED_COMMIT}:${sourcePath}`], {
+      cwd: REPOSITORY_ROOT,
+      encoding: "utf8"
+    });
+    assert.equal(bundle.metadata.provenance[name].sha256, sha256(source), `${name} SHA-256`);
+    assert.equal(bundle.metadata.provenance[name].bytes, Buffer.byteLength(source), `${name} bytes`);
+  }
+});
+
 test("bundled starter profiles are byte-for-byte canonical current-branch profiles", async () => {
   const bundle = await loadVerifiedAssets();
   for (const profile of AGENT_PROFILE_IDS) {
@@ -145,15 +161,13 @@ test("bundled starter profiles are byte-for-byte canonical current-branch profil
   }
 });
 
-test("bundled starter profiles describe enabled automation and retain fixed runtime limits", async () => {
+test("bundled starter profiles define evidence-first role boundaries", async () => {
   const { contents } = await loadVerifiedAssets();
-  assert.match(contents["agents/repository-auditor.md"], /live run can request one repair when repository repair is on/);
-  assert.match(contents["agents/issue-triager.md"], /`ai-ready` starts a separate implementation run/);
-  assert.match(contents["agents/maintenance-planner.md"], /Reviewer validated against the current head/);
-  assert.match(contents["agents/maintenance-planner.md"], /readyForFixer=false/);
-  assert.match(contents["agents/fixer.md"], /Make the smallest complete change/);
-  assert.match(contents["agents/pr-reviewer.md"], /Review is not repair authorization/);
-  assert.match(contents["agents/pr-reviewer.md"], /it must never open a second pull request/);
+  assert.match(contents["agents/repository-auditor.md"], /Evidence standard/);
+  assert.match(contents["agents/issue-triager.md"], /Duplicate rule/);
+  assert.match(contents["agents/fixer.md"], /Preflight/);
+  assert.match(contents["agents/fixer.md"], /smallest complete change/i);
+  assert.match(contents["agents/pr-reviewer.md"], /Finding gate/);
 });
 
 test("asset verification rejects an altered inventory or a single changed byte", async () => {
@@ -321,7 +335,6 @@ test("renderInstallFiles emits policy, every profile, and only selected callers 
     ".github/codekeeper/agents/pr-reviewer.md",
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
-    ".github/codekeeper/agents/maintenance-planner.md",
     ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml"
@@ -421,7 +434,6 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/codekeeper/agents/pr-reviewer.md",
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
-    ".github/codekeeper/agents/maintenance-planner.md",
     ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml"
@@ -502,18 +514,17 @@ test("each role can use any supported provider and model", async () => {
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, DEEPSEEK_SECRET, APP_SECRET]);
 });
 
-test("planner and fixer can use different supported models", async () => {
+test("fixer can use any supported model without a separate planner credential", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
     bundle,
     snapshot: snapshot(),
-    answers: answers({ modes: ["fix"], preset: "openai", models: { plan: "deepseek-v4-flash", fix: "sol-high" }, tracing: false })
+    answers: answers({ modes: ["fix"], preset: "openai", models: { fix: "sol-high" }, tracing: false })
   });
   const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
   const workflow = plan.files.find((file) => file.path === MODES.fix.target).contents;
-  assert.equal(policy.ai.agents.plan.provider, "deepseek");
   assert.equal(policy.ai.agents.fix.model, "gpt-5.6-sol");
-  assert.match(workflow, /planner_model_api_key: \$\{\{ secrets\.DEEPSEEK_API_KEY \}\}/);
+  assert.doesNotMatch(workflow, /planner_model_api_key/);
   assert.match(workflow, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
 });
 

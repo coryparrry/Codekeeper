@@ -12,7 +12,7 @@ Every operation limit has a global ceiling. Review context is limited to 20 find
 
 ## Provider and coordinator settings
 
-Each coordinator mode is independent under `ai.agents.review`, `audit`, `issue`, and `fix`. It selects a provider from `ai.providers`, a model, attempt/turn limits, JSON model settings, and an optional Codex workspace specialist. The JSON below is a partial excerpt; use the [starter policy](../.github/codekeeper.json) for the complete required four-mode `agents` object.
+Each coordinator mode is independent under `ai.agents.review`, `audit`, `issue`, and `fix`. It selects a provider from `ai.providers`, a model, a bounded retry limit, JSON model settings, and an optional Codex workspace specialist. `maxTurns` is a fixed compatibility field and must be `1`; coordinators never run a multi-turn loop. The JSON below is a partial excerpt; use the [starter policy](../.github/codekeeper.json) for the complete required four-mode `agents` object.
 
 The installer lists every supported provider and model for every role. The starting preset supplies defaults only. It does not lock a role to a provider.
 
@@ -42,7 +42,7 @@ The installer lists every supported provider and model for every role. The start
         "provider": "deepseek",
         "model": "deepseek-v4-flash",
         "effort": "none",
-        "maxTurns": 2,
+        "maxTurns": 1,
         "maximumAttempts": 2,
         "workspace": {
           "enabled": false,
@@ -69,7 +69,7 @@ The installer creates all four fixed profile paths in the adopter repository. Th
 | review | `.github/codekeeper/agents/pr-reviewer.md` | PR summary, evidence-backed findings, risk, test adequacy, and merge recommendation. |
 | issue | `.github/codekeeper/agents/issue-triager.md` | Issue classification, actionability, missing information, and duplicate assessment. |
 | audit | `.github/codekeeper/agents/repository-auditor.md` | Audit evidence, category and priority calibration, and report/no-action decisions. |
-| fix | `.github/codekeeper/agents/maintenance-planner.md` | Bounded implementation planning, risk decisions, and no-change decisions. |
+| fix | `.github/codekeeper/agents/fixer.md` | Problem proof, bounded implementation, validation evidence, risk, and no-change decisions. |
 
 Edit these Markdown files through the adopter's normal review process. A merged default-branch edit affects later runs without a runtime release. The workflow rejects missing, empty, non-UTF-8, oversized, symlinked, or wrong-path profiles. It records the default-branch source commit and profile SHA-256, freezes the exact bytes for the workspace and coordinator, carries them through sealing, and refuses publication if the trusted profile has changed since preparation.
 
@@ -115,12 +115,14 @@ The coordinator itself is one tool-less Agents SDK `Agent` per mode. Codex is op
 
 | Mode | Default provider | Workspace behavior |
 |---|---|---|
-| review | OpenAI | Optional read-only inspection of the exact PR head. |
-| audit | OpenAI | Optional inspection; write access requires `audit.repair.enabled=true` and a live run. |
-| issue | DeepSeek V4 Flash | Disabled by default; optional workspace is always read-only. |
-| fix | OpenAI | Optional implementation; write access also requires `issues.allowAiImplementation=true`. |
+| review | OpenAI | Read-only inspection of the exact PR head. When disabled, Codekeeper returns a deterministic manual-review result without findings or test claims. |
+| audit | OpenAI | Inspection; write access requires `audit.repair.enabled=true` and a live run. When disabled, Codekeeper returns a deterministic no-action audit. |
+| issue | DeepSeek V4 Flash | Disabled by default, so the coordinator triages the bounded issue context directly. If a read-only workspace is enabled manually, the coordinator receives only compact target metadata plus its evidence. |
+| fix | OpenAI | Implementation; write access also requires `issues.allowAiImplementation=true`. When disabled, Codekeeper returns a deterministic no-change result. |
 
 Review and issue workspace writes are rejected by config validation. The installer lets the adopter choose `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled`. A capability that is on is active for its matching live workflow.
+
+Upgrades from the former five-role flow remove the inert `ai.agents.plan` policy entry. An adopter-owned `.github/codekeeper/agents/maintenance-planner.md` file is never deleted automatically: the installer reports it as inactive and leaves it for removal in a separately reviewed pull request.
 
 ## Bounded review context and auto-merge
 

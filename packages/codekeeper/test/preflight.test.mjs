@@ -198,7 +198,7 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     const outside = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
     await writeFile(path.join(outside, "profile.md"), "# Outside\n");
-    await symlink(path.join(outside, "profile.md"), path.join(root, ".github", "codekeeper", "agents", "maintenance-planner.md"));
+    await symlink(path.join(outside, "profile.md"), path.join(root, ".github", "codekeeper", "agents", "fixer.md"));
     await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
   });
   await t.test("renamed caller invoking Codekeeper fails", async (t) => {
@@ -227,20 +227,25 @@ test("existing generated files are recognized as a rerunnable installation", asy
   await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
   await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
   const legacyPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
-  delete legacyPolicy.ai.agents.plan;
+  legacyPolicy.ai.agents.plan = structuredClone(legacyPolicy.ai.agents.fix);
+  for (const agent of Object.values(legacyPolicy.ai.agents)) agent.maxTurns = 2;
   await writeFile(path.join(root, ".github", "codekeeper.json"), `${JSON.stringify(legacyPolicy, null, 2)}\n`);
+  await writeFile(path.join(root, ".github", "codekeeper", "agents", "maintenance-planner.md"), "# Legacy planner\n");
   for (const [name, asset] of [
     ["pr-reviewer.md", "agents/pr-reviewer.md"],
     ["repository-auditor.md", "agents/repository-auditor.md"],
-    ["issue-triager.md", "agents/issue-triager.md"],
-    ["maintenance-planner.md", "agents/maintenance-planner.md"]
+    ["issue-triager.md", "agents/issue-triager.md"]
   ]) await writeFile(path.join(root, ".github", "codekeeper", "agents", name), bundle.contents[asset]);
   await writeFile(path.join(root, ".github", "workflows", "codekeeper-review.yml"), bundle.contents["workflows/review.yml"]);
 
   const installation = await inspectInstallationFiles(root);
   assert.deepEqual(installation.modes, ["review"]);
   assert.equal(installation.policy.ai.agents.review.model, "gpt-5.6-sol");
-  assert.equal(installation.policy.ai.agents.plan.model, installation.policy.ai.agents.fix.model);
+  assert.equal(installation.policy.ai.agents.plan, undefined);
+  for (const agent of ["review", "audit", "issue", "fix"]) {
+    assert.equal(installation.policy.ai.agents[agent].maxTurns, 1);
+  }
+  assert.deepEqual(installation.legacyFiles, [".github/codekeeper/agents/maintenance-planner.md"]);
   assert.equal(installation.contents[".github/codekeeper/agents/fixer.md"], undefined);
   const inspected = await inspectRepository({ runner: preflightRunner(root), cwd: root });
   assert.equal(inspected.updateBranch, `codekeeper/update-${HEAD_SHA.slice(0, 12)}`);

@@ -23,11 +23,11 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and proof sequence. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/94df55ad6bf97b26f4449593ef44a8745282636c/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/8d2ea1aa4250c14fc3ae6b6006fc90913f3a2ac1/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/94df55ad6bf97b26f4449593ef44a8745282636c/tools/codekeeper/agents) | Immutable source and provenance for the five starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
+| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/8d2ea1aa4250c14fc3ae6b6006fc90913f3a2ac1/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
@@ -45,7 +45,7 @@ The installer lists OpenAI Luna, Terra, and Sol, plus DeepSeek V4 Flash, for eve
 After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
 1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, and only the selected caller workflows.
-2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `94df55ad6bf97b26f4449593ef44a8745282636c`.
+2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `8d2ea1aa4250c14fc3ae6b6006fc90913f3a2ac1`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
@@ -66,7 +66,6 @@ Every installation includes these fixed, versioned starter files:
 - `.github/codekeeper/agents/pr-reviewer.md`
 - `.github/codekeeper/agents/repository-auditor.md`
 - `.github/codekeeper/agents/issue-triager.md`
-- `.github/codekeeper/agents/maintenance-planner.md`
 - `.github/codekeeper/agents/fixer.md`
 
 Edit and review these Markdown files through an ordinary pull request. After merge, their trusted default-branch versions tune priorities, work selection, implementation approach, review standards, evidence thresholds, duplicate criteria, risk decisions, writing, and when the right result is no action.
@@ -83,7 +82,7 @@ When repository repair is on, a live maintenance run may make one bounded repair
 - a dirty checkout, detached `HEAD`, stale local checkout, or a `HEAD` that is not the remote default branch;
 - an incomplete existing Codekeeper installation, an existing setup or update branch for the same source commit, or a generated-file collision.
 
-The same collision checks cover all five agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
+The same collision checks cover all four agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
 
 If setup fails, follow the recovery command printed by the installed binary. The installer preserves recoverable branch or pull-request state. Do not merge a partial setup.
 

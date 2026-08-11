@@ -44,25 +44,27 @@ async function loadArtifact(artifactDirectory, expectedMode, config, configSha25
     throw new Error("Sealed artifact manifest changed after sealing");
   }
   const manifest = parseArtifactJson(manifestBytes, "manifest.json");
-  if (manifest.version !== 2) throw new Error("Unsupported artifact manifest version");
+  if (manifest.version !== 3) throw new Error("Unsupported artifact manifest version");
   if (manifest.sealed !== true) throw new Error("Only sealed artifacts may be published");
   if (!/^[a-f0-9]{64}$/i.test(String(configSha256 ?? ""))) {
     throw new Error("Publisher requires the SHA-256 of its frozen configuration");
   }
 
-  const [contextBytes, resultBytes, configBytes, validationBytes, agentProfileBytes] = await Promise.all([
+  const [contextBytes, resultBytes, configBytes, validationBytes, agentProfileBytes, runtimeMetadataBytes] = await Promise.all([
     readRegularFile(path.join(artifactDirectory, "context.json")),
     readRegularFile(path.join(artifactDirectory, "result.json")),
     readRegularFile(path.join(artifactDirectory, "config.json")),
     readRegularFile(path.join(artifactDirectory, "validation.json")),
-    readRegularFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE))
+    readRegularFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE)),
+    readRegularFile(path.join(artifactDirectory, "runtime-metadata.json"))
   ]);
   if (
     sha256(contextBytes) !== manifest.contextSha256 ||
     sha256(resultBytes) !== manifest.resultSha256 ||
     sha256(configBytes) !== manifest.configFileSha256 ||
     sha256(validationBytes) !== manifest.validationSha256 ||
-    sha256(agentProfileBytes) !== manifest.agentProfileSha256
+    sha256(agentProfileBytes) !== manifest.agentProfileSha256 ||
+    sha256(runtimeMetadataBytes) !== manifest.runtimeMetadataSha256
   ) {
     throw new Error("Sealed artifact component changed after sealing");
   }
@@ -271,6 +273,63 @@ async function currentReviewPull(github, context, config) {
   return pull;
 }
 
+async function disableFailedAutoMergePostcondition(github, pullRequest, cause) {
+  let disableError = null;
+  try {
+    await github.disableAutoMerge(pullRequest.node_id);
+  } catch (error) {
+    disableError = error;
+  }
+  let refreshedPull;
+  try {
+    refreshedPull = await github.getPull(pullRequest.number);
+  } catch (error) {
+    throw new Error(`Auto-merge postcondition failed for PR #${pullRequest.number} and disablement could not be verified: ${error.message}`, { cause });
+  }
+  if (disableError || refreshedPull?.number !== pullRequest.number || refreshedPull.auto_merge !== null) {
+    const detail = disableError ? `: ${disableError.message}` : "";
+    throw new Error(`Auto-merge postcondition failed for PR #${pullRequest.number} and auto-merge could not be disabled${detail}`, { cause });
+  }
+  throw new Error(`Auto-merge postcondition failed for PR #${pullRequest.number}: ${cause.message}`, { cause });
+}
+
+async function verifyAutoMergePostcondition({
+  github,
+  activationPull,
+  context,
+  config,
+  files,
+  reviewResult,
+  reviewContextComplete,
+  automationBotLogin
+}) {
+  let verifiedPull;
+  try {
+    verifiedPull = await currentReviewPull(github, context, config);
+  } catch (error) {
+    return disableFailedAutoMergePostcondition(github, activationPull, error);
+  }
+  const verifiedDecision = evaluateAutoMerge({
+    config,
+    pullRequest: verifiedPull,
+    files,
+    reviewResult,
+    reviewContextComplete,
+    automationBotLogin
+  });
+  if (!verifiedPull.auto_merge || !verifiedDecision.eligible) {
+    const reason = !verifiedPull.auto_merge
+      ? "GitHub did not report auto-merge as active"
+      : verifiedDecision.reasons.join("; ") || "the pull request is no longer eligible";
+    return disableFailedAutoMergePostcondition(
+      github,
+      verifiedPull.auto_merge ? verifiedPull : activationPull,
+      new Error(reason)
+    );
+  }
+  return verifiedDecision;
+}
+
 export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
   const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
@@ -356,6 +415,18 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     } else {
       autoMergeResult = await reconcileAutoMerge(github, activationPull, config, activationDecision);
       publishedAutoMerge = activationDecision;
+      if (autoMergeResult.enabled) {
+        publishedAutoMerge = await verifyAutoMergePostcondition({
+          github,
+          activationPull,
+          context,
+          config,
+          files,
+          reviewResult: result,
+          reviewContextComplete,
+          automationBotLogin: automationIdentity.login
+        });
+      }
       if (!autoMergeResult.enabled) {
         publishedAutoMerge = {
           ...activationDecision,

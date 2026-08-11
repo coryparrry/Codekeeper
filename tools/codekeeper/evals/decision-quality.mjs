@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { runConfiguredAgent } from "../src/lib/agents-runtime.mjs";
-import { buildAuditPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "../src/lib/prompts.mjs";
+import { buildCoordinatorPrompt } from "../src/lib/prompts.mjs";
 import { auditSchema, fixSchema, issueSchema, reviewSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "../src/lib/schemas.mjs";
 import { applyPolicyPreset, POLICY_PRESETS } from "../presets/catalogue.mjs";
 
@@ -260,10 +260,10 @@ function assert(condition, message) {
 
 function promptAndSchemaFor(scenario, config) {
   switch (scenario.mode) {
-    case "review": return { prompt: buildReviewPrompt(scenario.context, config), schema: reviewSchema(config), validate: (result) => validateReviewResult(result, config) };
-    case "audit": return { prompt: buildAuditPrompt(scenario.context, config), schema: auditSchema(config), validate: (result) => validateAuditResult(result, config) };
-    case "issue": return { prompt: buildIssuePrompt(scenario.context, config), schema: issueSchema(config), validate: (result) => validateIssueResult(result, config) };
-    case "fix": return { prompt: buildFixPrompt(scenario.context, config), schema: fixSchema(scenario.context.target), validate: (result) => validateFixResult(result, scenario.context.target) };
+    case "review": return { prompt: buildCoordinatorPrompt("review", scenario.context, config), schema: reviewSchema(config), validate: (result) => validateReviewResult(result, config) };
+    case "audit": return { prompt: buildCoordinatorPrompt("audit", scenario.context, config), schema: auditSchema(config), validate: (result) => validateAuditResult(result, config) };
+    case "issue": return { prompt: buildCoordinatorPrompt("issue", scenario.context, config), schema: issueSchema(config), validate: (result) => validateIssueResult(result, config) };
+    case "fix": return { prompt: buildCoordinatorPrompt("fix", scenario.context, config), schema: fixSchema(scenario.context.target), validate: (result) => validateFixResult(result, scenario.context.target) };
     default: throw new Error(`Unknown scenario mode: ${scenario.mode}`);
   }
 }
@@ -351,9 +351,14 @@ export function makeOfflineSdk(fixtures = Object.fromEntries(SCENARIOS.map((scen
     }
   }
   class FakeRunner {
+    scenario;
     async run(_agent, input) {
-      const scenario = input.match(/"evaluationScenario":\s*"([^"]+)"/)?.[1];
+      const inputText = typeof input === "string"
+        ? input
+        : input.flatMap((message) => message.content ?? []).map((content) => content.text ?? "").join("\n");
+      const scenario = inputText.match(/"evaluationScenario":\s*"([^"]+)"/)?.[1] ?? this.scenario;
       if (!scenario || !fixtures[scenario]) throw new Error("offline fixture scenario was not found");
+      this.scenario = scenario;
       onRun(scenario);
       return { finalOutput: structuredClone(fixtures[scenario]) };
     }
@@ -381,7 +386,13 @@ export async function runDecisionEvaluation({ preset = "mixed", repeat = DEFAULT
           config: policy,
           prompt,
           schema,
-          specialistResult: scenario.specialistResult,
+          specialistResult: scenario.specialistResult === null
+            ? null
+            : {
+                evaluationScenario: scenario.name,
+                ...structuredClone(scenario.specialistResult),
+                ...structuredClone(scenario.fixture)
+              },
           validateOutput: validate,
           apiKey: providerKeys.get(agent.provider),
           sdkLoader,

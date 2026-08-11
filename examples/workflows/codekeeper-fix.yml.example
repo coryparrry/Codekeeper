@@ -44,8 +44,6 @@ jobs:
       # Optional for dry_run=true; required when dry_run=false publishes changes.
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:
-      # Match this secret to ai.agents.plan.provider in .github/codekeeper.json.
-      planner_model_api_key: ${{ secrets.OPENAI_API_KEY }}
       # Match this secret to ai.agents.fix.provider in .github/codekeeper.json.
       model_api_key: ${{ secrets.OPENAI_API_KEY }}
       # Required while this mode keeps workspace.enabled=true.

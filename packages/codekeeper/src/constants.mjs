@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "94df55ad6bf97b26f4449593ef44a8745282636c";
+export const SOURCE_COMMIT = "8d2ea1aa4250c14fc3ae6b6006fc90913f3a2ac1";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -42,7 +42,7 @@ export const MODES = Object.freeze({
     id: "fix",
     label: "Issue implementation and pull request repair",
     agentLabel: "Fixer",
-    description: "Plans, then implements ready issues or validated pull request repairs.",
+    description: "Validates and implements ready issues or pull request repairs in one workspace pass.",
     policyAgent: "fix",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
@@ -69,12 +69,6 @@ export const AGENT_PROFILES = Object.freeze({
     target: ".github/codekeeper/agents/issue-triager.md",
     asset: "agents/issue-triager.md",
     purpose: "Editable issue-triage judgment rules"
-  }),
-  "maintenance-planner": Object.freeze({
-    id: "maintenance-planner",
-    target: ".github/codekeeper/agents/maintenance-planner.md",
-    asset: "agents/maintenance-planner.md",
-    purpose: "Editable implementation planning rules"
   }),
   fixer: Object.freeze({
     id: "fixer",

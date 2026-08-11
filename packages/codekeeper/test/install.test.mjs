@@ -394,7 +394,6 @@ test("real Git integration creates one exact generated-only commit without broad
     ".github/codekeeper/agents/pr-reviewer.md",
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
-    ".github/codekeeper/agents/maintenance-planner.md",
     ".github/codekeeper/agents/fixer.md"
   ]);
   assert.equal(git(root, ["status", "--porcelain=v1"]), "");

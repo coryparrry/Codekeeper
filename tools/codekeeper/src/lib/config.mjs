@@ -1,7 +1,7 @@
 import path from "node:path";
 import { readJson } from "./io.mjs";
 
-export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "plan", "fix"]);
+export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "fix"]);
 const PROVIDER_APIS = new Set(["responses", "chat_completions"]);
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
 const LIMITS = Object.freeze({
@@ -265,7 +265,7 @@ function validateAi(config) {
     );
     positiveInteger(agent.maxTurns, `ai.agents.${mode}.maxTurns`);
     positiveInteger(agent.maximumAttempts, `ai.agents.${mode}.maximumAttempts`);
-    assert(agent.maxTurns <= 20, `ai.agents.${mode}.maxTurns must be at most 20`);
+    assert(agent.maxTurns === 1, `ai.agents.${mode}.maxTurns must be 1; coordinators are single-turn adjudicators`);
     assert(agent.maximumAttempts <= 5, `ai.agents.${mode}.maximumAttempts must be at most 5`);
     if (agent.modelSettings !== undefined) {
       plainObject(agent.modelSettings, `ai.agents.${mode}.modelSettings`);
@@ -287,7 +287,7 @@ function validateAi(config) {
       nonEmptyString(workspace.model, `ai.agents.${mode}.workspace.model`, 256);
       assert(REASONING_EFFORTS.has(workspace.effort), `ai.agents.${mode}.workspace.effort is unsupported`);
     }
-    if (mode === "review" || mode === "issue" || mode === "plan") {
+    if (mode === "review" || mode === "issue") {
       assert(!workspace.allowWrites, `ai.agents.${mode}.workspace.allowWrites must remain false`);
     }
   }

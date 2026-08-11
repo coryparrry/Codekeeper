@@ -1,30 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { fixSchema, planSchema, validateAuditResult, validateFixResult, validatePlanResult, validateReviewResult } from "../src/lib/schemas.mjs";
+import { fixSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "../src/lib/schemas.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
 );
-
-test("planner output must be ready and bound before the fixer can receive it", () => {
-  const target = { kind: "pull_request", number: 26 };
-  const result = {
-    mode: "plan",
-    summary: "One current finding is ready.",
-    targetKind: "pull_request",
-    targetNumber: 26,
-    objective: "Correct the current failure.",
-    steps: ["Write the failing test.", "Apply the smallest fix."],
-    validation: ["npm test"],
-    risks: [],
-    readyForFixer: true,
-    noActionReason: null
-  };
-  assert.equal(planSchema(target).properties.mode.const, "plan");
-  assert.equal(validatePlanResult(result, target), result);
-  assert.throws(() => validatePlanResult({ ...result, targetNumber: 27 }, target), /frozen target/);
-});
 
 test("review validator rejects auto recommendation with blockers", () => {
   assert.throws(
@@ -59,7 +40,7 @@ test("review validator rejects auto recommendation with blockers", () => {
   );
 });
 
-test("review validator cannot hand a stale finding to the planner", () => {
+test("review validator cannot promote a stale finding to the fixer", () => {
   assert.throws(() => validateReviewResult({
     mode: "review",
     summary: "The comment is stale.",
@@ -114,6 +95,31 @@ test("audit validator binds a requested repair to a finding", () => {
     config
   );
   assert.equal(result.repair.findingIndex, 0);
+});
+
+test("issue validator rejects AI implementation while a maintainer decision is required", () => {
+  assert.throws(
+    () => validateIssueResult({
+      mode: "issue",
+      summary: "The issue is clear but requires a compatibility choice.",
+      type: "bug",
+      priority: "p2",
+      labels: [],
+      actionable: true,
+      missingInformation: [],
+      duplicateOf: null,
+      duplicateConfidence: "none",
+      implementationRecommendation: "ai-ready",
+      decision: {
+        required: true,
+        question: "Which compatibility behavior should apply?",
+        rationale: "The implementation depends on a maintainer-owned policy choice.",
+        options: [{ label: "Preserve behavior", description: "Keep compatibility.", recommended: true }]
+      },
+      comment: "A maintainer decision is required before implementation."
+    }, config),
+    /required maintainer decision cannot be AI-ready/
+  );
 });
 
 test("fix schema and validator bind output to the frozen issue or pull request target", () => {

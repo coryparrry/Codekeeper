@@ -200,10 +200,12 @@ export async function inspectInstallationFiles(root, {
   if (!policy?.ai?.agents || !policy?.repository || !policy?.audit || !policy?.issues || !policy?.merge) {
     throw new InstallerError("The existing Codekeeper policy does not have the required sections.", { code: "EXISTING_INSTALLATION_INVALID" });
   }
-  if (!policy.ai.agents.plan && policy.ai.agents.fix) {
-    policy.ai.agents.plan = structuredClone(policy.ai.agents.fix);
-    policy.ai.agents.plan.workspace.enabled = false;
-    policy.ai.agents.plan.workspace.allowWrites = false;
+  // The planner was removed from the production flow. Strip its legacy policy
+  // entry during reruns so the current strict policy validator can accept the
+  // existing installation and render the single-pass fixer contract.
+  delete policy.ai.agents.plan;
+  for (const agent of Object.values(policy.ai.agents)) {
+    if (agent && typeof agent === "object" && !Array.isArray(agent)) agent.maxTurns = 1;
   }
   const policySource = `${JSON.stringify(policy, null, 2)}\n`;
   const contents = { [POLICY_TARGET]: installedPolicySource };
@@ -224,11 +226,16 @@ export async function inspectInstallationFiles(root, {
     contents[target] = await fsImpl.readFile(filePath, "utf8");
   }
   if (!modes.length) throw new InstallerError("The existing installation has no Codekeeper workflows.", { code: "EXISTING_INSTALLATION_INVALID" });
+  const legacyPlannerProfile = ".github/codekeeper/agents/maintenance-planner.md";
+  const legacyFiles = await exists(fsImpl, path.join(root, ...legacyPlannerProfile.split("/")))
+    ? [legacyPlannerProfile]
+    : [];
   return Object.freeze({
     policy: Object.freeze(policy),
     policySource,
     modes: Object.freeze(modes),
-    contents: Object.freeze(contents)
+    contents: Object.freeze(contents),
+    legacyFiles: Object.freeze(legacyFiles)
   });
 }
 

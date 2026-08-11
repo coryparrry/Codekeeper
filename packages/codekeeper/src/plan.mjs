@@ -69,12 +69,12 @@ export function normalizeModes(modes) {
 }
 
 export function modelAssignments(modes) {
-  return normalizeModes(modes).flatMap((mode) => mode === "fix"
-    ? [
-        { key: "plan", agent: "plan", label: "Maintenance planner", workflow: MODES.fix.label },
-        { key: "fix", agent: "fix", label: "Fixer", workflow: MODES.fix.label }
-      ]
-    : [{ key: mode, agent: MODES[mode].policyAgent, label: MODES[mode].agentLabel, workflow: MODES[mode].label }]);
+  return normalizeModes(modes).map((mode) => ({
+    key: mode,
+    agent: MODES[mode].policyAgent,
+    label: MODES[mode].agentLabel,
+    workflow: MODES[mode].label
+  }));
 }
 
 export function normalizeOwnerLogins(ownerLogins) {
@@ -435,6 +435,9 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     modes = [...installation.modes];
     preset = installation.policy.ai.agents.issue?.provider === "deepseek" ? "mixed" : "openai";
     output.write(`Editing the current ${modes.map((mode) => MODES[mode].label).join(" + ")} installation.\n`);
+    if (installation.legacyFiles?.length) {
+      output.write(`Legacy inactive file remains unchanged: ${installation.legacyFiles.join(", ")}. Remove it in a separately reviewed pull request when ready.\n`);
+    }
   } else if (useRecommended) {
     modes = [...RECOMMENDED_MODES];
     preset = RECOMMENDED_PRESET;
