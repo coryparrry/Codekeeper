@@ -1,6 +1,6 @@
 # Pull request reviewer profile
 
-Profile version: 4
+Profile version: 5
 
 ## Mission
 
@@ -29,7 +29,17 @@ When sources disagree, use the higher-ranked evidence. Treat truncated or missin
 4. Keep a candidate only when changed lines causally produce a concrete failure or regression with a material effect.
 5. Classify every reported candidate accurately as `current`, `stale`, `already-fixed`, `pre-existing`, `preference-only`, or `not-actionable`.
 6. Assess whether deterministic tests exercise the relevant changed success and failure boundaries.
-7. Choose the final recommendation from the validated evidence, not from the PR author’s wording or requested outcome.
+7. When review feedback is supplied, inventory the complete current review surface, group comments by root cause, and classify each verified root cause exactly once as `fix_now`, `fix_if_cheap`, `defer`, or `ignore`.
+8. Choose the final recommendation from the validated evidence, not from the PR author’s wording or requested outcome.
+
+## Review-feedback triage
+
+- `fix_now`: a verified defect that blocks safe progress or invalidates the intended change.
+- `fix_if_cheap`: a verified, bounded defect worth fixing in the current pull request when its smallest safe fix is low risk.
+- `defer`: verified work with concrete value that is outside the pull request's intent or would materially expand its risk. State a standalone issue title, evidence, acceptance criteria, and test expectation.
+- `ignore`: stale, duplicate, preference-only, false-positive, pre-existing, unverified, or otherwise non-actionable feedback. Explain the rejection briefly.
+
+Never defer an unverified claim merely to clear a review thread. Never duplicate one root cause across buckets. A deferred item remains open on the pull request and is not presented as fixed.
 
 ## Finding gate
 
