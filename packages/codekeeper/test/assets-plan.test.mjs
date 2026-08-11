@@ -70,6 +70,11 @@ const CHECKPOINT_PATHS = Object.freeze({
   "workflows/review.yml": "examples/workflows/codekeeper-review.yml.example"
 });
 
+const CHECKPOINT_PROVENANCE_PATHS = Object.freeze({
+  presetCatalogue: "tools/codekeeper/presets/catalogue.mjs",
+  toolingManifest: "tools/codekeeper/tooling-manifest.json"
+});
+
 function snapshot() {
   return Object.freeze({
     root: "/tmp/widget",
@@ -131,6 +136,19 @@ test("checkpoint-backed assets are byte-for-byte source release files", async ()
       encoding: "utf8"
     });
     assert.equal(bundle.contents[asset], source, `${asset} differs from ${sourcePath} at the pinned checkpoint`);
+  }
+});
+
+test("bundled provenance is byte-for-byte metadata from the pinned source release", async () => {
+  const bundle = await loadVerifiedAssets();
+  assert.deepEqual(Object.keys(bundle.metadata.provenance).sort(), Object.keys(CHECKPOINT_PROVENANCE_PATHS).sort());
+  for (const [name, sourcePath] of Object.entries(CHECKPOINT_PROVENANCE_PATHS)) {
+    const source = execFileSync("git", ["show", `${PINNED_COMMIT}:${sourcePath}`], {
+      cwd: REPOSITORY_ROOT,
+      encoding: "utf8"
+    });
+    assert.equal(bundle.metadata.provenance[name].sha256, sha256(source), `${name} SHA-256`);
+    assert.equal(bundle.metadata.provenance[name].bytes, Buffer.byteLength(source), `${name} bytes`);
   }
 });
 
