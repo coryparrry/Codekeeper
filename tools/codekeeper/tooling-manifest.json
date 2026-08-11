@@ -43,7 +43,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "da7403cc154b9e7e5e8117ac29f84a881089b20d314ca5a8fa14234bf212577b"
+      "sha256": "ca50e7a03bbebb0951992e29ba94eb139bbe08b5a834e80a925f48159c02559f"
     },
     {
       "path": "src/lib/commands.mjs",
@@ -87,7 +87,7 @@
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "1109c8c387237ba7be864c80ca9cc7c47abe64508fee5150a47dc1e4227b5c9a"
+      "sha256": "3a7d655b5bd806bb01d4e9ba1cacd62b1be849aa633a519511f0111b02d10d5d"
     },
     {
       "path": "src/lib/publish.mjs",

@@ -635,6 +635,133 @@ test("coordinator evidence cannot become more permissive than specialist authori
   );
 });
 
+test("coordinator binds every rendered claim to specialist evidence", () => {
+  const reviewFinding = { title: "A non-blocking finding" };
+  const review = {
+    summary: "Specialist review summary.",
+    risk: "medium",
+    labels: [],
+    blockingFindings: [],
+    nonBlockingFindings: [reviewFinding],
+    tests: { adequate: false, notes: "Specialist test note." },
+    diagram: "flowchart TD\nA-->B",
+    mergeRecommendation: "manual",
+    noActionReason: "A maintainer must decide."
+  };
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("review", { ...review, summary: "Invented review summary." }, review),
+    /review summary/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "review",
+      { ...review, blockingFindings: [reviewFinding], nonBlockingFindings: [] },
+      review
+    ),
+    /blocking finding/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("review", { ...review, tests: { adequate: false, notes: "Invented test note." } }, review),
+    /test notes/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("review", { ...review, diagram: "flowchart TD\nA-->C" }, review),
+    /review diagram/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("review", { ...review, noActionReason: "Invented reason." }, review),
+    /no-action reason/
+  );
+
+  const issue = {
+    summary: "Specialist issue summary.",
+    type: "bug",
+    priority: "p3",
+    labels: [],
+    actionable: false,
+    missingInformation: ["Affected version."],
+    duplicateOf: null,
+    duplicateConfidence: "none",
+    implementationRecommendation: "no",
+    decision: { required: false, question: "", rationale: "", options: [] },
+    comment: "Specialist issue comment."
+  };
+  const requiredDecision = {
+    required: true,
+    question: "Which behavior should apply?",
+    rationale: "The outcome changes compatibility.",
+    options: [{ label: "Keep behavior", description: "Preserve current behavior.", recommended: true }]
+  };
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("issue", { ...issue, comment: "Invented issue comment." }, issue),
+    /issue comment/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("issue", { ...issue, missingInformation: ["Invented missing fact."] }, issue),
+    /missing issue information/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("issue", { ...issue, implementationRecommendation: "manual" }, issue),
+    /implementation recommendation/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("issue", { ...issue, decision: requiredDecision }, issue),
+    /maintainer decision/
+  );
+  const issueWithDecision = { ...issue, decision: requiredDecision };
+  assert.doesNotThrow(
+    () => enforceCoordinatorEvidenceBoundary("issue", issueWithDecision, issueWithDecision)
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "issue",
+      { ...issueWithDecision, decision: { ...requiredDecision, rationale: "Invented rationale." } },
+      issueWithDecision
+    ),
+    /maintainer decision/
+  );
+
+  const audit = {
+    summary: "Specialist audit summary.",
+    findings: [],
+    repair: { requested: false, findingIndex: null, title: "", body: "", risk: "high", validationSummary: "" },
+    noActionReason: "No supported maintenance work."
+  };
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("audit", { ...audit, summary: "Invented audit summary." }, audit),
+    /audit summary/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "audit",
+      { ...audit, repair: { ...audit.repair, title: "Invented repair." } },
+      audit
+    ),
+    /repair title/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("audit", { ...audit, noActionReason: "Invented audit reason." }, audit),
+    /audit no-action reason/
+  );
+
+  const fix = {
+    summary: "Specialist fix summary.",
+    risk: "medium",
+    readyForReview: false,
+    testsRun: [],
+    changedSummary: "",
+    noChangeReason: "No policy-compliant patch exists."
+  };
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("fix", { ...fix, summary: "Invented fix summary." }, fix),
+    /fix summary/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("fix", { ...fix, noChangeReason: "Invented fix reason." }, fix),
+    /fix no-change reason/
+  );
+});
+
 test("runtime diagnostics expose only the final failure stage and attempt", async () => {
   const diagnostics = [];
   class FakeProvider { async close() {} }

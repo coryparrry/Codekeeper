@@ -213,6 +213,17 @@ function exactMember(value, candidates) {
   return candidates.some((candidate) => isDeepStrictEqual(candidate, value));
 }
 
+function hasOwn(value, field) {
+  return value !== null && typeof value === "object" && Object.hasOwn(value, field);
+}
+
+function assertEvidenceField(output, specialistResult, field, message, { allowNull = false } = {}) {
+  if (!hasOwn(output, field) || (allowNull && output[field] === null)) return;
+  if (!hasOwn(specialistResult, field) || !isDeepStrictEqual(output[field], specialistResult[field])) {
+    throw new Error(message);
+  }
+}
+
 function isMorePermissive(value, specialistValue, order) {
   return order.indexOf(value) > order.indexOf(specialistValue);
 }
@@ -240,12 +251,19 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     return output;
   }
   if (mode === "review") {
-    const candidates = [
-      ...(specialistResult.blockingFindings ?? []),
-      ...(specialistResult.nonBlockingFindings ?? [])
-    ];
-    for (const finding of [...(output.blockingFindings ?? []), ...(output.nonBlockingFindings ?? [])]) {
-      if (!exactMember(finding, candidates)) throw new Error("Coordinator introduced a review finding not present in workspace evidence");
+    assertEvidenceField(output, specialistResult, "summary", "Coordinator review summary differs from workspace evidence");
+    assertEvidenceField(output.tests, specialistResult.tests, "notes", "Coordinator review test notes differ from workspace evidence");
+    assertEvidenceField(output, specialistResult, "diagram", "Coordinator review diagram differs from workspace evidence", { allowNull: true });
+    assertEvidenceField(output, specialistResult, "noActionReason", "Coordinator review no-action reason differs from workspace evidence", { allowNull: true });
+    for (const finding of output.blockingFindings ?? []) {
+      if (!exactMember(finding, specialistResult.blockingFindings ?? [])) {
+        throw new Error("Coordinator introduced a review blocking finding not present in workspace evidence");
+      }
+    }
+    for (const finding of output.nonBlockingFindings ?? []) {
+      if (!exactMember(finding, specialistResult.nonBlockingFindings ?? [])) {
+        throw new Error("Coordinator introduced a review non-blocking finding not present in workspace evidence");
+      }
     }
     for (const finding of specialistResult.blockingFindings ?? []) {
       if (!exactMember(finding, output.blockingFindings ?? [])) {
@@ -268,8 +286,18 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     }
   }
   if (mode === "audit") {
+    assertEvidenceField(output, specialistResult, "summary", "Coordinator audit summary differs from workspace evidence");
+    assertEvidenceField(output, specialistResult, "noActionReason", "Coordinator audit no-action reason differs from workspace evidence", { allowNull: true });
     for (const finding of output.findings ?? []) {
       if (!exactMember(finding, specialistResult.findings ?? [])) throw new Error("Coordinator introduced an audit finding not present in workspace evidence");
+    }
+    for (const field of ["title", "body", "risk", "validationSummary"]) {
+      assertEvidenceField(
+        output.repair,
+        specialistResult.repair,
+        field,
+        `Coordinator audit repair ${field} differs from workspace evidence`
+      );
     }
     if (output.repair?.requested === true) {
       if (specialistResult.repair?.requested !== true) {
@@ -280,14 +308,11 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
       if (!specialistFinding || !exactMember(outputFinding, [specialistFinding])) {
         throw new Error("Coordinator audit repair targets a different finding than workspace evidence");
       }
-      for (const field of ["title", "body", "risk", "validationSummary"]) {
-        if (output.repair[field] !== specialistResult.repair[field]) {
-          throw new Error(`Coordinator audit repair ${field} differs from workspace evidence`);
-        }
-      }
     }
   }
   if (mode === "issue") {
+    assertEvidenceField(output, specialistResult, "summary", "Coordinator issue summary differs from workspace evidence");
+    assertEvidenceField(output, specialistResult, "comment", "Coordinator issue comment differs from workspace evidence");
     if (output.type !== specialistResult.type) {
       throw new Error("Coordinator issue type differs from workspace evidence");
     }
@@ -299,6 +324,9 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     }
     if (output.implementationRecommendation === "ai-ready" && specialistResult.implementationRecommendation !== "ai-ready") {
       throw new Error("Coordinator cannot make an issue AI-ready when workspace evidence did not");
+    }
+    if (isMorePermissive(output.implementationRecommendation, specialistResult.implementationRecommendation, ["no", "manual", "ai-ready"])) {
+      throw new Error("Coordinator implementation recommendation is more permissive than workspace evidence");
     }
     if (isMorePermissive(output.priority, specialistResult.priority, ["p3", "p2", "p1"])) {
       throw new Error("Coordinator issue priority is more urgent than workspace evidence");
@@ -315,8 +343,21 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
         throw new Error("Coordinator introduced an issue label not present in workspace evidence");
       }
     }
+    for (const missingInformation of output.missingInformation ?? []) {
+      if (!exactMember(missingInformation, specialistResult.missingInformation ?? [])) {
+        throw new Error("Coordinator introduced missing issue information not present in workspace evidence");
+      }
+    }
+    if (output.decision?.required === true && (
+      specialistResult.decision?.required !== true ||
+      !isDeepStrictEqual(output.decision, specialistResult.decision)
+    )) {
+      throw new Error("Coordinator maintainer decision differs from workspace evidence");
+    }
   }
   if (mode === "fix") {
+    assertEvidenceField(output, specialistResult, "summary", "Coordinator fix summary differs from workspace evidence");
+    assertEvidenceField(output, specialistResult, "noChangeReason", "Coordinator fix no-change reason differs from workspace evidence", { allowNull: true });
     if (output.readyForReview && specialistResult.readyForReview !== true) {
       throw new Error("Coordinator cannot mark a fix ready when workspace evidence did not");
     }

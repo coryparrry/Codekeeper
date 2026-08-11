@@ -61,6 +61,8 @@ test("review coordinator prompts preserve specialist blockers", () => {
   }, config);
 
   assert.match(prompt, /Every specialist blocking finding must remain blocking/);
+  assert.match(prompt, /non-blocking findings may be omitted or retained only as non-blocking/);
+  assert.match(prompt, /Emit a maintainer decision only by copying a required workspace decision exactly/);
   assert.doesNotMatch(prompt, /may omit or move them between blocking and non-blocking lists/);
 });
 

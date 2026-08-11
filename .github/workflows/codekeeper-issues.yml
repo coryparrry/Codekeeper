@@ -38,7 +38,7 @@ permissions:
   issues: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: b4292e113cf1a30d08c434f0c2cc4d5e46065d9e900226537ec41e6936f0e336
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 10d5ca35c3e30692580d53ab89b1a5ec3e5ad897ac5b8fc4523f17b4a4ae4809
 
 concurrency:
   group: codekeeper-issue-${{ github.event.issue.number }}

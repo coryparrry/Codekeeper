@@ -213,7 +213,7 @@ export function buildCoordinatorPrompt(mode, context, config) {
       action = "Decide whether the workspace triage evidence supports the issue classification, duplicate decision, and implementation recommendation. Do not add repository or issue claims that are absent from the workspace result; downgrade unsupported decisions.";
       break;
     case "review":
-      action = "Decide whether the workspace review evidence supports blocking, manual review, or auto-merge. Findings must be copied exactly from the workspace evidence. Every specialist blocking finding must remain blocking; non-blocking findings may be omitted, retained, or moved to the blocking list.";
+      action = "Decide whether the workspace review evidence supports blocking, manual review, or auto-merge. Findings must be copied exactly from the workspace evidence. Every specialist blocking finding must remain blocking; non-blocking findings may be omitted or retained only as non-blocking.";
       break;
     case "audit":
       action = "Decide which workspace audit findings are sufficiently supported. Findings must be copied exactly from the workspace evidence; do not add repository observations.";
@@ -235,6 +235,6 @@ ${embeddedContext(coordinatorContext(mode, context))}
 
 TASK:
 ${action}
-Do not inspect or reason about source code independently. Use only the workspace result supplied separately by the trusted runtime. When that evidence is incomplete, stale, internally inconsistent, or unsafe, fail closed.
+Do not inspect or reason about source code independently. Use only the workspace result supplied separately by the trusted runtime. When that evidence is incomplete, stale, internally inconsistent, or unsafe, fail closed. Copy required text verbatim. Every emitted finding, test record, list item, label, diagram, maintainer decision, repair field, or explanatory reason must match that evidence exactly; do not move findings between classifications. You may only omit optional evidence or select an enum state that is strictly more conservative. Emit a maintainer decision only by copying a required workspace decision exactly.
 Return only JSON matching the provider-enforced schema.`;
 }
