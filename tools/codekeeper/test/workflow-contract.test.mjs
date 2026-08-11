@@ -69,6 +69,7 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.match(reviewCaller, /pull-requests: read/);
   assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\}"/);
   assert.match(reviewCaller, /const route = !commandIntent && !automationReply/);
+  assert.match(reviewCaller, /const automationReply = eventName === "pull_request_review_comment" && automationBot && author === automationBot/);
   const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
@@ -420,6 +421,10 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(caller, /const mentioned = mentionBot && new RegExp\(`/);
   assert.match(caller, /appendFileSync\(process\.env\.GITHUB_OUTPUT, `owner_command=\$\{commandIntent\}\\nroute=\$\{route\}\\n`\)/);
   assert.match(caller, /owner_command: \$\{\{ needs\.intent\.outputs\.owner_command == 'true' \}\}/);
+  assert.match(caller, /intent:\n\s+name: Detect Codekeeper review feedback/);
+  assert.match(caller, /const commandIntent = trustedAssociation && \(slash \|\| mentioned\)/);
+  assert.match(caller, /bootstrap:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/);
+  assert.match(caller, /review:\n\s+needs: \[intent, bootstrap\]\n\s+if: needs\.intent\.outputs\.route == 'true' && needs\.bootstrap\.result == 'success'/);
   assert.match(source, /!\(github\.event_name == 'pull_request_review_comment'[\s\S]*github\.event\.comment\.user\.login == inputs\.automation_bot_login\)/);
   assert.doesNotMatch(source, /publish-review-status|on:\n\s+pull_request_target|state="success"/);
 });
