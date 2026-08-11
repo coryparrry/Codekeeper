@@ -458,6 +458,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     await github.createRepositoryDispatch("codekeeper_fix", {
       number: pull.number,
       head_sha: pull.head.sha,
+      authorization_mode: "policy",
       review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
     });
     automaticRepair.dispatched = true;
@@ -558,6 +559,21 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   const runUrl = trustedPublicationRunUrl(context);
 
   const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
+  const automationIdentity = expectedAutomationIdentity();
+  const deferredMarker = typeof issue.body === "string"
+    ? issue.body.match(/<!-- codekeeper:deferred=[a-f0-9]{64} -->$/)?.[0]
+    : null;
+  if (
+    issueLabelNames(issue).includes("codekeeper:deferred") &&
+    deferredMarker &&
+    isTrustedMaintenanceIssue(issue, {
+      marker: deferredMarker,
+      botLogin: automationIdentity.login,
+      botId: automationIdentity.id
+    })
+  ) {
+    desired.add("codekeeper:deferred");
+  }
   if (config.issues.allowAiImplementation && result.implementationRecommendation === "ai-ready") {
     desired.add("codekeeper:ready");
   }
@@ -593,7 +609,7 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     issue.number,
     ISSUE_TRIAGE_MARKER,
     comment,
-    expectedAutomationIdentity()
+    automationIdentity
   );
 
   if (result.duplicateOf === issue.number) {

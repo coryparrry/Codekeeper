@@ -134,7 +134,7 @@ test("policy v3 exposes autonomous defaults and OpenRouter without changing work
   assert.equal(config.automation.issueTriage, true);
   assert.equal(config.automation.ownerRequests, true);
   assert.equal(config.automation.maintenanceSchedule, "17 7 * * *");
-  assert.equal(config.review.createDeferredIssues, false);
+  assert.equal(config.review.createDeferredIssues, true);
   assert.deepEqual(config.ai.providers.openrouter, {
     baseUrl: "https://openrouter.ai/api/v1",
     api: "chat_completions",

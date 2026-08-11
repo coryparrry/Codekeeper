@@ -51,7 +51,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: dbc573b28e5f43c656ae01f8361635c2af7954dc59d0d8a5a576f6bf9411571a
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: eb67bf07fbcbc7d7ceee2bf85e0b391d3b3cdf4834ea8ad5407c421fab4358aa
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
@@ -67,6 +67,7 @@ jobs:
         github.actor == inputs.automation_bot_login) ||
        (((inputs.auto_review && github.event_name == 'pull_request_target') ||
          (inputs.feedback_triage &&
+          github.actor != inputs.automation_bot_login &&
           (github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment'))) &&
         !github.event.pull_request.draft &&
         github.event.pull_request.head.repo.full_name == github.repository &&
@@ -609,7 +610,7 @@ jobs:
         env:
           ENABLED: ${{ inputs.enabled }}
           AUTO_REVIEW: ${{ inputs.auto_review }}
-          AUTO_REVIEW_FEEDBACK: ${{ inputs.auto_review_feedback }}
+          AUTO_REVIEW_FEEDBACK: ${{ inputs.feedback_triage }}
           IS_REVIEW_FEEDBACK: ${{ github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment' || (github.event_name == 'repository_dispatch' && github.event.client_payload.review_feedback) }}
           IS_COMMAND_REVIEW: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review' }}
           IS_DRAFT: ${{ github.event.pull_request.draft || github.event.client_payload.draft }}

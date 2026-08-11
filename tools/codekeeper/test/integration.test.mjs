@@ -831,6 +831,37 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
   ];
   process.env.GITHUB_REPOSITORY = "acme/example";
   globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/graphql")) {
+      return new Response(JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [{
+                  id: "PRRT_thread",
+                  isResolved: false,
+                  isOutdated: false,
+                  comments: {
+                    nodes: [{
+                      id: "PRRC_comment",
+                      databaseId: 99,
+                      body: "The repair must retain the authorization boundary.",
+                      url: "https://github.com/acme/example/pull/42#discussion_r99",
+                      path: "src/authorization.mjs",
+                      line: 17,
+                      originalLine: 17,
+                      author: { login: "reviewer" }
+                    }],
+                    pageInfo: { hasNextPage: false }
+                  }
+                }],
+                pageInfo: { hasNextPage: false, endCursor: null }
+              }
+            }
+          }
+        }
+      }), { status: 200 });
+    }
     if (String(url).includes("/comments")) return new Response(JSON.stringify(comments), { status: 200 });
     if (String(url).includes("/pulls/42")) {
       return new Response(JSON.stringify({
@@ -878,6 +909,7 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
       config,
       token: "read-token",
       expectedHead: revision,
+      reviewThreadIds: ["PRRT_thread"],
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(prepared.target.kind, "pull_request");
@@ -887,6 +919,21 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
     );
     assert.match(prepared.pullRequest.comments[0].body, /blocking review finding/);
     assert.doesNotMatch(JSON.stringify(prepared.pullRequest.comments), /ATTACKER INSTRUCTION/);
+    assert.deepEqual(prepared.pullRequest.reviewThreads, [{
+      id: "PRRT_thread",
+      isResolved: false,
+      isOutdated: false,
+      comments: [{
+        id: "PRRC_comment",
+        databaseId: 99,
+        author: "reviewer",
+        body: "The repair must retain the authorization boundary.",
+        url: "https://github.com/acme/example/pull/42#discussion_r99",
+        path: "src/authorization.mjs",
+        line: 17,
+        originalLine: 17
+      }]
+    }]);
     labels = [{ name: "codekeeper:auto-repaired" }, { name: "codekeeper:paused" }];
     await assert.rejects(
       prepareFix({

@@ -678,7 +678,7 @@ test("issue publication does not close a duplicate after the triaged issue chang
   }
 });
 
-test("issue publication accepts its exact managed-label mutation before publishing the App marker", async () => {
+test("issue publication accepts its exact managed-label mutation and preserves a trusted deferred marker", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-label-revision-test-"));
   const configSha256 = "c".repeat(64);
   const issueConfig = structuredClone(config);
@@ -691,12 +691,12 @@ test("issue publication accepts its exact managed-label mutation before publishi
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   let updatedAt = context.issue.updatedAt;
-  let labels = [{ name: "external" }, { name: "codekeeper:priority-p1" }];
+  let labels = [{ name: "external" }, { name: "codekeeper:priority-p1" }, { name: "codekeeper:deferred" }];
   let markerPublished = false;
   const issue = () => ({
-    number: 7, title: "Report", body: "Details", state: "open", updated_at: updatedAt,
+    number: 7, title: "Report", body: `Details\n${deferredReviewMarker("f".repeat(64))}`, state: "open", updated_at: updatedAt,
     html_url: "https://github.com/owner/repository/issues/7",
-    user: { id: 1, login: "reporter", type: "User" }, labels
+    user: { id: Number(identity.id), login: identity.login, type: "Bot" }, labels
   });
   const restoreGitHub = replaceGitHubMethods({
     async getIssue() { return issue(); },
@@ -713,7 +713,7 @@ test("issue publication accepts its exact managed-label mutation before publishi
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256, artifactConfig: issueConfig });
     await publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" });
     assert.equal(markerPublished, true);
-    assert.deepEqual(labels.map((label) => label.name).sort(), ["codekeeper:priority-p3", "codekeeper:ready", "codekeeper:type-bug", "external"].sort());
+    assert.deepEqual(labels.map((label) => label.name).sort(), ["codekeeper:deferred", "codekeeper:priority-p3", "codekeeper:ready", "codekeeper:type-bug", "external"].sort());
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;

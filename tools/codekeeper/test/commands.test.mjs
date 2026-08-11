@@ -18,11 +18,23 @@ test("owner commands require an exact supported command", () => {
   assert.equal(parseCommand("/codekeeper defer"), "defer");
   assert.equal(parseCommand("/codekeeper stop now"), null);
   assert.equal(
+    parseMentionIntent("@codekeeper-acme review", "codekeeper-acme[bot]"),
+    "review",
+  );
+  assert.equal(
+    parseMentionIntent("@codekeeper-acme rerun", "codekeeper-acme[bot]"),
+    "rerun",
+  );
+  assert.equal(
     parseMentionIntent(
       "@codekeeper-acme please review this",
       "codekeeper-acme[bot]",
     ),
-    "review",
+    null,
+  );
+  assert.equal(
+    parseMentionIntent("@codekeeper-acme-helper fix", "codekeeper-acme[bot]"),
+    null,
   );
   assert.equal(
     parseMentionIntent(
@@ -51,7 +63,7 @@ test("non-owners and ambiguous mention text cannot grant mutation authority", as
       repository: { full_name: "owner/repository" },
       issue: { number: 42 },
       comment: {
-        body: "@codekeeper please fix this",
+        body: "@codekeeper fix",
         author_association: "CONTRIBUTOR",
         user: { login: "attacker" },
       },
@@ -69,6 +81,46 @@ test("non-owners and ambiguous mention text cannot grant mutation authority", as
         automationIdentity: { login: "codekeeper[bot]", id: "123" },
       }),
       /not authorised/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ordinary collaborator discussion is a successful no-op", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-command-noop-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "This implementation detail still needs discussion.",
+        author_association: "COLLABORATOR",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  try {
+    assert.deepEqual(
+      await runOwnerCommand({
+        eventPath,
+        config: {
+          automation: { ownerRequests: true },
+          repository: { ownerLogins: ["repository-owner"] },
+        },
+        token: "app-token",
+        automationIdentity: { login: "codekeeper[bot]", id: "123" },
+      }),
+      {
+        number: 42,
+        command: null,
+        skipped: true,
+        outcome: "No supported Codekeeper command was found.",
+      },
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -157,7 +209,7 @@ test("an owner mention queues issue triage through the trusted assistant dispatc
       repository: { full_name: "owner/repository" },
       issue: { number: 42 },
       comment: {
-        body: "@codekeeper please triage this",
+        body: "@codekeeper triage",
         author_association: "OWNER",
         user: { login: "repository-owner" },
       },

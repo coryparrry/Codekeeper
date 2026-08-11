@@ -47,7 +47,7 @@
     },
     {
       "path": "src/lib/commands.mjs",
-      "sha256": "7d312f95c21ee4932bc03a5f5121e6804c8686d98bc8ecb091ddbf7d0582f084"
+      "sha256": "32f442646cc1cad0fde8e2d0a5b7ee386a573dd5c19e2168b287a01073471c9e"
     },
     {
       "path": "src/lib/config.mjs",
@@ -83,7 +83,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "7b5434761446e77fa0848786c757b18961015f29a191925eb54b0afebd81d8f3"
+      "sha256": "046a9b073783a2bcccbd7c771cbfab3d90a0101c3ae8813636925e4c1282161b"
     },
     {
       "path": "src/lib/prompts.mjs",
@@ -91,7 +91,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "aca27273658685922285ccdc9c3643136ebeded37ef3d5fbceaa2f955e0f7087"
+      "sha256": "4f2505fe534f0dd92e8c60b3a31068df195597fbc085b6d37934746f29dad48d"
     },
     {
       "path": "src/lib/render.mjs",

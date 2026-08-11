@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "dbc573b28e5f43c656ae01f8361635c2af7954dc59d0d8a5a576f6bf9411571a";
+const toolingManifestSha256 = "eb67bf07fbcbc7d7ceee2bf85e0b391d3b3cdf4834ea8ad5407c421fab4358aa";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -381,6 +381,7 @@ test("review and issue-triage retain mandatory App credentials", async () => {
 
 test("review uses a PR-native fail-closed gate instead of a reusable commit status", async () => {
   const source = await workflow("review");
+  const publisher = await repositoryFile("tools/codekeeper/src/lib/publish.mjs");
   const caller = await repositoryFile("examples/workflows/codekeeper-review.yml.example");
   const gate = jobSection(source, "gate");
   assert.match(gate, /name: Codekeeper review gate/);
@@ -393,6 +394,14 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(
     jobSection(source, "workspace", "analyze"),
     /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_review'[\s\S]*github\.actor == inputs\.automation_bot_login/
+  );
+  assert.match(
+    jobSection(source, "workspace", "analyze"),
+    /feedback_triage[\s\S]*github\.actor != inputs\.automation_bot_login/
+  );
+  assert.match(
+    publisher,
+    /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*authorization_mode: "policy"/
   );
   assert.doesNotMatch(jobSection(source, "workspace", "analyze"), /inputs\.auto_review &&\s*\(\(github\.event_name/);
   assert.match(gate, /IS_COMMAND_REVIEW/);

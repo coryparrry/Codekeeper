@@ -158,6 +158,36 @@ function boundedRepairComments(comments, config, { actor, authorizationMode }) {
     }));
 }
 
+function boundedRepairReviewThreads(threads, reviewThreadIds) {
+  if (reviewThreadIds.length === 0) return [];
+  const byId = new Map(threads.map((thread) => [thread.id, thread]));
+  const selected = reviewThreadIds.map((threadId) => {
+    const thread = byId.get(threadId);
+    if (!thread) {
+      throw new Error(`PR repair review thread ${threadId} no longer exists`);
+    }
+    return {
+      id: thread.id,
+      isResolved: Boolean(thread.isResolved),
+      isOutdated: Boolean(thread.isOutdated),
+      comments: (thread.comments?.nodes ?? []).map((comment) => ({
+        id: boundedText(comment.id, 512, "…"),
+        databaseId: comment.databaseId,
+        author: boundedText(comment.author?.login, 256, "…"),
+        body: boundedText(comment.body, 6000),
+        url: boundedText(comment.url, 2048, "…"),
+        path: boundedText(comment.path, 4096, "…"),
+        line: comment.line ?? null,
+        originalLine: comment.originalLine ?? null
+      }))
+    };
+  });
+  if (Buffer.byteLength(JSON.stringify(selected), "utf8") > 262144) {
+    throw new Error("Selected PR repair review thread evidence exceeds 262144 bytes");
+  }
+  return selected;
+}
+
 async function completeReviewFeedback(github, pullNumber) {
   const [reviews, threads] = await Promise.all([
     github.listPullReviews(pullNumber, 129),
@@ -414,6 +444,12 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
         throw new Error("Automatic review repair requires the codekeeper:auto-repaired marker");
       }
     }
+    const reviewThreads = reviewThreadIds.length > 0
+      ? boundedRepairReviewThreads(
+        await github.listPullReviewThreads(targetNumber),
+        reviewThreadIds
+      )
+      : [];
     if (!/^[0-9a-f]{40}$/i.test(String(pull.head?.sha ?? "")) || !/^[0-9a-f]{40}$/i.test(String(pull.base?.sha ?? ""))) {
       throw new Error(`PR #${targetNumber} is missing full head or base commit SHAs`);
     }
@@ -434,7 +470,8 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       pullRequest: {
         ...frozenSubject,
         body: boundedText(frozenSubject.body, 12000),
-        comments: boundedRepairComments(comments, config, { actor, authorizationMode })
+        comments: boundedRepairComments(comments, config, { actor, authorizationMode }),
+        reviewThreads
       }
     };
     target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments);

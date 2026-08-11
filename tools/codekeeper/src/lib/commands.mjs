@@ -34,20 +34,17 @@ function parseMentionIntent(body, botLogin) {
   const mention = String(botLogin ?? "")
     .replace(/\[bot\]$/i, "")
     .toLowerCase();
-  const text = String(body ?? "")
+  if (!mention) return null;
+  const escapedMention = mention.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(body ?? "")
     .trim()
-    .toLowerCase();
-  if (!mention || !text.includes(`@${mention}`)) return null;
-  const actions = [
-    "review",
-    "triage",
-    "defer",
-    "status",
-    "implement",
-    "fix",
-    "stop",
-  ].filter((action) => new RegExp(`\\b${action}\\b`, "i").test(text));
-  return actions.length === 1 ? actions[0] : null;
+    .match(
+      new RegExp(
+        `^@${escapedMention}\\s+(status|review|rerun|triage|defer|implement|fix|stop)$`,
+        "i",
+      ),
+    );
+  return match ? match[1].toLowerCase() : null;
 }
 
 function isOwner(config, actor) {
@@ -84,8 +81,18 @@ export async function runOwnerCommand({
   const command =
     parseCommand(event.comment?.body) ??
     parseMentionIntent(event.comment?.body, automationIdentity?.login);
-  if (!COMMANDS.has(command))
-    throw new Error("The Codekeeper command is not supported");
+  const targetNumber = event.issue?.number ?? event.pull_request?.number;
+  if (!COMMANDS.has(command)) {
+    return {
+      number:
+        Number.isSafeInteger(targetNumber) && targetNumber > 0
+          ? targetNumber
+          : null,
+      command: null,
+      skipped: true,
+      outcome: "No supported Codekeeper command was found.",
+    };
+  }
   if (config.automation?.ownerRequests === false)
     throw new Error("Owner requests are off in the Codekeeper policy");
   const actor = event.comment?.user?.login ?? event.sender?.login;
@@ -99,7 +106,7 @@ export async function runOwnerCommand({
   }
   const repository =
     event.repository?.full_name ?? process.env.GITHUB_REPOSITORY;
-  const number = event.issue?.number ?? event.pull_request?.number;
+  const number = targetNumber;
   if (!Number.isSafeInteger(number) || number <= 0)
     throw new Error("The command target is invalid");
   const github = new GitHubClient({ token, repository });
