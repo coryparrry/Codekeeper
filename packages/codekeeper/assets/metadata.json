@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "repository": "coryparrry/Codekeeper",
-    "commit": "8d2ea1aa4250c14fc3ae6b6006fc90913f3a2ac1"
+    "commit": "0512523994a6e12c3c0210d3e7152df9dcbb72f9"
   },
   "assets": {
     "agents/pr-reviewer.md": {
@@ -26,13 +26,13 @@
       "sourcePath": "tools/codekeeper/agents/fixer.md"
     },
     "policies/mixed.json": {
-      "sha256": "1aa32a2ccbd4e92654c656abe9b0c438d059682b12f6831cba3f3721ccc28c89",
-      "bytes": 9457,
+      "sha256": "86bc5f0661627a493e8a65a38f46d7ebd4e68b41e9216d9b61242f762f6db7c1",
+      "bytes": 10022,
       "sourcePath": ".github/codekeeper.json"
     },
     "policies/openai.json": {
-      "sha256": "21aeaeb91356c4240c8083a629e64210bc8c037b2d23f821b4f12defd4b01793",
-      "bytes": 9294,
+      "sha256": "a6aee81b4167b9c656fc3d8b1a9034d110f27f9fdbeca1427b98376ba1d84b8b",
+      "bytes": 9859,
       "sourcePath": ".github/codekeeper.json#preset=openai"
     },
     "workflows/review.yml": {
@@ -63,7 +63,7 @@
       "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
     },
     "toolingManifest": {
-      "sha256": "4f954a432be7b1c30dbaaaec0019bd50671b177c22748f3aba0b8e18a9cadccc",
+      "sha256": "558590a2b2d6df7fc1b50c0d8bdca73d60bf130a400c4b662dfc63c2565165eb",
       "bytes": 3643,
       "sourcePath": "tools/codekeeper/tooling-manifest.json"
     }

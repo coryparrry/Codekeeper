@@ -248,7 +248,7 @@ test("existing generated files are recognized as a rerunnable installation", asy
     ownerRequests: true,
     maintenanceSchedule: "17 7 * * *"
   });
-  assert.equal(installation.policy.review.createDeferredIssues, true);
+  assert.equal(installation.policy.review.createDeferredIssues, false);
   assert.deepEqual(installation.policy.ai.providers.openrouter, {
     baseUrl: "https://openrouter.ai/api/v1",
     api: "chat_completions",
