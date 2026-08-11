@@ -460,6 +460,21 @@ test("coordinator evidence boundary rejects invented review findings and fix tes
 
 test("coordinator evidence cannot become more permissive than specialist authority", () => {
   const blocker = { title: "Current authorization failure" };
+  const reviewEvidence = (labels) => ({
+    risk: "low",
+    labels,
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    tests: { adequate: false },
+    mergeRecommendation: "manual"
+  });
+  const issueEvidence = (priority) => ({
+    priority,
+    duplicateOf: null,
+    actionable: false,
+    implementationRecommendation: "manual",
+    labels: []
+  });
   assert.throws(
     () => enforceCoordinatorEvidenceBoundary(
       "review",
@@ -502,6 +517,21 @@ test("coordinator evidence cannot become more permissive than specialist authori
   );
   assert.throws(
     () => enforceCoordinatorEvidenceBoundary(
+      "review",
+      reviewEvidence(["codekeeper:type-security"]),
+      reviewEvidence([])
+    ),
+    /review label/
+  );
+  assert.doesNotThrow(
+    () => enforceCoordinatorEvidenceBoundary(
+      "review",
+      reviewEvidence(["codekeeper:type-security"]),
+      reviewEvidence(["codekeeper:type-security", "codekeeper:type-bug"])
+    )
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
       "issue",
       {
         duplicateOf: 9,
@@ -519,6 +549,17 @@ test("coordinator evidence cannot become more permissive than specialist authori
       }
     ),
     /duplicate confidence/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "issue",
+      issueEvidence("p1"),
+      issueEvidence("p3")
+    ),
+    /issue priority/
+  );
+  assert.doesNotThrow(
+    () => enforceCoordinatorEvidenceBoundary("issue", issueEvidence("p3"), issueEvidence("p2"))
   );
   const auditFindingA = { title: "Finding A" };
   const auditFindingB = { title: "Finding B" };

@@ -258,6 +258,11 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     if (isMorePermissive(output.mergeRecommendation, specialistResult.mergeRecommendation, ["block", "manual", "auto"])) {
       throw new Error("Coordinator merge recommendation is more permissive than workspace evidence");
     }
+    for (const label of output.labels ?? []) {
+      if (!(specialistResult.labels ?? []).includes(label)) {
+        throw new Error("Coordinator introduced a review label not present in workspace evidence");
+      }
+    }
   }
   if (mode === "audit") {
     for (const finding of output.findings ?? []) {
@@ -288,6 +293,9 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     }
     if (output.implementationRecommendation === "ai-ready" && specialistResult.implementationRecommendation !== "ai-ready") {
       throw new Error("Coordinator cannot make an issue AI-ready when workspace evidence did not");
+    }
+    if (isMorePermissive(output.priority, specialistResult.priority, ["p3", "p2", "p1"])) {
+      throw new Error("Coordinator issue priority is more urgent than workspace evidence");
     }
     if (output.duplicateOf !== null && isMorePermissive(
       output.duplicateConfidence,
