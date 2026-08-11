@@ -51,14 +51,15 @@ import {
 const EXPECTED_ASSETS = Object.freeze({
   "agents/fixer.md": "6770753275c0df9a6546cfe0453b82e6bae985819ddb57998eeb94b14c6ae38a",
   "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
-  "agents/pr-reviewer.md": "6b89c645090e0684a677f57d8d08c87db4b823f1f5a2c271710a7c8a061ae283",
+  "agents/pr-reviewer.md": "2432af8cca474962d50a764af894639716ad5ae1076bc60ae811d34e4e2a4a1f",
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
-  "policies/mixed.json": "86bc5f0661627a493e8a65a38f46d7ebd4e68b41e9216d9b61242f762f6db7c1",
-  "policies/openai.json": "a6aee81b4167b9c656fc3d8b1a9034d110f27f9fdbeca1427b98376ba1d84b8b",
-  "workflows/fix.yml": "2ffb386e66d41beaf42f3e5f1c8a38415596098cbd2a047b73a574d9aec3ae8e",
-  "workflows/issues.yml": "77309242f348d75ed1bf8cf82ecef99e65bcf2f5fd19f54b0974fd168650dbb6",
+  "policies/mixed.json": "c53612a50a6af7b3f6f00171160d333fc4ddefdcd7dbed1d925def56c53f94d7",
+  "policies/openai.json": "9c7c5665d8471f474b83380b71cbc3cc528308258029dfbcc8d3786462283501",
+  "workflows/assistant.yml": "ef4925f02b23d25fa8d2124d3f0463d04acda2a16d4a04562e803c2b7c7bca86",
+  "workflows/fix.yml": "72c50767a21b45213b250d40b191548da68675442a61ceeb6ac5f9eeea7edc1d",
+  "workflows/issues.yml": "6e5f645c610feae7af02a07e29c7458c31ca7c9331d2ec23832366c345d33c9a",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
-  "workflows/review.yml": "1f706efb117d6dbdb8a4569c13578c40db8a603ce033ac6107864a4a2624d5a3"
+  "workflows/review.yml": "533e9c6219814328130a70f798dfdb05f0f9928604a2d2409285f3ec9bf2b93c"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
@@ -67,6 +68,7 @@ const CHECKPOINT_PATHS = Object.freeze({
   "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
   "agents/repository-auditor.md": "tools/codekeeper/agents/repository-auditor.md",
   "policies/mixed.json": ".github/codekeeper.json",
+  "workflows/assistant.yml": "examples/workflows/codekeeper-assistant.yml.example",
   "workflows/fix.yml": "examples/workflows/codekeeper-fix.yml.example",
   "workflows/issues.yml": "examples/workflows/codekeeper-issues.yml.example",
   "workflows/maintain.yml": "examples/workflows/codekeeper-maintain.yml.example",
@@ -111,7 +113,7 @@ function answers(overrides = {}) {
   return value;
 }
 
-test("the ten bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
+test("the bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
   const bundle = await loadVerifiedAssets();
   assert.equal(bundle.metadata.source.repository, SOURCE_REPOSITORY);
   assert.equal(bundle.metadata.source.commit, SOURCE_COMMIT);
@@ -352,8 +354,7 @@ test("openai preset changes only issue-triage model policy from the mixed preset
   assert.equal(openaiIssue.effort, "medium");
   assert.equal(openaiIssue.workspace.enabled, false);
   assert.equal(openaiIssue.workspace.allowWrites, false);
-  assert.equal(openaiIssue.workspace.model, "gpt-5.6-terra");
-  assert.equal(openaiIssue.workspace.effort, "medium");
+  assert.deepEqual(openaiIssue.workspace, mixedIssue.workspace);
 });
 
 test("each rendered workflow contains exactly the paired immutable bootstrap and reusable-workflow pins", async () => {
@@ -413,8 +414,9 @@ test("generated callers honor the rendered policy automation controls", async ()
   assert.match(contents[MODES.review.target], /auto_review: false/);
   assert.match(contents[MODES.review.target], /feedback_triage: false/);
   assert.match(contents[MODES.issues.target], /auto_triage: false/);
-  assert.match(contents[MODES.issues.target], /owner_requests: false/);
-  assert.match(contents[MODES.fix.target], /owner_requests: false/);
+  assert.doesNotMatch(contents[MODES.issues.target], /owner_requests:/);
+  assert.doesNotMatch(contents[MODES.fix.target], /owner_requests:/);
+  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /owner_requests: false/);
   assert.match(contents[MODES.maintain.target], /cron: "5 4 \* \* 1"/);
 });
 
@@ -433,6 +435,7 @@ test("renderInstallFiles emits policy, every profile, and only selected callers 
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
     ".github/codekeeper/agents/fixer.md",
+    ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml"
   ]);
@@ -554,6 +557,7 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
     ".github/codekeeper/agents/fixer.md",
+    ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml"
   ]);

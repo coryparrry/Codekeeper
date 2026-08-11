@@ -596,6 +596,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
       ".github/codekeeper/agents/issue-triager.md",
       ".github/codekeeper/agents/pr-reviewer.md",
       ".github/codekeeper/agents/repository-auditor.md",
+      ".github/workflows/codekeeper-assistant.yml",
       ".github/workflows/codekeeper-maintain.yml",
       ".github/workflows/codekeeper-review.yml"
     ]

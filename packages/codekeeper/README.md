@@ -23,15 +23,15 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and proof sequence. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/c5dce91476ed75c8c1338307567fb12502c6a5ae/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/098ed3ac0765f362e2c5ff6b3c28e51d4d32ee33/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/c5dce91476ed75c8c1338307567fb12502c6a5ae/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
+| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/098ed3ac0765f362e2c5ff6b3c28e51d4d32ee33/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
-The recommended setup includes pull-request review, repository maintenance, and the `openai` preset. It does not include issue triage or issue fix. The installer then asks if Codekeeper starts after the setup pull request merges. The default answer is enabled. Choose custom setup to select different workflows or use DeepSeek for issue triage.
+The Settings screen is the command centre for both new and existing installations. Standard mode covers workflows, autonomy, schedules, every role's provider/model/effort, workspace specialists, tracing, and all four profiles. Press `A` for Advanced mode, which exposes every editable policy field and shows immutable safety and release boundaries as read-only. Nothing changes until the final review is accepted.
 
 | Choice | What it adds |
 |---|---|
@@ -40,12 +40,12 @@ The recommended setup includes pull-request review, repository maintenance, and 
 | Issue triage | Issue-event labels and comments when enabled; not needed for the starter proof. |
 | Issue implementation and pull request repair | Automatically implements issues that triage marks ready when issue implementation is on. An owner can also use `/codekeeper fix` to repair an existing pull request. |
 
-The installer lists OpenAI Luna, Terra, and Sol, plus DeepSeek V4 Flash, for every selected role. A starting preset supplies defaults only. You can also enter an arbitrary model ID for OpenAI, DeepSeek, or OpenRouter. OpenAI traces are optional. When traces are on, the installer requests a separate OpenAI Platform trace-export key. A ChatGPT subscription is not an API key.
+The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and accepts any model ID for each provider. Coordinator selection is independent from the optional OpenAI Codex workspace specialist. OpenAI traces are optional. When traces are on, the installer requests a separate OpenAI Platform trace-export key. A ChatGPT subscription is not an API key.
 
 After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
-1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, and only the selected caller workflows.
-2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `c5dce91476ed75c8c1338307567fb12502c6a5ae`.
+1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, the always-installed repository-assistant caller, and the selected role callers.
+2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `098ed3ac0765f362e2c5ff6b3c28e51d4d32ee33`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
@@ -55,7 +55,7 @@ It never merges the pull request, runs a workflow, publishes an npm package, cop
 
 ## Change an existing installation
 
-Run `npx codekeeper init` again from the current default branch. The installer detects the merged installation and reuses the current workflows, GitHub App settings, secrets, policy, and edited profiles. You can change the model assigned to each agent, capability switches, display name, owner logins, tracing, and the global enabled switch.
+Run `npx codekeeper init` again from the current default branch. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and edited profiles into the same Settings screen. You can add or remove role workflows, change every editable policy value, and open any profile in `$EDITOR` without losing prior customizations.
 
 The installer writes only values that changed. It preserves edited profiles and does not ask for secrets again. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
 
@@ -96,7 +96,7 @@ Paste API keys into the Codekeeper terminal UI and press Enter. Codekeeper sends
 
 Do not paste the multiline App private key. Select its downloaded `.pem` file before the final review. The installer opens it read-only and passes its descriptor directly to `gh secret set`. It does not read or display the key or its path.
 
-The selected role assignments determine which provider secrets are requested. An OpenAI role requests `OPENAI_API_KEY`. A DeepSeek role requests `DEEPSEEK_API_KEY`. Tracing uses a separate OpenAI trace key.
+The selected role assignments determine which provider secrets are requested. OpenAI, DeepSeek, and OpenRouter use `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, and `OPENROUTER_API_KEY` respectively. An enabled OpenAI workspace specialist still needs `OPENAI_API_KEY` when its coordinator uses another provider. Tracing uses a separate OpenAI trace key. A same-provider model change does not request that provider key again.
 
 ## Capability choices
 
@@ -107,7 +107,7 @@ The installer enables the selected workflows after merge by default. You can cho
 - automatic exact-duplicate closure;
 - automatic merge.
 
-Applicable capabilities are selected by default. Clear any capability that you do not want. The final review shows each capability as on or off before the installer changes repository settings or files.
+Automatic review, feedback triage, issue triage, owner requests, and deferred-issue creation start on when their callers are installed. Automatic code repair, issue implementation, duplicate closure, and merge remain off until enabled separately. The final review shows effective automation, changed files, variables, and required secrets before the installer changes repository settings or files.
 
 Review all triggers before you merge the setup pull request. Do not add the `Codekeeper review gate` to branch protection until a controlled review passes.
 
@@ -117,16 +117,18 @@ Review all four generated agent profiles as well. They are the intended quick-ed
 
 ## Change models
 
-The bundled preset is a starting point, not an installer lock. Model changes belong in the generated `.github/codekeeper.json`; no installer-code change is required. For example, moving one OpenAI mode from Sol or Terra to Luna changes only the mode's `model` and matching `workspace.model` fields:
+The bundled preset is a starting point, not an installer lock. Change provider, arbitrary model ID, effort, model settings, and the independently configured workspace specialist in the Settings screen. For example, changing the review coordinator does not silently rewrite its workspace model:
 
 ```json
 {
   "ai": {
     "agents": {
       "review": {
-        "model": "gpt-5.6-luna",
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4.5",
+        "effort": "none",
         "workspace": {
-          "model": "gpt-5.6-luna"
+          "model": "gpt-5.6-sol"
         }
       }
     }
@@ -134,7 +136,7 @@ The bundled preset is a starting point, not an installer lock. Model changes bel
 }
 ```
 
-Run the installer again to change a provider or model. It updates the policy and the matching caller-secret mapping in one setup pull request.
+The installer renders the policy, caller controls, schedule, and provider-secret mappings from that one validated settings object in a single configuration pull request.
 
 ## Workflow lifecycle and records
 

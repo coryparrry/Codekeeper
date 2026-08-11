@@ -12,9 +12,7 @@ cd /absolute/path/to/adopter-repository
 npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.2.0.tgz -- codekeeper init
 ```
 
-The installer generates a disabled setup PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Review the generated policy, callers, and agent profiles before merging. If the installer cannot be used, the numbered steps below remain the manual fallback.
-
-The installer metadata in an older checkout may still pin a source checkpoint that predates adopter-owned profiles, owner-authorized maintenance repair, and same-PR repair. That older pin does **not** provide the behavior described below. Do not test or deploy these contracts until installer metadata names the final reviewed source checkpoint containing them; building a newer tarball does not change an older embedded pin.
+The installer opens one Settings command centre and generates a setup or configuration PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Standard mode covers workflows, autonomy, schedules, models, workspaces, tracing, and profiles. Advanced mode exposes every editable policy field while keeping deterministic safety and release boundaries read-only. Review the effective behavior, changed files, variables, and secrets at the final mutation boundary. If the installer cannot be used, the numbered steps below remain the manual fallback.
 
 If you are unsure which options to choose, accept the recommended starter setup: pull-request review plus repository maintenance, the `openai` preset, the repository name as the comment display name, and your authenticated GitHub login as the owner-command user. Issue triage and the separately gated fix path can be added later through a reviewed policy/workflow change.
 
@@ -35,7 +33,7 @@ Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter reposit
 
 The seed content is under [`tools/codekeeper/agents`](tools/codekeeper/agents). The guided installer always creates all four profiles, even when only some workflows are selected, so later mode additions start from the same reviewed checkpoint.
 
-Copy only the caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/`, remove `.example`, and replace both placeholders in every caller:
+Always copy `codekeeper-assistant.yml.example`, then copy the role caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/`. Remove `.example` and replace both placeholders in every caller:
 
 ```text
 OWNER/REPOSITORY
@@ -53,6 +51,7 @@ Update these values in the adopter's `.github/codekeeper.json`:
 - Repair `allowedPaths`, `protectedPaths`, limits, and deterministic `validationCommands`.
 - Auto-merge paths and eligible authors. The supplied policy permits only small Markdown changes to auto-merge.
 - Per-mode `ai.agents.<mode>` provider/model/settings and any optional Codex workspace. `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled` are all false by default.
+- `automation` controls for automatic PR review, review-feedback triage, issue triage, owner requests, and the maintenance schedule. `review.createDeferredIssues` is independently configurable.
 - The four Markdown profiles under `.github/codekeeper/agents/`. Use them to tune evidence thresholds, prioritization, test expectations, duplicate decisions, no-action behavior, and report wording.
 
 | Coordinator | Adopter-owned profile path |
@@ -93,6 +92,7 @@ CODEKEEPER_AUTOMATION_BOT_LOGIN=<app-slug>[bot]             # Actions variable, 
 CODEKEEPER_APP_PRIVATE_KEY=<full GitHub App PEM>            # Required by review/issue and maintenance/fix dry_run=false
 OPENAI_API_KEY=<OpenAI coordinator/workspace key>              # Actions secret when a mode uses OpenAI
 DEEPSEEK_API_KEY=<DeepSeek coordinator key>                    # Actions secret for the starter issue mode
+OPENROUTER_API_KEY=<OpenRouter coordinator key>                # Actions secret when a mode uses OpenRouter
 OPENAI_TRACE_API_KEY=<dedicated OpenAI trace-export key>       # Actions secret; never a model/provider key
 CODEKEEPER_ENABLED=false                                   # Actions variable initially
 ```
@@ -122,6 +122,8 @@ Only a GitHub login listed in `repository.ownerLogins` can request manual issue 
 ```text
 /codekeeper triage
 ```
+
+On a pull request review thread, `/codekeeper defer` asks the assistant to verify the claim and create or update one fingerprinted deferred issue. It replies with the issue link and lets normal issue triage apply priority, risk, readiness, testing, duplicate, and manual-review labels. Unverified, stale, duplicate, preference-only, and false-positive comments are rejected on the pull request instead of becoming issues.
 
 When `issues.allowAiImplementation=true`, trusted triage adds `codekeeper:ready` only to a clear, bounded, testable issue. That label starts the issue implementation workflow, which may open one bounded repair pull request.
 

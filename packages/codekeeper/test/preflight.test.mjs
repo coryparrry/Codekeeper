@@ -236,19 +236,25 @@ test("existing generated files are recognized as a rerunnable installation", asy
     ["repository-auditor.md", "agents/repository-auditor.md"],
     ["issue-triager.md", "agents/issue-triager.md"]
   ]) await writeFile(path.join(root, ".github", "codekeeper", "agents", name), bundle.contents[asset]);
-  await writeFile(path.join(root, ".github", "workflows", "codekeeper-review.yml"), bundle.contents["workflows/review.yml"]);
+  await writeFile(path.join(root, ".github", "workflows", "codekeeper-review.yml"), bundle.contents["workflows/review.yml"]
+    .replace("auto_review: true", "auto_review: false")
+    .replace("feedback_triage: true", "feedback_triage: false"));
+  await writeFile(path.join(root, ".github", "workflows", "codekeeper-maintain.yml"), bundle.contents["workflows/maintain.yml"]
+    .replace('cron: "17 7 * * *"', 'cron: "23 4 * * 2"'));
+  await writeFile(path.join(root, ".github", "workflows", "codekeeper-assistant.yml"), bundle.contents["workflows/assistant.yml"]
+    .replace("owner_requests: true", "owner_requests: false"));
 
   const installation = await inspectInstallationFiles(root);
-  assert.deepEqual(installation.modes, ["review"]);
+  assert.deepEqual(installation.modes, ["review", "maintain"]);
   assert.equal(installation.policy.version, 3);
   assert.deepEqual(installation.policy.automation, {
-    automaticPrReview: true,
-    reviewFeedbackTriage: true,
+    automaticPrReview: false,
+    reviewFeedbackTriage: false,
     issueTriage: true,
-    ownerRequests: true,
-    maintenanceSchedule: "17 7 * * *"
+    ownerRequests: false,
+    maintenanceSchedule: "23 4 * * 2"
   });
-  assert.equal(installation.policy.review.createDeferredIssues, false);
+  assert.equal(installation.policy.review.createDeferredIssues, true);
   assert.deepEqual(installation.policy.ai.providers.openrouter, {
     baseUrl: "https://openrouter.ai/api/v1",
     api: "chat_completions",

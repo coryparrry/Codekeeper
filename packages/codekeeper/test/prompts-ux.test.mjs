@@ -167,7 +167,7 @@ test("recommended setup explains consequences and returns review plus maintenanc
     displayName: "widget",
     ownerLogins: ["cory"],
     enabled: true,
-    capabilities: ["repair", "autoMerge"]
+    capabilities: []
   });
   assert.ok(Object.isFrozen(answers));
   assert.deepEqual(
@@ -182,14 +182,14 @@ test("recommended setup explains consequences and returns review plus maintenanc
   );
   const capabilityCall = prompt.calls.find((call) => call.method === "multiselect");
   assert.equal(capabilityCall.options.message, "Choose capabilities to turn on:");
-  assert.deepEqual(capabilityCall.options.defaultValues, ["repair", "autoMerge"]);
+  assert.deepEqual(capabilityCall.options.defaultValues, []);
   const transcript = output.toString();
   assert.match(transcript, /Pull request review:.*comments, labels, and a blocking result/);
   assert.match(transcript, /Repository maintenance:.*manual dry run that makes no GitHub changes/);
   assert.match(transcript, /OpenAI starting models: you can assign any supported provider and model to each role/);
   assert.match(transcript, /Issue triage and issue fix are not included/);
-  assert.match(transcript, /Repository repair: on/);
-  assert.match(transcript, /Automatic merge: on/);
+  assert.match(transcript, /Repository repair: off/);
+  assert.match(transcript, /Automatic merge: off/);
   assert.match(transcript, /installer opens a setup pull request/);
   assert.match(transcript, /OPENAI_API_KEY:/);
   assert.match(transcript, /OPENAI_TRACE_API_KEY:/);
@@ -214,7 +214,7 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     displayName: "widget",
     ownerLogins: ["cory"],
     enabled: true,
-    capabilities: ["issueImplementation", "duplicateClosure", "autoMerge"]
+    capabilities: []
   });
   const modeCall = prompt.calls.find((call) => call.method === "multiselect");
   assert.equal(modeCall.options.message, "Choose workflows to generate:");

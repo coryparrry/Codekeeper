@@ -13,6 +13,7 @@ import { InstallerError } from "./errors.mjs";
 import { CONSERVATIVE_BOUNDARIES, MODES, SECRET_PURPOSES } from "./constants.mjs";
 import { capabilitySummary, completionGuidance, documentMap, modelAssignments, workflowMap } from "./plan.mjs";
 import { createPrivateKeyPickerController } from "./private-key-input.mjs";
+import { editProfileWithEditor, SettingsScreen } from "./settings-tui.mjs";
 
 const h = React.createElement;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
@@ -472,6 +473,15 @@ function reviewData(plan) {
     setupDocumentPaths: documents.filter((item) => !item.path.includes("/agents/")).map((item) => item.path),
     profileDocumentPaths: documents.filter((item) => item.path.includes("/agents/")).map((item) => item.path),
     secrets: plan.secrets.map((secret) => `${secret.name} — ${SECRET_PURPOSES[secret.name]}`),
+    variables: plan.variables.map((variable) => `${variable.name} → ${variable.value}`),
+    automation: [
+      `Automatic PR review: ${plan.policy.automation.automaticPrReview ? "on" : "off"}`,
+      `Review feedback triage: ${plan.policy.automation.reviewFeedbackTriage ? "on" : "off"}`,
+      `Issue triage: ${plan.policy.automation.issueTriage ? "on" : "off"}`,
+      `Owner requests: ${plan.policy.automation.ownerRequests ? "on" : "off"}`,
+      `Deferred issues: ${plan.policy.review.createDeferredIssues ? "on" : "off"}`,
+      `Maintenance schedule: ${plan.policy.automation.maintenanceSchedule}`
+    ],
     startup: plan.update && plan.enabled
       ? "Codekeeper starts now with the current configuration; this update applies after merge."
       : plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge.",
@@ -487,7 +497,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const { stdout } = useStdout();
   const pagedDetail = usesPagedDetailLayout(stdout);
   const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
-  const lastPage = pagedDetail ? 7 : 2;
+  const lastPage = pagedDetail ? 9 : 2;
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
   usePaste(() => {});
   useInput((input, key) => {
@@ -539,12 +549,13 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       Box,
       { flexDirection: "column" },
       section("Document map", data.documents),
+      section("Repository variables", data.variables),
       section("Secrets requested through GitHub CLI", data.secrets)
     ) : null,
     !pagedDetail && page === 2 ? h(
       Box,
       { flexDirection: "column" },
-      section("Settings", [data.startup, ...data.capabilities, ...CONSERVATIVE_BOUNDARIES]),
+      section("Settings", [data.startup, ...data.automation, ...data.capabilities, ...CONSERVATIVE_BOUNDARIES]),
       data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
       h(
         Box,
@@ -564,10 +575,12 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     pagedDetail && page === 1 ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
     pagedDetail && page === 2 ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
     pagedDetail && page === 3 ? section("Editable agent profiles", data.profileDocumentPaths, 0) : null,
-    pagedDetail && page === 4 ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
-    pagedDetail && page === 5 ? section("Settings", [data.startup, ...data.capabilities], 0) : null,
-    pagedDetail && page === 6 ? section("Fixed boundaries", CONSERVATIVE_BOUNDARIES, 0) : null,
-    pagedDetail && page === 7 ? h(
+    pagedDetail && page === 4 ? section("Repository variables", data.variables, 0) : null,
+    pagedDetail && page === 5 ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
+    pagedDetail && page === 6 ? section("Settings", [data.startup, ...data.automation], 0) : null,
+    pagedDetail && page === 7 ? section("Capabilities", data.capabilities, 0) : null,
+    pagedDetail && page === 8 ? section("Fixed boundaries", CONSERVATIVE_BOUNDARIES, 0) : null,
+    pagedDetail && page === 9 ? h(
       Box,
       { flexDirection: "column" },
       data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
@@ -709,6 +722,7 @@ function TuiRoot({ registerController, colorEnabled }) {
   if (screen.kind === "input") return h(TextInputScreen, common);
   if (screen.kind === "secret") return h(SecretInputScreen, common);
   if (screen.kind === "file") return h(FilePickerScreen, common);
+  if (screen.kind === "settings") return h(SettingsScreen, common);
   if (screen.kind === "review") return h(ReviewScreen, common);
   if (screen.kind === "completion") return h(CompletionScreen, common);
   if (screen.kind === "progress") return h(ProgressScreen, { state: screen.state, colorEnabled });
@@ -822,6 +836,20 @@ export async function createInkPrompter({
     },
     async multiselect(spec) {
       return present("multiselect", spec);
+    },
+    async editSettings(spec) {
+      return present("settings", {
+        ...spec,
+        editProfile: (profile, source) => editProfileWithEditor({
+          profile,
+          source,
+          environment,
+          suspendTerminal: async (callback) => {
+            await instance.waitUntilRenderFlush();
+            return session.suspendTerminal(callback);
+          }
+        })
+      });
     },
     async selectPrivateKey({ step = "private key" } = {}) {
       const picker = await createPrivateKeyPickerController({

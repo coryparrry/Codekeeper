@@ -12,18 +12,19 @@ It is not a hosted service, webhook receiver, or multi-tenant GitHub App. The pr
 | `codekeeper-maintain.yml` | Audit the default branch. A live run may create one bounded repair when repository repair is on. |
 | `codekeeper-issues.yml` | Triage opened, reopened, or edited issues while `auto_triage=true`; configured-owner `/codekeeper triage` comments remain available when automatic triage is off. |
 | `codekeeper-fix.yml` | Implement an issue that trusted triage marks ready when issue implementation is on. A configured owner can also request exactly `/codekeeper fix` on an existing pull request. |
+| `codekeeper-assistant.yml` | Always-installed, lightweight owner-request router for issue and pull-request comments; it does not depend on installing the Fixer caller. |
 
 The guided installer performs this generation from release-pinned assets. Until it is published, use a locally built installer tarball for private acceptance or follow the [manual installation guide](INSTALL.md). The generated setup includes [`.github/codekeeper.json`](.github/codekeeper.json), the selected callers, and four adopter-owned Markdown profiles under `.github/codekeeper/agents/`. The manual path copies the matching non-executable templates from [`examples/workflows`](examples/workflows), replaces `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copies the policy and profiles into the adopter's default branch. Each caller pins the direct Codekeeper bootstrap action and its reusable workflow to the same immutable commit. The action stages only the production `tools/codekeeper` payload as a one-day artifact; every reusable job verifies that payload against the source-controlled manifest before using it. Adopters do not copy `tools/codekeeper` or source workflow files, and do not provide a source-repository token.
 
 The root policy is a valid starter, not a safe default for every repository. Before enabling it, replace `repository.ownerLogins`, verify the default branch and automation prefix, and tailor repair, validation, and auto-merge paths. Each mode has its own `ai.agents.<mode>` provider, model, settings, and optional Codex workspace specialist. The runtime label names are intentionally namespaced and must remain defined exactly as supplied. See [configuration](docs/CONFIGURATION.md).
 
-Each role can use any supported provider and model. OpenAI and DeepSeek are the first integrations. A role is not fixed to either provider.
+Each coordinator role can use OpenAI, DeepSeek, OpenRouter, or an arbitrary model ID for one of those providers. The coordinator choice is independent from its optional OpenAI Codex workspace specialist.
 
 ## Agent roles and authority
 
 | Role | Trigger | What it does | Actions it can take |
 |---|---|---|---|
-| Pull request reviewer | A PR event or `/codekeeper review` | Checks each finding against the current PR head, tries to disprove it, and classifies it. Reports defects, risk, and test coverage. Adds a Mermaid diagram when a flow needs one. | Updates one review comment and managed labels. A current, validated blocker can start the Fixer when automatic review repair is on. |
+| Pull request reviewer | A PR event, review comment, or `/codekeeper review` | Maintains one living summary, inventories the complete current review surface, deduplicates root causes, and classifies verified feedback as fix now, fix if cheap, defer, or ignore. | Updates review output and managed labels. A verified deferred item can become one fingerprinted issue; a current blocker can start the Fixer when automatic review repair is on. |
 | Issue triager | An issue event or `/codekeeper triage` | Classifies the issue. Compares it with open issues and PRs that describe the same component, symptom, failure, or requested outcome. These are related items, not duplicates unless the failure and outcome match. | Updates one triage comment and managed labels. It can mark an issue ready or close an exact duplicate when those capabilities are on. |
 | Repository auditor | A schedule or manual run | Reviews the default branch for evidence-backed maintenance work. | Creates maintenance issues. It can open one bounded repair PR when repository repair is on. |
 | Fixer | A ready issue, `/codekeeper implement`, `/codekeeper fix`, or a validated automatic repair request | Proves the requested problem, chooses the smallest complete change, implements it, and runs focused validation in one workspace pass. | Opens one issue PR or pushes to the existing PR branch. It cannot bypass path, size, validation, or merge policy. |
@@ -35,11 +36,13 @@ Configured owners can use these exact commands:
 - `/codekeeper status`
 - `/codekeeper review`
 - `/codekeeper rerun`
+- `/codekeeper triage`
+- `/codekeeper defer`
 - `/codekeeper implement`
 - `/codekeeper fix`
 - `/codekeeper stop`
 
-The issue implementation and pull request repair caller supplies this command router. Install that caller to use these commands.
+Configured-owner mentions can request the same fixed actions in natural language. The always-installed assistant caller supplies this router, so commands do not depend on installing the Fixer. Non-owner content and model output cannot grant mutation authority.
 
 ## Adopter-owned coordinator profiles
 

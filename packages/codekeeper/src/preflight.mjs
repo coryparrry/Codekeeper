@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
+  ASSISTANT_WORKFLOW,
   BOT_LOGIN_VARIABLE,
   CLIENT_ID_VARIABLE,
   ENABLED_VARIABLE,
@@ -18,6 +19,22 @@ import { upgradePolicy } from "./policy.mjs";
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const GITHUB_WORKFLOW_REFERENCE = /(?:coryparrry\/Codekeeper|\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-)/i;
+
+function callerBoolean(source, name) {
+  const matches = [...source.matchAll(new RegExp(`^\\s*${name}:\\s*(true|false)\\s*$`, "gm"))];
+  if (matches.length > 1) throw new InstallerError(`Existing caller has duplicate ${name} controls.`, { code: "EXISTING_INSTALLATION_INVALID" });
+  return matches.length ? matches[0][1] === "true" : null;
+}
+
+function callerSchedule(source) {
+  const matches = [...source.matchAll(/^\s*-\s+cron:\s*["']([^"']+)["']\s*$/gm)];
+  if (matches.length > 1) throw new InstallerError("Existing maintenance caller has duplicate schedules.", { code: "EXISTING_INSTALLATION_INVALID" });
+  const value = matches[0]?.[1] ?? null;
+  if (value !== null && !/^[^\s"'#]+(?:\s+[^\s"'#]+){4}$/.test(value)) {
+    throw new InstallerError("Existing maintenance caller has an invalid schedule.", { code: "EXISTING_INSTALLATION_INVALID" });
+  }
+  return value;
+}
 
 function trimGitSuffix(value) {
   return value.endsWith(".git") ? value.slice(0, -4) : value;
@@ -156,10 +173,13 @@ export async function assertNoInstallationFiles(root, {
 
   const workflowsRoot = path.join(githubRoot, "workflows");
   const workflowEntries = await safeDirectoryEntries(fsImpl, workflowsRoot);
-  const knownWorkflowNames = new Map(MODE_IDS.map((mode) => {
-    const name = path.basename(MODES[mode].target);
-    return [name.toLowerCase(), { mode, name }];
-  }));
+  const knownWorkflowNames = new Map([
+    ...MODE_IDS.map((mode) => {
+      const name = path.basename(MODES[mode].target);
+      return [name.toLowerCase(), { mode, name }];
+    }),
+    [path.basename(ASSISTANT_WORKFLOW.target).toLowerCase(), { mode: ASSISTANT_WORKFLOW.id, name: path.basename(ASSISTANT_WORKFLOW.target) }]
+  ]);
   for (const entry of workflowEntries) {
     const knownWorkflow = knownWorkflowNames.get(entry.name.toLowerCase());
     if (knownWorkflow) {
@@ -213,7 +233,6 @@ export async function inspectInstallationFiles(root, {
   for (const agent of Object.values(policy.ai.agents)) {
     if (agent && typeof agent === "object" && !Array.isArray(agent)) agent.maxTurns = 1;
   }
-  const policySource = `${JSON.stringify(policy, null, 2)}\n`;
   const contents = { [POLICY_TARGET]: installedPolicySource };
   for (const profile of AGENT_PROFILE_IDS) {
     const target = AGENT_PROFILES[profile].target;
@@ -232,6 +251,22 @@ export async function inspectInstallationFiles(root, {
     contents[target] = await fsImpl.readFile(filePath, "utf8");
   }
   if (!modes.length) throw new InstallerError("The existing installation has no Codekeeper workflows.", { code: "EXISTING_INSTALLATION_INVALID" });
+  if (contents[MODES.review.target]) {
+    policy.automation.automaticPrReview = callerBoolean(contents[MODES.review.target], "auto_review") ?? policy.automation.automaticPrReview;
+    policy.automation.reviewFeedbackTriage = callerBoolean(contents[MODES.review.target], "feedback_triage") ?? policy.automation.reviewFeedbackTriage;
+  }
+  if (contents[MODES.issues.target]) {
+    policy.automation.issueTriage = callerBoolean(contents[MODES.issues.target], "auto_triage") ?? policy.automation.issueTriage;
+  }
+  if (contents[MODES.maintain.target]) {
+    policy.automation.maintenanceSchedule = callerSchedule(contents[MODES.maintain.target]) ?? policy.automation.maintenanceSchedule;
+  }
+  const assistantPath = path.join(root, ...ASSISTANT_WORKFLOW.target.split("/"));
+  if (await exists(fsImpl, assistantPath)) {
+    contents[ASSISTANT_WORKFLOW.target] = await fsImpl.readFile(assistantPath, "utf8");
+    policy.automation.ownerRequests = callerBoolean(contents[ASSISTANT_WORKFLOW.target], "owner_requests") ?? policy.automation.ownerRequests;
+  }
+  const policySource = `${JSON.stringify(policy, null, 2)}\n`;
   const legacyPlannerProfile = ".github/codekeeper/agents/maintenance-planner.md";
   const legacyFiles = await exists(fsImpl, path.join(root, ...legacyPlannerProfile.split("/")))
     ? [legacyPlannerProfile]

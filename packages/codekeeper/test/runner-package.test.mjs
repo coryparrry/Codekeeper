@@ -164,6 +164,7 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "assets/metadata.json",
     "assets/policies/mixed.json",
     "assets/policies/openai.json",
+    "assets/workflows/assistant.yml",
     "assets/workflows/fix.yml",
     "assets/workflows/issues.yml",
     "assets/workflows/maintain.yml",
@@ -181,6 +182,8 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "src/preflight.mjs",
     "src/private-key-input.mjs",
     "src/prompts.mjs",
+    "src/settings-tui.mjs",
+    "src/settings.mjs",
     "src/shell-command.mjs",
     "src/tui.mjs"
   ].sort();
