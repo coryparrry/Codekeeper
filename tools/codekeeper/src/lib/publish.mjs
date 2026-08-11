@@ -258,6 +258,7 @@ async function suspendAutoMerge(github, pullRequest, refreshPull) {
 async function currentReviewPull(github, context, config) {
   const pull = await github.getPull(context.pullRequest.number);
   if (pull.state !== "open") throw new Error(`PR #${pull.number} is not open`);
+  if (pull.draft) throw new Error(`PR #${pull.number} became a draft; stale review will not publish`);
   if (pull.head.sha !== context.pullRequest.headSha) {
     throw new Error(`PR #${pull.number} moved from ${context.pullRequest.headSha} to ${pull.head.sha}; stale review will not publish`);
   }
@@ -269,6 +270,9 @@ async function currentReviewPull(github, context, config) {
   }
   if (pull.head.repo?.full_name !== context.repository || pull.base.repo?.full_name !== context.repository) {
     throw new Error(`PR #${pull.number} repository changed; stale review will not publish`);
+  }
+  if (issueLabelNames(pull).includes("codekeeper:paused")) {
+    throw new Error(`PR #${pull.number} is paused; review publication stopped`);
   }
   return pull;
 }
@@ -454,14 +458,26 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     await currentReviewPull(github, context, config);
     await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
     await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
-    await currentReviewPull(github, context, config);
-    await github.createRepositoryDispatch("codekeeper_fix", {
-      number: pull.number,
-      head_sha: pull.head.sha,
-      authorization_mode: "policy",
-      requested_by: automationIdentity.login,
-      review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
-    });
+    try {
+      await currentReviewPull(github, context, config);
+      await github.createRepositoryDispatch("codekeeper_fix", {
+        number: pull.number,
+        head_sha: pull.head.sha,
+        authorization_mode: "policy",
+        requested_by: automationIdentity.login,
+        review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
+      });
+    } catch (error) {
+      try {
+        await github.removeLabel(pull.number, "codekeeper:auto-repaired");
+      } catch (rollbackError) {
+        throw new Error(
+          `${error.message}; codekeeper:auto-repaired could not be rolled back: ${rollbackError.message}`,
+          { cause: error }
+        );
+      }
+      throw error;
+    }
     automaticRepair.dispatched = true;
   }
 
@@ -612,6 +628,17 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     comment,
     automationIdentity
   );
+  const acceptOwnedCommentUpdate = async (before) => {
+    const after = assertExpectedManagedLabelMutation(
+      before,
+      await github.getIssue(issue.number),
+      desiredLabels,
+      managedIssueLabels(config)
+    );
+    expectedUpdatedAt = after.updated_at;
+    return after;
+  };
+  let afterOwnedComment = await acceptOwnedCommentUpdate(afterLabelMutation);
 
   if (result.duplicateOf === issue.number) {
     throw new Error(`Issue #${issue.number} cannot be its own duplicate`);
@@ -621,6 +648,7 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     await currentIssue();
     const duplicate = await currentOpenIssue(github, duplicateContext, "duplicate assessment");
     await github.createComment(issue.number, `Closing as a duplicate of #${duplicate.number}.`);
+    afterOwnedComment = await acceptOwnedCommentUpdate(afterOwnedComment);
     await currentIssue();
     await currentOpenIssue(github, duplicateContext, "duplicate assessment");
     await github.updateIssue(issue.number, { state: "closed", state_reason: "not_planned" });
@@ -646,7 +674,7 @@ export function isTrustedMaintenanceIssue(issue, { marker, botLogin, botId }) {
   );
 }
 
-async function upsertMaintenanceFindings({ github, findings, config, runUrl, dryRun }) {
+async function upsertMaintenanceFindings({ github, findings, config, runUrl, revalidateBeforeMutation, dryRun }) {
   const automationIdentity = expectedAutomationIdentity();
   const existing = await github.listMaintenanceIssues("codekeeper:maintenance");
   const published = [];
@@ -676,12 +704,16 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
       published.push({ fingerprint, state: match ? "would-update" : "would-create", issueNumber: match?.number ?? null });
       continue;
     }
+    await revalidateBeforeMutation();
     await github.ensureLabels(config.labels, labels);
     if (match) {
+      await revalidateBeforeMutation();
       await github.updateIssue(match.number, { title, body });
+      await revalidateBeforeMutation();
       await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
       published.push({ fingerprint, state: "updated", issueNumber: match.number });
     } else {
+      await revalidateBeforeMutation();
       const created = await github.createIssue({ title, body, labels });
       published.push({ fingerprint, state: "created", issueNumber: created.number });
       existing.push(created);
@@ -920,11 +952,21 @@ export async function publishAudit({ artifactDirectory, config, configSha256, ex
     throw new Error(`Default branch moved from ${context.baseSha} to ${liveHead}; stale audit will not publish`);
   }
   const github = new GitHubClient({ token, repository: context.repository });
+  const revalidateDefaultBranch = async () => {
+    const branch = await github.getBranch(config.repository.defaultBranch);
+    const remoteHead = branch?.commit?.sha;
+    if (remoteHead !== context.baseSha) {
+      throw new Error(
+        `Remote default branch moved from ${context.baseSha} to ${remoteHead ?? "missing"}; stale audit will not publish`
+      );
+    }
+  };
   const findings = await upsertMaintenanceFindings({
     github,
     findings: result.findings,
     config,
     runUrl: context.runUrl,
+    revalidateBeforeMutation: revalidateDefaultBranch,
     dryRun
   });
 
@@ -947,9 +989,11 @@ export async function publishAudit({ artifactDirectory, config, configSha256, ex
       fingerprint,
       issueNumber: publishedFinding?.issueNumber ?? null,
       finding,
+      revalidateBeforeMutation: revalidateDefaultBranch,
       dryRun
     });
     if (!dryRun && publishedFinding?.issueNumber && repair.url) {
+      await revalidateDefaultBranch();
       await github.upsertMarkerComment(
         publishedFinding.issueNumber,
         repairNotificationMarker(fingerprint),

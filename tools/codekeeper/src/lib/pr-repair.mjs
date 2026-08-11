@@ -150,12 +150,20 @@ function pullLabelNames(pull) {
   return names;
 }
 
-async function currentFrozenPull(github, target, { rejectPaused = false } = {}) {
+async function currentFrozenPull(
+  github,
+  target,
+  { rejectPaused = false, requireAutomaticRepairMarker = false } = {}
+) {
   const pull = assertLivePullRepairTarget(await github.getPull(target.number), target);
-  if (rejectPaused && pullLabelNames(pull).includes("codekeeper:paused")) {
+  const labels = pullLabelNames(pull);
+  if (rejectPaused && labels.includes("codekeeper:paused")) {
     const error = new Error(`PR #${target.number} is paused; automatic publication stopped`);
     error.code = "CODEKEEPER_PAUSED";
     throw error;
+  }
+  if (requireAutomaticRepairMarker && !labels.includes("codekeeper:auto-repaired")) {
+    throw new Error(`PR #${target.number} no longer has policy repair authorization`);
   }
   const [comments, liveReviewThreads] = await Promise.all([
     github.listIssueComments(target.number),
@@ -230,7 +238,10 @@ export async function publishPullRequestRepair({
   gitOperations = defaultGitOperations
 }) {
   const target = frozenPullRepairTarget(context, config);
-  const revalidationOptions = { rejectPaused: true };
+  const revalidationOptions = {
+    rejectPaused: true,
+    requireAutomaticRepairMarker: context.authorizationMode === "policy"
+  };
   if (!String(context.runId ?? "").trim()) throw new Error("Frozen PR repair context is missing its workflow run ID");
   try {
     const pull = await currentFrozenPull(github, target, revalidationOptions);

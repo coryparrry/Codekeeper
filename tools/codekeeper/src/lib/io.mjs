@@ -72,6 +72,13 @@ export function parseArgs(argv) {
   return {
     positional,
     flags,
+    assertKnown(allowedNames) {
+      const allowed = new Set(allowedNames);
+      const unknown = [...flags.keys()].filter((name) => !allowed.has(name));
+      if (unknown.length > 0) {
+        throw new Error(`Unknown argument${unknown.length === 1 ? "" : "s"}: ${unknown.map((name) => `--${name}`).join(", ")}`);
+      }
+    },
     get(name, fallback = undefined) {
       return flags.has(name) ? flags.get(name) : fallback;
     },
@@ -107,6 +114,13 @@ export function log(message, details = undefined) {
   }
 }
 
+export function workflowCommandValue(value) {
+  return String(value ?? "")
+    .replaceAll("%", "%25")
+    .replaceAll("\r", "%0D")
+    .replaceAll("\n", "%0A");
+}
+
 export function warn(message) {
-  console.warn(`::warning::${message}`);
+  console.warn(`::warning::${workflowCommandValue(message)}`);
 }

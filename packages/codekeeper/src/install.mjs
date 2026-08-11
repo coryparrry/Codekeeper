@@ -8,6 +8,7 @@ import { formatCommand } from "./shell-command.mjs";
 import { APP_SECRET, SECRET_PURPOSES } from "./constants.mjs";
 
 const PR_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/;
+export const SECRET_UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 
 async function maybeLstat(fsImpl, target) {
   try {
@@ -214,7 +215,12 @@ export async function configureRepositorySettings(plan, {
           runner,
           "gh",
           ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
-          { cwd: plan.root, stdio: "ignore", stdinFd: appInput.descriptor, timeoutMs: null },
+          {
+            cwd: plan.root,
+            stdio: "ignore",
+            stdinFd: appInput.descriptor,
+            timeoutMs: SECRET_UPLOAD_TIMEOUT_MS
+          },
           `GitHub CLI did not set ${secret.name}.`,
           resumeCommand
         );
@@ -232,7 +238,7 @@ export async function configureRepositorySettings(plan, {
           {
             cwd: plan.root,
             stdio: "ignore",
-            timeoutMs: null,
+            timeoutMs: SECRET_UPLOAD_TIMEOUT_MS,
             provideInput: (write) => withSecretInput({
               step: "credential",
               name: secret.name,
@@ -250,7 +256,7 @@ export async function configureRepositorySettings(plan, {
             runner,
             "gh",
             ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
-            { cwd: plan.root, stdio: "inherit", timeoutMs: null },
+            { cwd: plan.root, stdio: "inherit", timeoutMs: SECRET_UPLOAD_TIMEOUT_MS },
             `GitHub CLI did not set ${secret.name}.`,
             resumeCommand
           ),

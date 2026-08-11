@@ -3,6 +3,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRY_ATTEMPTS = 2;
 const MAX_RETRY_ATTEMPTS = 2;
 const MAX_RETRY_DELAY_MS = 5_000;
+const MAX_PAGINATION_PAGES = 1_000;
 const RETRYABLE_STATUS = new Set([408, 429]);
 const TRANSIENT_GRAPHQL_ERROR_TYPES = new Set(["INTERNAL", "INTERNAL_ERROR", "RATE_LIMITED", "SERVICE_UNAVAILABLE"]);
 
@@ -234,7 +235,26 @@ export class GitHubClient {
     }
     const results = [];
     let url = endpoint.includes("?") ? `${endpoint}&per_page=100` : `${endpoint}?per_page=100`;
+    const visited = new Set();
+    const apiBase = new URL(`${this.apiUrl}/`);
+    let pages = 0;
     while (url && results.length < limit) {
+      const resolved = new URL(url, apiBase);
+      if (
+        resolved.origin !== apiBase.origin ||
+        !resolved.pathname.startsWith(apiBase.pathname)
+      ) {
+        throw new Error("GitHub pagination returned an untrusted next URL");
+      }
+      const normalized = resolved.toString();
+      if (visited.has(normalized)) {
+        throw new Error("GitHub pagination returned a repeated next URL");
+      }
+      if (pages >= MAX_PAGINATION_PAGES) {
+        throw new Error(`GitHub pagination exceeded ${MAX_PAGINATION_PAGES} pages`);
+      }
+      visited.add(normalized);
+      pages += 1;
       const response = await this.request("GET", url);
       if (!Array.isArray(response.data)) throw new Error(`Expected array from ${url}`);
       for (const item of response.data) {

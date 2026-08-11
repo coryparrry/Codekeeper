@@ -3,6 +3,10 @@ import { copyFile, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promi
 import os from "node:os";
 import path from "node:path";
 
+const MAX_CAPTURE_FILE_BYTES = 1024 * 1024;
+const MAX_CAPTURE_PATCH_BYTES = 5 * 1024 * 1024;
+const DEFAULT_VALIDATION_TIMEOUT_MS = 5 * 60 * 1000;
+
 function commandError(command, args, result) {
   const stderr = result.stderr?.toString("utf8").trim();
   const stdout = result.stdout?.toString("utf8").trim();
@@ -20,6 +24,7 @@ export function run(command, args, options = {}) {
     encoding: options.encoding ?? "utf8",
     input: options.input,
     maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
+    timeout: options.timeoutMs,
     stdio: options.stdio ?? "pipe"
   });
   if (result.error) throw result.error;
@@ -53,7 +58,13 @@ function splitNul(buffer) {
     .filter((entry) => entry !== "");
 }
 
-export async function collectWorkingTreeChanges(cwd = process.cwd()) {
+export async function collectWorkingTreeChanges(
+  cwd = process.cwd(),
+  { maximumFileBytes = MAX_CAPTURE_FILE_BYTES } = {}
+) {
+  if (!Number.isSafeInteger(maximumFileBytes) || maximumFileBytes <= 0) {
+    throw new Error("Workspace capture file limit must be a positive integer");
+  }
   const trackedTokens = splitNul(
     git(["diff", "--name-status", "-z", "HEAD"], { cwd, encoding: null }).stdout
   );
@@ -147,6 +158,13 @@ export async function collectWorkingTreeChanges(cwd = process.cwd()) {
     item.modeChanged = false;
     item.specialMode = false;
     item.bytes = stat.size;
+    if (stat.size > maximumFileBytes) {
+      item.captureSkipped = true;
+      item.binary = false;
+      item.additions = 0;
+      item.deletions = 0;
+      continue;
+    }
     const content = await readFile(absolute);
     item.binary = content.includes(0);
     item.additions = item.binary ? 0 : content.toString("utf8").split("\n").length;
@@ -177,11 +195,27 @@ export async function collectWorkingTreeChanges(cwd = process.cwd()) {
   };
 }
 
-export async function createPatch(patchPath, cwd = process.cwd()) {
-  const changes = await collectWorkingTreeChanges(cwd);
+export async function createPatch(
+  patchPath,
+  cwd = process.cwd(),
+  {
+    maximumFileBytes = MAX_CAPTURE_FILE_BYTES,
+    maximumPatchBytes = MAX_CAPTURE_PATCH_BYTES
+  } = {}
+) {
+  if (!Number.isSafeInteger(maximumPatchBytes) || maximumPatchBytes <= 0) {
+    throw new Error("Workspace capture patch limit must be a positive integer");
+  }
+  const changes = await collectWorkingTreeChanges(cwd, { maximumFileBytes });
   const untracked = changes.files.filter((item) => item.untracked).map((item) => item.path);
+  if (changes.files.some((item) => item.captureSkipped)) {
+    await writeFile(patchPath, Buffer.alloc(0));
+    return { ...changes, patchBytes: 0, captureSkipped: true };
+  }
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-index-"));
   const temporaryIndex = path.join(temporaryDirectory, "index");
+  let patchBytes = 0;
+  let captureSkipped = false;
   try {
     const indexPath = gitText(["rev-parse", "--git-path", "index"], { cwd });
     try {
@@ -192,20 +226,39 @@ export async function createPatch(patchPath, cwd = process.cwd()) {
     }
     const environment = { GIT_INDEX_FILE: temporaryIndex };
     if (untracked.length > 0) git(["add", "-N", "--", ...untracked], { cwd, env: environment });
-    const patch = git(["diff", "--binary", "--full-index", "HEAD"], { cwd, env: environment, encoding: null }).stdout;
-    await writeFile(patchPath, patch);
+    try {
+      const patch = git(["diff", "--binary", "--full-index", "HEAD"], {
+        cwd,
+        env: environment,
+        encoding: null,
+        maxBuffer: maximumPatchBytes + 1
+      }).stdout;
+      patchBytes = patch.length;
+      await writeFile(patchPath, patch);
+    } catch (error) {
+      if (error.code !== "ENOBUFS") throw error;
+      patchBytes = maximumPatchBytes + 1;
+      captureSkipped = true;
+      await writeFile(patchPath, Buffer.alloc(0));
+    }
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
-  const patch = await readFile(patchPath);
-  return { ...changes, patchBytes: patch.length };
+  return { ...changes, patchBytes, captureSkipped };
 }
 
 export function applyPatch(patchPath, cwd = process.cwd()) {
   git(["apply", "--whitespace=error-all", patchPath], { cwd });
 }
 
-export function runValidationCommands(commands, cwd = process.cwd()) {
+export function runValidationCommands(
+  commands,
+  cwd = process.cwd(),
+  { timeoutMs = DEFAULT_VALIDATION_TIMEOUT_MS } = {}
+) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("Validation timeout must be a positive integer");
+  }
   const environment = { ...process.env };
   for (const key of [
     "GITHUB_TOKEN",
@@ -221,9 +274,31 @@ export function runValidationCommands(commands, cwd = process.cwd()) {
   ]) {
     delete environment[key];
   }
+  for (const key of Object.keys(environment)) {
+    if (/(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY)$/i.test(key)) {
+      delete environment[key];
+    }
+  }
   const results = [];
   for (const command of commands) {
-    const result = run("bash", ["-c", command], { cwd, allowFailure: true, env: environment, replaceEnv: true });
+    let result;
+    try {
+      result = run("bash", ["-c", command], {
+        cwd,
+        allowFailure: true,
+        env: environment,
+        replaceEnv: true,
+        timeoutMs
+      });
+    } catch (error) {
+      const failure = new Error(
+        error.code === "ETIMEDOUT"
+          ? `Validation command timed out after ${timeoutMs}ms: ${command}`
+          : `Validation command could not run: ${command}: ${error.message}`
+      );
+      failure.validationResults = results;
+      throw failure;
+    }
     results.push({
       command,
       success: result.status === 0,

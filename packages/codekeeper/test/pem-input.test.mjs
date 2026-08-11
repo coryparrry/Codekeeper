@@ -5,7 +5,7 @@ import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { fstatSync } from "node:fs";
 import path from "node:path";
 import { createCommandRunner, openSafeStdinFile, STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
-import { configureRepositorySettings } from "../src/install.mjs";
+import { configureRepositorySettings, SECRET_UPLOAD_TIMEOUT_MS } from "../src/install.mjs";
 import { createRecordingRunner, result, temporaryDirectory, textSink } from "./helpers.mjs";
 
 const PRIVATE_KEY_BYTES = "private-key-byte-canary-never-render";
@@ -196,7 +196,7 @@ test("App PEM uses fd-only child input, closes on failure, and leaks no path or 
     cwd: "/tmp/widget",
     stdio: "ignore",
     stdinFd: 45,
-    timeoutMs: null
+    timeoutMs: SECRET_UPLOAD_TIMEOUT_MS
   });
   assert.equal(closed, 1);
   const observable = `${JSON.stringify(runner.calls)}\n${output.toString()}`;

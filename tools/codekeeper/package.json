@@ -12,9 +12,9 @@
     "zod": "4.4.3"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs audit/*.test.mjs",
     "eval:offline": "node evals/decision-quality.mjs --offline",
     "eval:live": "node evals/decision-quality.mjs",
-    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs presets/*.mjs scripts/*.mjs evals/*.mjs test/*.mjs; do node --check \"$file\"; done' && node scripts/generate-tooling-manifest.mjs --check && node --test test/*.test.mjs"
+    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs presets/*.mjs scripts/*.mjs evals/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node scripts/generate-tooling-manifest.mjs --check && node --test test/*.test.mjs audit/*.test.mjs"
   }
 }

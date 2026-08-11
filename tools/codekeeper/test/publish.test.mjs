@@ -637,11 +637,12 @@ test("issue publication does not close a duplicate after the triaged issue chang
   let duplicateCommentPublished = false;
   let issueClosed = false;
   let updatedAt = context.issue.updatedAt;
+  let title = "Report";
   let labels = [];
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
       if (number === 9) return { number, state: "open" };
-      return { number, state: "open", updated_at: updatedAt, labels };
+      return { number, title, state: "open", updated_at: updatedAt, labels };
     },
     async ensureLabels() {},
     async replaceManagedLabels(_number, desiredLabels) {
@@ -651,6 +652,7 @@ test("issue publication does not close a duplicate after the triaged issue chang
     async upsertMarkerComment() {
       triageCommentPublished = true;
       updatedAt = "2026-08-05T10:01:00Z";
+      title = "Report changed concurrently";
     },
     async createComment(_number, body) { duplicateCommentPublished ||= body.includes("Closing as a duplicate"); },
     async updateIssue() { issueClosed = true; }
@@ -663,7 +665,7 @@ test("issue publication does not close a duplicate after the triaged issue chang
     });
     await assert.rejects(
       publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
-      /changed after analysis/
+      /changed while Codekeeper reconciled labels/
     );
     assert.equal(triageCommentPublished, true);
     assert.equal(duplicateCommentPublished, false);
@@ -1326,7 +1328,9 @@ test("maintenance publication adopts an App-created issue after response loss", 
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   const issues = [];
   let creates = 0;
+  let remoteBaseSha;
   const restoreGitHub = replaceGitHubMethods({
+    async getBranch() { return { commit: { sha: remoteBaseSha } }; },
     async listMaintenanceIssues() { return issues; },
     async listIssueComments() { throw new Error("orphan adoption must not require a second write"); },
     async ensureLabels() {},
@@ -1354,6 +1358,7 @@ test("maintenance publication adopts an App-created issue after response loss", 
     git(repository, ["add", "README.md"]);
     git(repository, ["commit", "-qm", "initial"]);
     const baseSha = git(repository, ["rev-parse", "HEAD"]);
+    remoteBaseSha = baseSha;
     const context = { mode: "audit", repository: "owner/repository", configSha256, baseSha, runUrl: "https://example.test/run", repairAuthorized: false };
     const result = {
       mode: "audit",
@@ -1452,6 +1457,7 @@ test("maintenance repair notification remains singular after response loss", asy
       base: { repo: { full_name: context.repository } }
     };
     const restoreGitHub = replaceGitHubMethods({
+      async getBranch() { return { commit: { sha: context.baseSha } }; },
       async listMaintenanceIssues() { return [maintenanceIssue]; },
       async ensureLabels() {},
       async updateIssue() {},
