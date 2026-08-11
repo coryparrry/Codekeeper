@@ -185,6 +185,7 @@ const REQUIRED_RUNTIME_LABELS = [
   "codekeeper:auto-repaired",
   "codekeeper:auto-merge",
   "codekeeper:duplicate-candidate",
+  "codekeeper:deferred",
   "codekeeper:needs-tests",
   "codekeeper:priority-p1",
   "codekeeper:priority-p2",
@@ -217,6 +218,7 @@ const ISSUE_MANAGED_LABELS = [
   "codekeeper:ready",
   "codekeeper:manual-review",
   "codekeeper:duplicate-candidate",
+  "codekeeper:deferred",
   "codekeeper:priority-p1",
   "codekeeper:priority-p2",
   "codekeeper:priority-p3",
@@ -332,8 +334,8 @@ export function getAgentRuntimeSettings(config, mode, { mutationAuthorized = tru
 export async function loadConfig(configPath = ".github/codekeeper.json") {
   const resolved = path.resolve(configPath);
   const config = await readJson(resolved);
-  fixedObject(config, "policy", ["version", "repository", "projectInvariants", "ai", "labels", "review", "audit", "issues", "merge"]);
-  assert(config.version === 2, "version must be 2");
+  fixedObject(config, "policy", ["version", "repository", "projectInvariants", "automation", "ai", "labels", "review", "audit", "issues", "merge"]);
+  assert(config.version === 3, "version must be 3");
   fixedObject(config.repository, "repository", ["displayName", "defaultBranch", "ownerLogins", "automationBranchPrefix"]);
   nonEmptyString(config.repository.displayName, "repository.displayName", 256);
   nonEmptyString(config.repository.defaultBranch, "repository.defaultBranch", 255);
@@ -344,6 +346,13 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
   assert(new Set(normalizedOwnerLogins).size === normalizedOwnerLogins.length, "repository.ownerLogins must not contain duplicates after normalization");
   config.repository.ownerLogins = normalizedOwnerLogins;
   stringArray(config.projectInvariants ?? [], "projectInvariants", { maximumEntries: LIMITS.projectInvariants, maximumLength: 4_096 });
+  fixedObject(config.automation, "automation", ["automaticPrReview", "reviewFeedbackTriage", "issueTriage", "ownerRequests", "maintenanceSchedule"]);
+  boolean(config.automation.automaticPrReview, "automation.automaticPrReview");
+  boolean(config.automation.reviewFeedbackTriage, "automation.reviewFeedbackTriage");
+  boolean(config.automation.issueTriage, "automation.issueTriage");
+  boolean(config.automation.ownerRequests, "automation.ownerRequests");
+  nonEmptyString(config.automation.maintenanceSchedule, "automation.maintenanceSchedule", 100);
+  assert(/^(?:\S+\s+){4}\S+$/.test(config.automation.maintenanceSchedule), "automation.maintenanceSchedule must contain five cron fields");
   validateAi(config);
 
   dynamicObject(config.labels, "labels", LIMITS.labelEntries);
@@ -358,8 +367,9 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
     assert(config.labels[label], `runtime requires undefined label ${label}`);
   }
 
-  fixedObject(config.review, "review", ["autoRepair", "maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
+  fixedObject(config.review, "review", ["autoRepair", "createDeferredIssues", "maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
   boolean(config.review.autoRepair, "review.autoRepair");
+  boolean(config.review.createDeferredIssues, "review.createDeferredIssues");
   cappedNonNegativeInteger(config.review.maximumBlockingFindings, "review.maximumBlockingFindings", LIMITS.maximumBlockingFindings);
   cappedNonNegativeInteger(config.review.maximumNonBlockingFindings, "review.maximumNonBlockingFindings", LIMITS.maximumNonBlockingFindings);
   cappedPositiveInteger(config.review.maximumDiffBytes, "review.maximumDiffBytes", LIMITS.maximumDiffBytes);
@@ -405,7 +415,7 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
   boolean(config.merge.enabled, "merge.enabled");
   boolean(config.merge.allowAutomationPullRequests, "merge.allowAutomationPullRequests");
   boolean(config.merge.allowUserPullRequests, "merge.allowUserPullRequests");
-  assert(!config.merge.allowUserPullRequests, "merge.allowUserPullRequests must remain false in version 2");
+  assert(!config.merge.allowUserPullRequests, "merge.allowUserPullRequests must remain false in version 3");
   assert(["MERGE", "SQUASH", "REBASE"].includes(config.merge.method), "merge.method must be MERGE, SQUASH, or REBASE");
   cappedPositiveInteger(config.merge.maximumFiles, "merge.maximumFiles", LIMITS.maximumMergeFiles);
   cappedPositiveInteger(config.merge.maximumChangedLines, "merge.maximumChangedLines", LIMITS.maximumMergeChangedLines);

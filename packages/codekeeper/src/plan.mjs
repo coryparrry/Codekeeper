@@ -9,11 +9,10 @@ import {
   CAPABILITY_IDS,
   CLIENT_ID_VARIABLE,
   CONSERVATIVE_BOUNDARIES,
-  DEEPSEEK_SECRET,
   ENABLED_VARIABLE,
   MODE_IDS,
   MODES,
-  OPENAI_SECRET,
+  MODEL_PROVIDER_SECRETS,
   PRESET_IDS,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
@@ -25,6 +24,7 @@ import {
 } from "./constants.mjs";
 import { renderInstallFiles, sha256 } from "./assets.mjs";
 import { InstallerError } from "./errors.mjs";
+import { upgradePolicy } from "./policy.mjs";
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const BOT_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,99})\[bot\]$/;
@@ -118,8 +118,9 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
   const selected = normalizeModes(modes);
   const names = [];
   const providers = new Set(modelAssignments(selected).map(({ key }) => models?.[key]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
-  if (providers.has("openai")) names.push(OPENAI_SECRET);
-  if (providers.has("deepseek")) names.push(DEEPSEEK_SECRET);
+  for (const [provider, secret] of Object.entries(MODEL_PROVIDER_SECRETS)) {
+    if (providers.has(provider)) names.push(secret);
+  }
   if (tracing) names.push(TRACE_SECRET);
   names.push(APP_SECRET);
   return Object.freeze(names);
@@ -128,8 +129,9 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
 function existingSecretNames(installation) {
   const providers = new Set(modelAssignments(installation.modes).map(({ agent }) => installation.policy.ai.agents[agent].provider));
   return new Set([
-    ...(providers.has("openai") ? [OPENAI_SECRET] : []),
-    ...(providers.has("deepseek") ? [DEEPSEEK_SECRET] : []),
+    ...Object.entries(MODEL_PROVIDER_SECRETS)
+      .filter(([provider]) => providers.has(provider))
+      .map(([, secret]) => secret),
     ...(installation.policy.ai.tracing.enabled ? [TRACE_SECRET] : []),
     APP_SECRET
   ]);
@@ -137,20 +139,31 @@ function existingSecretNames(installation) {
 
 export function normalizeModelChoices({ modes, preset, bundle, choices = {}, policySource = bundle.contents[`policies/${preset}.json`] }) {
   const selected = normalizeModes(modes);
-  const policy = JSON.parse(policySource);
+  const policy = upgradePolicy(JSON.parse(policySource));
   const normalized = {};
   for (const assignment of modelAssignments(selected)) {
     const { key, agent: agentId, workflow } = assignment;
     const agent = policy.ai.agents[agentId];
     const defaultOption = ALL_MODEL_OPTIONS.find((option) => option.provider === agent.provider && option.model === agent.model && option.effort === agent.effort);
-    const choiceId = choices[key] ?? defaultOption?.id;
-    const choice = ALL_MODEL_OPTIONS.find((option) => option.id === choiceId);
-    if (!choice) throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    const requested = choices[key] ?? defaultOption?.id;
+    const choice = typeof requested === "string"
+      ? ALL_MODEL_OPTIONS.find((option) => option.id === requested)
+      : requested;
+    if (!choice || typeof choice !== "object") throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    const provider = String(choice.provider ?? "").trim();
+    const model = String(choice.model ?? "").trim();
+    const effort = String(choice.effort ?? "none").trim();
+    if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, provider) || !policy.ai.providers[provider]
+      || !model || model.length > 256 || /[\s\u0000-\u001f\u007f]/.test(model)
+      || !["none", "minimal", "low", "medium", "high", "max", "xhigh"].includes(effort)
+      || (effort !== "none" && !policy.ai.providers[provider]?.supportsReasoningEffort)) {
+      throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    }
     normalized[key] = Object.freeze({
-      provider: choice.provider,
-      model: choice.model,
-      effort: choice.effort,
-      choice: choice.id
+      provider,
+      model,
+      effort,
+      choice: typeof requested === "string" ? choice.id : null
     });
   }
   const assignmentKeys = new Set(modelAssignments(selected).map(({ key }) => key));

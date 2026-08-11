@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "repository": {
     "displayName": "Example Repository",
     "defaultBranch": "main",
@@ -13,6 +13,13 @@
     "Do not add accounts, external services, permissions, or architectural machinery unless the approved issue requires them.",
     "Do not change repository automation, security policy, release configuration, or credentials outside the explicit path policy."
   ],
+  "automation": {
+    "automaticPrReview": true,
+    "reviewFeedbackTriage": true,
+    "issueTriage": true,
+    "ownerRequests": true,
+    "maintenanceSchedule": "17 7 * * *"
+  },
   "ai": {
     "tracing": {
       "enabled": true,
@@ -27,6 +34,12 @@
       },
       "deepseek": {
         "baseUrl": "https://api.deepseek.com",
+        "api": "chat_completions",
+        "structuredOutputs": false,
+        "supportsReasoningEffort": false
+      },
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
         "api": "chat_completions",
         "structuredOutputs": false,
         "supportsReasoningEffort": false
@@ -150,6 +163,10 @@
       "color": "CFD3D7",
       "description": "Likely duplicate requiring confirmation"
     },
+    "codekeeper:deferred": {
+      "color": "C5DEF5",
+      "description": "Verified work deferred from a pull request"
+    },
     "codekeeper:needs-tests": {
       "color": "D4C5F9",
       "description": "Additional tests are required"
@@ -209,6 +226,7 @@
   },
   "review": {
     "autoRepair": false,
+    "createDeferredIssues": true,
     "maximumBlockingFindings": 8,
     "maximumNonBlockingFindings": 8,
     "allowedLabels": [
@@ -302,6 +320,7 @@
       "codekeeper:ready",
       "codekeeper:manual-review",
       "codekeeper:duplicate-candidate",
+      "codekeeper:deferred",
       "codekeeper:priority-p1",
       "codekeeper:priority-p2",
       "codekeeper:priority-p3",

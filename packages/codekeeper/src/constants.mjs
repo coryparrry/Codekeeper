@@ -143,6 +143,12 @@ export const APP_SECRET = "CODEKEEPER_APP_PRIVATE_KEY";
 export const TRACE_SECRET = "OPENAI_TRACE_API_KEY";
 export const OPENAI_SECRET = "OPENAI_API_KEY";
 export const DEEPSEEK_SECRET = "DEEPSEEK_API_KEY";
+export const OPENROUTER_SECRET = "OPENROUTER_API_KEY";
+export const MODEL_PROVIDER_SECRETS = Object.freeze({
+  openai: OPENAI_SECRET,
+  deepseek: DEEPSEEK_SECRET,
+  openrouter: OPENROUTER_SECRET
+});
 export const ENABLED_VARIABLE = "CODEKEEPER_ENABLED";
 export const CLIENT_ID_VARIABLE = "CODEKEEPER_APP_CLIENT_ID";
 export const BOT_LOGIN_VARIABLE = "CODEKEEPER_AUTOMATION_BOT_LOGIN";
@@ -150,6 +156,7 @@ export const BOT_LOGIN_VARIABLE = "CODEKEEPER_AUTOMATION_BOT_LOGIN";
 export const SECRET_PURPOSES = Object.freeze({
   [OPENAI_SECRET]: "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key.",
   [DEEPSEEK_SECRET]: "DeepSeek API key for each role assigned to DeepSeek",
+  [OPENROUTER_SECRET]: "OpenRouter API key for each role assigned to OpenRouter",
   [TRACE_SECRET]: "Separate OpenAI Platform API key for trace export. Do not reuse the model API key.",
   [APP_SECRET]: "downloaded GitHub App PEM private key used to mint App installation tokens"
 });

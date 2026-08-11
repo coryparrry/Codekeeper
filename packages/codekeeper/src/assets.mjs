@@ -7,12 +7,14 @@ import {
   AGENT_PROFILES,
   ASSET_KEYS,
   MODE_IDS,
+  MODEL_PROVIDER_SECRETS,
   MODES,
   POLICY_TARGET,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
+import { upgradePolicy } from "./policy.mjs";
 
 const DEFAULT_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FULL_SHA = /^[0-9a-f]{40}$/;
@@ -116,16 +118,16 @@ export function renderPolicy(policySource, {
 }) {
   let policy;
   try {
-    policy = JSON.parse(policySource);
+    policy = upgradePolicy(JSON.parse(policySource));
   } catch (cause) {
-    throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
+    throw new InstallerError("Bundled policy is invalid or unsupported.", { code: "ASSET_POLICY_INVALID", cause });
   }
   if (enforceBundledDefaults) assertDisabledPolicy(policy);
   let requiredPolicy;
   try {
-    requiredPolicy = JSON.parse(requiredPolicySource);
+    requiredPolicy = upgradePolicy(JSON.parse(requiredPolicySource));
   } catch (cause) {
-    throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
+    throw new InstallerError("Bundled policy is invalid or unsupported.", { code: "ASSET_POLICY_INVALID", cause });
   }
   if (!policy.repository || !policy.merge || !Array.isArray(policy.merge.allowedUserAuthors)) {
     throw new InstallerError("Bundled policy cannot be tailored safely.", { code: "ASSET_POLICY_INVALID" });
@@ -152,13 +154,9 @@ export function renderPolicy(policySource, {
     agent.effort = selection.effort;
     agent.modelSettings = selection.provider === "openai"
       ? { text: { verbosity: "low" } }
-      : { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } };
-    if (agent.workspace) {
-      agent.workspace.enabled = selection.provider === "openai" && mode !== "issues";
-      agent.workspace.allowWrites = agent.workspace.enabled && (mode === "maintain" || mode === "fix");
-      agent.workspace.model = selection.model;
-      agent.workspace.effort = selection.effort;
-    }
+      : selection.provider === "deepseek"
+        ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
+        : {};
   }
   if (!Array.isArray(policy.audit.repair.protectedPaths) || !policy.audit.repair.protectedPaths.length) {
     throw new InstallerError("Rendered policy has no protected paths.", { code: "UNSAFE_POLICY" });
@@ -200,8 +198,9 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
     .replaceAll("FULL_COMMIT_SHA", sourceCommit);
 
   const resolvedProvider = provider ?? (mode === "issues" && preset === "mixed" ? "deepseek" : "openai");
-  const desiredSecret = resolvedProvider === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY";
-  const modelSecretPattern = /model_api_key: \$\{\{ secrets\.(?:OPENAI|DEEPSEEK)_API_KEY \}\}/;
+  const desiredSecret = MODEL_PROVIDER_SECRETS[resolvedProvider];
+  if (!desiredSecret) throw new InstallerError(`Unsupported model provider: ${resolvedProvider}`, { code: "PLAN_INVALID" });
+  const modelSecretPattern = /model_api_key: \$\{\{ secrets\.(?:OPENAI|DEEPSEEK|OPENROUTER)_API_KEY \}\}/;
   if (!modelSecretPattern.test(rendered)) {
     throw new InstallerError(`Bundled ${mode} workflow has no model API key placeholder.`, { code: "WORKFLOW_RENDER_INVALID" });
   }

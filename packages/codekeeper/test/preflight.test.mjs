@@ -240,6 +240,22 @@ test("existing generated files are recognized as a rerunnable installation", asy
 
   const installation = await inspectInstallationFiles(root);
   assert.deepEqual(installation.modes, ["review"]);
+  assert.equal(installation.policy.version, 3);
+  assert.deepEqual(installation.policy.automation, {
+    automaticPrReview: true,
+    reviewFeedbackTriage: true,
+    issueTriage: true,
+    ownerRequests: true,
+    maintenanceSchedule: "17 7 * * *"
+  });
+  assert.equal(installation.policy.review.createDeferredIssues, true);
+  assert.deepEqual(installation.policy.ai.providers.openrouter, {
+    baseUrl: "https://openrouter.ai/api/v1",
+    api: "chat_completions",
+    structuredOutputs: false,
+    supportsReasoningEffort: false
+  });
+  assert.equal(installation.policy.labels["codekeeper:deferred"].color, "C5DEF5");
   assert.equal(installation.policy.ai.agents.review.model, "gpt-5.6-sol");
   assert.equal(installation.policy.ai.agents.plan, undefined);
   for (const agent of ["review", "audit", "issue", "fix"]) {

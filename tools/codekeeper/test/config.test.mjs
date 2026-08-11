@@ -65,7 +65,7 @@ test("configuration rejects unsupported user auto-merge, unknown keys, and unsaf
   userAutoMerge.merge.allowUserPullRequests = true;
   await assert.rejects(
     loadConfig(await writeConfig(userAutoMerge)),
-    /merge\.allowUserPullRequests must remain false in version 2/
+    /merge\.allowUserPullRequests must remain false in version 3/
   );
 
   const unknownRoot = structuredClone(source);
@@ -124,6 +124,24 @@ test("configuration rejects resource limits above global ceilings and accepts th
     await assert.rejects(loadConfig(await writeConfig(invalid)), /must be at most/);
   }
   await assert.doesNotReject(loadConfig(await writeConfig(structuredClone(source))));
+});
+
+test("policy v3 exposes autonomous defaults and OpenRouter without changing workspace ownership", async () => {
+  const { config } = await loadConfig(await writeConfig(structuredClone(source)));
+  assert.equal(config.version, 3);
+  assert.equal(config.automation.automaticPrReview, true);
+  assert.equal(config.automation.reviewFeedbackTriage, true);
+  assert.equal(config.automation.issueTriage, true);
+  assert.equal(config.automation.ownerRequests, true);
+  assert.equal(config.automation.maintenanceSchedule, "17 7 * * *");
+  assert.equal(config.review.createDeferredIssues, true);
+  assert.deepEqual(config.ai.providers.openrouter, {
+    baseUrl: "https://openrouter.ai/api/v1",
+    api: "chat_completions",
+    structuredOutputs: false,
+    supportsReasoningEffort: false
+  });
+  assert.equal(config.ai.agents.review.workspace.model, "gpt-5.6-sol");
 });
 
 test("configuration bounds policy list cardinality", async () => {

@@ -367,6 +367,44 @@ test("contract retries repair only the previous output without replaying the tas
   assert.doesNotMatch(inputs[2], /attempt 1/i);
 });
 
+test("OpenRouter uses Chat Completions and locally validates unstructured output", async () => {
+  const openRouterConfig = withoutTracing();
+  openRouterConfig.ai.agents.issue.provider = "openrouter";
+  openRouterConfig.ai.agents.issue.model = "anthropic/claude-sonnet-4.5";
+  openRouterConfig.ai.agents.issue.modelSettings = {};
+  const calls = { attempts: 0 };
+  class FakeProvider {
+    constructor(options) { calls.provider = options; }
+    async close() {}
+  }
+  class FakeAgent {
+    constructor(options) { calls.agent = options; }
+  }
+  class FakeRunner {
+    async run() {
+      calls.attempts += 1;
+      return { finalOutput: calls.attempts === 1 ? "not json" : JSON.stringify(validIssue()) };
+    }
+  }
+
+  const result = await runConfiguredAgent({
+    mode: "issue",
+    config: openRouterConfig,
+    prompt: "Classify this issue.",
+    schema,
+    apiKey: "openrouter-secret",
+    validateOutput: (output) => validateIssueResult(output, config),
+    sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider })
+  });
+
+  assert.equal(calls.provider.baseURL, "https://openrouter.ai/api/v1");
+  assert.equal(calls.provider.useResponses, false);
+  assert.equal("outputType" in calls.agent, false);
+  assert.equal(result.metadata.structuredOutputs, false);
+  assert.equal(result.metadata.attempt, 2);
+  assert.deepEqual(result.output, validIssue());
+});
+
 test("evidence-boundary retries include the authoritative specialist result", async () => {
   const retryConfig = withoutTracing();
   retryConfig.ai.agents.review.maximumAttempts = 2;
