@@ -59,7 +59,7 @@ const EXPECTED_ASSETS = Object.freeze({
   "workflows/fix.yml": "72c50767a21b45213b250d40b191548da68675442a61ceeb6ac5f9eeea7edc1d",
   "workflows/issues.yml": "15ece2b9b8b4e50956b110aef1643d3bab0dc4c73c5b13a1d65aa2caf4951cbd",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
-  "workflows/review.yml": "40038aa46771cf1b09f0cd329351e560a8d61fd41e7e6581e1791bd156dafae2"
+  "workflows/review.yml": "367b0af80030c0d3dd4d0f8bedfb54d958f10f072b0e72605616314a05185d0a"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({

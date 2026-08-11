@@ -68,6 +68,12 @@ test("one settings object keeps coordinator and workspace models independent", a
   const unsafeSchedule = structuredClone(edited);
   unsafeSchedule.policy.automation.maintenanceSchedule = "17 7 * * *\"";
   assert.throws(() => validateEditableSettings(unsafeSchedule, policy), /five safe cron fields/);
+  const outOfRangeSchedule = structuredClone(edited);
+  outOfRangeSchedule.policy.automation.maintenanceSchedule = "99 99 99 99 99";
+  assert.throws(() => validateEditableSettings(outOfRangeSchedule, policy), /cron fields with valid ranges/);
+  const boundedSchedule = structuredClone(edited);
+  boundedSchedule.policy.automation.maintenanceSchedule = "*/15 0-23/2 1,15 * 1-5";
+  validateEditableSettings(boundedSchedule, policy);
 });
 
 test("settings reject runtime-incompatible model settings and managed-label removal", async () => {

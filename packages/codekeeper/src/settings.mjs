@@ -18,6 +18,7 @@ const CAPS = Object.freeze({
   "merge.maximumFiles": [1, 50],
   "merge.maximumChangedLines": [1, 5_000]
 });
+const CRON_RANGES = Object.freeze([[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]]);
 const REQUIRED_RUNTIME_LABELS = Object.freeze([
   "codekeeper:reviewed", "codekeeper:maintenance", "codekeeper:ready", "codekeeper:blocked",
   "codekeeper:manual-review", "codekeeper:paused", "codekeeper:auto-repaired", "codekeeper:auto-merge",
@@ -267,6 +268,31 @@ function validateJson(value, name, depth = 0) {
   }
 }
 
+function validCronField(field, minimum, maximum) {
+  const span = maximum - minimum + 1;
+  return field.split(",").every((part) => {
+    const [base, step, extra] = part.split("/");
+    if (!base || extra !== undefined) return false;
+    if (step !== undefined && (!/^\d+$/.test(step) || Number(step) < 1 || Number(step) > span)) return false;
+    if (base === "*") return true;
+    const [start, end, extraRange] = base.split("-");
+    if (!/^\d+$/.test(start) || extraRange !== undefined) return false;
+    const startValue = Number(start);
+    if (startValue < minimum || startValue > maximum) return false;
+    if (end === undefined) return true;
+    if (!/^\d+$/.test(end)) return false;
+    const endValue = Number(end);
+    return endValue >= startValue && endValue <= maximum;
+  });
+}
+
+function validMaintenanceSchedule(value) {
+  if (/[^\d\s*,\/-]/.test(value)) return false;
+  const fields = value.split(/\s+/);
+  return fields.length === CRON_RANGES.length
+    && fields.every((field, index) => validCronField(field, ...CRON_RANGES[index]));
+}
+
 export function validateEditableSettings(settings, baselinePolicy) {
   if (!settings || typeof settings !== "object" || typeof settings.enabled !== "boolean") throw new InstallerError("Codekeeper settings are invalid.", { code: "SETTING_INVALID" });
   if (!Array.isArray(settings.modes) || !settings.modes.length || new Set(settings.modes).size !== settings.modes.length || settings.modes.some((mode) => !MODE_IDS.includes(mode))) {
@@ -291,7 +317,7 @@ export function validateEditableSettings(settings, baselinePolicy) {
     if (typeof policy.automation[key] !== "boolean") throw new InstallerError(`automation.${key} must be boolean.`, { code: "SETTING_INVALID" });
   }
   requiredString(policy.automation.maintenanceSchedule, "automation.maintenanceSchedule", 100);
-  if (!/^[^\s"'#]+(?:\s+[^\s"'#]+){4}$/.test(policy.automation.maintenanceSchedule)) throw new InstallerError("Maintenance schedule must contain five safe cron fields.", { code: "SETTING_INVALID" });
+  if (!validMaintenanceSchedule(policy.automation.maintenanceSchedule)) throw new InstallerError("Maintenance schedule must contain five safe cron fields with valid ranges.", { code: "SETTING_INVALID" });
   if (typeof policy.ai.tracing.enabled !== "boolean") throw new InstallerError("Tracing must be boolean.", { code: "SETTING_INVALID" });
   for (const agentId of AGENT_IDS) {
     const agent = policy.ai.agents[agentId];
