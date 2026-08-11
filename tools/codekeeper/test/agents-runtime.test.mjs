@@ -458,6 +458,70 @@ test("coordinator evidence boundary rejects invented review findings and fix tes
   );
 });
 
+test("coordinator evidence cannot become more permissive than specialist authority", () => {
+  const blocker = { title: "Current authorization failure" };
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "review",
+      {
+        risk: "low",
+        blockingFindings: [],
+        nonBlockingFindings: [],
+        tests: { adequate: true },
+        mergeRecommendation: "auto"
+      },
+      {
+        risk: "high",
+        blockingFindings: [blocker],
+        nonBlockingFindings: [],
+        tests: { adequate: false },
+        mergeRecommendation: "block"
+      }
+    ),
+    /specialist blocker/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "review",
+      {
+        risk: "low",
+        blockingFindings: [],
+        nonBlockingFindings: [],
+        tests: { adequate: true },
+        mergeRecommendation: "auto"
+      },
+      {
+        risk: "medium",
+        blockingFindings: [],
+        nonBlockingFindings: [],
+        tests: { adequate: false },
+        mergeRecommendation: "manual"
+      }
+    ),
+    /more permissive/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "issue",
+      {
+        duplicateOf: 9,
+        duplicateConfidence: "high",
+        actionable: false,
+        implementationRecommendation: "manual",
+        labels: []
+      },
+      {
+        duplicateOf: 9,
+        duplicateConfidence: "medium",
+        actionable: false,
+        implementationRecommendation: "manual",
+        labels: []
+      }
+    ),
+    /duplicate confidence/
+  );
+});
+
 test("runtime diagnostics expose only the final failure stage and attempt", async () => {
   const diagnostics = [];
   class FakeProvider { async close() {} }

@@ -361,6 +361,7 @@ test("review publication activates auto-merge last and falls back safely", async
     state: "open",
     draft: false,
     auto_merge: null,
+    labels: [],
     user: { login: identity.login, type: "Bot" },
     head: { sha: "head", ref: "automation/codekeeper/repair-test", repo: { full_name: context.repository } },
     base: { sha: "base", ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
@@ -371,12 +372,25 @@ test("review publication activates auto-merge last and falls back safely", async
   let rejectEnable = true;
   let rejectDisable = false;
   let rejectLabels = false;
+  let mutateHeadAfterEnable = false;
+  let pauseAfterEnable = false;
+  let enabledThisRun = false;
   const restoreGitHub = replaceGitHubMethods({
-    async getPull() { return structuredClone(pull); },
+    async getPull() {
+      if ((mutateHeadAfterEnable || pauseAfterEnable) && enabledThisRun) {
+        if (mutateHeadAfterEnable) pull.head.sha = "moved-after-activation";
+        if (pauseAfterEnable) pull.labels = [{ name: "codekeeper:paused" }];
+        pull.auto_merge = { enabled_at: "now" };
+        enabledThisRun = false;
+      }
+      return structuredClone(pull);
+    },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
     async enableAutoMerge() {
       calls.push({ type: "enable" });
       if (rejectEnable) throw new Error("GitHub rejected enablement");
+      pull.auto_merge = { enabled_at: "now" };
+      enabledThisRun = true;
     },
     async disableAutoMerge() {
       calls.push({ type: "disable" });
@@ -422,6 +436,32 @@ test("review publication activates auto-merge last and falls back safely", async
     const successful = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" });
     assert.equal(successful.autoMergeResult.enabled, true);
     assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable"]);
+
+    calls.length = 0;
+    pull.auto_merge = null;
+    enabledThisRun = false;
+    mutateHeadAfterEnable = true;
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
+      /auto-merge.*postcondition|stale review/i
+    );
+    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "disable"]);
+    assert.equal(pull.auto_merge, null);
+    pull.head.sha = "head";
+    mutateHeadAfterEnable = false;
+    enabledThisRun = false;
+
+    calls.length = 0;
+    pauseAfterEnable = true;
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
+      /postcondition.*paused/i
+    );
+    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "disable"]);
+    assert.equal(pull.auto_merge, null);
+    pull.labels = [];
+    pauseAfterEnable = false;
+    enabledThisRun = false;
 
     calls.length = 0;
     pull.auto_merge = { enabled_at: "now" };

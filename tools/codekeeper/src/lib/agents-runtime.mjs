@@ -210,6 +210,10 @@ function exactMember(value, candidates) {
   return candidates.some((candidate) => isDeepStrictEqual(candidate, value));
 }
 
+function isMorePermissive(value, specialistValue, order) {
+  return order.indexOf(value) > order.indexOf(specialistValue);
+}
+
 export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResult) {
   if (specialistResult === null) {
     if (mode === "review" && (
@@ -240,6 +244,20 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     for (const finding of [...(output.blockingFindings ?? []), ...(output.nonBlockingFindings ?? [])]) {
       if (!exactMember(finding, candidates)) throw new Error("Coordinator introduced a review finding not present in workspace evidence");
     }
+    for (const finding of specialistResult.blockingFindings ?? []) {
+      if (!exactMember(finding, output.blockingFindings ?? [])) {
+        throw new Error("Coordinator omitted a specialist blocker");
+      }
+    }
+    if (isMorePermissive(output.risk, specialistResult.risk, ["high", "medium", "low"])) {
+      throw new Error("Coordinator review risk is more permissive than workspace evidence");
+    }
+    if (output.tests?.adequate === true && specialistResult.tests?.adequate !== true) {
+      throw new Error("Coordinator test adequacy is more permissive than workspace evidence");
+    }
+    if (isMorePermissive(output.mergeRecommendation, specialistResult.mergeRecommendation, ["block", "manual", "auto"])) {
+      throw new Error("Coordinator merge recommendation is more permissive than workspace evidence");
+    }
   }
   if (mode === "audit") {
     for (const finding of output.findings ?? []) {
@@ -255,6 +273,13 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     }
     if (output.implementationRecommendation === "ai-ready" && specialistResult.implementationRecommendation !== "ai-ready") {
       throw new Error("Coordinator cannot make an issue AI-ready when workspace evidence did not");
+    }
+    if (output.duplicateOf !== null && isMorePermissive(
+      output.duplicateConfidence,
+      specialistResult.duplicateConfidence,
+      ["none", "low", "medium", "high"]
+    )) {
+      throw new Error("Coordinator duplicate confidence is more permissive than workspace evidence");
     }
     for (const label of output.labels ?? []) {
       if (!(specialistResult.labels ?? []).includes(label)) {

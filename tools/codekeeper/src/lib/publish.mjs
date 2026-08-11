@@ -273,6 +273,62 @@ async function currentReviewPull(github, context, config) {
   return pull;
 }
 
+async function disableFailedAutoMergePostcondition(github, pullRequest, cause) {
+  let disableError = null;
+  try {
+    await github.disableAutoMerge(pullRequest.node_id);
+  } catch (error) {
+    disableError = error;
+  }
+  let refreshedPull;
+  try {
+    refreshedPull = await github.getPull(pullRequest.number);
+  } catch (error) {
+    throw new Error(`Auto-merge postcondition failed for PR #${pullRequest.number} and disablement could not be verified: ${error.message}`, { cause });
+  }
+  if (disableError || refreshedPull?.number !== pullRequest.number || refreshedPull.auto_merge !== null) {
+    const detail = disableError ? `: ${disableError.message}` : "";
+    throw new Error(`Auto-merge postcondition failed for PR #${pullRequest.number} and auto-merge could not be disabled${detail}`, { cause });
+  }
+  throw new Error(`Auto-merge postcondition failed for PR #${pullRequest.number}: ${cause.message}`, { cause });
+}
+
+async function verifyAutoMergePostcondition({
+  github,
+  activationPull,
+  context,
+  config,
+  files,
+  reviewResult,
+  reviewContextComplete,
+  automationBotLogin
+}) {
+  let verifiedPull;
+  try {
+    verifiedPull = await currentReviewPull(github, context, config);
+  } catch (error) {
+    return disableFailedAutoMergePostcondition(github, activationPull, error);
+  }
+  const verifiedDecision = evaluateAutoMerge({
+    config,
+    pullRequest: verifiedPull,
+    files,
+    reviewResult,
+    reviewContextComplete,
+    automationBotLogin
+  });
+  if (!verifiedPull.auto_merge || !verifiedDecision.eligible) {
+    const reason = !verifiedPull.auto_merge
+      ? "GitHub did not report auto-merge as active"
+      : verifiedDecision.reasons.join("; ") || "the pull request is no longer eligible";
+    if (verifiedPull.auto_merge) {
+      return disableFailedAutoMergePostcondition(github, verifiedPull, new Error(reason));
+    }
+    throw new Error(`Auto-merge postcondition failed for PR #${activationPull.number}: ${reason}`);
+  }
+  return verifiedDecision;
+}
+
 export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
   const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
@@ -358,6 +414,18 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     } else {
       autoMergeResult = await reconcileAutoMerge(github, activationPull, config, activationDecision);
       publishedAutoMerge = activationDecision;
+      if (autoMergeResult.enabled) {
+        publishedAutoMerge = await verifyAutoMergePostcondition({
+          github,
+          activationPull,
+          context,
+          config,
+          files,
+          reviewResult: result,
+          reviewContextComplete,
+          automationBotLogin: automationIdentity.login
+        });
+      }
       if (!autoMergeResult.enabled) {
         publishedAutoMerge = {
           ...activationDecision,
