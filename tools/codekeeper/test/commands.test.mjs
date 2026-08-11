@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -151,6 +151,70 @@ test("commands fail before dispatch when their workflow is not installed", async
     Object.assign(GitHubClient.prototype, originals);
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("defer requires the Issues workflow before reading review evidence", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-defer-mode-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        id: 99,
+        body: "/codekeeper defer",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    getReviewComment: GitHubClient.prototype.getReviewComment,
+  };
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    pull_request: {},
+    labels: [],
+  });
+  GitHubClient.prototype.getReviewComment = async () => {
+    throw new Error("review evidence must not be read without Issue triage");
+  };
+  try {
+    await assert.rejects(
+      runOwnerCommand({
+        eventPath,
+        config: {
+          automation: { ownerRequests: true },
+          repository: { ownerLogins: ["repository-owner"] },
+        },
+        token: "app-token",
+        automationIdentity: { login: "codekeeper[bot]", id: "123" },
+        installedModes: ["review", "maintain"],
+      }),
+      /\/defer requires the Issue triage workflow/,
+    );
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("documentation advertises the exact supported mention grammar", async () => {
+  const readme = await readFile(
+    new URL("../../../README.md", import.meta.url),
+    "utf8",
+  );
+  assert.match(readme, /`@<app-slug> review`/);
+  assert.match(
+    readme,
+    /free-form requests such as `@<app-slug> please review this` are ignored/,
+  );
+  assert.doesNotMatch(readme, /same fixed actions in natural language/);
 });
 
 test("non-owners and ambiguous mention text cannot grant mutation authority", async () => {

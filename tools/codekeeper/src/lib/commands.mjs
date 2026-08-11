@@ -73,9 +73,11 @@ function requireInstalledMode(command, issue, installedModes) {
         ? issue.pull_request
           ? "review"
           : "issues"
-        : command === "implement" || command === "fix"
-          ? "fix"
-          : null;
+        : command === "defer"
+          ? "issues"
+          : command === "implement" || command === "fix"
+            ? "fix"
+            : null;
   if (!required || selected.has(required)) return;
   const label =
     required === "review"

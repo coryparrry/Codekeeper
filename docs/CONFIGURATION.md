@@ -103,7 +103,7 @@ Reusable workflow callers expose explicit controls alongside `enabled`:
 
 `review.autoRepair=true` permits one automatic repair pass after a blocking review. A second blocking review stops for a maintainer.
 
-Configured owners can use `/codekeeper status`, `/codekeeper review`, `/codekeeper rerun`, `/codekeeper triage`, `/codekeeper defer`, `/codekeeper implement`, `/codekeeper fix`, and `/codekeeper stop`. Slash commands must be the complete comment. The always-installed assistant caller also accepts constrained natural-language owner mentions, but only routes the fixed supported actions; non-owner content cannot authorize writes.
+Configured owners can use `/codekeeper status`, `/codekeeper review`, `/codekeeper rerun`, `/codekeeper triage`, `/codekeeper defer`, `/codekeeper implement`, `/codekeeper fix`, and `/codekeeper stop`. Slash commands must be the complete comment. The always-installed assistant caller also accepts the exact mention form `@<app-slug> <action>` for one supported action. It ignores extra prose and ambiguous actions; non-owner content cannot authorize writes.
 
 Verified `defer` results create or update one issue using a hidden root-cause fingerprint, add `codekeeper:deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue. Deferred and ignored threads are not automatically resolved.
 

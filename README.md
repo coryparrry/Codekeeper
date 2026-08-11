@@ -42,7 +42,7 @@ Configured owners can use these exact commands:
 - `/codekeeper fix`
 - `/codekeeper stop`
 
-Configured-owner mentions can request the same fixed actions in natural language. The always-installed assistant supplies the router, and each model-backed command requires its matching selected role workflow. Non-owner content and model output cannot grant mutation authority.
+Configured owners can also use the exact mention form `@<app-slug> review`, substituting the installed App slug and one supported action. The entire comment must match that form; free-form requests such as `@<app-slug> please review this` are ignored. The always-installed assistant supplies the router, and each model-backed command requires its matching selected role workflow. Non-owner content and model output cannot grant mutation authority.
 
 ## Adopter-owned coordinator profiles
 
