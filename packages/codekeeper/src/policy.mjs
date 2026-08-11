@@ -28,7 +28,7 @@ export function upgradePolicy(input) {
   if (policy.version === 2) {
     policy.version = POLICY_VERSION;
     policy.automation = { ...AUTOMATION_DEFAULTS };
-    policy.review.createDeferredIssues ??= true;
+    policy.review.createDeferredIssues ??= false;
     policy.ai.providers.openrouter ??= structuredClone(OPENROUTER_PROVIDER);
     policy.labels["codekeeper:deferred"] ??= structuredClone(DEFERRED_LABEL);
     if (!policy.issues.managedLabels.includes("codekeeper:deferred")) {

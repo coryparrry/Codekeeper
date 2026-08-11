@@ -141,6 +141,21 @@ test("checkpoint-backed assets are byte-for-byte source release files", async ()
   }
 });
 
+test("the pinned runtime accepts the policy version emitted by this installer", async () => {
+  const bundle = await loadVerifiedAssets();
+  const emittedVersion = JSON.parse(renderPolicy(bundle.contents["policies/openai.json"], {
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"]
+  })).version;
+  const pinnedConfig = execFileSync("git", ["show", `${SOURCE_COMMIT}:tools/codekeeper/src/lib/config.mjs`], {
+    cwd: REPOSITORY_ROOT,
+    encoding: "utf8"
+  });
+  assert.equal(emittedVersion, 3);
+  assert.match(pinnedConfig, /config\.version === 3/);
+});
+
 test("bundled provenance is byte-for-byte metadata from the pinned source release", async () => {
   const bundle = await loadVerifiedAssets();
   assert.deepEqual(Object.keys(bundle.metadata.provenance).sort(), Object.keys(CHECKPOINT_PROVENANCE_PATHS).sort());
@@ -323,6 +338,27 @@ test("each rendered workflow contains exactly the paired immutable bootstrap and
   assert.doesNotMatch(openaiIssue, /secrets\.DEEPSEEK_API_KEY/);
 });
 
+test("generated callers honor the rendered policy automation controls", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  policy.automation.automaticPrReview = false;
+  policy.automation.issueTriage = false;
+  policy.automation.maintenanceSchedule = "5 4 * * 1";
+  const files = renderInstallFiles(bundle, {
+    modes: ["review", "maintain", "issues"],
+    preset: "openai",
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    policySource: JSON.stringify(policy),
+    enforceBundledDefaults: false
+  });
+  const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
+  assert.match(contents[MODES.review.target], /auto_review: false/);
+  assert.match(contents[MODES.issues.target], /auto_triage: false/);
+  assert.match(contents[MODES.maintain.target], /cron: "5 4 \* \* 1"/);
+});
+
 test("renderInstallFiles emits policy, every profile, and only selected callers with verified output digests", async () => {
   const bundle = await loadVerifiedAssets();
   const files = renderInstallFiles(bundle, {
@@ -374,6 +410,28 @@ test("every non-empty mode subset has the exact mixed and OpenAI secret matrix",
       assert.deepEqual(requiredSecretNames({ modes, preset }), expected, `${preset}: ${modes.join(",")}`);
     }
   }
+});
+
+test("alternative coordinators still request OpenAI for enabled workspaces", () => {
+  assert.deepEqual(requiredSecretNames({
+    modes: ["review"],
+    models: {
+      review: { provider: "openrouter", model: "anthropic/claude-sonnet", effort: "none" }
+    },
+    tracing: false
+  }), [OPENAI_SECRET, OPENROUTER_SECRET, APP_SECRET]);
+});
+
+test("legacy policies keep deferred issue publication off until the publisher is installed", async () => {
+  const bundle = await loadVerifiedAssets();
+  const legacy = JSON.parse(bundle.contents["policies/openai.json"]);
+  legacy.version = 2;
+  delete legacy.automation;
+  delete legacy.review.createDeferredIssues;
+  delete legacy.ai.providers.openrouter;
+  delete legacy.labels["codekeeper:deferred"];
+  legacy.issues.managedLabels = legacy.issues.managedLabels.filter((label) => label !== "codekeeper:deferred");
+  assert.equal(upgradePolicy(legacy).review.createDeferredIssues, false);
 });
 
 test("install plan is frozen, applies startup first, and documents selected workflows without credential values", async () => {
@@ -553,7 +611,7 @@ test("arbitrary OpenRouter coordinator models preserve the OpenAI workspace spec
   assert.equal(policy.ai.providers.openrouter.api, "chat_completions");
   assert.equal(policy.ai.providers.openrouter.structuredOutputs, false);
   assert.match(workflow, /secrets\.OPENROUTER_API_KEY/);
-  assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENROUTER_SECRET, APP_SECRET]);
+  assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, OPENROUTER_SECRET, APP_SECRET]);
 });
 
 test("fixer can use any supported model without a separate planner credential", async () => {

@@ -183,7 +183,7 @@ function assertPinnedWorkflow(source, sourceRepository, sourceCommit) {
   }
 }
 
-export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, preset }) {
+export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, preset, automation = null }) {
   if (!MODE_IDS.includes(mode)) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   if (count(template, "OWNER/REPOSITORY") !== 3 || count(template, "FULL_COMMIT_SHA") !== 3) {
     throw new InstallerError(`Bundled ${mode} workflow has unexpected placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
@@ -205,6 +205,25 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
     throw new InstallerError(`Bundled ${mode} workflow has no model API key placeholder.`, { code: "WORKFLOW_RENDER_INVALID" });
   }
   rendered = rendered.replace(modelSecretPattern, `model_api_key: \${{ secrets.${desiredSecret} }}`);
+  if (automation) {
+    if (mode === "review") {
+      if (typeof automation.automaticPrReview !== "boolean" || count(rendered, "auto_review: true") !== 1) {
+        throw new InstallerError("Review automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+      }
+      rendered = rendered.replace("auto_review: true", `auto_review: ${automation.automaticPrReview}`);
+    } else if (mode === "issues") {
+      if (typeof automation.issueTriage !== "boolean" || count(rendered, "auto_triage: true") !== 1) {
+        throw new InstallerError("Issue automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+      }
+      rendered = rendered.replace("auto_triage: true", `auto_triage: ${automation.issueTriage}`);
+    } else if (mode === "maintain") {
+      if (typeof automation.maintenanceSchedule !== "string" || !automation.maintenanceSchedule.trim()
+        || count(rendered, 'cron: "17 7 * * *"') !== 1) {
+        throw new InstallerError("Maintenance automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+      }
+      rendered = rendered.replace('cron: "17 7 * * *"', `cron: ${JSON.stringify(automation.maintenanceSchedule)}`);
+    }
+  }
   if (rendered.includes("OWNER/REPOSITORY") || rendered.includes("FULL_COMMIT_SHA")) {
     throw new InstallerError(`Rendered ${mode} workflow contains unresolved placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
   }
@@ -226,18 +245,20 @@ export function renderInstallFiles(bundle, {
   enforceBundledDefaults = true
 }) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
+  const policyContents = renderPolicy(policySource, {
+    displayName,
+    defaultBranch,
+    ownerLogins,
+    capabilities,
+    models,
+    tracing,
+    enforceBundledDefaults,
+    requiredPolicySource: bundle.contents[`policies/${preset}.json`]
+  });
+  const renderedPolicy = JSON.parse(policyContents);
   const rendered = [{
     path: POLICY_TARGET,
-    contents: renderPolicy(policySource, {
-      displayName,
-      defaultBranch,
-      ownerLogins,
-      capabilities,
-      models,
-      tracing,
-      enforceBundledDefaults,
-      requiredPolicySource: bundle.contents[`policies/${preset}.json`]
-    })
+    contents: policyContents
   }];
   for (const profile of AGENT_PROFILE_IDS) {
     rendered.push({
@@ -253,7 +274,8 @@ export function renderInstallFiles(bundle, {
         sourceCommit,
         mode,
         provider: models[mode]?.provider,
-        preset
+        preset,
+        automation: renderedPolicy.automation
       })
     });
   }

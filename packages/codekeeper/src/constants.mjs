@@ -14,6 +14,7 @@ export const MODES = Object.freeze({
     agentLabel: "Pull request reviewer",
     description: "Reviews pull requests from this repository. Adds comments, labels, and a blocking result.",
     policyAgent: "review",
+    workspaceProvider: "openai",
     target: ".github/workflows/codekeeper-review.yml",
     asset: "workflows/review.yml",
     trigger: "same-repository pull request"
@@ -24,6 +25,7 @@ export const MODES = Object.freeze({
     agentLabel: "Repository auditor",
     description: "Runs repository audits manually or on a schedule. Live runs can repair the repository when repair is on.",
     policyAgent: "audit",
+    workspaceProvider: "openai",
     target: ".github/workflows/codekeeper-maintain.yml",
     asset: "workflows/maintain.yml",
     trigger: "schedule or manual run"
@@ -34,6 +36,7 @@ export const MODES = Object.freeze({
     agentLabel: "Issue triager",
     description: "Adds labels and comments to issues. Automatic duplicate closure stays off.",
     policyAgent: "issue",
+    workspaceProvider: null,
     target: ".github/workflows/codekeeper-issues.yml",
     asset: "workflows/issues.yml",
     trigger: "issue or issue comment"
@@ -44,6 +47,7 @@ export const MODES = Object.freeze({
     agentLabel: "Fixer",
     description: "Validates and implements ready issues or pull request repairs in one workspace pass.",
     policyAgent: "fix",
+    workspaceProvider: "openai",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
     trigger: "ready issue, owner command, or manual run"

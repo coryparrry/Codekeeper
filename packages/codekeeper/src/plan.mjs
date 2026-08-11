@@ -118,6 +118,9 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
   const selected = normalizeModes(modes);
   const names = [];
   const providers = new Set(modelAssignments(selected).map(({ key }) => models?.[key]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
+  for (const mode of selected) {
+    if (MODES[mode].workspaceProvider) providers.add(MODES[mode].workspaceProvider);
+  }
   for (const [provider, secret] of Object.entries(MODEL_PROVIDER_SECRETS)) {
     if (providers.has(provider)) names.push(secret);
   }
@@ -482,11 +485,15 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   for (const assignment of modelAssignments(modes)) {
     const { key, agent: agentId, label, workflow } = assignment;
     const agent = presetPolicy.ai.agents[agentId];
-    const choices = ALL_MODEL_OPTIONS;
-    const defaultChoice = choices.find((choice) => choice.provider === agent.provider && choice.model === agent.model && choice.effort === agent.effort) ?? choices[0];
-    models[key] = await prompt.select(tuiOptions(prompt, {
+    const defaultChoice = ALL_MODEL_OPTIONS.find((choice) => choice.provider === agent.provider && choice.model === agent.model && choice.effort === agent.effort);
+    const customChoiceId = `current-custom-${key}`;
+    const choices = defaultChoice ? ALL_MODEL_OPTIONS : [{
+      id: customChoiceId,
+      label: `Current custom model · ${agent.provider} · ${agent.model} · ${agent.effort} effort`
+    }, ...ALL_MODEL_OPTIONS];
+    const selectedModel = await prompt.select(tuiOptions(prompt, {
       message: `Assign a model to the ${label}:`,
-      defaultValue: defaultChoice.id,
+      defaultValue: defaultChoice?.id ?? customChoiceId,
       choices: choices.map((choice) => ({ value: choice.id, label: choice.label }))
     }, {
       step: "models",
@@ -495,6 +502,9 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
         "You can change this choice later in .github/codekeeper.json."
       ]
     }));
+    models[key] = selectedModel === customChoiceId
+      ? { provider: agent.provider, model: agent.model, effort: agent.effort }
+      : selectedModel;
   }
   const tracing = prompt?.kind === "ink"
     ? await prompt.select({

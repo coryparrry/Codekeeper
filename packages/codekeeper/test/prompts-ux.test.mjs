@@ -4,6 +4,7 @@ import { Readable, Writable } from "node:stream";
 import { loadVerifiedAssets } from "../src/assets.mjs";
 import { MODE_IDS, MODES, RECOMMENDED_MODES, RECOMMENDED_PRESET } from "../src/constants.mjs";
 import { collectAppAnswers, collectSetupAnswers } from "../src/plan.mjs";
+import { upgradePolicy } from "../src/policy.mjs";
 import { createTerminalPrompter } from "../src/prompts.mjs";
 import { HEAD_SHA, textSink } from "./helpers.mjs";
 
@@ -280,6 +281,43 @@ test("an existing installation reuses its workflows, identity, and settings", as
   assert.equal(prompt.calls.some((call) => call.options.message === "Choose workflows to generate:"), false);
   assert.match(output.toString(), /current GitHub App settings and existing API keys stay unchanged/);
   assert.doesNotMatch(output.toString(), /OPENAI_API_KEY:/);
+});
+
+test("an existing custom model remains the default during a guided rerun", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  policy.ai.agents.review.provider = "openrouter";
+  policy.ai.agents.review.model = "anthropic/claude-sonnet";
+  policy.ai.agents.review.effort = "none";
+  policy.ai.agents.review.modelSettings = {};
+  const prompt = setupPrompt({ recommended: true });
+  const answers = await collectSetupAnswers({
+    prompt,
+    bundle,
+    output: textSink(),
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy,
+        policySource: `${JSON.stringify(policy, null, 2)}\n`,
+        modes: ["review"],
+        contents: {}
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    }
+  });
+  assert.deepEqual(answers.models.review, {
+    provider: "openrouter",
+    model: "anthropic/claude-sonnet",
+    effort: "none"
+  });
+  const modelPrompt = prompt.calls.find((call) => call.options.message === "Assign a model to the Pull request reviewer:");
+  assert.match(modelPrompt.options.choices[0].label, /Current custom model.*anthropic\/claude-sonnet/);
 });
 
 test("enabling an existing installation explicitly describes immediate activation", async () => {
