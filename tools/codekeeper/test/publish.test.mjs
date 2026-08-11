@@ -621,7 +621,7 @@ test("review publication activates auto-merge last and falls back safely", async
   }
 });
 
-test("issue publication does not close a duplicate after the triaged issue changes", async () => {
+test("issue publication does not close a duplicate after a concurrent user comment", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-stale-test-"));
   const configSha256 = "a".repeat(64);
   const issueConfig = structuredClone(config);
@@ -637,22 +637,28 @@ test("issue publication does not close a duplicate after the triaged issue chang
   let duplicateCommentPublished = false;
   let issueClosed = false;
   let updatedAt = context.issue.updatedAt;
-  let title = "Report";
   let labels = [];
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
       if (number === 9) return { number, state: "open" };
-      return { number, title, state: "open", updated_at: updatedAt, labels };
+      return { number, title: "Report", state: "open", updated_at: updatedAt, labels };
     },
     async ensureLabels() {},
     async replaceManagedLabels(_number, desiredLabels) {
       labels = desiredLabels.map((name) => ({ name }));
       updatedAt = "2026-08-05T10:00:30Z";
     },
-    async upsertMarkerComment() {
+    async upsertMarkerComment(_number, marker, body) {
       triageCommentPublished = true;
-      updatedAt = "2026-08-05T10:01:00Z";
-      title = "Report changed concurrently";
+      const ownedUpdatedAt = "2026-08-05T10:01:00Z";
+      updatedAt = "2026-08-05T10:01:30Z";
+      return {
+        id: 70,
+        body: `${body}\n${marker}`,
+        created_at: ownedUpdatedAt,
+        updated_at: ownedUpdatedAt,
+        user: { id: Number(identity.id), login: identity.login, type: "Bot" }
+      };
     },
     async createComment(_number, body) { duplicateCommentPublished ||= body.includes("Closing as a duplicate"); },
     async updateIssue() { issueClosed = true; }
@@ -665,7 +671,7 @@ test("issue publication does not close a duplicate after the triaged issue chang
     });
     await assert.rejects(
       publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
-      /changed while Codekeeper reconciled labels/
+      /changed while Codekeeper reconciled comments/
     );
     assert.equal(triageCommentPublished, true);
     assert.equal(duplicateCommentPublished, false);

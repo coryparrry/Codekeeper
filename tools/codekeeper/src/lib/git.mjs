@@ -179,6 +179,12 @@ export async function collectWorkingTreeChanges(
       const stat = await lstat(path.join(cwd, item.path));
       item.bytes = stat.isFile() ? stat.size : 0;
       if (stat.isSymbolicLink()) item.symlink = true;
+      if (stat.isFile() && stat.size > maximumFileBytes) {
+        item.captureSkipped = true;
+        item.binary = false;
+        item.additions = 0;
+        item.deletions = 0;
+      }
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       item.bytes = 0;

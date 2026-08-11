@@ -182,6 +182,21 @@ function assertExpectedManagedLabelMutation(before, after, desired, managed) {
   return after;
 }
 
+function assertExpectedOwnedCommentMutation(before, after, comment, expectedBody, identity, desired, managed) {
+  const issue = assertExpectedManagedLabelMutation(before, after, desired, managed);
+  const commentUpdatedAt = comment?.updated_at ?? comment?.created_at;
+  if (
+    !matchesAutomationActor(comment?.user, identity) ||
+    comment?.body !== expectedBody ||
+    typeof commentUpdatedAt !== "string" ||
+    !Number.isFinite(Date.parse(commentUpdatedAt)) ||
+    issue.updated_at !== commentUpdatedAt
+  ) {
+    throw new Error(`Issue #${before.number} changed while Codekeeper reconciled comments`);
+  }
+  return issue;
+}
+
 function branchSlug(value) {
   return String(value)
     .toLowerCase()
@@ -622,33 +637,46 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     desiredLabels,
     managedIssueLabels(config)
   );
-  await github.upsertMarkerComment(
+  const markerBody = `${comment}\n${ISSUE_TRIAGE_MARKER}`;
+  const markerMutation = await github.upsertMarkerComment(
     issue.number,
     ISSUE_TRIAGE_MARKER,
     comment,
     automationIdentity
   );
-  const acceptOwnedCommentUpdate = async (before) => {
-    const after = assertExpectedManagedLabelMutation(
-      before,
-      await github.getIssue(issue.number),
-      desiredLabels,
-      managedIssueLabels(config)
-    );
+  const acceptOwnedCommentUpdate = async (before, commentMutation = null, expectedBody = null) => {
+    const current = await github.getIssue(issue.number);
+    const after = commentMutation
+      ? assertExpectedOwnedCommentMutation(
+        before,
+        current,
+        commentMutation,
+        expectedBody,
+        automationIdentity,
+        desiredLabels,
+        managedIssueLabels(config)
+      )
+      : assertExpectedManagedLabelMutation(before, current, desiredLabels, managedIssueLabels(config));
     expectedUpdatedAt = after.updated_at;
     return after;
   };
-  let afterOwnedComment = await acceptOwnedCommentUpdate(afterLabelMutation);
+  const closingDuplicate = config.issues.closeExactDuplicates && result.duplicateOf && result.duplicateConfidence === "high";
+  let afterOwnedComment = await acceptOwnedCommentUpdate(
+    afterLabelMutation,
+    closingDuplicate ? markerMutation : null,
+    closingDuplicate ? markerBody : null
+  );
 
   if (result.duplicateOf === issue.number) {
     throw new Error(`Issue #${issue.number} cannot be its own duplicate`);
   }
-  if (config.issues.closeExactDuplicates && result.duplicateOf && result.duplicateConfidence === "high") {
+  if (closingDuplicate) {
     const duplicateContext = { number: result.duplicateOf };
     await currentIssue();
     const duplicate = await currentOpenIssue(github, duplicateContext, "duplicate assessment");
-    await github.createComment(issue.number, `Closing as a duplicate of #${duplicate.number}.`);
-    afterOwnedComment = await acceptOwnedCommentUpdate(afterOwnedComment);
+    const duplicateBody = `Closing as a duplicate of #${duplicate.number}.`;
+    const duplicateMutation = await github.createComment(issue.number, duplicateBody);
+    afterOwnedComment = await acceptOwnedCommentUpdate(afterOwnedComment, duplicateMutation, duplicateBody);
     await currentIssue();
     await currentOpenIssue(github, duplicateContext, "duplicate assessment");
     await github.updateIssue(issue.number, { state: "closed", state_reason: "not_planned" });

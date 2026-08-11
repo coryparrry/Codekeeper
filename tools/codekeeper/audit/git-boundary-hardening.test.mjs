@@ -39,3 +39,27 @@ test("workspace capture bounds oversized content before materializing the patch"
     `capture materialized ${changes.patchBytes} bytes before policy rejection`
   );
 });
+
+test("workspace capture enforces the per-file limit for tracked modifications", async (t) => {
+  const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-tracked-file-boundary-audit-"));
+  t.after(() => rm(repository, { recursive: true, force: true }));
+  git(repository, ["init", "--quiet"]);
+  git(repository, ["config", "user.name", "Audit"]);
+  git(repository, ["config", "user.email", "audit@example.invalid"]);
+  const trackedPath = path.join(repository, "tracked.txt");
+  await writeFile(trackedPath, "baseline\n", "utf8");
+  git(repository, ["add", "tracked.txt"]);
+  git(repository, ["commit", "--quiet", "-m", "baseline"]);
+
+  await writeFile(trackedPath, Buffer.alloc(2_048, "x"));
+  const patchPath = path.join(repository, "captured.patch");
+  const changes = await createPatch(patchPath, repository, {
+    maximumFileBytes: 1_000,
+    maximumPatchBytes: 10_000
+  });
+
+  assert.equal(changes.files[0].bytes, 2_048);
+  assert.equal(changes.files[0].captureSkipped, true);
+  assert.equal(changes.captureSkipped, true);
+  assert.equal((await readFile(patchPath)).length, 0);
+});

@@ -161,11 +161,26 @@ test("issue duplicate closure survives Codekeeper's own marker-comment update", 
       labels = desiredLabels.map((name) => ({ name }));
       updatedAt = "2026-08-05T10:00:30Z";
     },
-    async upsertMarkerComment() {
+    async upsertMarkerComment(_number, marker, body) {
       calls.push("marker");
       updatedAt = "2026-08-05T10:01:00Z";
+      return {
+        body: `${body}\n${marker}`,
+        created_at: updatedAt,
+        updated_at: updatedAt,
+        user: { id: Number(identity.id), login: identity.login, type: "Bot" }
+      };
     },
-    async createComment() { calls.push("duplicate-comment"); },
+    async createComment(_number, body) {
+      calls.push("duplicate-comment");
+      updatedAt = "2026-08-05T10:01:30Z";
+      return {
+        body,
+        created_at: updatedAt,
+        updated_at: updatedAt,
+        user: { id: Number(identity.id), login: identity.login, type: "Bot" }
+      };
+    },
     async updateIssue() { calls.push("close"); }
   });
   const restoreEnvironment = setIdentityEnvironment();
