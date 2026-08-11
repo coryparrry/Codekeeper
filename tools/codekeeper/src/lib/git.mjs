@@ -6,6 +6,8 @@ import path from "node:path";
 const MAX_CAPTURE_FILE_BYTES = 1024 * 1024;
 const MAX_CAPTURE_PATCH_BYTES = 5 * 1024 * 1024;
 const DEFAULT_VALIDATION_TIMEOUT_MS = 5 * 60 * 1000;
+const VALIDATION_KILL_GRACE_MS = 100;
+const MAX_VALIDATION_OUTPUT_BYTES = 12000;
 
 function commandError(command, args, result) {
   const stderr = result.stderr?.toString("utf8").trim();
@@ -251,7 +253,68 @@ export function applyPatch(patchPath, cwd = process.cwd()) {
   git(["apply", "--whitespace=error-all", patchPath], { cwd });
 }
 
-export function runValidationCommands(
+function appendOutputTail(current, chunk) {
+  const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+  if (bytes.length >= MAX_VALIDATION_OUTPUT_BYTES) {
+    return Buffer.from(bytes.subarray(-MAX_VALIDATION_OUTPUT_BYTES));
+  }
+  const retained = current.subarray(Math.max(0, current.length + bytes.length - MAX_VALIDATION_OUTPUT_BYTES));
+  return Buffer.concat([retained, bytes]);
+}
+
+function signalValidationProcess(child, signal) {
+  try {
+    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
+    else child.kill(signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+}
+
+function runValidationProcess(command, { cwd, environment, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    const detached = process.platform !== "win32";
+    const child = spawn("bash", ["-c", command], {
+      cwd,
+      env: environment,
+      detached,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = Buffer.alloc(0);
+    let stderr = Buffer.alloc(0);
+    let timedOut = false;
+    let killTimer;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      try {
+        signalValidationProcess(child, "SIGTERM");
+        killTimer = setTimeout(() => {
+          try {
+            signalValidationProcess(child, "SIGKILL");
+          } catch (error) {
+            reject(error);
+          }
+        }, VALIDATION_KILL_GRACE_MS);
+      } catch (error) {
+        reject(error);
+      }
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => { stdout = appendOutputTail(stdout, chunk); });
+    child.stderr.on("data", (chunk) => { stderr = appendOutputTail(stderr, chunk); });
+    child.once("error", (error) => {
+      clearTimeout(timeoutTimer);
+      clearTimeout(killTimer);
+      reject(error);
+    });
+    child.once("close", (status, signal) => {
+      clearTimeout(timeoutTimer);
+      clearTimeout(killTimer);
+      resolve({ status, signal, stdout, stderr, timedOut });
+    });
+  });
+}
+
+export async function runValidationCommands(
   commands,
   cwd = process.cwd(),
   { timeoutMs = DEFAULT_VALIDATION_TIMEOUT_MS } = {}
@@ -283,27 +346,22 @@ export function runValidationCommands(
   for (const command of commands) {
     let result;
     try {
-      result = run("bash", ["-c", command], {
-        cwd,
-        allowFailure: true,
-        env: environment,
-        replaceEnv: true,
-        timeoutMs
-      });
+      result = await runValidationProcess(command, { cwd, environment, timeoutMs });
     } catch (error) {
-      const failure = new Error(
-        error.code === "ETIMEDOUT"
-          ? `Validation command timed out after ${timeoutMs}ms: ${command}`
-          : `Validation command could not run: ${command}: ${error.message}`
-      );
+      const failure = new Error(`Validation command could not run: ${command}: ${error.message}`);
+      failure.validationResults = results;
+      throw failure;
+    }
+    if (result.timedOut) {
+      const failure = new Error(`Validation command timed out after ${timeoutMs}ms: ${command}`);
       failure.validationResults = results;
       throw failure;
     }
     results.push({
       command,
       success: result.status === 0,
-      stdout: result.stdout.toString("utf8").slice(-12000),
-      stderr: result.stderr.toString("utf8").slice(-12000)
+      stdout: result.stdout.toString("utf8"),
+      stderr: result.stderr.toString("utf8")
     });
     if (result.status !== 0) {
       const error = new Error(`Validation command failed: ${command}`);

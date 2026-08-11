@@ -18,11 +18,11 @@ function setEnvironment(name, value) {
   };
 }
 
-test("validation commands cannot inherit Codekeeper provider credentials", () => {
+test("validation commands cannot inherit Codekeeper provider credentials", async () => {
   const restoreModel = setEnvironment("CODEKEEPER_MODEL_API_KEY", "audit-canary-model");
   const restoreTrace = setEnvironment("CODEKEEPER_TRACE_API_KEY", "audit-canary-trace");
   try {
-    const results = runValidationCommands([
+    const results = await runValidationCommands([
       "test -z \"$CODEKEEPER_MODEL_API_KEY\" && test -z \"$CODEKEEPER_TRACE_API_KEY\""
     ]);
     assert.equal(results[0].success, true);
@@ -34,7 +34,7 @@ test("validation commands cannot inherit Codekeeper provider credentials", () =>
 
 test("a hung validation command is terminated within the workflow budget", async () => {
   const gitModuleUrl = new URL("../src/lib/git.mjs", import.meta.url).href;
-    const script = `import { runValidationCommands } from ${JSON.stringify(gitModuleUrl)}; runValidationCommands(["sleep 2"], process.cwd(), { timeoutMs: 25 });`;
+  const script = `import { runValidationCommands } from ${JSON.stringify(gitModuleUrl)}; await runValidationCommands(["trap '' TERM; sleep 2"], process.cwd(), { timeoutMs: 25 });`;
   const child = spawn("node", ["--input-type=module", "-e", script], {
     cwd: repositoryRoot,
     stdio: ["ignore", "ignore", "ignore"]
