@@ -104,6 +104,14 @@ test("settings require each enabled capability to have its executing workflow", 
     () => validateEditableSettings(automaticRepairWithoutFixer, policy),
     /Automatic PR repair requires.*Fixer workflow/
   );
+
+  const issueImplementationWithoutFixer = structuredClone(settings);
+  issueImplementationWithoutFixer.modes = ["issues"];
+  issueImplementationWithoutFixer.policy.issues.allowAiImplementation = true;
+  assert.throws(
+    () => validateEditableSettings(issueImplementationWithoutFixer, policy),
+    /Issue implementation requires the Fixer workflow/
+  );
 });
 
 test("fresh settings can enable capabilities after bundled defaults are verified", async () => {

@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "repository": "coryparrry/Codekeeper",
-    "commit": "3633009cbc9219b36ab5dd4acb7666115a1efed7"
+    "commit": "f1bec8fe1aabf4cdad2d30858f1c5d13c81bbef8"
   },
   "assets": {
     "agents/pr-reviewer.md": {
@@ -41,8 +41,8 @@
       "sourcePath": "examples/workflows/codekeeper-assistant.yml.example"
     },
     "workflows/review.yml": {
-      "sha256": "40038aa46771cf1b09f0cd329351e560a8d61fd41e7e6581e1791bd156dafae2",
-      "bytes": 1968,
+      "sha256": "cb2276fd2dc550d397be74100b2e68c0c9b17c90291f93db82b8d98b7b2ffbfe",
+      "bytes": 4081,
       "sourcePath": "examples/workflows/codekeeper-review.yml.example"
     },
     "workflows/maintain.yml": {

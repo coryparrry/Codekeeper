@@ -18,24 +18,58 @@ permissions:
   pull-requests: read
 
 jobs:
+  intent:
+    name: Detect Codekeeper review feedback
+    runs-on: ubuntu-latest
+    outputs:
+      owner_command: ${{ steps.intent.outputs.owner_command }}
+      route: ${{ steps.intent.outputs.route }}
+    steps:
+      - name: Exclude owner commands and automation replies
+        id: intent
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          AUTOMATION_BOT_LOGIN: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
+        run: |
+          node --input-type=module -e '
+            import { appendFileSync } from "node:fs";
+            const eventName = String(process.env.EVENT_NAME ?? "");
+            const body = String(process.env.COMMENT_BODY ?? "").trim();
+            const author = String(process.env.COMMENT_AUTHOR ?? "").toLowerCase();
+            const association = String(process.env.AUTHOR_ASSOCIATION ?? "");
+            const automationBot = String(process.env.AUTOMATION_BOT_LOGIN ?? "").toLowerCase();
+            const mentionBot = automationBot.replace(/\[bot\]$/i, "");
+            const escapedMention = mentionBot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const actions = ["status", "review", "rerun", "triage", "defer", "implement", "fix", "stop"];
+            const slash = new RegExp(`^/codekeeper\\s+(${actions.join("|")})$`, "i").test(body);
+            const mentioned = mentionBot && new RegExp(`^@${escapedMention}\\s+(${actions.join("|")})$`, "i").test(body);
+            const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
+            const commandIntent = eventName === "pull_request_review_comment" && trustedAssociation && (slash || mentioned);
+            const automationReply = eventName === "pull_request_review_comment" && automationBot && author === automationBot;
+            const route = !commandIntent && !automationReply;
+            appendFileSync(process.env.GITHUB_OUTPUT, `owner_command=${commandIntent}\nroute=${route}\n`);
+          '
   bootstrap:
+    needs: intent
+    if: needs.intent.outputs.route == 'true'
     name: Codekeeper pinned tooling bootstrap
-    if: >-
-      github.event_name != 'pull_request_review_comment' ||
-      github.actor != vars.CODEKEEPER_AUTOMATION_BOT_LOGIN
     runs-on: ubuntu-latest
     steps:
       - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
         with:
           artifact-name: codekeeper-tooling-${{ github.run_id }}
   review:
-    needs: bootstrap
-    if: github.event_name != 'pull_request_review_comment' || github.event.comment.user.login != vars.CODEKEEPER_AUTOMATION_BOT_LOGIN
+    needs: [intent, bootstrap]
+    if: needs.intent.outputs.route == 'true' && needs.bootstrap.result == 'success'
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-review.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       auto_review: true
       feedback_triage: true
+      owner_command: ${{ needs.intent.outputs.owner_command == 'true' }}
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:
