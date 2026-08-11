@@ -178,7 +178,7 @@ export async function runCli({
         appClientId: snapshot.existingSettings.appClientId,
         automationBotLogin: snapshot.existingSettings.automationBotLogin
       };
-      if (requiresAutomationBotLogin(setupAnswers.modes, setupAnswers.capabilities) && !appAnswers.automationBotLogin) {
+      if (requiresAutomationBotLogin(setupAnswers.modes, setupAnswers.capabilities, setupAnswers.policy?.automation.ownerRequests ?? true) && !appAnswers.automationBotLogin) {
         presentationOutput.write("\nGitHub App identifier\n");
         appAnswers.automationBotLogin = await collectAutomationBotLogin({ prompt: activePrompt, output: presentationOutput });
       }
@@ -221,6 +221,7 @@ export async function runCli({
         prompt: activePrompt,
         modes: setupAnswers.modes,
         capabilities: setupAnswers.capabilities,
+        ownerRequests: setupAnswers.policy?.automation.ownerRequests ?? true,
         output: presentationOutput
       });
     }

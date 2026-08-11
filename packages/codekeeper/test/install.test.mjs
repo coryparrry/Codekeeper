@@ -475,8 +475,13 @@ test("real Git integration reruns can change configuration and remove a workflow
   assert.equal(git(root, ["branch", "--show-current"]).trim(), `codekeeper/update-${installedHead.slice(0, 12)}`);
   assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [
     ".github/codekeeper.json",
+    ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-maintain.yml"
   ]);
+  assert.match(
+    await readFile(path.join(root, ".github/workflows/codekeeper-assistant.yml"), "utf8"),
+    /installed_modes: review/
+  );
   await assert.rejects(readFile(path.join(root, ".github/workflows/codekeeper-maintain.yml"), "utf8"), /ENOENT/);
   assert.match(await readFile(path.join(root, ".github/codekeeper/agents/pr-reviewer.md"), "utf8"), /Team preference/);
   const policy = JSON.parse(await readFile(path.join(root, ".github/codekeeper.json"), "utf8"));

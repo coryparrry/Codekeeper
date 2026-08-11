@@ -30,6 +30,7 @@ jobs:
           artifact-name: codekeeper-tooling-${{ github.run_id }}
   review:
     needs: bootstrap
+    if: github.event_name != 'pull_request_review_comment' || github.event.comment.user.login != vars.CODEKEEPER_AUTOMATION_BOT_LOGIN
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-review.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}

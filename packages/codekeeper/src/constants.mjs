@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "098ed3ac0765f362e2c5ff6b3c28e51d4d32ee33";
+export const SOURCE_COMMIT = "3633009cbc9219b36ab5dd4acb7666115a1efed7";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -60,7 +60,7 @@ export const ASSISTANT_WORKFLOW = Object.freeze({
   label: "Repository assistant",
   target: ".github/workflows/codekeeper-assistant.yml",
   asset: "workflows/assistant.yml",
-  description: "Routes configured-owner requests independently of the optional Fixer workflow."
+  description: "Routes configured-owner requests to the installed role workflows."
 });
 export const AGENT_PROFILES = Object.freeze({
   "pr-reviewer": Object.freeze({

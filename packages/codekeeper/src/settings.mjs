@@ -18,6 +18,26 @@ const CAPS = Object.freeze({
   "merge.maximumFiles": [1, 50],
   "merge.maximumChangedLines": [1, 5_000]
 });
+const REQUIRED_RUNTIME_LABELS = Object.freeze([
+  "codekeeper:reviewed", "codekeeper:maintenance", "codekeeper:ready", "codekeeper:blocked",
+  "codekeeper:manual-review", "codekeeper:paused", "codekeeper:auto-repaired", "codekeeper:auto-merge",
+  "codekeeper:duplicate-candidate", "codekeeper:deferred", "codekeeper:needs-tests",
+  "codekeeper:priority-p1", "codekeeper:priority-p2", "codekeeper:priority-p3",
+  "codekeeper:risk-low", "codekeeper:risk-medium", "codekeeper:risk-high",
+  "codekeeper:type-bug", "codekeeper:type-documentation", "codekeeper:type-enhancement",
+  "codekeeper:type-maintenance", "codekeeper:type-question", "codekeeper:type-security", "codekeeper:type-testing"
+]);
+const REVIEW_MANAGED_LABELS = Object.freeze([
+  "codekeeper:reviewed", "codekeeper:blocked", "codekeeper:manual-review", "codekeeper:auto-merge",
+  "codekeeper:needs-tests", "codekeeper:risk-low", "codekeeper:risk-medium", "codekeeper:risk-high"
+]);
+const ISSUE_MANAGED_LABELS = Object.freeze([
+  "codekeeper:maintenance", "codekeeper:ready", "codekeeper:manual-review", "codekeeper:duplicate-candidate",
+  "codekeeper:deferred", "codekeeper:priority-p1", "codekeeper:priority-p2", "codekeeper:priority-p3",
+  "codekeeper:risk-low", "codekeeper:risk-medium", "codekeeper:risk-high", "codekeeper:type-bug",
+  "codekeeper:type-documentation", "codekeeper:type-enhancement", "codekeeper:type-maintenance",
+  "codekeeper:type-question", "codekeeper:type-security", "codekeeper:type-testing"
+]);
 
 const STANDARD_PATHS = Object.freeze([
   ["automation.automaticPrReview", "Automatic PR review"],
@@ -285,6 +305,10 @@ export function validateEditableSettings(settings, baselinePolicy) {
     }
     if (!agent.modelSettings || typeof agent.modelSettings !== "object" || Array.isArray(agent.modelSettings)) throw new InstallerError(`${agentId}.modelSettings must be a JSON object.`, { code: "SETTING_INVALID" });
     validateJson(agent.modelSettings, `${agentId}.modelSettings`);
+    if (agent.modelSettings.reasoning && typeof agent.modelSettings.reasoning === "object"
+      && !Array.isArray(agent.modelSettings.reasoning) && Object.hasOwn(agent.modelSettings.reasoning, "effort")) {
+      throw new InstallerError(`${agentId}.modelSettings.reasoning.effort is invalid; use the top-level agent effort setting.`, { code: "SETTING_INVALID" });
+    }
     if (typeof agent.workspace.enabled !== "boolean" || !equal(agent.workspace.allowWrites, baselinePolicy.ai.agents[agentId].workspace.allowWrites)) {
       throw new InstallerError(`${agentId} workspace boundary is invalid.`, { code: "SETTING_INVALID" });
     }
@@ -309,6 +333,22 @@ export function validateEditableSettings(settings, baselinePolicy) {
   for (const label of [...policy.review.allowedLabels, ...policy.review.managedLabels, ...policy.issues.managedLabels]) {
     if (!policy.labels[label]) throw new InstallerError(`Policy references undefined label ${label}.`, { code: "SETTING_INVALID" });
   }
+  for (const label of REQUIRED_RUNTIME_LABELS) {
+    if (!policy.labels[label]) throw new InstallerError(`Policy must define runtime label ${label}.`, { code: "SETTING_INVALID" });
+  }
+  for (const label of [...REVIEW_MANAGED_LABELS, ...policy.review.allowedLabels]) {
+    if (!policy.review.managedLabels.includes(label)) throw new InstallerError(`review.managedLabels must include ${label}.`, { code: "SETTING_INVALID" });
+  }
+  for (const label of [...ISSUE_MANAGED_LABELS, ...policy.review.allowedLabels]) {
+    if (!policy.issues.managedLabels.includes(label)) throw new InstallerError(`issues.managedLabels must include ${label}.`, { code: "SETTING_INVALID" });
+  }
+  if (policy.review.autoRepair && !(settings.modes.includes("review") && settings.modes.includes("fix"))) {
+    throw new InstallerError("Automatic PR repair requires both the Review and Fixer workflows.", { code: "SETTING_INVALID" });
+  }
+  if (policy.audit.repair.enabled && !settings.modes.includes("maintain")) throw new InstallerError("Repository repair requires the Maintenance workflow.", { code: "SETTING_INVALID" });
+  if (policy.issues.allowAiImplementation && !settings.modes.includes("fix")) throw new InstallerError("Issue implementation requires the Fixer workflow.", { code: "SETTING_INVALID" });
+  if (policy.issues.closeExactDuplicates && !settings.modes.includes("issues")) throw new InstallerError("Duplicate closure requires the Issue triage workflow.", { code: "SETTING_INVALID" });
+  if (policy.merge.enabled && !settings.modes.some((mode) => mode === "maintain" || mode === "fix")) throw new InstallerError("Automatic merge requires a repair workflow.", { code: "SETTING_INVALID" });
   for (const profile of AGENT_PROFILE_IDS) {
     const source = settings.profiles[profile];
     if (typeof source !== "string" || !source.trim() || Buffer.byteLength(source) > 64 * 1024 || source.includes("\0")) throw new InstallerError(`${profile} profile is invalid.`, { code: "SETTING_INVALID" });

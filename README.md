@@ -12,7 +12,7 @@ It is not a hosted service, webhook receiver, or multi-tenant GitHub App. The pr
 | `codekeeper-maintain.yml` | Audit the default branch. A live run may create one bounded repair when repository repair is on. |
 | `codekeeper-issues.yml` | Triage opened, reopened, or edited issues while `auto_triage=true`; configured-owner `/codekeeper triage` comments remain available when automatic triage is off. |
 | `codekeeper-fix.yml` | Implement an issue that trusted triage marks ready when issue implementation is on. A configured owner can also request exactly `/codekeeper fix` on an existing pull request. |
-| `codekeeper-assistant.yml` | Always-installed, lightweight owner-request router for issue and pull-request comments; it does not depend on installing the Fixer caller. |
+| `codekeeper-assistant.yml` | Always-installed, lightweight owner-request router for issue and pull-request comments; it routes only actions whose role caller is installed. |
 
 The guided installer performs this generation from release-pinned assets. Until it is published, use a locally built installer tarball for private acceptance or follow the [manual installation guide](INSTALL.md). The generated setup includes [`.github/codekeeper.json`](.github/codekeeper.json), the selected callers, and four adopter-owned Markdown profiles under `.github/codekeeper/agents/`. The manual path copies the matching non-executable templates from [`examples/workflows`](examples/workflows), replaces `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copies the policy and profiles into the adopter's default branch. Each caller pins the direct Codekeeper bootstrap action and its reusable workflow to the same immutable commit. The action stages only the production `tools/codekeeper` payload as a one-day artifact; every reusable job verifies that payload against the source-controlled manifest before using it. Adopters do not copy `tools/codekeeper` or source workflow files, and do not provide a source-repository token.
 
@@ -42,7 +42,7 @@ Configured owners can use these exact commands:
 - `/codekeeper fix`
 - `/codekeeper stop`
 
-Configured-owner mentions can request the same fixed actions in natural language. The always-installed assistant caller supplies this router, so commands do not depend on installing the Fixer. Non-owner content and model output cannot grant mutation authority.
+Configured-owner mentions can request the same fixed actions in natural language. The always-installed assistant supplies the router, and each model-backed command requires its matching selected role workflow. Non-owner content and model output cannot grant mutation authority.
 
 ## Adopter-owned coordinator profiles
 

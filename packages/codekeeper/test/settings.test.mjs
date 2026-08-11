@@ -70,6 +70,66 @@ test("one settings object keeps coordinator and workspace models independent", a
   assert.throws(() => validateEditableSettings(unsafeSchedule, policy), /five safe cron fields/);
 });
 
+test("settings reject runtime-incompatible model settings and managed-label removal", async () => {
+  const { policy, settings } = await fixture(["review", "issues"]);
+  const nestedEffort = structuredClone(settings);
+  nestedEffort.policy.ai.agents.review.modelSettings.reasoning = { effort: "high" };
+  assert.throws(
+    () => validateEditableSettings(nestedEffort, policy),
+    /modelSettings\.reasoning\.effort.*top-level agent effort/
+  );
+
+  const missingReviewLabel = structuredClone(settings);
+  missingReviewLabel.policy.review.managedLabels = missingReviewLabel.policy.review.managedLabels
+    .filter((label) => label !== "codekeeper:reviewed");
+  assert.throws(
+    () => validateEditableSettings(missingReviewLabel, policy),
+    /review\.managedLabels.*codekeeper:reviewed/
+  );
+
+  const missingIssueLabel = structuredClone(settings);
+  missingIssueLabel.policy.issues.managedLabels = missingIssueLabel.policy.issues.managedLabels
+    .filter((label) => label !== "codekeeper:ready");
+  assert.throws(
+    () => validateEditableSettings(missingIssueLabel, policy),
+    /issues\.managedLabels.*codekeeper:ready/
+  );
+});
+
+test("settings require each enabled capability to have its executing workflow", async () => {
+  const { policy, settings } = await fixture(["review", "maintain"]);
+  const automaticRepairWithoutFixer = structuredClone(settings);
+  automaticRepairWithoutFixer.policy.review.autoRepair = true;
+  assert.throws(
+    () => validateEditableSettings(automaticRepairWithoutFixer, policy),
+    /Automatic PR repair requires.*Fixer workflow/
+  );
+});
+
+test("fresh settings can enable capabilities after bundled defaults are verified", async () => {
+  const { bundle, settings } = await fixture(["review", "fix"]);
+  const edited = structuredClone(settings);
+  edited.policy.review.autoRepair = true;
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      root: "/tmp/widget",
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: HEAD_SHA,
+      viewerLogin: "coryparrry"
+    },
+    answers: {
+      ...settingsAnswers(edited),
+      preset: "openai",
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    }
+  });
+  assert.equal(plan.policy.review.autoRepair, true);
+  assert.ok(plan.files.some((file) => file.path === MODES.fix.target));
+});
+
 test("profile editing uses a temporary copy and returns only validated Markdown", async () => {
   let editorPath;
   const edited = await editProfileWithEditor({

@@ -105,11 +105,11 @@ export function normalizeCapabilities(modes, selected = []) {
   return Object.freeze(Object.fromEntries(CAPABILITY_IDS.map((id) => [id, selected.includes(id)])));
 }
 
-export function requiresAutomationBotLogin(modes, capabilities = []) {
+export function requiresAutomationBotLogin(modes, capabilities = [], ownerRequests = true) {
   const issueImplementation = Array.isArray(capabilities)
     ? capabilities.includes("issueImplementation")
     : capabilities?.issueImplementation === true;
-  return modes.includes("review") || (modes.includes("fix") && issueImplementation);
+  return ownerRequests || modes.includes("review") || (modes.includes("fix") && issueImplementation);
 }
 
 export function capabilitySummary(capabilities, modes = null) {
@@ -358,7 +358,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const ownerLogins = normalizeOwnerLogins(answers.policy?.repository.ownerLogins ?? answers.ownerLogins);
   if (!validClientId(answers.appClientId)) throw new InstallerError("GitHub App Client ID is invalid.", { code: "PLAN_INVALID" });
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
-  const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities);
+  const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, answers.policy?.automation.ownerRequests ?? true);
   const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
   if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models, policySource });
@@ -770,7 +770,7 @@ export async function collectAutomationBotLogin({ prompt, output }) {
   return automationBotLogin.toLowerCase();
 }
 
-export async function collectAppAnswers({ prompt, modes, capabilities = [], output }) {
+export async function collectAppAnswers({ prompt, modes, capabilities = [], ownerRequests = true, output }) {
   output.write("\nGitHub App identifiers\n");
   output.write("  - Client ID: find the value that starts with Iv in the App settings\n");
   const appClientId = await prompt.inputText(tuiOptions(prompt, {
@@ -783,7 +783,7 @@ export async function collectAppAnswers({ prompt, modes, capabilities = [], outp
       "Do not enter the numeric App ID."
     ]
   }));
-  const automationBotLogin = requiresAutomationBotLogin(modes, capabilities)
+  const automationBotLogin = requiresAutomationBotLogin(modes, capabilities, ownerRequests)
     ? await collectAutomationBotLogin({ prompt, output })
     : null;
   return Object.freeze({ appClientId, automationBotLogin: automationBotLogin?.toLowerCase() ?? null });

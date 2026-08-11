@@ -55,11 +55,11 @@ const EXPECTED_ASSETS = Object.freeze({
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
   "policies/mixed.json": "c53612a50a6af7b3f6f00171160d333fc4ddefdcd7dbed1d925def56c53f94d7",
   "policies/openai.json": "9c7c5665d8471f474b83380b71cbc3cc528308258029dfbcc8d3786462283501",
-  "workflows/assistant.yml": "ef4925f02b23d25fa8d2124d3f0463d04acda2a16d4a04562e803c2b7c7bca86",
+  "workflows/assistant.yml": "58d92290268aca6fc25eb3ead3e12b969d4926e2ab371b2009caf2fbb47cbd66",
   "workflows/fix.yml": "72c50767a21b45213b250d40b191548da68675442a61ceeb6ac5f9eeea7edc1d",
-  "workflows/issues.yml": "6e5f645c610feae7af02a07e29c7458c31ca7c9331d2ec23832366c345d33c9a",
+  "workflows/issues.yml": "15ece2b9b8b4e50956b110aef1643d3bab0dc4c73c5b13a1d65aa2caf4951cbd",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
-  "workflows/review.yml": "533e9c6219814328130a70f798dfdb05f0f9928604a2d2409285f3ec9bf2b93c"
+  "workflows/review.yml": "40038aa46771cf1b09f0cd329351e560a8d61fd41e7e6581e1791bd156dafae2"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
@@ -944,6 +944,36 @@ test("fix-only issue implementation configures the trusted App bot identity", as
       answers: answers({
         modes: ["issues", "fix"],
         capabilities: ["issueImplementation"],
+        automationBotLogin: null
+      })
+    }),
+    assertInstallerCode(assert, "PLAN_INVALID")
+  );
+});
+
+test("owner requests require the trusted App bot identity for every workflow selection", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["issues"],
+      capabilities: [],
+      models: { issues: "terra-medium" }
+    })
+  });
+  assert.deepEqual(
+    plan.variables.find((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"),
+    { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
+  );
+  assert.throws(
+    () => buildInstallPlan({
+      bundle,
+      snapshot: snapshot(),
+      answers: answers({
+        modes: ["issues"],
+        capabilities: [],
+        models: { issues: "terra-medium" },
         automationBotLogin: null
       })
     }),

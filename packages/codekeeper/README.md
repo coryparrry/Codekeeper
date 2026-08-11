@@ -23,11 +23,11 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and proof sequence. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/098ed3ac0765f362e2c5ff6b3c28e51d4d32ee33/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/3633009cbc9219b36ab5dd4acb7666115a1efed7/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/098ed3ac0765f362e2c5ff6b3c28e51d4d32ee33/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
+| [Canonical starter profiles](https://github.com/coryparrry/Codekeeper/tree/3633009cbc9219b36ab5dd4acb7666115a1efed7/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
@@ -38,14 +38,14 @@ The Settings screen is the command centre for both new and existing installation
 | Pull request review | App-owned review output for controlled same-repository pull requests after Codekeeper is deliberately enabled. |
 | Repository maintenance | Manual or scheduled audits. When repository repair is on, each live run can create one bounded repair pull request. |
 | Issue triage | Issue-event labels and comments when enabled; not needed for the starter proof. |
-| Issue implementation and pull request repair | Automatically implements issues that triage marks ready when issue implementation is on. An owner can also use `/codekeeper fix` to repair an existing pull request. |
+| Issue implementation and pull request repair | Automatically implements issues that triage marks ready when issue implementation is on. When this workflow is selected, an owner can also use `/codekeeper fix` to repair an existing pull request. |
 
 The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and accepts any model ID for each provider. Coordinator selection is independent from the optional OpenAI Codex workspace specialist. OpenAI traces are optional. When traces are on, the installer requests a separate OpenAI Platform trace-export key. A ChatGPT subscription is not an API key.
 
 After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
 1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, the always-installed repository-assistant caller, and the selected role callers.
-2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `098ed3ac0765f362e2c5ff6b3c28e51d4d32ee33`.
+2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `3633009cbc9219b36ab5dd4acb7666115a1efed7`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
