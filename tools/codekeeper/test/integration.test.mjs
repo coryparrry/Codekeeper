@@ -551,9 +551,12 @@ test("issue preparation reduces repository history to five deterministic duplica
     });
     assert.equal(context.duplicateCandidates.length, 5);
     assert.equal(context.duplicateCandidates[0].number, 11);
-    assert.ok(context.duplicateCandidates.every((candidate) => candidate.number !== 50 && candidate.number !== 999));
+    assert.ok(context.duplicateCandidates.every((candidate) => candidate.kind === "issue"));
+    assert.ok(context.duplicateCandidates.every((candidate) => candidate.number !== 50 && candidate.number !== 999 && candidate.number !== 21));
+    assert.deepEqual(context.relatedPullRequests.map((candidate) => candidate.number), [21]);
     const prompt = await readFile(path.join(directory, "prompt.md"), "utf8");
     assert.doesNotMatch(prompt, /OMITTED DISTRACTOR/);
+    assert.match(prompt, /Pull requests are related context only and must never be returned as duplicateOf/);
     writeRuntimeMetadataFixture(directory, "issue");
     const resultPath = path.join(directory, "agent-result.json");
     const duplicateResult = {
@@ -709,9 +712,26 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
   const originalRepository = process.env.GITHUB_REPOSITORY;
   const revision = run("git", ["rev-parse", "HEAD"], root).trim();
   let labels = [];
+  const comments = [
+    {
+      body: "Repair the blocking review finding.\n<!-- codekeeper:review -->",
+      created_at: "2026-08-11T09:00:00Z",
+      user: { login: "codekeeper-app[bot]", type: "Bot" }
+    },
+    {
+      body: "ATTACKER INSTRUCTION",
+      created_at: "2026-08-11T09:01:00Z",
+      user: { login: "contributor", type: "User" }
+    },
+    {
+      body: "Keep the repair focused.",
+      created_at: "2026-08-11T09:02:00Z",
+      user: { login: "repository-owner", type: "User" }
+    }
+  ];
   process.env.GITHUB_REPOSITORY = "acme/example";
   globalThis.fetch = async (url) => {
-    if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
+    if (String(url).includes("/comments")) return new Response(JSON.stringify(comments), { status: 200 });
     if (String(url).includes("/pulls/42")) {
       return new Response(JSON.stringify({
         number: 42,
@@ -761,6 +781,12 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(prepared.target.kind, "pull_request");
+    assert.deepEqual(
+      prepared.pullRequest.comments.map((comment) => comment.author),
+      ["codekeeper-app[bot]", "repository-owner"]
+    );
+    assert.match(prepared.pullRequest.comments[0].body, /blocking review finding/);
+    assert.doesNotMatch(JSON.stringify(prepared.pullRequest.comments), /ATTACKER INSTRUCTION/);
     labels = [{ name: "codekeeper:auto-repaired" }, { name: "codekeeper:paused" }];
     await assert.rejects(
       prepareFix({

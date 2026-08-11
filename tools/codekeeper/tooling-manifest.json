@@ -83,11 +83,11 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "6e99ff483165c3da953c60bc527ad2d86b922aebf8860303b90f125fd6015219"
+      "sha256": "f8156a7f551619f1c05be0575a3630a51c84bd61e7feda0ec404bca67dc5a688"
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "b5e20b1374162a8a17827dede1d6db00adf9455c9dc48cc6e71e8669d09f7ef1"
+      "sha256": "919827a2c02d9c14f1435cc62c8b53815115a133cb4ad4ae67cb13196a82f116"
     },
     {
       "path": "src/lib/publish.mjs",

@@ -4,6 +4,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-prof
 import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
+import { REVIEW_MARKER } from "./markers.mjs";
 import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
 import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
@@ -89,14 +90,12 @@ function overlapScore(a, right) {
   return overlap / (a.size + b.size - overlap);
 }
 
-function duplicateCandidates(issue, issues, pulls, maximum = 5) {
+function relatedCandidates(issue, candidates, kind, maximum = 5) {
   const needle = `${issue.title ?? ""}\n${issue.body ?? ""}`;
   const needleWords = normalizedWords(needle);
-  return [
-    ...issues.filter((candidate) => candidate.number !== issue.number).map((candidate) => ({ kind: "issue", candidate })),
-    ...pulls.map((candidate) => ({ kind: "pull_request", candidate }))
-  ]
-    .map(({ kind, candidate }) => ({
+  return candidates
+    .filter((candidate) => kind !== "issue" || candidate.number !== issue.number)
+    .map((candidate) => ({
       kind,
       number: candidate.number,
       title: boundedText(candidate.title, 512, "…"),
@@ -110,6 +109,14 @@ function duplicateCandidates(issue, issues, pulls, maximum = 5) {
     .map(({ score: _score, ...candidate }) => candidate);
 }
 
+function duplicateCandidates(issue, issues, maximum = 5) {
+  return relatedCandidates(issue, issues, "issue", maximum);
+}
+
+function relatedPullRequests(issue, pulls, maximum = 5) {
+  return relatedCandidates(issue, pulls, "pull_request", maximum);
+}
+
 function boundedOwnerComments(comments, config) {
   const owners = configuredOwnerLogins(config);
   return comments
@@ -118,6 +125,35 @@ function boundedOwnerComments(comments, config) {
     .map((comment) => ({
       author: boundedText(comment.user?.login, 256, "…"),
       body: boundedText(comment.body, 2000),
+      createdAt: comment.created_at ?? ""
+    }));
+}
+
+function boundedRepairComments(comments, config, { actor, authorizationMode }) {
+  if (authorizationMode !== "policy") return boundedOwnerComments(comments, config);
+  const normalizedActor = String(actor ?? "").trim().toLowerCase();
+  if (!normalizedActor.endsWith("[bot]")) {
+    throw new Error("Automatic PR repair requires a GitHub App bot actor");
+  }
+  const trustedReview = comments.findLast((comment) =>
+    comment.user?.type === "Bot" &&
+    String(comment.user?.login ?? "").trim().toLowerCase() === normalizedActor &&
+    typeof comment.body === "string" &&
+    comment.body.endsWith(REVIEW_MARKER)
+  );
+  if (!trustedReview) {
+    throw new Error("Automatic PR repair requires the triggering Codekeeper review comment");
+  }
+  const owners = configuredOwnerLogins(config);
+  const ownerComments = comments
+    .filter((comment) => owners.has(String(comment.user?.login ?? "").trim().toLowerCase()))
+    .slice(-5);
+  const selected = new Set([trustedReview, ...ownerComments]);
+  return comments
+    .filter((comment) => selected.has(comment))
+    .map((comment) => ({
+      author: boundedText(comment.user?.login, 256, "…"),
+      body: boundedText(comment.body, comment === trustedReview ? 12000 : 2000),
       createdAt: comment.created_at ?? ""
     }));
 }
@@ -252,7 +288,8 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
       url: boundedText(issue.html_url, 2048, "…"),
       updatedAt: issue.updated_at ?? ""
     },
-    duplicateCandidates: duplicateCandidates(issue, existing, pulls)
+    duplicateCandidates: duplicateCandidates(issue, existing),
+    relatedPullRequests: relatedPullRequests(issue, pulls)
   };
   await writeBundle({
     directory,
@@ -327,7 +364,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       pullRequest: {
         ...frozenSubject,
         body: boundedText(frozenSubject.body, 12000),
-        comments: boundedOwnerComments(comments, config)
+        comments: boundedRepairComments(comments, config, { actor, authorizationMode })
       }
     };
     target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments);
