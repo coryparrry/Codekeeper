@@ -468,7 +468,8 @@ test("coordinator evidence cannot become more permissive than specialist authori
     tests: { adequate: false },
     mergeRecommendation: "manual"
   });
-  const issueEvidence = (priority) => ({
+  const issueEvidence = (priority, type = "bug") => ({
+    type,
     priority,
     duplicateOf: null,
     actionable: false,
@@ -560,6 +561,10 @@ test("coordinator evidence cannot become more permissive than specialist authori
   );
   assert.doesNotThrow(
     () => enforceCoordinatorEvidenceBoundary("issue", issueEvidence("p3"), issueEvidence("p2"))
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("issue", issueEvidence("p3", "security"), issueEvidence("p3", "bug")),
+    /issue type/
   );
   const auditFindingA = { title: "Finding A" };
   const auditFindingB = { title: "Finding B" };

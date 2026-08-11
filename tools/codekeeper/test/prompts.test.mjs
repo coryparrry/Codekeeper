@@ -51,6 +51,19 @@ test("coordinator prompts reject unknown modes instead of defaulting to fixer se
   assert.throws(() => buildCoordinatorPrompt("unknown", {}, config), /Unknown coordinator mode/);
 });
 
+test("review coordinator prompts preserve specialist blockers", () => {
+  const prompt = buildCoordinatorPrompt("review", {
+    repository: "acme/example",
+    runUrl: "https://example.test/run/7",
+    toolingSha: "a".repeat(40),
+    configSha256: "b".repeat(64),
+    pullRequest: { number: 7, baseSha: "base", headSha: "head", changedFiles: [], diff: { truncated: false } }
+  }, config);
+
+  assert.match(prompt, /Every specialist blocking finding must remain blocking/);
+  assert.doesNotMatch(prompt, /may omit or move them between blocking and non-blocking lists/);
+});
+
 test("issue coordinators use full context directly and compact context after workspace triage", () => {
   const context = {
     repository: "acme/example",

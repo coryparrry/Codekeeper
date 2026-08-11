@@ -213,7 +213,7 @@ export function buildCoordinatorPrompt(mode, context, config) {
       action = "Decide whether the workspace triage evidence supports the issue classification, duplicate decision, and implementation recommendation. Do not add repository or issue claims that are absent from the workspace result; downgrade unsupported decisions.";
       break;
     case "review":
-      action = "Decide whether the workspace review evidence supports blocking, manual review, or auto-merge. Findings must be copied exactly from the workspace evidence; you may omit or move them between blocking and non-blocking lists.";
+      action = "Decide whether the workspace review evidence supports blocking, manual review, or auto-merge. Findings must be copied exactly from the workspace evidence. Every specialist blocking finding must remain blocking; non-blocking findings may be omitted, retained, or moved to the blocking list.";
       break;
     case "audit":
       action = "Decide which workspace audit findings are sufficiently supported. Findings must be copied exactly from the workspace evidence; do not add repository observations.";

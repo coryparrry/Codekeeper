@@ -285,6 +285,9 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     }
   }
   if (mode === "issue") {
+    if (output.type !== specialistResult.type) {
+      throw new Error("Coordinator issue type differs from workspace evidence");
+    }
     if (output.duplicateOf !== null && output.duplicateOf !== specialistResult.duplicateOf) {
       throw new Error("Coordinator introduced an issue duplicate not present in workspace evidence");
     }
