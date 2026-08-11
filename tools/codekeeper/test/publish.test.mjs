@@ -949,7 +949,7 @@ test("fix publication does not create a repair PR after the issue changes", asyn
   }
 });
 
-function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), runId = "7001", authorizationMode = "owner" }) {
+function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), runId = "7001", authorizationMode = "owner", reviewThreads = [] }) {
   const pull = {
     number: 42,
     title: "Repair this change",
@@ -979,10 +979,37 @@ function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), ru
       baseRef: config.repository.defaultBranch,
       baseSha,
       baseRepository: "owner/repository",
-      subjectSha256: frozenPullRepairSubjectSha256(pull, comments)
+      reviewThreadIds: reviewThreads.map((thread) => thread.id),
+      subjectSha256: frozenPullRepairSubjectSha256(pull, comments, reviewThreads)
     },
-    pullRequest: frozenPullRepairSubject(pull, comments)
+    pullRequest: {
+      ...frozenPullRepairSubject(pull, comments, reviewThreads),
+      reviewThreads
+    }
   };
+}
+
+function frozenRepairReviewThread(body = "Please preserve this review evidence.", isResolved = false) {
+  return {
+    id: "PRRT_thread",
+    isResolved,
+    isOutdated: false,
+    comments: [{
+      id: "PRRC_node_41",
+      databaseId: 41,
+      author: "reviewer",
+      body,
+      url: "https://example.test/pull/42#discussion_r41",
+      path: "README.md",
+      line: 1,
+      originalLine: 1
+    }]
+  };
+}
+
+function liveRepairReviewThread(body, isResolved = false) {
+  const frozen = frozenRepairReviewThread(body, isResolved);
+  return { ...frozen, comments: { nodes: frozen.comments } };
 }
 
 function liveRepairPull(context, overrides = {}) {
@@ -1036,6 +1063,8 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
   let pushes = 0;
   let createPullCalls = 0;
   let rejectPush = false;
+  let reviewThreadBody = "Please preserve this review evidence.";
+  let reviewThreadResolved = false;
   const failureComments = [];
   try {
     await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
@@ -1050,8 +1079,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
     const patch = execFileSync("git", ["diff", "--binary", "--full-index", "HEAD"], { cwd: repository });
     await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
     git(repository, ["checkout", "--", "README.md"]);
-    const context = pullRepairContext({ configSha256, headSha });
-    context.target.reviewThreadIds = ["PRRT_thread"];
+    const context = pullRepairContext({ configSha256, headSha, reviewThreads: [frozenRepairReviewThread()] });
     const result = { ...pullRepairResult(), resolvedReviewThreadIds: ["PRRT_thread"] };
     const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "fix",
@@ -1071,8 +1099,11 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       async createPull() { createPullCalls += 1; throw new Error("must not create a second pull request"); },
       async updateIssue() { throw new Error("must not close or mutate an issue"); },
       async enableAutoMerge() { throw new Error("must not enable auto-merge"); },
-      async resolveReviewThread(threadId) { assert.equal(threadId, "PRRT_thread"); },
-      async listPullReviewThreads() { return [{ id: "PRRT_thread", isResolved: true }]; },
+      async resolveReviewThread(threadId) {
+        assert.equal(threadId, "PRRT_thread");
+        reviewThreadResolved = true;
+      },
+      async listPullReviewThreads() { return [liveRepairReviewThread(reviewThreadBody, reviewThreadResolved)]; },
       async upsertMarkerComment(number, marker, body, authorIdentity) {
         if (!rejectPush) throw new Error("successful PR repair should not publish a failure comment");
         failureComments.push({ number, marker, body, authorIdentity });
@@ -1082,6 +1113,28 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
       process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
       process.chdir(repository);
+      reviewThreadBody = "This review evidence changed after preparation.";
+      rejectPush = true;
+      await assert.rejects(
+        publishFix({
+          artifactDirectory,
+          config,
+          configSha256,
+          ...integrity,
+          token: "token",
+          prRepairGit: {
+            configureAutomationIdentity() {},
+            createCommitOnCurrentHead,
+            pushHeadToBranch() { throw new Error("thread mutation reached push"); }
+          }
+        }),
+        /repair evidence changed/
+      );
+      assert.equal(pushes, 0);
+      failureComments.length = 0;
+      reviewThreadBody = "Please preserve this review evidence.";
+      rejectPush = false;
+
       const repair = await publishFix({
         artifactDirectory,
         config,
@@ -1115,6 +1168,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
 
       git(repository, ["reset", "--hard", headSha]);
       liveHead = headSha;
+      reviewThreadResolved = false;
       rejectPush = true;
       await assert.rejects(
         publishFix({

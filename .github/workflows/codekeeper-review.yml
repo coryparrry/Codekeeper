@@ -51,11 +51,11 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: eb67bf07fbcbc7d7ceee2bf85e0b391d3b3cdf4834ea8ad5407c421fab4358aa
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: db70b70295c226a4ba1d10832aaebe5778740c88a1c891efaf3e089812b2c321
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.actor != inputs.automation_bot_login }}
 
 jobs:
   workspace:
@@ -144,6 +144,7 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
+          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -344,6 +345,7 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
+          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -618,10 +620,16 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           BASE_REF: ${{ github.event.pull_request.base.ref || github.event.client_payload.base_ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ACTOR: ${{ github.actor }}
+          AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
           ANALYZE_RESULT: ${{ needs.analyze.result }}
           SEAL_RESULT: ${{ needs.seal.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
+          [[ "$IS_REVIEW_FEEDBACK" == "true" && -n "$AUTOMATION_BOT_LOGIN" && "$ACTOR" == "$AUTOMATION_BOT_LOGIN" ]] && {
+            echo "Codekeeper-authored review feedback is intentionally ignored."
+            exit 0
+          }
           [[ "$ENABLED" == "true" ]] || { echo "Codekeeper is disabled; this required gate fails closed."; exit 1; }
           [[ "$IS_COMMAND_REVIEW" == "true" || ("$IS_REVIEW_FEEDBACK" == "true" && "$AUTO_REVIEW_FEEDBACK" == "true") || ("$IS_REVIEW_FEEDBACK" != "true" && "$AUTO_REVIEW" == "true") ]] || { echo "The matching automatic review policy is disabled; this required gate fails closed."; exit 1; }
           [[ "$IS_DRAFT" != "true" ]] || { echo "Draft pull requests require manual review."; exit 1; }

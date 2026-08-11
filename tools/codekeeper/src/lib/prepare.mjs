@@ -5,7 +5,7 @@ import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./g
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
 import { REVIEW_MARKER } from "./markers.mjs";
-import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
+import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
 import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
 import { assertRunnerOwnedDirectory, runUrl } from "./workspace.mjs";
@@ -158,45 +158,22 @@ function boundedRepairComments(comments, config, { actor, authorizationMode }) {
     }));
 }
 
-function boundedRepairReviewThreads(threads, reviewThreadIds) {
-  if (reviewThreadIds.length === 0) return [];
-  const byId = new Map(threads.map((thread) => [thread.id, thread]));
-  const selected = reviewThreadIds.map((threadId) => {
-    const thread = byId.get(threadId);
-    if (!thread) {
-      throw new Error(`PR repair review thread ${threadId} no longer exists`);
-    }
-    return {
-      id: thread.id,
-      isResolved: Boolean(thread.isResolved),
-      isOutdated: Boolean(thread.isOutdated),
-      comments: (thread.comments?.nodes ?? []).map((comment) => ({
-        id: boundedText(comment.id, 512, "…"),
-        databaseId: comment.databaseId,
-        author: boundedText(comment.author?.login, 256, "…"),
-        body: boundedText(comment.body, 6000),
-        url: boundedText(comment.url, 2048, "…"),
-        path: boundedText(comment.path, 4096, "…"),
-        line: comment.line ?? null,
-        originalLine: comment.originalLine ?? null
-      }))
-    };
-  });
-  if (Buffer.byteLength(JSON.stringify(selected), "utf8") > 262144) {
-    throw new Error("Selected PR repair review thread evidence exceeds 262144 bytes");
-  }
-  return selected;
-}
-
 async function completeReviewFeedback(github, pullNumber) {
   const [reviews, threads] = await Promise.all([
     github.listPullReviews(pullNumber, 129),
     github.listPullReviewThreads(pullNumber, 129)
   ]);
   if (reviews.length > 128 || threads.length > 128) throw new Error(`PR #${pullNumber} has more than 128 review records or threads`);
+  const automationLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
+  const isAutomationFeedback = (author, body) => {
+    const normalizedAuthor = String(author ?? "").trim().toLowerCase();
+    return (automationLogin && normalizedAuthor === automationLogin) ||
+      /<!-- codekeeper:review-feedback-reply=[0-9a-f]{64} -->\s*$/.test(String(body ?? ""));
+  };
   const feedback = [];
   for (const review of reviews) {
     if (!String(review.body ?? "").trim()) continue;
+    if (isAutomationFeedback(review.user?.login, review.body)) continue;
     feedback.push({
       sourceKey: `review:${review.id}`,
       kind: "review",
@@ -214,6 +191,7 @@ async function completeReviewFeedback(github, pullNumber) {
   for (const thread of threads) {
     const rootCommentId = thread.comments?.nodes?.[0]?.databaseId ?? null;
     for (const comment of thread.comments?.nodes ?? []) {
+      if (isAutomationFeedback(comment.author?.login, comment.body)) continue;
       feedback.push({
         sourceKey: `review_comment:${comment.databaseId}`,
         kind: "review_comment",
@@ -445,7 +423,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       }
     }
     const reviewThreads = reviewThreadIds.length > 0
-      ? boundedRepairReviewThreads(
+      ? frozenPullRepairReviewThreads(
         await github.listPullReviewThreads(targetNumber),
         reviewThreadIds
       )
@@ -465,7 +443,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       baseRepository: pull.base.repo.full_name
     };
     baseSha = target.headSha;
-    const frozenSubject = frozenPullRepairSubject(pull, comments);
+    const frozenSubject = frozenPullRepairSubject(pull, comments, reviewThreads);
     subject = {
       pullRequest: {
         ...frozenSubject,
@@ -474,7 +452,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
         reviewThreads
       }
     };
-    target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments);
+    target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments, reviewThreads);
   } else {
     if (authorizationMode === "policy" && !config.issues.allowAiImplementation) {
       throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");

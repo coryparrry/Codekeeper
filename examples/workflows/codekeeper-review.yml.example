@@ -20,6 +20,9 @@ permissions:
 jobs:
   bootstrap:
     name: Codekeeper pinned tooling bootstrap
+    if: >-
+      github.event_name != 'pull_request_review_comment' ||
+      github.actor != vars.CODEKEEPER_AUTOMATION_BOT_LOGIN
     runs-on: ubuntu-latest
     steps:
       - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA

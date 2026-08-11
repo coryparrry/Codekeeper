@@ -184,9 +184,14 @@ test("feedback-triggered review preparation freezes the complete current review 
     }
   }));
   const originalFetch = globalThis.fetch;
+  const originalAutomationLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = "codekeeper-app[bot]";
   globalThis.fetch = async (url) => {
     if (String(url).includes("/pulls/7/reviews")) {
-      return new Response(JSON.stringify([{ id: 7, body: "General review note", state: "CHANGES_REQUESTED", html_url: "https://github.test/review/7", user: { login: "reviewer" } }]), { status: 200 });
+      return new Response(JSON.stringify([
+        { id: 7, body: "General review note", state: "CHANGES_REQUESTED", html_url: "https://github.test/review/7", user: { login: "reviewer" } },
+        { id: 8, body: "Codekeeper automation review", state: "COMMENTED", html_url: "https://github.test/review/8", user: { login: "codekeeper-app[bot]" } }
+      ]), { status: 200 });
     }
     if (String(url).endsWith("/graphql")) {
       const reviewThreads = {
@@ -197,7 +202,8 @@ test("feedback-triggered review preparation freezes the complete current review 
           comments: {
             nodes: [
               { id: "PRRC_node_41", databaseId: 41, body: "Root timeout concern", url: "https://github.test/comment/41", path: "README.md", line: 1, originalLine: 1, author: { login: "reviewer" } },
-              { id: "PRRC_node_42", databaseId: 42, body: "Please add a timeout test", url: "https://github.test/comment/42", path: "README.md", line: 1, originalLine: 1, author: { login: "owner" } }
+              { id: "PRRC_node_42", databaseId: 42, body: "Please add a timeout test", url: "https://github.test/comment/42", path: "README.md", line: 1, originalLine: 1, author: { login: "owner" } },
+              { id: "PRRC_node_43", databaseId: 43, body: "Handled.\n\n<!-- codekeeper:review-feedback-reply=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->", url: "https://github.test/comment/43", path: "README.md", line: 1, originalLine: 1, author: { login: "codekeeper-app[bot]" } }
             ],
             pageInfo: { hasNextPage: false }
           }
@@ -226,6 +232,8 @@ test("feedback-triggered review preparation freezes the complete current review 
     assert.equal(context.pullRequest.reviewFeedback[0].threadId, "PRRT_thread");
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalAutomationLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = originalAutomationLogin;
   }
 });
 
