@@ -1,11 +1,14 @@
 import { GitHubClient } from "./github.mjs";
 import { readJson } from "./io.mjs";
 import { COMMAND_STATUS_MARKER } from "./markers.mjs";
+import { upsertDeferredReviewFeedback } from "./publish.mjs";
 
 const COMMANDS = new Set([
   "status",
   "review",
   "rerun",
+  "triage",
+  "defer",
   "implement",
   "fix",
   "stop",
@@ -21,8 +24,30 @@ function labels(issue) {
 function parseCommand(body) {
   const match = String(body ?? "")
     .trim()
-    .match(/^\/codekeeper\s+(status|review|rerun|implement|fix|stop)$/i);
+    .match(
+      /^\/codekeeper\s+(status|review|rerun|triage|defer|implement|fix|stop)$/i,
+    );
   return match ? match[1].toLowerCase() : null;
+}
+
+function parseMentionIntent(body, botLogin) {
+  const mention = String(botLogin ?? "")
+    .replace(/\[bot\]$/i, "")
+    .toLowerCase();
+  const text = String(body ?? "")
+    .trim()
+    .toLowerCase();
+  if (!mention || !text.includes(`@${mention}`)) return null;
+  const actions = [
+    "review",
+    "triage",
+    "defer",
+    "status",
+    "implement",
+    "fix",
+    "stop",
+  ].filter((action) => new RegExp(`\\b${action}\\b`, "i").test(text));
+  return actions.length === 1 ? actions[0] : null;
 }
 
 function isOwner(config, actor) {
@@ -46,7 +71,7 @@ function statusBody(issue, command, outcome) {
 | Result | ${outcome} |
 | Codekeeper labels | ${active.length ? active.map((label) => `\`${label}\``).join(", ") : "None"} |
 
-Available commands: \`/codekeeper status\`, \`/codekeeper review\`, \`/codekeeper rerun\`, \`/codekeeper implement\`, \`/codekeeper fix\`, and \`/codekeeper stop\`.`;
+Available commands: \`/codekeeper status\`, \`/codekeeper review\`, \`/codekeeper triage\`, \`/codekeeper defer\`, \`/codekeeper implement\`, \`/codekeeper fix\`, and \`/codekeeper stop\`.`;
 }
 
 export async function runOwnerCommand({
@@ -56,9 +81,13 @@ export async function runOwnerCommand({
   automationIdentity,
 }) {
   const event = await readJson(eventPath);
-  const command = parseCommand(event.comment?.body);
+  const command =
+    parseCommand(event.comment?.body) ??
+    parseMentionIntent(event.comment?.body, automationIdentity?.login);
   if (!COMMANDS.has(command))
     throw new Error("The Codekeeper command is not supported");
+  if (config.automation?.ownerRequests === false)
+    throw new Error("Owner requests are off in the Codekeeper policy");
   const actor = event.comment?.user?.login ?? event.sender?.login;
   if (
     !ASSOCIATIONS.has(event.comment?.author_association) ||
@@ -70,7 +99,7 @@ export async function runOwnerCommand({
   }
   const repository =
     event.repository?.full_name ?? process.env.GITHUB_REPOSITORY;
-  const number = event.issue?.number;
+  const number = event.issue?.number ?? event.pull_request?.number;
   if (!Number.isSafeInteger(number) || number <= 0)
     throw new Error("The command target is invalid");
   const github = new GitHubClient({ token, repository });
@@ -99,18 +128,118 @@ export async function runOwnerCommand({
       base_ref: pull.base.ref,
     });
     outcome = "A new review was requested for the current pull request commit.";
+  } else if (command === "triage") {
+    if (issue.pull_request) {
+      const pull = await github.getPull(number);
+      await github.createRepositoryDispatch("codekeeper_review", {
+        number,
+        head_sha: pull.head.sha,
+        base_sha: pull.base.sha,
+        draft: pull.draft,
+        head_repository: pull.head.repo.full_name,
+        base_ref: pull.base.ref,
+        review_feedback: true,
+      });
+      outcome =
+        "The complete current pull request review surface was queued for triage.";
+    } else {
+      await github.createRepositoryDispatch("codekeeper_issue", {
+        number,
+        requested_by: actor,
+      });
+      outcome = "The issue was queued for owner-requested triage.";
+    }
+  } else if (command === "defer") {
+    if (!issue.pull_request)
+      throw new Error(
+        "/codekeeper defer requires a pull request review comment",
+      );
+    const directComment = event.comment;
+    const sourceComment = directComment?.in_reply_to_id
+      ? await github.getReviewComment(directComment.in_reply_to_id)
+      : directComment;
+    if (!sourceComment?.id || parseCommand(sourceComment.body) === "defer") {
+      throw new Error(
+        "/codekeeper defer must reply to the review comment that should become an issue",
+      );
+    }
+    const threads = await github.listPullReviewThreads(number);
+    const thread = threads.find((candidate) =>
+      (candidate.comments?.nodes ?? []).some(
+        (comment) => comment.databaseId === sourceComment.id,
+      ),
+    );
+    const sourceKey = `review_comment:${sourceComment.id}`;
+    const feedback = {
+      problemKey: `owner-defer-review-comment-${sourceComment.id}`,
+      disposition: "defer",
+      type: "maintenance",
+      explanation: String(
+        sourceComment.body ?? "Deferred pull request review feedback",
+      ).slice(0, 6000),
+      validation:
+        "A configured repository owner explicitly requested deferral; normal issue triage must validate readiness and priority.",
+      sourceKeys: [sourceKey],
+      threadIds: thread ? [thread.id] : [],
+    };
+    const deferred = await upsertDeferredReviewFeedback({
+      github,
+      context: {
+        repository,
+        runUrl: "",
+        pullRequest: {
+          number,
+          url: issue.html_url,
+          reviewFeedback: [
+            {
+              sourceKey,
+              rootCommentId:
+                thread?.comments?.nodes?.[0]?.databaseId ?? sourceComment.id,
+              author: sourceComment.user?.login ?? actor,
+              url: sourceComment.html_url ?? issue.html_url,
+              threadId: thread?.id ?? null,
+            },
+          ],
+        },
+      },
+      result: { reviewFeedback: [feedback] },
+      config,
+      automationIdentity,
+      ownerRequested: true,
+    });
+    outcome = `The review feedback was deferred to issue #${deferred[0].issueNumber}.`;
   } else if (command === "implement") {
     if (issue.pull_request)
       throw new Error("/codekeeper implement requires an issue");
-    if (!config.issues.allowAiImplementation)
-      throw new Error("Issue implementation is off in the Codekeeper policy");
-    await github.ensureLabels(config.labels, ["codekeeper:ready"]);
     await github.removeLabel(number, "codekeeper:paused");
-    await github.addLabels(number, ["codekeeper:ready"]);
-    outcome = "The issue was queued for implementation.";
+    await github.createRepositoryDispatch("codekeeper_fix", {
+      number,
+      authorization_mode: "owner",
+      requested_by: actor,
+    });
+    outcome = "The bounded owner-requested implementation was queued.";
   } else if (command === "fix") {
     await github.removeLabel(number, "codekeeper:paused");
-    outcome = "The item was resumed for owner-requested repair.";
+    const payload = {
+      number,
+      authorization_mode: "owner",
+      requested_by: actor,
+    };
+    if (issue.pull_request) {
+      const pull = await github.getPull(number);
+      payload.head_sha = pull.head.sha;
+      if (event.comment?.pull_request_review_id) {
+        const threads = await github.listPullReviewThreads(number);
+        const thread = threads.find((candidate) =>
+          (candidate.comments?.nodes ?? []).some(
+            (comment) => comment.databaseId === event.comment.id,
+          ),
+        );
+        if (thread) payload.review_thread_ids = [thread.id];
+      }
+    }
+    await github.createRepositoryDispatch("codekeeper_fix", payload);
+    outcome = "The bounded owner-requested repair was queued.";
   } else if (command === "stop") {
     await github.ensureLabels(config.labels, ["codekeeper:paused"]);
     await github.addLabels(number, ["codekeeper:paused"]);
@@ -135,4 +264,4 @@ export async function runOwnerCommand({
   return { number, command, outcome };
 }
 
-export { parseCommand };
+export { parseCommand, parseMentionIntent };

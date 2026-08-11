@@ -65,7 +65,8 @@ export function frozenPullRepairTarget(context, config) {
     baseRef: requiredText(target.baseRef, "base ref"),
     baseSha: requiredText(target.baseSha, "base SHA"),
     baseRepository: requiredText(target.baseRepository, "base repository"),
-    subjectSha256: requiredText(target.subjectSha256, "repair evidence SHA-256")
+    subjectSha256: requiredText(target.subjectSha256, "repair evidence SHA-256"),
+    reviewThreadIds: Array.isArray(target.reviewThreadIds) ? [...target.reviewThreadIds] : []
   };
   if (!COMMIT_SHA.test(frozen.headSha) || !COMMIT_SHA.test(frozen.baseSha) || !SHA256.test(frozen.subjectSha256)) {
     throw new Error("Frozen PR target requires full head and base commit SHAs plus repair evidence SHA-256");
@@ -229,6 +230,20 @@ export async function publishPullRequestRepair({
     const pushedSha = gitOperations.pushHeadToBranch(target.headRef, github.token);
     if (pushedSha !== commitSha) throw new Error(`PR repair pushed ${pushedSha}; expected ${commitSha}`);
     const updatedPull = assertLivePullRepairTarget(await github.getPull(target.number), target, { expectedHeadSha: commitSha });
+    for (const threadId of result.resolvedReviewThreadIds ?? []) {
+      await github.resolveReviewThread(threadId);
+    }
+    let resolvedReviewThreadIds = [];
+    if ((result.resolvedReviewThreadIds?.length ?? 0) > 0) {
+      const threads = await github.listPullReviewThreads(target.number);
+      const byId = new Map(threads.map((thread) => [thread.id, thread]));
+      for (const threadId of result.resolvedReviewThreadIds) {
+        if (byId.get(threadId)?.isResolved !== true) {
+          throw new Error(`Review thread ${threadId} was not resolved after the verified fix was pushed`);
+        }
+      }
+      resolvedReviewThreadIds = [...result.resolvedReviewThreadIds];
+    }
     return {
       updated: true,
       pullRequest: target.number,
@@ -237,6 +252,7 @@ export async function publishPullRequestRepair({
       previousHeadSha: target.headSha,
       headSha: commitSha,
       files: patch.files,
+      resolvedReviewThreadIds,
       dryRun: false
     };
   } catch (error) {

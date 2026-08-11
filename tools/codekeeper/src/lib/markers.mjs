@@ -21,6 +21,23 @@ export function findingMarker(fingerprint) {
   return `<!-- codekeeper:fingerprint=${fingerprint} -->`;
 }
 
+export function deferredReviewFingerprint(repository, pullNumber, problemKey) {
+  return sha256(JSON.stringify({
+    version: 1,
+    repository: String(repository ?? "").trim().toLowerCase(),
+    pullNumber,
+    problemKey: String(problemKey ?? "").normalize("NFKC").trim().toLowerCase()
+  }));
+}
+
+export function deferredReviewMarker(fingerprint) {
+  return `<!-- codekeeper:deferred=${fingerprint} -->`;
+}
+
+export function reviewFeedbackReplyMarker(fingerprint) {
+  return `<!-- codekeeper:review-feedback-reply=${fingerprint} -->`;
+}
+
 export function repairMarker(fingerprint) {
   return `<!-- codekeeper:repair=${fingerprint} -->`;
 }

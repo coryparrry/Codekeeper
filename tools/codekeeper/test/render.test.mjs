@@ -11,7 +11,27 @@ test("review comment contains deterministic policy decision", () => {
       diagram: "flowchart LR\n  Change --> Test",
       mergeRecommendation: "auto",
       blockingFindings: [],
-      nonBlockingFindings: []
+      nonBlockingFindings: [],
+      reviewFeedback: [
+        {
+          problemKey: "fix-current-timeout",
+          disposition: "fix_now",
+          explanation: "The timeout regression is current.",
+          validation: "A focused test fails on this head."
+        },
+        {
+          problemKey: "defer-cache-cleanup",
+          disposition: "defer",
+          explanation: "The cleanup is valid follow-up work.",
+          validation: "The duplicated cache path remains."
+        },
+        {
+          problemKey: "ignore-stale-comment",
+          disposition: "ignore",
+          explanation: "The comment targets code removed by a later push.",
+          validation: "The cited path is absent on the current head."
+        }
+      ]
     },
     { eligible: false, reasons: ["Swift files require manual review"] },
     "https://github.com/owner/repository/actions/runs/7001"
@@ -20,6 +40,9 @@ test("review comment contains deterministic policy decision", () => {
   assert.match(markdown, /Manual boundary retained/);
   assert.match(markdown, /Swift files require manual review/);
   assert.match(markdown, /```mermaid\nflowchart LR/);
+  assert.match(markdown, /Fix now/);
+  assert.match(markdown, /Defer/);
+  assert.match(markdown, /Ignore/);
   assert.match(markdown, /<sub>Codekeeper workflow run: https:\/\/github\.com\/owner\/repository\/actions\/runs\/7001<\/sub>/);
 });
 

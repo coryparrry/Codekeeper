@@ -264,6 +264,59 @@ export class GitHubClient {
     return this.paginate(this.repoPath(`/pulls/${number}/files`), { limit });
   }
 
+  async listPullReviews(number, limit = 100) {
+    return this.paginate(this.repoPath(`/pulls/${number}/reviews`), { limit });
+  }
+
+  async getReviewComment(commentId) {
+    return (await this.request("GET", this.repoPath(`/pulls/comments/${commentId}`))).data;
+  }
+
+  async listPullReviewComments(number) {
+    return this.paginate(this.repoPath(`/pulls/${number}/comments`));
+  }
+
+  async listPullReviewThreads(number, limit = 200) {
+    const query = `
+      query PullReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            reviewThreads(first: 100, after: $after) {
+              nodes {
+                id
+                isResolved
+                isOutdated
+                comments(first: 100) {
+                  nodes { id databaseId body url path line originalLine author { login } }
+                  pageInfo { hasNextPage }
+                }
+              }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }
+      }
+    `;
+    const threads = [];
+    let after = null;
+    while (threads.length < limit) {
+      const data = await this.graphql(query, { owner: this.owner, repo: this.repo, number, after });
+      const connection = data?.repository?.pullRequest?.reviewThreads;
+      if (!connection || !Array.isArray(connection.nodes)) throw new Error(`PR #${number} has invalid review-thread metadata`);
+      for (const thread of connection.nodes) {
+        if (thread.comments?.pageInfo?.hasNextPage) throw new Error(`PR #${number} has a review thread with more than 100 comments`);
+        threads.push(thread);
+        if (threads.length === limit) break;
+      }
+      if (!connection.pageInfo?.hasNextPage) return threads;
+      if (threads.length === limit || !connection.pageInfo.endCursor) {
+        throw new Error(`PR #${number} has more than ${limit} review threads`);
+      }
+      after = connection.pageInfo.endCursor;
+    }
+    return threads;
+  }
+
   async listIssueComments(number) {
     return this.paginate(this.repoPath(`/issues/${number}/comments`));
   }
@@ -299,6 +352,28 @@ export class GitHubClient {
 
   async updateComment(commentId, body) {
     return (await this.request("PATCH", this.repoPath(`/issues/comments/${commentId}`), { body: { body } })).data;
+  }
+
+  async createReviewReply(number, commentId, body) {
+    return (await this.request("POST", this.repoPath(`/pulls/${number}/comments/${commentId}/replies`), { body: { body } })).data;
+  }
+
+  async updateReviewComment(commentId, body) {
+    return (await this.request("PATCH", this.repoPath(`/pulls/comments/${commentId}`), { body: { body } })).data;
+  }
+
+  async upsertReviewReply(number, commentId, marker, body, authorIdentity) {
+    const expectedAuthor = normalizeAutomationIdentity(authorIdentity);
+    if (!expectedAuthor) throw new Error("A configured GitHub App bot identity is required for review replies");
+    const comments = await this.listPullReviewComments(number);
+    const existing = comments.find((comment) =>
+      Number(comment.in_reply_to_id) === Number(commentId) &&
+      isOwnedMarkerComment(comment, marker, expectedAuthor)
+    );
+    const content = `${body}\n${marker}`;
+    return existing
+      ? this.updateReviewComment(existing.id, content)
+      : this.createReviewReply(number, commentId, content);
   }
 
   async upsertMarkerComment(number, marker, body, authorIdentity) {
@@ -440,6 +515,17 @@ export class GitHubClient {
       }
     `;
     return this.graphql(query, { pullRequestId: pullRequestNodeId });
+  }
+
+  async resolveReviewThread(threadId) {
+    const query = `
+      mutation ResolveReviewThread($threadId: ID!) {
+        resolveReviewThread(input: { threadId: $threadId }) {
+          thread { id isResolved }
+        }
+      }
+    `;
+    return this.graphql(query, { threadId });
   }
 
   async graphql(query, variables = {}) {

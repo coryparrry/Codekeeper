@@ -158,6 +158,52 @@ function boundedRepairComments(comments, config, { actor, authorizationMode }) {
     }));
 }
 
+async function completeReviewFeedback(github, pullNumber) {
+  const [reviews, threads] = await Promise.all([
+    github.listPullReviews(pullNumber, 129),
+    github.listPullReviewThreads(pullNumber, 129)
+  ]);
+  if (reviews.length > 128 || threads.length > 128) throw new Error(`PR #${pullNumber} has more than 128 review records or threads`);
+  const feedback = [];
+  for (const review of reviews) {
+    if (!String(review.body ?? "").trim()) continue;
+    feedback.push({
+      sourceKey: `review:${review.id}`,
+      kind: "review",
+      author: boundedText(review.user?.login, 256, "…"),
+      body: boundedText(review.body, 6000),
+      url: boundedText(review.html_url, 2048, "…"),
+      state: boundedText(review.state, 64, "…"),
+      threadId: null,
+      resolved: false,
+      outdated: false,
+      path: null,
+      line: null
+    });
+  }
+  for (const thread of threads) {
+    const rootCommentId = thread.comments?.nodes?.[0]?.databaseId ?? null;
+    for (const comment of thread.comments?.nodes ?? []) {
+      feedback.push({
+        sourceKey: `review_comment:${comment.databaseId}`,
+        kind: "review_comment",
+        author: boundedText(comment.author?.login, 256, "…"),
+        body: boundedText(comment.body, 6000),
+        url: boundedText(comment.url, 2048, "…"),
+        state: "commented",
+        threadId: boundedText(thread.id, 512, "…"),
+        rootCommentId,
+        resolved: thread.isResolved === true,
+        outdated: thread.isOutdated === true,
+        path: comment.path ? boundedText(comment.path, 2048, "…") : null,
+        line: Number.isSafeInteger(comment.line ?? comment.originalLine) ? (comment.line ?? comment.originalLine) : null
+      });
+    }
+  }
+  if (feedback.length > 128) throw new Error(`PR #${pullNumber} has more than 128 review feedback items`);
+  return feedback.sort((a, b) => a.sourceKey.localeCompare(b.sourceKey));
+}
+
 export async function prepareReview({ eventPath, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
   const agentProfile = await trustedAgentProfile("review", agentProfilePath, agentProfileSourceSha);
   const event = await readJson(eventPath);
@@ -172,6 +218,16 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     }
   }
   const pull = ensureSameRepositoryPullRequest(event, repository);
+  const feedbackEvent = Boolean(event.review || event.comment?.pull_request_review_id || event.client_payload?.review_feedback);
+  if (feedbackEvent && event.action !== "codekeeper_review" && config.automation.reviewFeedbackTriage !== true) {
+    throw new Error("Automatic review-feedback triage is off in the Codekeeper policy");
+  }
+  if (!feedbackEvent && event.action !== "codekeeper_review" && config.automation.automaticPrReview !== true) {
+    throw new Error("Automatic pull request review is off in the Codekeeper policy");
+  }
+  const reviewFeedback = feedbackEvent
+    ? await completeReviewFeedback(new GitHubClient({ token, repository }), pull.number)
+    : [];
   const context = {
     mode: "review",
     repository,
@@ -187,7 +243,8 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
       baseRef: boundedText(pull.base?.ref ?? config.repository.defaultBranch, 512, "…"),
       headRef: boundedText(pull.head?.ref, 512, "…"),
       baseSha: pull.base?.sha,
-      headSha: pull.head?.sha
+      headSha: pull.head?.sha,
+      reviewFeedback
     }
   };
   if (!context.pullRequest.baseSha || !context.pullRequest.headSha) {
@@ -264,11 +321,19 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   if (triageMode === "manual" && !isConfiguredOwner(config, actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request Codekeeper issue triage`);
   }
+  if (triageMode === "automatic" && config.automation.issueTriage !== true) {
+    throw new Error("Automatic issue triage is off in the Codekeeper policy");
+  }
   const event = await readJson(eventPath);
   const repository = repositoryFromEvent(event);
+  const github = new GitHubClient({ token, repository });
+  if (!event.issue && event.action === "codekeeper_issue") {
+    const number = Number(event.client_payload?.number);
+    if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Issue dispatch has no valid issue number");
+    event.issue = await github.getIssue(number);
+  }
   const issue = event.issue;
   if (!issue || issue.pull_request) throw new Error("Issue payload is missing or refers to a pull request");
-  const github = new GitHubClient({ token, repository });
   const [existing, pulls] = await Promise.all([
     github.listOpenIssues(config.issues.maximumOpenIssueContext),
     github.listOpenPulls(config.issues.maximumOpenIssueContext)
@@ -302,10 +367,14 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", reviewThreadIds = [], directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
   const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha);
   if (!["owner", "policy"].includes(authorizationMode)) {
     throw new Error("Codekeeper fix authorization mode must be owner or policy");
+  }
+  if (!Array.isArray(reviewThreadIds) || reviewThreadIds.length > 128 || new Set(reviewThreadIds).size !== reviewThreadIds.length
+    || reviewThreadIds.some((threadId) => typeof threadId !== "string" || !threadId.trim() || threadId.length > 512)) {
+    throw new Error("Codekeeper fix review thread IDs are invalid");
   }
   if (authorizationMode === "owner" && !isConfiguredOwner(config, actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request a Codekeeper fix`);
@@ -355,6 +424,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       headSha: pull.head.sha,
       headRepository: pull.head.repo.full_name,
       baseRef: pull.base.ref,
+      reviewThreadIds: [...reviewThreadIds],
       baseSha: pull.base.sha,
       baseRepository: pull.base.repo.full_name
     };
@@ -369,9 +439,10 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     };
     target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments);
   } else {
-    if (!config.issues.allowAiImplementation) {
+    if (authorizationMode === "policy" && !config.issues.allowAiImplementation) {
       throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
     }
+    if (reviewThreadIds.length > 0) throw new Error("Issue implementation cannot resolve pull request review threads");
     const labels = boundedLabels(issue.labels);
     if (authorizationMode === "policy" && labels.includes("codekeeper:paused")) {
       throw new Error(`Issue #${targetNumber} is paused`);

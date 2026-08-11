@@ -7,7 +7,7 @@ import test from "node:test";
 import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/lib/github.mjs";
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
-import { findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
+import { deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
 import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
 import {
   isTrustedMaintenanceIssue,
@@ -17,7 +17,9 @@ import {
   publishIssue as publishIssueProduction,
   publishReview as publishReviewProduction,
   reconcileAutoMerge,
-  repairBranch
+  repairBranch,
+  replyToReviewFeedback,
+  upsertDeferredReviewFeedback
 } from "../src/lib/publish.mjs";
 
 const config = JSON.parse(
@@ -179,6 +181,84 @@ test("sticky marker comments ignore human and unrelated-bot spoofing", () => {
   assert.equal(isOwnedMarkerComment({ ...trusted, body: `${trusted.body}\nuntrusted suffix` }, marker, identity), false);
 });
 
+test("verified deferred feedback creates one idempotent issue with backlinks and triage metadata", async () => {
+  const context = {
+    repository: "owner/repository",
+    runUrl: "https://github.com/owner/repository/actions/runs/9",
+    pullRequest: {
+      number: 7,
+      url: "https://github.com/owner/repository/pull/7",
+      reviewFeedback: [
+        { sourceKey: "review_comment:41", rootCommentId: 41, author: "reviewer", url: "https://github.com/owner/repository/pull/7#discussion_r41" },
+        { sourceKey: "review_comment:42", rootCommentId: 41, author: "owner", url: "https://github.com/owner/repository/pull/7#discussion_r42" }
+      ]
+    }
+  };
+  const feedback = {
+    problemKey: "timeout-regression-coverage",
+    disposition: "defer",
+    type: "testing",
+    explanation: "Add deterministic timeout regression coverage.",
+    validation: "The current head still lacks the timeout case.",
+    sourceKeys: ["review_comment:41", "review_comment:42"],
+    threadIds: ["PRRT_thread"]
+  };
+  const fingerprint = deferredReviewFingerprint(context.repository, 7, feedback.problemKey);
+  const existing = [];
+  const calls = { created: [], updated: [], replies: [], labels: [] };
+  const github = {
+    async listMaintenanceIssues() { return existing; },
+    async ensureLabels(_definitions, labels) { calls.labels.push(labels); },
+    async createIssue(input) {
+      calls.created.push(input);
+      const issue = { ...input, number: 51, html_url: "https://github.com/owner/repository/issues/51", state: "open", user: { login: identity.login, id: Number(identity.id), type: "Bot" } };
+      return issue;
+    },
+    async updateIssue(number, input) {
+      calls.updated.push({ number, input });
+      return { ...existing[0], ...input };
+    },
+    async replaceManagedLabels() {},
+    async upsertReviewReply(number, commentId, marker, body) { calls.replies.push({ number, commentId, marker, body }); }
+  };
+  const input = { github, context, result: { reviewFeedback: [feedback] }, config, automationIdentity: identity };
+
+  const created = await upsertDeferredReviewFeedback(input);
+  assert.deepEqual(created.map((item) => item.state), ["created"]);
+  assert.deepEqual(calls.created[0].labels, ["codekeeper:deferred", "codekeeper:type-testing"]);
+  assert.match(calls.created[0].body, /pull\/7#discussion_r41/);
+  assert.match(calls.created[0].body, new RegExp(deferredReviewMarker(fingerprint)));
+  assert.equal(calls.replies[0].commentId, 41);
+  assert.match(calls.replies[0].body, /issue #51/);
+
+  existing.push({
+    ...calls.created[0],
+    number: 51,
+    state: "open",
+    user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+  });
+  const updated = await upsertDeferredReviewFeedback(input);
+  assert.deepEqual(updated.map((item) => item.state), ["updated"]);
+  assert.equal(calls.created.length, 1);
+  assert.equal(calls.updated.length, 1);
+  assert.equal(calls.replies.length, 2, "one idempotent thread-reply upsert runs per publication");
+
+  const automaticPolicyOff = structuredClone(config);
+  automaticPolicyOff.review.createDeferredIssues = false;
+  assert.deepEqual(await upsertDeferredReviewFeedback({
+    ...input,
+    config: automaticPolicyOff,
+    ownerRequested: false,
+    dryRun: true
+  }), []);
+  assert.deepEqual((await upsertDeferredReviewFeedback({
+    ...input,
+    config: automaticPolicyOff,
+    ownerRequested: true,
+    dryRun: true
+  })).map((item) => item.state), ["would-update"]);
+});
+
 test("maintenance issue fingerprints require the configured App author", () => {
   const marker = findingMarker("b".repeat(64));
   const issue = {
@@ -191,6 +271,37 @@ test("maintenance issue fingerprints require the configured App author", () => {
   assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { login: "other-app[bot]", id: 123456, type: "Bot" } }, options), false);
   assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { ...issue.user, id: 999 } }, options), false);
   assert.equal(isTrustedMaintenanceIssue({ ...issue, body: `${issue.body}\nuntrusted suffix` }, options), false);
+});
+
+test("ignored and repairable inline feedback receive idempotent replies without resolving threads", async () => {
+  const replies = [];
+  const context = {
+    repository: "owner/repository",
+    pullRequest: {
+      number: 7,
+      reviewFeedback: [
+        { sourceKey: "review_comment:41", rootCommentId: 41 },
+        { sourceKey: "review_comment:42", rootCommentId: 41 },
+        { sourceKey: "review_comment:43", rootCommentId: 43 }
+      ]
+    }
+  };
+  const result = { reviewFeedback: [
+    { problemKey: "duplicate-style-request", disposition: "ignore", explanation: "This duplicates an already resolved preference.", validation: "No current defect remains.", sourceKeys: ["review_comment:41", "review_comment:42"] },
+    { problemKey: "current-null-crash", disposition: "fix_now", explanation: "The current head can crash.", validation: "A regression test reproduces it.", sourceKeys: ["review_comment:43"] }
+  ] };
+  const published = await replyToReviewFeedback({
+    github: { async upsertReviewReply(number, commentId, marker, body) { replies.push({ number, commentId, marker, body }); } },
+    context,
+    result,
+    automationIdentity: identity
+  });
+  assert.deepEqual(published.map(({ commentId, disposition }) => ({ commentId, disposition })), [
+    { commentId: 41, disposition: "ignore" },
+    { commentId: 43, disposition: "fix_now" }
+  ]);
+  assert.match(replies[0].body, /^No action:/);
+  assert.match(replies[1].body, /^Fix now:/);
 });
 
 test("GraphQL follows the configured GitHub API host", () => {
@@ -940,10 +1051,12 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
     await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
     git(repository, ["checkout", "--", "README.md"]);
     const context = pullRepairContext({ configSha256, headSha });
+    context.target.reviewThreadIds = ["PRRT_thread"];
+    const result = { ...pullRepairResult(), resolvedReviewThreadIds: ["PRRT_thread"] };
     const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "fix",
       context,
-      result: pullRepairResult(),
+      result,
       configSha256,
       patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: ["README.md"] }
     });
@@ -958,6 +1071,8 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       async createPull() { createPullCalls += 1; throw new Error("must not create a second pull request"); },
       async updateIssue() { throw new Error("must not close or mutate an issue"); },
       async enableAutoMerge() { throw new Error("must not enable auto-merge"); },
+      async resolveReviewThread(threadId) { assert.equal(threadId, "PRRT_thread"); },
+      async listPullReviewThreads() { return [{ id: "PRRT_thread", isResolved: true }]; },
       async upsertMarkerComment(number, marker, body, authorIdentity) {
         if (!rejectPush) throw new Error("successful PR repair should not publish a failure comment");
         failureComments.push({ number, marker, body, authorIdentity });
@@ -989,6 +1104,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
         }
       });
       assert.equal(repair.updated, true);
+      assert.deepEqual(repair.resolvedReviewThreadIds, ["PRRT_thread"]);
       assert.equal(repair.previousHeadSha, headSha);
       assert.equal(repair.headSha, liveHead);
       assert.equal(pushes, 1);

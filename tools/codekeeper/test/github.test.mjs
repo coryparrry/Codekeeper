@@ -67,6 +67,30 @@ test("GitHub does not retry an ambiguous mutation response-body timeout", async 
   assert.equal(attempts, 1);
 });
 
+test("review replies update the App-owned marker in the originating thread", async () => {
+  const marker = "<!-- codekeeper:deferred-reply=test -->";
+  const requests = [];
+  const github = client({
+    fetch: async (url, options) => {
+      requests.push({ url: String(url), method: options.method, body: options.body });
+      if (options.method === "GET") {
+        return new Response(JSON.stringify([{
+          id: 99,
+          in_reply_to_id: 41,
+          body: `Old reply\n${marker}`,
+          user: { login: "codekeeper[bot]", id: 123, type: "Bot" }
+        }]));
+      }
+      return new Response(JSON.stringify({ id: 99 }), { status: 200 });
+    }
+  });
+
+  await github.upsertReviewReply(7, 41, marker, "Updated reply", { login: "codekeeper[bot]", id: "123" });
+  assert.deepEqual(requests.map(({ method }) => method), ["GET", "PATCH"]);
+  assert.match(requests[1].url, /\/pulls\/comments\/99$/);
+  assert.equal(JSON.parse(requests[1].body).body, `Updated reply\n${marker}`);
+});
+
 test("GitHub keeps GraphQL deadlines active while response bodies are read", async () => {
   const github = client({
     timeoutMs: 5,

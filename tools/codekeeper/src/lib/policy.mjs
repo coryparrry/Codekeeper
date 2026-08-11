@@ -83,7 +83,8 @@ export function issueTypeLabel(type) {
     documentation: "codekeeper:type-documentation",
     question: "codekeeper:type-question",
     security: "codekeeper:type-security",
-    maintenance: "codekeeper:type-maintenance"
+    maintenance: "codekeeper:type-maintenance",
+    testing: "codekeeper:type-testing"
   };
   return map[type] ?? "codekeeper:type-maintenance";
 }

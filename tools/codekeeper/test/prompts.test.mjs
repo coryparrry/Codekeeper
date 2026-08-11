@@ -107,7 +107,7 @@ test("fix prompt keeps an owner-commanded PR repair on its frozen existing head"
   };
 
   const prompt = buildFixPrompt(context, config);
-  assert.match(prompt, /exact owner command \/codekeeper fix/);
+  assert.match(prompt, /exact bounded pull request repair/);
   assert.match(prompt, /existing pull request, directly atop its frozen head/);
   assert.match(prompt, new RegExp(headSha));
   assert.match(prompt, /Never create another branch or pull request/);

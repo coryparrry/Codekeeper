@@ -157,6 +157,19 @@ function reviewResult(context, result) {
       }
     }
   }
+  const sourceFeedback = context.pullRequest.reviewFeedback ?? [];
+  const expectedSources = new Set(sourceFeedback.map((item) => item.sourceKey));
+  const actualSources = new Set(result.reviewFeedback.flatMap((item) => item.sourceKeys));
+  if (expectedSources.size !== actualSources.size || [...expectedSources].some((source) => !actualSources.has(source))) {
+    throw new Error("Review feedback classifications must cover the complete frozen review surface exactly once");
+  }
+  const sourcesByKey = new Map(sourceFeedback.map((item) => [item.sourceKey, item]));
+  for (const feedback of result.reviewFeedback) {
+    const expectedThreadIds = [...new Set(feedback.sourceKeys.map((key) => sourcesByKey.get(key)?.threadId).filter(Boolean))].sort();
+    if (JSON.stringify([...feedback.threadIds].sort()) !== JSON.stringify(expectedThreadIds)) {
+      throw new Error(`Review feedback ${feedback.problemKey} has thread IDs outside its frozen sources`);
+    }
+  }
   return result;
 }
 

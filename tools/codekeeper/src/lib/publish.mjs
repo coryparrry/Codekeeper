@@ -5,10 +5,10 @@ import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-prof
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
-import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "./markers.mjs";
+import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
 import { publishPullRequestRepair } from "./pr-repair.mjs";
-import { renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
+import { renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
 function singleLine(value, maximum = 256) {
@@ -341,8 +341,11 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
   const blocking = result.blockingFindings.length > 0 || critical || result.mergeRecommendation === "block";
   const existingLabels = new Set((pull.labels ?? []).map((label) => typeof label === "string" ? label : label.name));
+  const repairFeedback = result.reviewFeedback.filter((feedback) =>
+    feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
+  );
   const automaticRepair = {
-    eligible: blocking && config.review.autoRepair && !existingLabels.has("codekeeper:paused") && !existingLabels.has("codekeeper:auto-repaired"),
+    eligible: (blocking || repairFeedback.length > 0) && config.review.autoRepair && !existingLabels.has("codekeeper:paused") && !existingLabels.has("codekeeper:auto-repaired"),
     dispatched: false
   };
   const publicationState = (autoMerge) => {
@@ -399,6 +402,15 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   };
 
   let { desiredLabels } = await writePublicationState(publishedAutoMerge);
+  const deferredIssues = await upsertDeferredReviewFeedback({
+    github,
+    context,
+    result,
+    config,
+    automationIdentity,
+    dryRun
+  });
+  const feedbackReplies = await replyToReviewFeedback({ github, context, result, automationIdentity, dryRun });
   let autoMergeResult = {
     enabled: false,
     disabled: suspension.disabled,
@@ -445,12 +457,96 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     await currentReviewPull(github, context, config);
     await github.createRepositoryDispatch("codekeeper_fix", {
       number: pull.number,
-      head_sha: pull.head.sha
+      head_sha: pull.head.sha,
+      review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
     });
     automaticRepair.dispatched = true;
   }
 
-  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, blocking };
+  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, deferredIssues, feedbackReplies, blocking };
+}
+
+function rootReviewCommentIds(sources) {
+  return [...new Set(sources
+    .filter((source) => source.sourceKey.startsWith("review_comment:"))
+    .map((source) => source.rootCommentId ?? Number(source.sourceKey.slice("review_comment:".length)))
+    .filter((commentId) => Number.isSafeInteger(commentId) && commentId > 0))];
+}
+
+export async function replyToReviewFeedback({ github, context, result, automationIdentity, dryRun = false }) {
+  const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
+  const replies = [];
+  for (const feedback of result.reviewFeedback.filter((item) => item.disposition !== "defer")) {
+    const commentIds = rootReviewCommentIds(feedback.sourceKeys.map((key) => sourcesByKey.get(key)).filter(Boolean));
+    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.problemKey);
+    const label = feedback.disposition === "fix_now" ? "Fix now"
+      : feedback.disposition === "fix_if_cheap" ? "Fix if cheap"
+        : "No action";
+    const body = `${label}: ${sanitizeMarkdown(feedback.explanation)}\n\nValidation: ${sanitizeMarkdown(feedback.validation)}`;
+    for (const commentId of commentIds) {
+      if (!dryRun) {
+        await github.upsertReviewReply(context.pullRequest.number, commentId, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
+      }
+      replies.push({ problemKey: feedback.problemKey, commentId, disposition: feedback.disposition, dryRun });
+    }
+  }
+  return replies;
+}
+
+export async function upsertDeferredReviewFeedback({ github, context, result, config, automationIdentity, dryRun = false, ownerRequested = false }) {
+  const deferred = result.reviewFeedback?.filter((item) => item.disposition === "defer") ?? [];
+  if ((!ownerRequested && !config.review.createDeferredIssues) || deferred.length === 0) return [];
+  const existing = await github.listMaintenanceIssues("codekeeper:deferred");
+  const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
+  const published = [];
+  for (const feedback of deferred) {
+    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.problemKey);
+    const marker = deferredReviewMarker(fingerprint);
+    const match = existing.find((issue) => isTrustedMaintenanceIssue(issue, {
+      marker,
+      botLogin: automationIdentity.login,
+      botId: automationIdentity.id
+    }));
+    const sources = feedback.sourceKeys.map((key) => sourcesByKey.get(key)).filter(Boolean);
+    const labels = ["codekeeper:deferred", issueTypeLabel(feedback.type)];
+    const title = singleLine(`[Deferred from PR #${context.pullRequest.number}] ${feedback.explanation}`, 256);
+    const body = renderDeferredIssue({
+      feedback,
+      pullRequest: context.pullRequest,
+      sources,
+      marker,
+      runUrl: context.runUrl
+    });
+    if (match?.state === "closed") {
+      published.push({ fingerprint, state: "acknowledged", issueNumber: match.number });
+      continue;
+    }
+    if (dryRun) {
+      published.push({ fingerprint, state: match ? "would-update" : "would-create", issueNumber: match?.number ?? null });
+      continue;
+    }
+    await github.ensureLabels(config.labels, labels);
+    let issue;
+    if (match) {
+      issue = await github.updateIssue(match.number, { title, body });
+      await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
+    } else {
+      issue = await github.createIssue({ title, body, labels });
+      existing.push(issue);
+    }
+    const issueUrl = issue.html_url ?? `https://github.com/${context.repository}/issues/${issue.number}`;
+    const reply = `Deferred verified review feedback to [issue #${issue.number}](${issueUrl}). This review thread remains open for human disposition.`;
+    const rootCommentIds = rootReviewCommentIds(sources);
+    if (rootCommentIds.length > 0) {
+      for (const commentId of rootCommentIds) {
+        await github.upsertReviewReply(context.pullRequest.number, commentId, reviewFeedbackReplyMarker(fingerprint), reply, automationIdentity);
+      }
+    } else {
+      await github.upsertMarkerComment(context.pullRequest.number, reviewFeedbackReplyMarker(fingerprint), reply, automationIdentity);
+    }
+    published.push({ fingerprint, state: match ? "updated" : "created", issueNumber: issue.number });
+  }
+  return published;
 }
 
 export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
