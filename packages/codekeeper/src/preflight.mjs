@@ -204,6 +204,9 @@ export async function inspectInstallationFiles(root, {
   // entry during reruns so the current strict policy validator can accept the
   // existing installation and render the single-pass fixer contract.
   delete policy.ai.agents.plan;
+  for (const agent of Object.values(policy.ai.agents)) {
+    if (agent && typeof agent === "object" && !Array.isArray(agent)) agent.maxTurns = 1;
+  }
   const policySource = `${JSON.stringify(policy, null, 2)}\n`;
   const contents = { [POLICY_TARGET]: installedPolicySource };
   for (const profile of AGENT_PROFILE_IDS) {

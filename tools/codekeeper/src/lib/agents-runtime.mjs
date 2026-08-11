@@ -263,6 +263,21 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     for (const finding of output.findings ?? []) {
       if (!exactMember(finding, specialistResult.findings ?? [])) throw new Error("Coordinator introduced an audit finding not present in workspace evidence");
     }
+    if (output.repair?.requested === true) {
+      if (specialistResult.repair?.requested !== true) {
+        throw new Error("Coordinator requested an audit repair not present in workspace evidence");
+      }
+      const specialistFinding = specialistResult.findings?.[specialistResult.repair.findingIndex];
+      const outputFinding = output.findings?.[output.repair.findingIndex];
+      if (!specialistFinding || !exactMember(outputFinding, [specialistFinding])) {
+        throw new Error("Coordinator audit repair targets a different finding than workspace evidence");
+      }
+      for (const field of ["title", "body", "risk", "validationSummary"]) {
+        if (output.repair[field] !== specialistResult.repair[field]) {
+          throw new Error(`Coordinator audit repair ${field} differs from workspace evidence`);
+        }
+      }
+    }
   }
   if (mode === "issue") {
     if (output.duplicateOf !== null && output.duplicateOf !== specialistResult.duplicateOf) {
@@ -290,6 +305,9 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
   if (mode === "fix") {
     if (output.readyForReview && specialistResult.readyForReview !== true) {
       throw new Error("Coordinator cannot mark a fix ready when workspace evidence did not");
+    }
+    if (isMorePermissive(output.risk, specialistResult.risk, ["high", "medium", "low"])) {
+      throw new Error("Coordinator fix risk is more permissive than workspace evidence");
     }
     for (const test of output.testsRun ?? []) {
       if (!exactMember(test, specialistResult.testsRun ?? [])) throw new Error("Coordinator introduced a test result not present in workspace evidence");

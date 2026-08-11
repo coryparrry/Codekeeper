@@ -520,6 +520,71 @@ test("coordinator evidence cannot become more permissive than specialist authori
     ),
     /duplicate confidence/
   );
+  const auditFindingA = { title: "Finding A" };
+  const auditFindingB = { title: "Finding B" };
+  const specialistRepair = {
+    requested: true,
+    findingIndex: 1,
+    title: "Fix B",
+    body: "Repairs B.",
+    risk: "high",
+    validationSummary: "Validated B."
+  };
+  const specialistAudit = { findings: [auditFindingA, auditFindingB], repair: specialistRepair };
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "audit",
+      {
+        findings: [auditFindingB, auditFindingA],
+        repair: {
+          ...specialistRepair,
+          findingIndex: 1,
+          title: "Fix A",
+          body: "Repairs A.",
+          risk: "low",
+          validationSummary: "Validated A."
+        }
+      },
+      specialistAudit
+    ),
+    /audit repair/
+  );
+  assert.doesNotThrow(
+    () => enforceCoordinatorEvidenceBoundary(
+      "audit",
+      {
+        findings: [auditFindingB, auditFindingA],
+        repair: { ...specialistRepair, findingIndex: 0 }
+      },
+      specialistAudit
+    )
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "audit",
+      {
+        findings: [auditFindingB, auditFindingA],
+        repair: { ...specialistRepair, findingIndex: 0, risk: "low" }
+      },
+      specialistAudit
+    ),
+    /audit repair risk/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "fix",
+      { risk: "low", readyForReview: true, testsRun: [], changedSummary: "Applied the patch." },
+      { risk: "high", readyForReview: true, testsRun: [], changedSummary: "Applied the patch." }
+    ),
+    /fix risk/
+  );
+  assert.doesNotThrow(
+    () => enforceCoordinatorEvidenceBoundary(
+      "fix",
+      { risk: "high", readyForReview: false, testsRun: [], changedSummary: "Applied the patch." },
+      { risk: "medium", readyForReview: false, testsRun: [], changedSummary: "Applied the patch." }
+    )
+  );
 });
 
 test("runtime diagnostics expose only the final failure stage and attempt", async () => {
