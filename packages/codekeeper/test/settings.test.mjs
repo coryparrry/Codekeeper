@@ -142,6 +142,13 @@ test("settings reject runtime-incompatible model settings and managed-label remo
     /modelSettings\.reasoning\.effort.*top-level agent effort/
   );
 
+  const overlongKey = structuredClone(settings);
+  overlongKey.policy.ai.agents.review.modelSettings = { ["x".repeat(16_385)]: true };
+  assert.throws(
+    () => validateEditableSettings(overlongKey, policy),
+    /modelSettings.*overlong key/
+  );
+
   const missingReviewLabel = structuredClone(settings);
   missingReviewLabel.policy.review.managedLabels = missingReviewLabel.policy.review.managedLabels
     .filter((label) => label !== "codekeeper:reviewed");

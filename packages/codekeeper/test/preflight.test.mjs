@@ -311,6 +311,7 @@ test("existing generated files are recognized as a rerunnable installation", asy
   );
   const legacyIssuesOnly = await inspectRepository({ runner: preflightRunner(issuesRoot), cwd: issuesRoot });
   assert.equal(legacyIssuesOnly.installation.policy.automation.ownerRequests, false);
+  assert.equal(legacyIssuesOnly.existingSettings.automationBotLogin, "codekeeper-widget[bot]");
 });
 
 test("setup branch collision detection covers local refs, remote refs, and prior pull requests", async () => {
