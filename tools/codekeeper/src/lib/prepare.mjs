@@ -4,8 +4,8 @@ import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-prof
 import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
-import { REVIEW_MARKER, sha256 } from "./markers.mjs";
-import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
+import { automaticRepairMarker, sha256 } from "./markers.mjs";
+import { frozenPullRepairReviewThreads, frozenPullRepairSubject } from "./pr-repair.mjs";
 import { completeReviewFeedback } from "./review-feedback.mjs";
 import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
@@ -25,6 +25,10 @@ function boundedLabels(labels, maximum = 30) {
   return (labels ?? [])
     .slice(0, maximum)
     .map((label) => boundedText(typeof label === "string" ? label : label?.name, 128, "…"));
+}
+
+function labelNames(labels) {
+  return (labels ?? []).map((label) => typeof label === "string" ? label : label?.name);
 }
 
 function configuredOwnerLogins(config) {
@@ -126,35 +130,6 @@ function boundedOwnerComments(comments, config) {
     .map((comment) => ({
       author: boundedText(comment.user?.login, 256, "…"),
       body: boundedText(comment.body, 2000),
-      createdAt: comment.created_at ?? ""
-    }));
-}
-
-function boundedRepairComments(comments, config, { actor, authorizationMode }) {
-  if (authorizationMode !== "policy") return boundedOwnerComments(comments, config);
-  const normalizedActor = String(actor ?? "").trim().toLowerCase();
-  if (!normalizedActor.endsWith("[bot]")) {
-    throw new Error("Automatic PR repair requires a GitHub App bot actor");
-  }
-  const trustedReview = comments.findLast((comment) =>
-    comment.user?.type === "Bot" &&
-    String(comment.user?.login ?? "").trim().toLowerCase() === normalizedActor &&
-    typeof comment.body === "string" &&
-    comment.body.endsWith(REVIEW_MARKER)
-  );
-  if (!trustedReview) {
-    throw new Error("Automatic PR repair requires the triggering Codekeeper review comment");
-  }
-  const owners = configuredOwnerLogins(config);
-  const ownerComments = comments
-    .filter((comment) => owners.has(String(comment.user?.login ?? "").trim().toLowerCase()))
-    .slice(-5);
-  const selected = new Set([trustedReview, ...ownerComments]);
-  return comments
-    .filter((comment) => selected.has(comment))
-    .map((comment) => ({
-      author: boundedText(comment.user?.login, 256, "…"),
-      body: boundedText(comment.body, comment === trustedReview ? 12000 : 2000),
       createdAt: comment.created_at ?? ""
     }));
 }
@@ -362,12 +337,21 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     if (expectedHead && pull.head?.sha !== expectedHead) {
       throw new Error(`PR #${targetNumber} moved from ${expectedHead} to ${pull.head?.sha}; stale repair will not start`);
     }
-    const labels = boundedLabels(issue.labels);
-    if (labels.includes("codekeeper:paused")) throw new Error(`PR #${targetNumber} is paused`);
+    const liveLabels = labelNames(issue.labels);
+    if (liveLabels.includes("codekeeper:paused")) throw new Error(`PR #${targetNumber} is paused`);
     if (authorizationMode === "policy") {
       if (!config.review.autoRepair) throw new Error("Automatic review repair is off in the Codekeeper policy");
-      if (!labels.includes("codekeeper:auto-repaired")) {
-        throw new Error("Automatic review repair requires the codekeeper:auto-repaired marker");
+      if (!expectedHead) throw new Error("Automatic review repair requires its dispatched head SHA");
+      const normalizedActor = String(actor ?? "").trim().toLowerCase();
+      const marker = automaticRepairMarker(expectedHead);
+      const authorized = comments.some((comment) =>
+        comment?.user?.type === "Bot" &&
+        String(comment?.user?.login ?? "").trim().toLowerCase() === normalizedActor &&
+        typeof comment?.body === "string" &&
+        comment.body.endsWith(marker)
+      );
+      if (!authorized) {
+        throw new Error("Automatic review repair requires its current-head authorization marker");
       }
     }
     const reviewThreads = reviewThreadIds.length > 0
@@ -391,26 +375,26 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       baseRepository: pull.base.repo.full_name
     };
     baseSha = target.headSha;
-    const frozenSubject = frozenPullRepairSubject(pull, comments, reviewThreads);
-    subject = {
-      pullRequest: {
-        ...frozenSubject,
-        body: boundedText(frozenSubject.body, 12000),
-        comments: boundedRepairComments(comments, config, { actor, authorizationMode }),
-        reviewThreads
-      }
+    const repairEvidencePolicy = {
+      authorizationMode,
+      actor,
+      ownerLogins: [...config.repository.ownerLogins]
     };
-    target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments, reviewThreads);
+    const frozenSubject = frozenPullRepairSubject(pull, comments, reviewThreads, repairEvidencePolicy);
+    subject = {
+      pullRequest: frozenSubject
+    };
+    target.subjectSha256 = sha256(JSON.stringify(frozenSubject));
   } else {
     if (authorizationMode === "policy" && !config.issues.allowAiImplementation) {
       throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
     }
     if (reviewThreadIds.length > 0) throw new Error("Issue implementation cannot resolve pull request review threads");
-    const labels = boundedLabels(issue.labels);
-    if (authorizationMode === "policy" && labels.includes("codekeeper:paused")) {
+    const liveLabels = labelNames(issue.labels);
+    if (authorizationMode === "policy" && liveLabels.includes("codekeeper:paused")) {
       throw new Error(`Issue #${targetNumber} is paused`);
     }
-    if (authorizationMode === "policy" && !labels.includes("codekeeper:ready")) {
+    if (authorizationMode === "policy" && !liveLabels.includes("codekeeper:ready")) {
       throw new Error("Automatic issue implementation requires the codekeeper:ready label");
     }
     target = { kind: "issue", number: targetNumber };
@@ -423,7 +407,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
         author: boundedText(issue.user?.login, 256, "…"),
         url: boundedText(issue.html_url, 2048, "…"),
         updatedAt: issue.updated_at ?? "",
-        labels,
+        labels: boundedLabels(issue.labels),
         comments: boundedOwnerComments(comments, config)
       }
     };

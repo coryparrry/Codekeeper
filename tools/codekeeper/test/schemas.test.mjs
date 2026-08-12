@@ -122,6 +122,25 @@ test("issue validator rejects AI implementation while a maintainer decision is r
   );
 });
 
+test("issue validator rejects a missing maintainer decision", () => {
+  assert.throws(
+    () => validateIssueResult({
+      mode: "issue",
+      summary: "The issue appears ready.",
+      type: "bug",
+      priority: "p2",
+      labels: [],
+      actionable: true,
+      missingInformation: [],
+      duplicateOf: null,
+      duplicateConfidence: "none",
+      implementationRecommendation: "ai-ready",
+      comment: "This issue can be implemented."
+    }, config),
+    /missing required field decision/
+  );
+});
+
 test("fix schema and validator bind output to the frozen issue or pull request target", () => {
   const target = { kind: "pull_request", number: 42 };
   const schema = fixSchema(target);

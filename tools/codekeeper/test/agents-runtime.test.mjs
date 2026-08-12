@@ -52,6 +52,7 @@ function validIssue(overrides = {}) {
     duplicateOf: null,
     duplicateConfidence: "none",
     implementationRecommendation: "manual",
+    decision: { required: false, question: "", rationale: "", options: [] },
     comment: "Thank you for the clear report.",
     ...overrides
   };
@@ -654,6 +655,14 @@ test("coordinator evidence cannot become more permissive than specialist authori
   assert.throws(
     () => enforceCoordinatorEvidenceBoundary(
       "audit",
+      { ...specialistAudit, repair: { ...specialistRepair, requested: false } },
+      specialistAudit
+    ),
+    /cannot clear a specialist audit repair request/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "audit",
       {
         findings: [auditFindingB, auditFindingA],
         repair: {
@@ -704,6 +713,54 @@ test("coordinator evidence cannot become more permissive than specialist authori
       { risk: "high", readyForReview: false, testsRun: [], changedSummary: "Applied the patch." },
       { risk: "medium", readyForReview: false, testsRun: [], changedSummary: "Applied the patch." }
     )
+  );
+});
+
+test("coordinator review feedback dispositions may only become more conservative", () => {
+  const dispositions = ["fix_now", "fix_if_cheap", "defer", "ignore"];
+  const feedback = {
+    problemKey: "current-review-defect",
+    disposition: "fix_now",
+    type: "bug",
+    explanation: "The current head still contains the defect.",
+    validation: "A focused regression reproduces the failure.",
+    sourceKeys: ["review_comment:42"],
+    threadIds: ["PRRT_42"]
+  };
+  const review = (disposition) => ({
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: [{ ...feedback, disposition }]
+  });
+
+  for (const [specialistIndex, specialistDisposition] of dispositions.entries()) {
+    for (const [outputIndex, outputDisposition] of dispositions.entries()) {
+      if (outputIndex >= specialistIndex) {
+        assert.doesNotThrow(
+          () => enforceCoordinatorEvidenceBoundary("review", review(outputDisposition), review(specialistDisposition)),
+          `${specialistDisposition} should allow ${outputDisposition}`
+        );
+      } else {
+        assert.throws(
+          () => enforceCoordinatorEvidenceBoundary("review", review(outputDisposition), review(specialistDisposition)),
+          /upgraded review feedback disposition/,
+          `${specialistDisposition} should reject ${outputDisposition}`
+        );
+      }
+    }
+  }
+
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary(
+      "review",
+      review("defer"),
+      { ...review("fix_now"), reviewFeedback: [{ ...feedback, disposition: "fix_now", validation: "Different evidence." }] }
+    ),
+    /not present in workspace evidence/
+  );
+  assert.throws(
+    () => enforceCoordinatorEvidenceBoundary("review", { ...review("fix_now"), reviewFeedback: [] }, review("fix_now")),
+    /omitted review feedback/
   );
 });
 

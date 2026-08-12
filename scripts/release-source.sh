@@ -4,12 +4,13 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/release-source.sh [--verify] [--output DIRECTORY] [REVISION]
+Usage: scripts/release-source.sh [--verify|--verify-worktree] [--output DIRECTORY] [REVISION]
 
 Builds a deterministic gzip-compressed source archive from tracked content at
 REVISION (default: HEAD), validates its exact inventory and MANIFEST.sha256
 after unpacking, and prints the archive SHA-256. --verify performs the same
-checks in temporary storage and retains no archive.
+checks in temporary storage and retains no archive. --verify-worktree checks
+the complete non-ignored working-tree inventory and content without creating an archive.
 USAGE
 }
 
@@ -19,6 +20,7 @@ die() {
 }
 
 verify_only=false
+verify_worktree=false
 output_dir=''
 revision='HEAD'
 
@@ -26,6 +28,9 @@ while (( $# )); do
   case "$1" in
     --verify)
       verify_only=true
+      ;;
+    --verify-worktree)
+      verify_worktree=true
       ;;
     --output)
       (( $# >= 2 )) || die '--output requires a directory'
@@ -49,6 +54,62 @@ done
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || die 'run inside a Git worktree'
 repo_root=$(cd "$repo_root" && pwd -P)
 cd "$repo_root"
+
+! $verify_only || ! $verify_worktree || die '--verify and --verify-worktree are mutually exclusive'
+
+verify_release_tree() {
+  local tree_root=$1
+  local tree_inventory=$2
+  local manifest_paths_unsorted="$work_dir/manifest-paths-unsorted"
+  local manifest_paths="$work_dir/manifest-paths"
+  local release_inventory="$work_dir/release-inventory"
+  local duplicate_paths
+
+  [[ -f $tree_root/MANIFEST.sha256 ]] || die 'release tree is missing MANIFEST.sha256'
+  : > "$manifest_paths_unsorted"
+  while IFS= read -r manifest_line || [[ -n $manifest_line ]]; do
+    [[ $manifest_line =~ ^[[:xdigit:]]{64}[[:space:]][[:space:]](.+)$ ]] || die 'MANIFEST.sha256 contains a malformed entry'
+    manifest_path=${BASH_REMATCH[1]}
+    [[ $manifest_path == ./* ]] && manifest_path=${manifest_path#./}
+    [[ -n $manifest_path ]] || die 'MANIFEST.sha256 contains an empty path'
+    case "$manifest_path" in
+      /*|*'//'*) die "MANIFEST.sha256 contains an unsafe path: $manifest_path" ;;
+    esac
+    IFS=/ read -r -a manifest_components <<< "$manifest_path"
+    for manifest_component in "${manifest_components[@]}"; do
+      [[ -n $manifest_component && $manifest_component != . && $manifest_component != .. ]] || die "MANIFEST.sha256 contains an unsafe path: $manifest_path"
+    done
+    printf '%s\n' "$manifest_path" >> "$manifest_paths_unsorted"
+  done < "$tree_root/MANIFEST.sha256"
+  LC_ALL=C sort "$manifest_paths_unsorted" > "$manifest_paths"
+  duplicate_paths=$(LC_ALL=C uniq -d "$manifest_paths")
+  if [[ -n $duplicate_paths ]]; then
+    die 'MANIFEST.sha256 contains duplicate paths'
+  fi
+  grep -vx 'MANIFEST.sha256' "$tree_inventory" > "$release_inventory"
+  cmp -s "$release_inventory" "$manifest_paths" || {
+    diff -u "$release_inventory" "$manifest_paths" >&2 || true
+    die 'MANIFEST.sha256 paths do not exactly cover the release inventory'
+  }
+  (
+    cd "$tree_root"
+    shasum -a 256 -c MANIFEST.sha256
+  )
+}
+
+if $verify_worktree; then
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/codekeeper-source-worktree.XXXXXX")
+  trap 'rm -rf "$work_dir"' EXIT
+  worktree_inventory="$work_dir/worktree-inventory"
+  git ls-files --cached --others --exclude-standard | LC_ALL=C sort > "$worktree_inventory"
+  if grep -Eq '(^|/)(\.git|node_modules|\.claude|__MACOSX)(/|$)|(^|/)\.DS_Store$|\.(profraw|profdata|trace|xcresult)$|\.dSYM(/|$)' "$worktree_inventory"; then
+    die 'working tree contains forbidden local or profiler debris'
+  fi
+  verify_release_tree "$repo_root" "$worktree_inventory"
+  commit=$(git rev-parse --verify HEAD)
+  printf 'verified working tree for %s (%s source files)\n' "$commit" "$(wc -l < "$worktree_inventory" | tr -d ' ')"
+  exit 0
+fi
 
 [[ -z $(git status --porcelain=v1 --untracked-files=all) ]] || die 'refusing dirty checkout'
 commit=$(git rev-parse --verify --quiet "${revision}^{commit}") || die "not a commit: $revision"
@@ -95,40 +156,7 @@ fi
 
 tar -xzf "$archive" -C "$work_dir"
 archive_root="$work_dir/${prefix%/}"
-[[ -f $archive_root/MANIFEST.sha256 ]] || die 'archive is missing MANIFEST.sha256'
-
-manifest_paths_unsorted="$work_dir/manifest-paths-unsorted"
-manifest_paths="$work_dir/manifest-paths"
-release_inventory="$work_dir/release-inventory"
-: > "$manifest_paths_unsorted"
-while IFS= read -r manifest_line || [[ -n $manifest_line ]]; do
-  [[ $manifest_line =~ ^[[:xdigit:]]{64}[[:space:]][[:space:]](.+)$ ]] || die 'MANIFEST.sha256 contains a malformed entry'
-  manifest_path=${BASH_REMATCH[1]}
-  [[ $manifest_path == ./* ]] && manifest_path=${manifest_path#./}
-  [[ -n $manifest_path ]] || die 'MANIFEST.sha256 contains an empty path'
-  case "$manifest_path" in
-    /*|*'//'*) die "MANIFEST.sha256 contains an unsafe path: $manifest_path" ;;
-  esac
-  IFS=/ read -r -a manifest_components <<< "$manifest_path"
-  for manifest_component in "${manifest_components[@]}"; do
-    [[ -n $manifest_component && $manifest_component != . && $manifest_component != .. ]] || die "MANIFEST.sha256 contains an unsafe path: $manifest_path"
-  done
-  printf '%s\n' "$manifest_path" >> "$manifest_paths_unsorted"
-done < "$archive_root/MANIFEST.sha256"
-LC_ALL=C sort "$manifest_paths_unsorted" > "$manifest_paths"
-duplicate_paths=$(LC_ALL=C uniq -d "$manifest_paths")
-if [[ -n $duplicate_paths ]]; then
-  die 'MANIFEST.sha256 contains duplicate paths'
-fi
-grep -vx 'MANIFEST.sha256' "$archive_inventory" > "$release_inventory"
-cmp -s "$release_inventory" "$manifest_paths" || {
-  diff -u "$release_inventory" "$manifest_paths" >&2 || true
-  die 'MANIFEST.sha256 paths do not exactly cover the release inventory'
-}
-(
-  cd "$archive_root"
-  shasum -a 256 -c MANIFEST.sha256
-)
+verify_release_tree "$archive_root" "$archive_inventory"
 
 printf 'verified source archive for %s (%s tracked files)\n' "$commit" "$(wc -l < "$expected_inventory" | tr -d ' ')"
 if ! $verify_only; then

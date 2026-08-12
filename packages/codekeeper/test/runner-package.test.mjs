@@ -177,6 +177,7 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "src/constants.mjs",
     "src/errors.mjs",
     "src/install.mjs",
+    "src/input-safety.mjs",
     "src/plan.mjs",
     "src/policy.mjs",
     "src/policy-validator.mjs",

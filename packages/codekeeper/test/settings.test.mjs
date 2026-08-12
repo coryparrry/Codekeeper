@@ -371,6 +371,22 @@ test("profile editing uses a temporary copy and returns only validated Markdown"
   await assert.rejects(readFile(editorPath, "utf8"), /ENOENT/);
 });
 
+test("profile editing rejects private-key PEM envelopes", async () => {
+  await assert.rejects(
+    editProfileWithEditor({
+      profile: "pr-reviewer",
+      source: "# Reviewer\n",
+      environment: { EDITOR: "test-editor" },
+      suspendTerminal: (callback) => callback(),
+      runEditor: async (_editor, file) => {
+        await writeFile(file, "# Reviewer\n\n-----BEGIN PRIVATE KEY-----\ncanary\n-----END PRIVATE KEY-----\n", "utf8");
+        return 0;
+      }
+    }),
+    (error) => error.code === "PROFILE_INVALID"
+  );
+});
+
 test("profile editor receives the generated path without a command shell", async () => {
   let invocation;
   const edited = await editProfileWithEditor({

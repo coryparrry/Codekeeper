@@ -141,7 +141,7 @@ function fakeClock(start = NOW) {
   };
 }
 
-function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = false, publicRepository = false, currentDefaultBranch = "main", markerHasPreviousPage = false, fixDraft = false, fixFork = false, fixRetarget = false, invalidFixHead = false, alteredFixHead = false, multipleFixCommits = false, foreignFixCommit = false, lateFixCommit = false, lateFixPull = false, lateMarker = false, missingPublicationParent = false, multiplePublicationParents = false, malformedPublicationParent = false, mismatchedPublicationParent = false, wrongRunActor = false, wrongAttributedActor = false, jobTotalCount = null, staleMarker = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, wrongReviewRunBaseBranch = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
+function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = false, publicRepository = false, currentDefaultBranch = "main", markerHasPreviousPage = false, fixDraft = false, fixFork = false, fixRetarget = false, invalidFixHead = false, alteredFixHead = false, multipleFixCommits = false, foreignFixCommit = false, lateFixCommit = false, lateFixPull = false, lateMarker = false, missingPublicationParent = false, multiplePublicationParents = false, malformedPublicationParent = false, mismatchedPublicationParent = false, wrongRunActor = false, wrongAttributedActor = false, jobTotalCount = null, staleMarker = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, fullPullInventory = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, wrongReviewRunBaseBranch = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
   const calls = [];
   let workflowListCount = 0;
   let runViewCount = 0;
@@ -337,6 +337,7 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
     if (args[0] === "issue" && args[1] === "view") return response({ number: scenario === "issue-triage-related" ? 13 : issueNumber, url: `https://github.com/${REPO}/issues/${scenario === "issue-triage-related" ? 13 : issueNumber}`, state: "OPEN", labels: [{ name: "codekeeper:ready" }], updatedAt: SUBJECT_UPDATED });
     if (args[0] === "pr" && args[1] === "list") {
       pullListCount += 1;
+      if (fullPullInventory && pullListCount === 1) return response(Array.from({ length: 100 }, (_, index) => ({ number: index + 1, url: `https://github.com/${REPO}/pull/${index + 1}`, headRefName: `unrelated/${index + 1}`, createdAt: SUBJECT_UPDATED })));
       return response(pullListCount === 1 ? [] : [{ number: 14, url: `https://github.com/${REPO}/pull/14`, headRefName: branch, createdAt: lateFixPull ? LATE_PUBLICATION : SUBJECT_UPDATED }]);
     }
     if (args[0] === "api" && args[1] === "graphql") {
@@ -719,6 +720,13 @@ test("controlled fix rejects concurrent runs and accepts exactly one current can
     const unsafeResult = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: unsafeShape.runner, now: () => new Date(NOW), sleep: async () => {} });
     assert.equal(unsafeResult.passed, false);
   }
+});
+
+test("controlled fix refuses a possibly truncated open pull request inventory", async () => {
+  const fake = fakeGh({ scenario: "controlled-fix", fullPullInventory: true });
+  const result = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: fake.runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(result.passed, false);
+  assert.equal(fake.calls.some((args) => args[0] === "workflow"), false);
 });
 
 test("controlled-fix recovery proves retained evidence with a parent anchored to the run SHA, without dispatch, mutation, or log reads", async () => {

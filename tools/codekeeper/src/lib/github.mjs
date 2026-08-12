@@ -1,4 +1,4 @@
-import { sha256 } from "./markers.mjs";
+import { automaticRepairMarker, sha256 } from "./markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
 import { completeReviewFeedback } from "./review-feedback.mjs";
 
@@ -296,8 +296,8 @@ export class GitHubClient {
     repository,
     target,
     policy,
-    rejectPaused = false,
-    requireAutomaticRepairMarker = false
+    repairEvidencePolicy,
+    rejectPaused = false
   }) {
     this.assertNoMutationGuard();
     if (repository !== this.repository) throw new Error("Conditional pull repair repository does not match the GitHub client");
@@ -328,7 +328,7 @@ export class GitHubClient {
         subjectSha256: target.subjectSha256,
         reviewThreadIds: [...target.reviewThreadIds],
         rejectPaused: rejectPaused === true,
-        requireAutomaticRepairMarker: requireAutomaticRepairMarker === true
+        repairEvidencePolicy: structuredClone(repairEvidencePolicy)
       }
     };
     try {
@@ -461,6 +461,23 @@ export class GitHubClient {
     expected.updatedAt = updatedAt;
   }
 
+  async rebaseIssueMutationAfterComment(number) {
+    const expected = this.issueMutation;
+    if (!expected || expected.number !== number) return null;
+    const issue = await this.getIssue(number);
+    if (typeof issue.updated_at !== "string" || !Number.isFinite(Date.parse(issue.updated_at))) {
+      throw new Error(`Issue #${number} has no updated timestamp after comment reconciliation`);
+    }
+    const previousUpdatedAt = expected.updatedAt;
+    expected.updatedAt = issue.updated_at;
+    try {
+      return await this.assertMutationCurrent();
+    } catch (error) {
+      expected.updatedAt = previousUpdatedAt;
+      throw error;
+    }
+  }
+
   async verifyIssueMutation() {
     return this.assertMutationCurrent();
   }
@@ -503,6 +520,7 @@ export class GitHubClient {
       authorIdentity,
       mutation?.updated_at ?? mutation?.created_at
     );
+    await this.rebaseIssueMutationAfterComment(number);
     return mutation;
   }
 
@@ -569,12 +587,21 @@ export class GitHubClient {
     if (expected.feedbackFrozen && sha256(JSON.stringify(feedback)) !== expected.feedbackSha256) {
       throw new Error(`PR #${pull.number} review feedback changed after preparation; stale publication will not mutate GitHub`);
     }
-    if (expected.repair?.requireAutomaticRepairMarker && !currentLabels.includes("codekeeper:auto-repaired")) {
-      throw new Error(`PR #${pull.number} no longer has policy repair authorization`);
-    }
     if (expected.repair) {
+      const evidencePolicy = expected.repair.repairEvidencePolicy;
+      if (evidencePolicy.authorizationMode === "policy") {
+        const actor = normalizeLogin(evidencePolicy.actor);
+        const marker = automaticRepairMarker(expected.headSha);
+        const authorized = comments.some((comment) =>
+          comment?.user?.type === "Bot" &&
+          normalizeLogin(comment?.user?.login) === actor &&
+          typeof comment?.body === "string" &&
+          comment.body.endsWith(marker)
+        );
+        if (!authorized) throw new Error(`PR #${pull.number} no longer has policy repair authorization`);
+      }
       const reviewThreads = frozenPullRepairReviewThreads(liveReviewThreads, expected.repair.reviewThreadIds);
-      if (frozenPullRepairSubjectSha256(pull, comments, reviewThreads) !== expected.repair.subjectSha256) {
+      if (frozenPullRepairSubjectSha256(pull, comments, reviewThreads, evidencePolicy) !== expected.repair.subjectSha256) {
         throw new Error(`PR #${pull.number} repair evidence changed after implementation started`);
       }
       if (!branch) throw new Error(`PR #${pull.number} head branch ${expected.headRef} no longer exists`);
@@ -944,6 +971,7 @@ export class GitHubClient {
       comments.set(normalized.id, normalized);
       this.issueMutation.comments = [...comments.values()].sort((left, right) => left.id - right.id);
       this.issueMutation.updatedAt = mutation.updated_at ?? mutation.created_at;
+      await this.rebaseIssueMutationAfterComment(number);
     }
     return mutation;
   }
@@ -1148,23 +1176,32 @@ export class GitHubClient {
     const mutation = isGraphqlMutation(query);
     if (mutation) await this.assertMutationCurrent();
     const retries = mutation ? 0 : this.retryAttempts;
-    const { response, payload } = await this.fetchWithRetry(this.graphqlUrl, {
-      method: "POST",
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.token}`,
-        "User-Agent": "codekeeper",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ query, variables })
-    }, {
-      retries,
-      consume: async (response, signal) => ({
-        response,
-        payload: await awaitWithSignal(response.json(), signal)
-      }),
-      retryPayload: ({ payload }) => isRetryableGraphqlPayload(payload)
-    });
+    let requestResult;
+    try {
+      requestResult = await this.fetchWithRetry(this.graphqlUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${this.token}`,
+          "User-Agent": "codekeeper",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ query, variables })
+      }, {
+        retries,
+        consume: async (response, signal) => ({
+          response,
+          payload: await awaitWithSignal(response.json(), signal)
+        }),
+        retryPayload: ({ payload }) => isRetryableGraphqlPayload(payload)
+      });
+    } catch (error) {
+      if (mutation && error && typeof error === "object") {
+        error.githubMutationOutcome = "ambiguous";
+      }
+      throw error;
+    }
+    const { response, payload } = requestResult;
     if (!response.ok || payload.errors?.length) {
       const message = payload.errors?.map((error) => error.message).join("; ") || response.statusText;
       const error = new Error(`GitHub GraphQL failed: ${message}`);

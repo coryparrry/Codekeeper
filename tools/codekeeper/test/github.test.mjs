@@ -163,6 +163,57 @@ test("conditional pull labels reconcile an applied mutation after response loss"
   assert.equal(requests.filter(({ method, href }) => method === "POST" && href.endsWith("/labels")).length, 1);
 });
 
+test("conditional issue comments rebase from the live issue timestamp", async () => {
+  const marker = "<!-- codekeeper:issue-triage -->";
+  const author = { login: "codekeeper[bot]", id: "123" };
+  const commentUpdatedAt = "2026-08-05T10:01:00Z";
+  let issueUpdatedAt = "2026-08-05T10:00:00Z";
+  let comments = [];
+  const issue = () => ({
+    number: 7,
+    title: "Report",
+    body: "Details",
+    state: "open",
+    updated_at: issueUpdatedAt,
+    labels: []
+  });
+  const github = client({
+    retries: 0,
+    fetch: async (url, options) => {
+      const href = String(url);
+      if (options.method === "GET" && /\/issues\/7\/comments\?/.test(href)) {
+        return new Response(JSON.stringify(comments));
+      }
+      if (options.method === "POST" && /\/issues\/7\/comments$/.test(href)) {
+        issueUpdatedAt = "2026-08-05T10:01:30Z";
+        const comment = {
+          id: 70,
+          body: JSON.parse(options.body).body,
+          created_at: commentUpdatedAt,
+          updated_at: commentUpdatedAt,
+          user: { login: author.login, id: Number(author.id), type: "Bot" }
+        };
+        comments = [comment];
+        return new Response(JSON.stringify(comment), { status: 201 });
+      }
+      if (options.method === "GET" && /\/issues\/7$/.test(href)) {
+        return new Response(JSON.stringify(issue()));
+      }
+      return new Response(null, { status: 204 });
+    }
+  });
+
+  await github.beginIssueMutation({
+    issue: { number: 7, updatedAt: issueUpdatedAt },
+    trackSubject: true,
+    trackComments: true
+  });
+  await github.upsertOwnedIssueMarker(7, marker, "Triage result", author);
+
+  assert.notEqual(commentUpdatedAt, issueUpdatedAt);
+  await github.verifyIssueMutation();
+});
+
 test("GitHub requests carry a finite abort deadline", async () => {
   let signal;
   const github = client({
@@ -453,7 +504,52 @@ test("GraphQL retries HTTP 200 rate-limit errors", async () => {
   assert.deepEqual(delays, [500]);
 });
 
-test("GraphQL does not retry ambiguous mutation failures", async () => {
+test("GraphQL marks mutation transport failures ambiguous without retrying", async () => {
+  let attempts = 0;
+  const github = client({
+    sleep: async () => { throw new Error("mutations must not be retried"); },
+    fetch: async () => {
+      attempts += 1;
+      throw new TypeError("connection lost");
+    }
+  });
+
+  await assert.rejects(
+    github.graphql("mutation Update { updateIssue(input: {}) { clientMutationId } }"),
+    (error) => {
+      assert.match(error.message, /connection lost/);
+      assert.equal(error.githubMutationOutcome, "ambiguous");
+      return true;
+    }
+  );
+  assert.equal(attempts, 1);
+});
+
+test("GraphQL marks mutation response-body timeouts ambiguous without retrying", async () => {
+  let attempts = 0;
+  const github = client({
+    timeoutMs: 5,
+    sleep: async () => { throw new Error("mutations must not be retried"); },
+    fetch: async () => {
+      attempts += 1;
+      return new Response(new ReadableStream({ start() {} }), {
+        headers: { "content-type": "application/json" }
+      });
+    }
+  });
+
+  await assert.rejects(
+    github.graphql("mutation Update { updateIssue(input: {}) { clientMutationId } }"),
+    (error) => {
+      assert.match(error.message, /timed out after 5ms/);
+      assert.equal(error.githubMutationOutcome, "ambiguous");
+      return true;
+    }
+  );
+  assert.equal(attempts, 1);
+});
+
+test("GraphQL does not mark parsed mutation errors ambiguous or retry them", async () => {
   let attempts = 0;
   const github = client({
     sleep: async () => { throw new Error("mutations must not be retried"); },
@@ -468,6 +564,7 @@ test("GraphQL does not retry ambiguous mutation failures", async () => {
     (error) => {
       assert.equal(error.status, 200);
       assert.deepEqual(error.payload, { errors: [{ type: "RATE_LIMITED", message: "rate limited" }] });
+      assert.equal(error.githubMutationOutcome, undefined);
       return true;
     }
   );

@@ -31,6 +31,13 @@ function assertFrozenPolicy(context, configSha256) {
   }
 }
 
+function assertFrozenHead(context) {
+  const head = currentHead();
+  if (head !== context.baseSha) {
+    throw new Error(`Checkout HEAD changed from ${context.baseSha} to ${head}`);
+  }
+}
+
 async function createFreshDirectory(directory) {
   await mkdir(path.dirname(directory), { recursive: true });
   try {
@@ -248,10 +255,6 @@ async function capturePatch(config, cwd = process.cwd()) {
 
 async function captureWorkspacePatch({ context, config, repairRequested, risk }) {
   const reasons = [];
-  if (currentHead() !== context.baseSha) {
-    reasons.push(`Checkout HEAD changed from ${context.baseSha} to ${currentHead()}`);
-  }
-
   const initial = await capturePatch(config);
   const changes = initial.changes;
   const policy = validatePatch(changes, config);
@@ -281,6 +284,7 @@ export async function validateAudit({ directory, contextPath = path.join(directo
   const context = await readRegularJson(contextPath);
   assertTrustedContext(context, "audit");
   assertFrozenPolicy(context, configSha256);
+  assertFrozenHead(context);
   const result = validateAuditResult(await readRegularJson(resultPath), config);
   if (typeof context.repairAuthorized !== "boolean") {
     throw new Error("Trusted audit context is missing explicit repair authorization");
@@ -310,6 +314,7 @@ export async function validateFix({ directory, contextPath = path.join(directory
   const context = await readRegularJson(contextPath);
   assertTrustedContext(context, "fix");
   assertFrozenPolicy(context, configSha256);
+  assertFrozenHead(context);
   if (!context.target || !["issue", "pull_request"].includes(context.target.kind)) {
     throw new Error("Trusted fix context is missing a valid target kind");
   }

@@ -734,6 +734,7 @@ test("issue preparation reduces repository history to five deterministic duplica
       duplicateOf: 11,
       duplicateConfidence: "high",
       implementationRecommendation: "no",
+      decision: { required: false, question: "", rationale: "", options: [] },
       comment: "This matches issue #11."
     };
     await writeFile(resultPath, JSON.stringify(duplicateResult), "utf8");
@@ -818,7 +819,8 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
   config.issues.allowAiImplementation = true;
   const originalFetch = globalThis.fetch;
   const originalRepository = process.env.GITHUB_REPOSITORY;
-  let issueLabels = [{ name: "codekeeper:ready" }];
+  const fillerLabels = Array.from({ length: 30 }, (_, index) => ({ name: `filler-${index}` }));
+  let issueLabels = [...fillerLabels, { name: "codekeeper:ready" }];
   process.env.GITHUB_REPOSITORY = "acme/example";
   globalThis.fetch = async (url) => {
     if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
@@ -847,7 +849,9 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
     });
     assert.equal(prepared.authorizationMode, "policy");
     assert.equal(prepared.requestedBy, "codekeeper-app[bot]");
-    issueLabels = [{ name: "codekeeper:ready" }, { name: "codekeeper:paused" }];
+    assert.equal(prepared.issue.labels.length, 30);
+    assert.equal(prepared.issue.labels.includes("codekeeper:ready"), false);
+    issueLabels = [...fillerLabels, { name: "codekeeper:ready" }, { name: "codekeeper:paused" }];
     await assert.rejects(
       prepareFix({
         targetNumber: 5,
@@ -867,7 +871,7 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
   }
 });
 
-test("automatic PR repair requires its one-shot marker and every repair honors pause", async () => {
+test("automatic PR repair requires its current-head marker and every repair honors pause", async () => {
   const root = await createRepository();
   const config = structuredClone(templateConfig);
   config.review.autoRepair = true;
@@ -875,7 +879,9 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
   const originalFetch = globalThis.fetch;
   const originalRepository = process.env.GITHUB_REPOSITORY;
   const revision = run("git", ["rev-parse", "HEAD"], root).trim();
-  let labels = [];
+  const fillerLabels = Array.from({ length: 30 }, (_, index) => ({ name: `filler-${index}` }));
+  let labels = fillerLabels;
+  let authorizationMarkerPresent = false;
   const comments = [
     {
       body: "Repair the blocking review finding.\n<!-- codekeeper:review -->",
@@ -926,7 +932,13 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
         }
       }), { status: 200 });
     }
-    if (String(url).includes("/comments")) return new Response(JSON.stringify(comments), { status: 200 });
+    if (String(url).includes("/comments")) {
+      return new Response(JSON.stringify(authorizationMarkerPresent ? [...comments, {
+        body: `Automatic repair was authorized.\n<!-- codekeeper:auto-repair-head=${revision} -->`,
+        created_at: "2026-08-11T09:03:00Z",
+        user: { login: "codekeeper-app[bot]", type: "Bot" }
+      }] : comments), { status: 200 });
+    }
     if (String(url).includes("/pulls/42")) {
       return new Response(JSON.stringify({
         number: 42,
@@ -962,9 +974,9 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
         expectedHead: revision,
         ...agentProfileOptions(root, "fix")
       }),
-      /codekeeper:auto-repaired/
+      /authorization marker/
     );
-    labels = [{ name: "codekeeper:auto-repaired" }];
+    authorizationMarkerPresent = true;
     const prepared = await prepareFix({
       targetNumber: 42,
       actor: "codekeeper-app[bot]",
@@ -977,12 +989,14 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(prepared.target.kind, "pull_request");
+    assert.equal(prepared.target.subjectSha256, digest(JSON.stringify(prepared.pullRequest)));
     assert.deepEqual(
       prepared.pullRequest.comments.map((comment) => comment.author),
       ["codekeeper-app[bot]", "repository-owner"]
     );
     assert.match(prepared.pullRequest.comments[0].body, /blocking review finding/);
     assert.doesNotMatch(JSON.stringify(prepared.pullRequest.comments), /ATTACKER INSTRUCTION/);
+    assert.equal(labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
     assert.deepEqual(prepared.pullRequest.reviewThreads, [{
       id: "PRRT_thread",
       isResolved: false,
@@ -999,7 +1013,7 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
         originalLine: 17
       }]
     }]);
-    labels = [{ name: "codekeeper:auto-repaired" }, { name: "codekeeper:paused" }];
+    labels = [...fillerLabels, { name: "codekeeper:paused" }];
     await assert.rejects(
       prepareFix({
         targetNumber: 42,

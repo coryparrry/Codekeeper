@@ -1,9 +1,47 @@
-import { sha256 } from "./markers.mjs";
+import { REVIEW_MARKER, sha256 } from "./markers.mjs";
 
 function boundedText(value, maximum, suffix = "\n…[truncated]") {
   const text = String(value ?? "");
   if (text.length <= maximum) return text;
   return `${text.slice(0, Math.max(0, maximum - suffix.length))}${suffix}`;
+}
+
+function normalizedLogin(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function frozenRepairComments(comments, evidencePolicy) {
+  if (!evidencePolicy) {
+    return comments.slice(-20).map((comment) => ({
+      author: boundedText(comment?.user?.login, 256, "…"),
+      body: boundedText(comment?.body, 12000),
+      createdAt: comment?.created_at ?? ""
+    }));
+  }
+  const owners = new Set(evidencePolicy.ownerLogins.map(normalizedLogin));
+  const ownerComments = comments
+    .filter((comment) => owners.has(normalizedLogin(comment?.user?.login)))
+    .slice(-5);
+  let trustedReview = null;
+  let selected = new Set(ownerComments);
+  if (evidencePolicy.authorizationMode === "policy") {
+    const actor = normalizedLogin(evidencePolicy.actor);
+    trustedReview = comments.findLast((comment) =>
+      comment?.user?.type === "Bot" &&
+      normalizedLogin(comment?.user?.login) === actor &&
+      typeof comment?.body === "string" &&
+      comment.body.endsWith(REVIEW_MARKER)
+    );
+    if (!trustedReview) throw new Error("Automatic PR repair requires the triggering Codekeeper review comment");
+    selected = new Set([trustedReview, ...ownerComments]);
+  }
+  return comments
+    .filter((comment) => selected.has(comment))
+    .map((comment) => ({
+      author: boundedText(comment?.user?.login, 256, "…"),
+      body: boundedText(comment?.body, comment === trustedReview ? 12000 : 2000),
+      createdAt: comment?.created_at ?? ""
+    }));
 }
 
 export function frozenPullRepairReviewThreads(threads, reviewThreadIds) {
@@ -35,24 +73,18 @@ export function frozenPullRepairReviewThreads(threads, reviewThreadIds) {
   return selected;
 }
 
-export function frozenPullRepairSubject(pull, comments, reviewThreads = []) {
+export function frozenPullRepairSubject(pull, comments, reviewThreads = [], evidencePolicy = null) {
   return {
     number: pull?.number,
     title: boundedText(pull?.title, 512, "…"),
-    body: boundedText(pull?.body, 30000),
+    body: boundedText(pull?.body, evidencePolicy ? 12000 : 30000),
     author: boundedText(pull?.user?.login, 256, "…"),
     url: boundedText(pull?.html_url, 2048, "…"),
-    comments: Array.isArray(comments)
-      ? comments.slice(-20).map((comment) => ({
-        author: boundedText(comment?.user?.login, 256, "…"),
-        body: boundedText(comment?.body, 12000),
-        createdAt: comment?.created_at ?? ""
-      }))
-      : [],
+    comments: Array.isArray(comments) ? frozenRepairComments(comments, evidencePolicy) : [],
     reviewThreads: Array.isArray(reviewThreads) ? reviewThreads : []
   };
 }
 
-export function frozenPullRepairSubjectSha256(pull, comments, reviewThreads = []) {
-  return sha256(JSON.stringify(frozenPullRepairSubject(pull, comments, reviewThreads)));
+export function frozenPullRepairSubjectSha256(pull, comments, reviewThreads = [], evidencePolicy = null) {
+  return sha256(JSON.stringify(frozenPullRepairSubject(pull, comments, reviewThreads, evidencePolicy)));
 }

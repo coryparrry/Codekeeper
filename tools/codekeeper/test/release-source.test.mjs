@@ -106,3 +106,64 @@ test("failed verification leaves no final archive and a corrected retry succeeds
   assert.match(stdout, /verified source archive/);
   assert.equal((await readdir(output)).filter((name) => name.endsWith(".tar.gz")).length, 1);
 });
+
+test("worktree verification checks pending content without weakening archive cleanliness", async (context) => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "codekeeper-release-worktree-test-"));
+  context.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+
+  const checkout = path.join(fixtureRoot, "checkout");
+  const output = path.join(fixtureRoot, "artifacts");
+  const scripts = path.join(checkout, "scripts");
+  await mkdir(scripts, { recursive: true });
+  await mkdir(output);
+  await copyFile(releaseScript, path.join(scripts, "release-source.sh"));
+
+  const readmePath = path.join(checkout, "README.md");
+  const manifestPath = path.join(checkout, "MANIFEST.sha256");
+  const originalReadme = "# Release fixture\n";
+  await writeFile(readmePath, originalReadme, "utf8");
+  const script = await readFile(path.join(scripts, "release-source.sh"));
+  await writeFile(
+    manifestPath,
+    `${digest(originalReadme)}  README.md\n${digest(script)}  scripts/release-source.sh\n`,
+    "utf8"
+  );
+
+  run("git", ["init", "-q"], checkout);
+  run("git", ["config", "user.name", "Test"], checkout);
+  run("git", ["config", "user.email", "test@example.com"], checkout);
+  run("git", ["add", "."], checkout);
+  run("git", ["commit", "-qm", "fixture"], checkout);
+
+  const updatedReadme = "# Pending release fixture\n";
+  await writeFile(readmePath, updatedReadme, "utf8");
+  await writeFile(
+    manifestPath,
+    `${digest(updatedReadme)}  README.md\n${digest(script)}  scripts/release-source.sh\n`,
+    "utf8"
+  );
+  assert.match(run("bash", ["scripts/release-source.sh", "--verify-worktree"], checkout), /verified working tree/);
+
+  await writeFile(readmePath, "# Stale manifest\n", "utf8");
+  assert.throws(() => run("bash", ["scripts/release-source.sh", "--verify-worktree"], checkout));
+
+  await writeFile(readmePath, updatedReadme, "utf8");
+  assert.throws(
+    () => run("bash", ["scripts/release-source.sh", "--output", "../artifacts"], checkout),
+    (error) => {
+      assert.match(error.stderr, /refusing dirty checkout/);
+      return true;
+    }
+  );
+
+  const newSourcePath = path.join(checkout, "new-source.mjs");
+  const newSource = "export const ready = true;\n";
+  await writeFile(newSourcePath, newSource, "utf8");
+  assert.throws(() => run("bash", ["scripts/release-source.sh", "--verify-worktree"], checkout));
+  await writeFile(
+    manifestPath,
+    `${digest(updatedReadme)}  README.md\n${digest(newSource)}  new-source.mjs\n${digest(script)}  scripts/release-source.sh\n`,
+    "utf8"
+  );
+  assert.match(run("bash", ["scripts/release-source.sh", "--verify-worktree"], checkout), /verified working tree/);
+});
