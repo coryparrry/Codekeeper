@@ -169,7 +169,8 @@ export async function runOwnerCommand({
     if (
       !sourceComment?.id ||
       parseCommand(sourceComment.body) === "defer" ||
-      parseMentionIntent(sourceComment.body, automationIdentity?.login) === "defer"
+      parseMentionIntent(sourceComment.body, automationIdentity?.login) ===
+        "defer"
     ) {
       throw new Error(
         "/codekeeper defer must reply to the review comment that should become an issue",

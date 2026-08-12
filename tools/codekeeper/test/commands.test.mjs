@@ -315,33 +315,47 @@ test("an owner mention queues issue triage through the trusted assistant dispatc
 });
 
 test("a root mention-based defer command cannot become its own feedback source", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-root-mention-defer-command-"));
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-root-mention-defer-command-"),
+  );
   const eventPath = path.join(directory, "event.json");
-  await writeFile(eventPath, JSON.stringify({
-    repository: { full_name: "owner/repository" },
-    issue: { number: 42 },
-    comment: {
-      id: 99,
-      body: "@codekeeper defer",
-      author_association: "OWNER",
-      user: { login: "repository-owner" }
-    }
-  }));
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        id: 99,
+        body: "@codekeeper defer",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
   const originals = {
     getIssue: GitHubClient.prototype.getIssue,
-    listPullReviewThreads: GitHubClient.prototype.listPullReviewThreads
+    listPullReviewThreads: GitHubClient.prototype.listPullReviewThreads,
   };
-  GitHubClient.prototype.getIssue = async () => ({ number: 42, state: "open", pull_request: {} });
-  GitHubClient.prototype.listPullReviewThreads = async () => { throw new Error("review thread lookup must not run"); };
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    pull_request: {},
+  });
+  GitHubClient.prototype.listPullReviewThreads = async () => {
+    throw new Error("review thread lookup must not run");
+  };
   try {
     await assert.rejects(
       runOwnerCommand({
         eventPath,
-        config: { automation: { ownerRequests: true }, repository: { ownerLogins: ["repository-owner"] } },
+        config: {
+          automation: { ownerRequests: true },
+          repository: { ownerLogins: ["repository-owner"] },
+        },
         token: "app-token",
-        automationIdentity: { login: "codekeeper[bot]", id: "123" }
+        automationIdentity: { login: "codekeeper[bot]", id: "123" },
       }),
-      /must reply to the review comment/
+      /must reply to the review comment/,
     );
   } finally {
     Object.assign(GitHubClient.prototype, originals);
