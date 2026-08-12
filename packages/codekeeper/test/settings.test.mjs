@@ -327,6 +327,31 @@ test("profile editing uses a temporary copy and returns only validated Markdown"
   await assert.rejects(readFile(editorPath, "utf8"), /ENOENT/);
 });
 
+test("profile editor receives the generated path without a command shell", async () => {
+  let invocation;
+  const edited = await editProfileWithEditor({
+    profile: "pr-reviewer",
+    source: "# Reviewer\n",
+    environment: { EDITOR: "test-editor" },
+    suspendTerminal: (callback) => callback(),
+    spawnEditor(editor, args, options) {
+      invocation = { editor, args, options };
+      const child = {
+        once(event, callback) {
+          if (event === "exit") queueMicrotask(() => callback(0, null));
+          return child;
+        }
+      };
+      return child;
+    }
+  });
+
+  assert.equal(edited, "# Reviewer\n");
+  assert.equal(invocation.editor, "test-editor");
+  assert.equal(invocation.args.length, 1);
+  assert.equal(invocation.options.shell, false);
+});
+
 test("one validated settings object renders matching caller controls and schedule", async () => {
   const { bundle, settings } = await fixture(["review", "maintain", "issues", "fix"]);
   let edited = setSetting(settings, row(settings, "policy:automation.automaticPrReview"), false);
