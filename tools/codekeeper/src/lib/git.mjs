@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { copyFile, lstat, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -65,6 +66,80 @@ function splitNul(buffer) {
     .toString("utf8")
     .split("\0")
     .filter((entry) => entry !== "");
+}
+
+export async function inspectUntrackedFile(absolute, maximumFileBytes) {
+  const flags = fsConstants.O_RDONLY
+    | (fsConstants.O_NOFOLLOW ?? 0)
+    | (fsConstants.O_NONBLOCK ?? 0);
+  let handle;
+  try {
+    handle = await open(absolute, flags);
+  } catch (error) {
+    if (error.code === "ELOOP") {
+      return {
+        symlink: true,
+        specialMode: true,
+        oldMode: "000000",
+        newMode: "120000",
+        modeChanged: false,
+        bytes: 0,
+        additions: 0,
+        deletions: 0
+      };
+    }
+    throw error;
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      return { specialMode: true, bytes: 0, additions: 0, deletions: 0 };
+    }
+    const common = {
+      oldMode: "000000",
+      newMode: stat.mode & 0o111 ? "100755" : "100644",
+      modeChanged: false,
+      specialMode: false
+    };
+    if (stat.size > maximumFileBytes) {
+      return {
+        ...common,
+        bytes: stat.size,
+        captureSkipped: true,
+        binary: false,
+        additions: 0,
+        deletions: 0
+      };
+    }
+    const buffer = Buffer.alloc(maximumFileBytes + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > maximumFileBytes) {
+      return {
+        ...common,
+        bytes: total,
+        captureSkipped: true,
+        binary: false,
+        additions: 0,
+        deletions: 0
+      };
+    }
+    const content = buffer.subarray(0, total);
+    const binary = content.includes(0);
+    return {
+      ...common,
+      bytes: total,
+      binary,
+      additions: binary ? 0 : content.toString("utf8").split("\n").length,
+      deletions: 0
+    };
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function collectWorkingTreeChanges(
@@ -157,40 +232,8 @@ export async function collectWorkingTreeChanges(
 
   for (const filePath of untrackedPaths) {
     const absolute = path.join(cwd, filePath);
-    const stat = await lstat(absolute);
     const item = byPath.get(filePath);
-    if (stat.isSymbolicLink()) {
-      item.symlink = true;
-      item.specialMode = true;
-      item.oldMode = "000000";
-      item.newMode = "120000";
-      item.modeChanged = false;
-      item.additions = 0;
-      item.deletions = 0;
-      continue;
-    }
-    if (!stat.isFile()) {
-      item.specialMode = true;
-      item.additions = 0;
-      item.deletions = 0;
-      continue;
-    }
-    item.oldMode = "000000";
-    item.newMode = stat.mode & 0o111 ? "100755" : "100644";
-    item.modeChanged = false;
-    item.specialMode = false;
-    item.bytes = stat.size;
-    if (stat.size > maximumFileBytes) {
-      item.captureSkipped = true;
-      item.binary = false;
-      item.additions = 0;
-      item.deletions = 0;
-      continue;
-    }
-    const content = await readFile(absolute);
-    item.binary = content.includes(0);
-    item.additions = item.binary ? 0 : content.toString("utf8").split("\n").length;
-    item.deletions = 0;
+    Object.assign(item, await inspectUntrackedFile(absolute, maximumFileBytes));
   }
 
   for (const item of byPath.values()) {
