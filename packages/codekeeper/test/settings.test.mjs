@@ -38,6 +38,9 @@ test("standard and advanced settings expose behavior, arbitrary models, profiles
   assert.deepEqual(row(settings, "policy:ai.agents.review.provider").choices, ["openai", "deepseek", "openrouter"]);
   assert.equal(row(settings, "policy:ai.agents.review.model").kind, "string");
   assert.equal(row(settings, "policy:ai.agents.review.modelSettings", true).kind, "json");
+  const providers = row(settings, "policy:ai.providers", true);
+  assert.equal(providers.readOnly, true);
+  assert.throws(() => setSetting(settings, providers, {}), /read-only/);
   assert.equal(row(settings, "policy:ai.agents.review.maxTurns", true).readOnly, true);
   assert.equal(row(settings, "policy:audit.repair.protectedPaths", true).readOnly, true);
   assert.equal(standard.filter((candidate) => candidate.kind === "profile").length, 4);

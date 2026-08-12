@@ -87,6 +87,7 @@ function readOnlyPolicyPath(path) {
     || path === "repository.defaultBranch"
     || path === "repository.automationBranchPrefix"
     || path === "ai.tracing.includeSensitiveData"
+    || path === "ai.providers"
     || path.startsWith("ai.providers.")
     || /^ai\.agents\.[^.]+\.maxTurns$/.test(path)
     || /^ai\.agents\.[^.]+\.workspace\.allowWrites$/.test(path)

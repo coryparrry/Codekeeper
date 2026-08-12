@@ -50,7 +50,7 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 67f99dd9104f7040e5f50138541a256c1497b264df377e707133e3a2d6c11cdf
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 4645ea4b148fc57901eb1fa495a6342e0601f76e4f7bcc0426c251a0b1dba894
 
 concurrency:
   group: codekeeper-fix-${{ inputs.issue_number || github.event.issue.number || github.event.client_payload.number }}

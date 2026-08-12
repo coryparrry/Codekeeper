@@ -165,15 +165,14 @@ export async function completeReviewFeedback(github, pullNumber) {
   ]);
   if (reviews.length > 128 || threads.length > 128) throw new Error(`PR #${pullNumber} has more than 128 review records or threads`);
   const automationLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
-  const isAutomationFeedback = (author, body) => {
+  const isAutomationFeedback = (author) => {
     const normalizedAuthor = String(author ?? "").trim().toLowerCase();
-    return (automationLogin && normalizedAuthor === automationLogin) ||
-      /<!-- codekeeper:review-feedback-reply=[0-9a-f]{64} -->\s*$/.test(String(body ?? ""));
+    return Boolean(automationLogin && normalizedAuthor === automationLogin);
   };
   const feedback = [];
   for (const review of reviews) {
     if (!String(review.body ?? "").trim()) continue;
-    if (isAutomationFeedback(review.user?.login, review.body)) continue;
+    if (isAutomationFeedback(review.user?.login)) continue;
     const body = String(review.body ?? "");
     feedback.push({
       sourceKey: `review:${review.id}`,
@@ -193,7 +192,7 @@ export async function completeReviewFeedback(github, pullNumber) {
   for (const thread of threads) {
     const rootCommentId = thread.comments?.nodes?.[0]?.databaseId ?? null;
     for (const comment of thread.comments?.nodes ?? []) {
-      if (isAutomationFeedback(comment.author?.login, comment.body)) continue;
+      if (isAutomationFeedback(comment.author?.login)) continue;
       const body = String(comment.body ?? "");
       feedback.push({
         sourceKey: `review_comment:${comment.databaseId}`,
