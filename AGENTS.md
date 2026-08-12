@@ -27,4 +27,4 @@ Follow the repository’s Conventional Commit history: `fix(review): ...`, `feat
 
 ## Security & Agent Workflow
 
-Never commit or paste provider keys, GitHub App PEMs, tokens, or live traces. Report vulnerabilities through GitHub private vulnerability reporting. For issue tracking, triage-label mapping, or domain documentation, follow `docs/agents/` when that configuration exists on the branch.
+Never commit or paste provider keys, GitHub App PEMs, tokens, or live traces. Report vulnerabilities through GitHub private vulnerability reporting.
