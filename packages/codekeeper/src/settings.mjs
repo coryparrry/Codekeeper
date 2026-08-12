@@ -310,7 +310,11 @@ export function validateEditableSettings(settings, baselinePolicy) {
   }
   requiredString(policy.repository.displayName, "repository.displayName", 256);
   stringList(policy.repository.ownerLogins, "repository.ownerLogins", 64, 256);
-  if (policy.repository.ownerLogins.some((login) => !LOGIN.test(login)) || !equal(policy.merge.allowedUserAuthors, policy.repository.ownerLogins)) {
+  const normalizedOwnerLogins = policy.repository.ownerLogins.map((login) => login.toLowerCase());
+  if (!normalizedOwnerLogins.length
+    || new Set(normalizedOwnerLogins).size !== normalizedOwnerLogins.length
+    || policy.repository.ownerLogins.some((login) => !LOGIN.test(login))
+    || !equal(policy.merge.allowedUserAuthors, policy.repository.ownerLogins)) {
     throw new InstallerError("Owner logins are invalid or out of sync.", { code: "SETTING_INVALID" });
   }
   stringList(policy.projectInvariants, "projectInvariants", 64, 4_096);

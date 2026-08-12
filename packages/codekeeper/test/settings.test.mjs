@@ -113,6 +113,19 @@ test("settings reject runtime-incompatible model settings and managed-label remo
   );
 });
 
+test("settings keep unusable owner lists inside the editor", async () => {
+  const { policy, settings } = await fixture(["review"]);
+  for (const ownerLogins of [[], ["Repository-Owner", "repository-owner"]]) {
+    const invalid = structuredClone(settings);
+    invalid.policy.repository.ownerLogins = ownerLogins;
+    invalid.policy.merge.allowedUserAuthors = [...ownerLogins];
+    assert.throws(
+      () => validateEditableSettings(invalid, policy),
+      /Owner logins are invalid or out of sync/,
+    );
+  }
+});
+
 test("settings cannot disable tracing while sensitive trace export is required", async () => {
   const { policy, profiles } = await fixture(["review"]);
   const baseline = structuredClone(policy);
