@@ -91,6 +91,45 @@ test("review replies update the App-owned marker in the originating thread", asy
   assert.equal(JSON.parse(requests[1].body).body, `Updated reply\n${marker}`);
 });
 
+test("retiring feedback updates only App-owned top-level and inline markers", async () => {
+  const marker = "<!-- codekeeper:review-feedback-reply=" + "a".repeat(64) + " -->";
+  const requests = [];
+  const github = client({
+    fetch: async (url, options) => {
+      const href = String(url);
+      requests.push({ url: href, method: options.method, body: options.body });
+      if (options.method === "GET" && href.includes("/issues/7/comments")) {
+        return new Response(JSON.stringify([
+          { id: 11, body: `Old top-level reply\n${marker}`, user: { login: "codekeeper[bot]", id: 123, type: "Bot" } },
+          { id: 12, body: `Spoofed reply\n${marker}`, user: { login: "person", id: 456, type: "User" } }
+        ]));
+      }
+      if (options.method === "GET" && href.includes("/pulls/7/comments")) {
+        return new Response(JSON.stringify([
+          { id: 21, body: `Old inline reply\n${marker}`, user: { login: "codekeeper[bot]", id: 123, type: "Bot" } },
+          { id: 22, body: `Other bot reply\n${marker}`, user: { login: "other[bot]", id: 789, type: "Bot" } }
+        ]));
+      }
+      return new Response(JSON.stringify({ id: 1 }), { status: 200 });
+    }
+  });
+
+  const updated = await github.retireReviewFeedbackReply(
+    7,
+    marker,
+    "No longer current.",
+    { login: "codekeeper[bot]", id: "123" }
+  );
+
+  assert.equal(updated, 2);
+  const patches = requests.filter(({ method }) => method === "PATCH");
+  assert.deepEqual(patches.map(({ url }) => url).sort(), [
+    "https://api.github.com/repos/owner/repository/issues/comments/11",
+    "https://api.github.com/repos/owner/repository/pulls/comments/21"
+  ]);
+  assert.ok(patches.every(({ body }) => JSON.parse(body).body === `No longer current.\n${marker}`));
+});
+
 test("GitHub keeps GraphQL deadlines active while response bodies are read", async () => {
   const github = client({
     timeoutMs: 5,

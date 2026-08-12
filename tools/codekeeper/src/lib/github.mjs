@@ -389,6 +389,28 @@ export class GitHubClient {
     return existing ? this.updateComment(existing.id, content) : this.createComment(number, content);
   }
 
+  async retireReviewFeedbackReply(number, marker, body, authorIdentity) {
+    const expectedAuthor = normalizeAutomationIdentity(authorIdentity);
+    if (!expectedAuthor) {
+      throw new Error("A configured GitHub App bot identity is required to retire review replies");
+    }
+    const [comments, reviewComments] = await Promise.all([
+      this.listIssueComments(number),
+      this.listPullReviewComments(number)
+    ]);
+    const content = `${body}\n${marker}`;
+    const updates = [
+      ...comments
+        .filter((comment) => isOwnedMarkerComment(comment, marker, expectedAuthor))
+        .map((comment) => this.updateComment(comment.id, content)),
+      ...reviewComments
+        .filter((comment) => isOwnedMarkerComment(comment, marker, expectedAuthor))
+        .map((comment) => this.updateReviewComment(comment.id, content))
+    ];
+    await Promise.all(updates);
+    return updates.length;
+  }
+
   async ensureLabel(name, definition) {
     const endpoint = this.repoPath(`/labels/${encodeURIComponent(name)}`);
     try {
