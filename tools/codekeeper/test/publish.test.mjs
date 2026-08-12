@@ -398,6 +398,30 @@ test("frozen review feedback detects edits past the prompt body limit", async ()
   assert.notDeepEqual(frozen, edited);
 });
 
+test("human-authored automation markers remain review feedback", async () => {
+  const marker = "<!-- codekeeper:review-feedback-reply=" + "a".repeat(64) + " -->";
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = "codekeeper-app[bot]";
+  try {
+    const feedback = await completeReviewFeedback({
+      async listPullReviews() { return []; },
+      async listPullReviewThreads() {
+        return [{
+          id: "PRRT_thread", isResolved: false, isOutdated: false,
+          comments: { nodes: [
+            { databaseId: 41, body: `Human feedback\n\n${marker}`, author: { login: "reviewer" } },
+            { databaseId: 42, body: `Automation reply\n\n${marker}`, author: { login: "codekeeper-app[bot]" } }
+          ] }
+        }];
+      }
+    }, 7);
+    assert.deepEqual(feedback.map((item) => item.sourceKey), ["review_comment:41"]);
+  } finally {
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+  }
+});
+
 test("fix-now feedback blocks auto-merge even when repair dispatch is disabled", () => {
   const reviewConfig = structuredClone(config);
   reviewConfig.merge.enabled = true;
