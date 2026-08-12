@@ -82,13 +82,13 @@ test("one settings object keeps coordinator and workspace models independent", a
   assert.throws(() => validateEditableSettings(unsafe, policy), /read-only safety boundary/);
   const incompatible = structuredClone(edited);
   incompatible.policy.ai.agents.review.effort = "high";
-  assert.throws(() => validateEditableSettings(incompatible, policy), /incompatible/);
+  assert.throws(() => validateEditableSettings(incompatible, policy), /supportsReasoningEffort/);
   const unsafeSchedule = structuredClone(edited);
   unsafeSchedule.policy.automation.maintenanceSchedule = "17 7 * * *\"";
-  assert.throws(() => validateEditableSettings(unsafeSchedule, policy), /five safe cron fields/);
+  assert.throws(() => validateEditableSettings(unsafeSchedule, policy), /supported GitHub Actions cron syntax/);
   const outOfRangeSchedule = structuredClone(edited);
   outOfRangeSchedule.policy.automation.maintenanceSchedule = "99 99 99 99 99";
-  assert.throws(() => validateEditableSettings(outOfRangeSchedule, policy), /cron fields with valid ranges/);
+  assert.throws(() => validateEditableSettings(outOfRangeSchedule, policy), /supported GitHub Actions cron syntax/);
   const boundedSchedule = structuredClone(edited);
   boundedSchedule.policy.automation.maintenanceSchedule = "*/15 0-23/2 1,15 * 1-5";
   validateEditableSettings(boundedSchedule, policy);
@@ -112,7 +112,8 @@ test("changing a provider selects a compatible default model", async () => {
 
   const customProviderDefinition = {
     baseUrl: "https://models.example/v1",
-    apiKeySecret: "CUSTOM_API_KEY",
+    api: "responses",
+    structuredOutputs: true,
     supportsReasoningEffort: false
   };
   policy.ai.providers.custom = structuredClone(customProviderDefinition);
@@ -143,7 +144,7 @@ test("settings reject runtime-incompatible model settings and managed-label remo
   nestedEffort.policy.ai.agents.review.modelSettings.reasoning = { effort: "high" };
   assert.throws(
     () => validateEditableSettings(nestedEffort, policy),
-    /modelSettings\.reasoning\.effort.*top-level agent effort/
+    /modelSettings\.reasoning\.effort.*ai\.agents\.review\.effort/
   );
 
   const overlongKey = structuredClone(settings);
@@ -158,7 +159,7 @@ test("settings reject runtime-incompatible model settings and managed-label remo
     .filter((label) => label !== "codekeeper:reviewed");
   assert.throws(
     () => validateEditableSettings(missingReviewLabel, policy),
-    /review\.managedLabels.*codekeeper:reviewed/
+    /review must explicitly manage emitted label codekeeper:reviewed/
   );
 
   const missingIssueLabel = structuredClone(settings);
@@ -166,7 +167,16 @@ test("settings reject runtime-incompatible model settings and managed-label remo
     .filter((label) => label !== "codekeeper:ready");
   assert.throws(
     () => validateEditableSettings(missingIssueLabel, policy),
-    /issues\.managedLabels.*codekeeper:ready/
+    /issues must explicitly manage emitted label codekeeper:ready/
+  );
+});
+
+test("settings reject every policy shape the runtime validator rejects", async () => {
+  const { policy, settings } = await fixture();
+  settings.policy.review.unexpected = true;
+  assert.throws(
+    () => validateEditableSettings(settings, policy),
+    /review contains an unknown key unexpected/
   );
 });
 
@@ -178,7 +188,7 @@ test("settings keep unusable owner lists inside the editor", async () => {
     invalid.policy.merge.allowedUserAuthors = [...ownerLogins];
     assert.throws(
       () => validateEditableSettings(invalid, policy),
-      /Owner logins are invalid or out of sync/,
+      /repository\.ownerLogins must not be empty|must not contain duplicates/,
     );
   }
 });
@@ -192,6 +202,18 @@ test("settings canonicalize runtime-valid owner logins before enforcing identity
 
   assert.deepEqual(settings.policy.repository.ownerLogins, ["repository-owner"]);
   assert.deepEqual(settings.policy.merge.allowedUserAuthors, ["repository-owner"]);
+});
+
+test("Advanced owner edits synchronize canonical merge authors", async () => {
+  const { settings } = await fixture(["review"]);
+  const edited = setSetting(
+    settings,
+    row(settings, "policy:repository.ownerLogins", true),
+    [" NewOwner "]
+  );
+
+  assert.deepEqual(edited.policy.repository.ownerLogins, ["newowner"]);
+  assert.deepEqual(edited.policy.merge.allowedUserAuthors, ["newowner"]);
 });
 
 test("settings cannot disable tracing while sensitive trace export is required", async () => {
@@ -209,7 +231,7 @@ test("settings cannot disable tracing while sensitive trace export is required",
 
   assert.throws(
     () => validateEditableSettings(settings, baseline),
-    /Sensitive trace export requires tracing to stay enabled/
+    /ai\.tracing\.includeSensitiveData requires ai\.tracing\.enabled=true/
   );
 });
 

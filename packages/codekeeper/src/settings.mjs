@@ -1,52 +1,10 @@
 import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODEL_OPTIONS, MODEL_PROVIDER_SECRETS, MODES, SOURCE_COMMIT, SOURCE_REPOSITORY } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
+import { validatePolicy } from "./policy-validator.mjs";
 
 const AGENT_IDS = Object.freeze(["review", "audit", "issue", "fix"]);
 const EFFORTS = Object.freeze(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
-const CAPS = Object.freeze({
-  "review.maximumBlockingFindings": [0, 20],
-  "review.maximumNonBlockingFindings": [0, 20],
-  "review.maximumDiffBytes": [1, 5 * 1024 * 1024],
-  "review.maximumChangedFiles": [1, 1_000],
-  "audit.maximumIssuesPerRun": [1, 20],
-  "audit.repair.maximumFiles": [1, 100],
-  "audit.repair.maximumChangedLines": [1, 10_000],
-  "audit.repair.maximumPatchBytes": [1, 5 * 1024 * 1024],
-  "audit.repair.maximumFileBytes": [1, 1024 * 1024],
-  "issues.maximumOpenIssueContext": [1, 200],
-  "merge.maximumFiles": [1, 50],
-  "merge.maximumChangedLines": [1, 5_000]
-});
-const CRON_MONTHS = new Map([["JAN", 1], ["FEB", 2], ["MAR", 3], ["APR", 4], ["MAY", 5], ["JUN", 6], ["JUL", 7], ["AUG", 8], ["SEP", 9], ["OCT", 10], ["NOV", 11], ["DEC", 12]]);
-const CRON_WEEKDAYS = new Map([["SUN", 0], ["MON", 1], ["TUE", 2], ["WED", 3], ["THU", 4], ["FRI", 5], ["SAT", 6]]);
-const CRON_FIELDS = Object.freeze([
-  Object.freeze({ minimum: 0, maximum: 59 }),
-  Object.freeze({ minimum: 0, maximum: 23 }),
-  Object.freeze({ minimum: 1, maximum: 31 }),
-  Object.freeze({ minimum: 1, maximum: 12, names: CRON_MONTHS }),
-  Object.freeze({ minimum: 0, maximum: 6, names: CRON_WEEKDAYS })
-]);
-const REQUIRED_RUNTIME_LABELS = Object.freeze([
-  "codekeeper:reviewed", "codekeeper:maintenance", "codekeeper:ready", "codekeeper:blocked",
-  "codekeeper:manual-review", "codekeeper:paused", "codekeeper:auto-repaired", "codekeeper:auto-merge",
-  "codekeeper:duplicate-candidate", "codekeeper:deferred", "codekeeper:needs-tests",
-  "codekeeper:priority-p1", "codekeeper:priority-p2", "codekeeper:priority-p3",
-  "codekeeper:risk-low", "codekeeper:risk-medium", "codekeeper:risk-high",
-  "codekeeper:type-bug", "codekeeper:type-documentation", "codekeeper:type-enhancement",
-  "codekeeper:type-maintenance", "codekeeper:type-question", "codekeeper:type-security", "codekeeper:type-testing"
-]);
-const REVIEW_MANAGED_LABELS = Object.freeze([
-  "codekeeper:reviewed", "codekeeper:blocked", "codekeeper:manual-review", "codekeeper:auto-merge",
-  "codekeeper:needs-tests", "codekeeper:risk-low", "codekeeper:risk-medium", "codekeeper:risk-high"
-]);
-const ISSUE_MANAGED_LABELS = Object.freeze([
-  "codekeeper:maintenance", "codekeeper:ready", "codekeeper:manual-review", "codekeeper:duplicate-candidate",
-  "codekeeper:deferred", "codekeeper:priority-p1", "codekeeper:priority-p2", "codekeeper:priority-p3",
-  "codekeeper:risk-low", "codekeeper:risk-medium", "codekeeper:risk-high", "codekeeper:type-bug",
-  "codekeeper:type-documentation", "codekeeper:type-enhancement", "codekeeper:type-maintenance",
-  "codekeeper:type-question", "codekeeper:type-security", "codekeeper:type-testing"
-]);
 
 const STANDARD_PATHS = Object.freeze([
   ["automation.automaticPrReview", "Automatic PR review"],
@@ -65,6 +23,12 @@ const STANDARD_PATHS = Object.freeze([
 
 function clone(value) {
   return structuredClone(value);
+}
+
+function canonicalOwnerLogins(value) {
+  return Array.isArray(value)
+    ? value.map((login) => String(login).trim().toLowerCase())
+    : value;
 }
 
 function pathParts(path) {
@@ -232,7 +196,11 @@ export function setSetting(settings, row, value) {
       }
       if (!next.policy.ai.providers[value]?.supportsReasoningEffort) next.policy.ai.agents[agent].effort = "none";
     }
-    if (row.path === "repository.ownerLogins") next.policy.merge.allowedUserAuthors = [...value];
+    if (row.path === "repository.ownerLogins") {
+      const ownerLogins = canonicalOwnerLogins(value);
+      next.policy.repository.ownerLogins = ownerLogins;
+      next.policy.merge.allowedUserAuthors = Array.isArray(ownerLogins) ? [...ownerLogins] : ownerLogins;
+    }
   }
   return next;
 }
@@ -259,81 +227,6 @@ function equal(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function requiredString(value, name, maximum = 16_384) {
-  if (typeof value !== "string" || !value.trim() || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) {
-    throw new InstallerError(`${name} is invalid.`, { code: "SETTING_INVALID" });
-  }
-}
-function modelId(value, name) {
-  requiredString(value, name, 256);
-  if (/\s/.test(value)) throw new InstallerError(`${name} cannot contain whitespace.`, { code: "SETTING_INVALID" });
-}
-
-function stringList(value, name, maximumEntries = 128, maximumLength = 16_384) {
-  if (!Array.isArray(value) || value.length > maximumEntries || new Set(value).size !== value.length) {
-    throw new InstallerError(`${name} must be a bounded JSON string list without duplicates.`, { code: "SETTING_INVALID" });
-  }
-  for (const item of value) requiredString(item, name, maximumLength);
-}
-
-function validateJson(value, name, depth = 0) {
-  if (depth > 20) throw new InstallerError(`${name} is nested too deeply.`, { code: "SETTING_INVALID" });
-  if (value === null || typeof value === "boolean") return;
-  if (typeof value === "string") {
-    if (value.length > 16_384) throw new InstallerError(`${name} is invalid.`, { code: "SETTING_INVALID" });
-    return;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value) || Math.abs(value) > 1_000_000) throw new InstallerError(`${name} contains an invalid number.`, { code: "SETTING_INVALID" });
-    return;
-  }
-  const entries = Array.isArray(value) ? value.entries() : Object.entries(value ?? {});
-  if (value === null || typeof value !== "object" || [...entries].length > 128) throw new InstallerError(`${name} is invalid.`, { code: "SETTING_INVALID" });
-  for (const [key, child] of Array.isArray(value) ? value.entries() : Object.entries(value)) {
-    if (["__proto__", "constructor", "prototype"].includes(String(key))) throw new InstallerError(`${name} contains a forbidden key.`, { code: "SETTING_INVALID" });
-    if (!Array.isArray(value) && String(key).length > 16_384) throw new InstallerError(`${name} contains an overlong key.`, { code: "SETTING_INVALID" });
-    validateJson(child, `${name}.${key}`, depth + 1);
-  }
-}
-
-function cronValue(value, field) {
-  const named = field.names?.get(value.toUpperCase());
-  if (named !== undefined) return named;
-  if (!/^\d+$/.test(value)) return null;
-  const numeric = Number(value);
-  return Number.isSafeInteger(numeric) && numeric >= field.minimum && numeric <= field.maximum ? numeric : null;
-}
-
-function validCronBase(value, field) {
-  if (value === "*") return true;
-  const range = value.split("-");
-  if (range.length === 1) return cronValue(range[0], field) !== null;
-  if (range.length !== 2) return false;
-  const start = cronValue(range[0], field);
-  const end = cronValue(range[1], field);
-  return start !== null && end !== null && start <= end;
-}
-
-function validCronField(value, field) {
-  if (!value || value.startsWith(",") || value.endsWith(",")) return false;
-  return value.split(",").every((entry) => {
-    const parts = entry.split("/");
-    if (parts.length > 2 || !validCronBase(parts[0], field)) return false;
-    if (parts.length === 1) return true;
-    const step = Number(parts[1]);
-    return /^\d+$/.test(parts[1])
-      && Number.isSafeInteger(step)
-      && step > 0
-      && step <= field.maximum - field.minimum + 1;
-  });
-}
-
-function validMaintenanceSchedule(value) {
-  const fields = value.trim().split(/\s+/);
-  return fields.length === CRON_FIELDS.length
-    && fields.every((field, index) => validCronField(field, CRON_FIELDS[index]));
-}
-
 export function validateEditableSettings(settings, baselinePolicy) {
   if (!settings || typeof settings !== "object" || typeof settings.enabled !== "boolean") throw new InstallerError("Codekeeper settings are invalid.", { code: "SETTING_INVALID" });
   if (!Array.isArray(settings.modes) || !settings.modes.length || new Set(settings.modes).size !== settings.modes.length || settings.modes.some((mode) => !MODE_IDS.includes(mode))) {
@@ -348,81 +241,29 @@ export function validateEditableSettings(settings, baselinePolicy) {
   ]) {
     if (!equal(getPath(policy, path), getPath(baselinePolicy, path))) throw new InstallerError(`${path} is a read-only safety boundary.`, { code: "SETTING_INVALID" });
   }
-  requiredString(policy.repository.displayName, "repository.displayName", 100);
-  if (policy.repository.displayName.trim() !== policy.repository.displayName) throw new InstallerError("repository.displayName is invalid.", { code: "SETTING_INVALID" });
-  stringList(policy.repository.ownerLogins, "repository.ownerLogins", 64, 256);
-  const normalizedOwnerLogins = policy.repository.ownerLogins.map((login) => login.trim().toLowerCase());
-  if (!normalizedOwnerLogins.length
-    || new Set(normalizedOwnerLogins).size !== normalizedOwnerLogins.length
-    || normalizedOwnerLogins.some((login) => !LOGIN.test(login))
+  if (policy.projectInvariants === undefined) policy.projectInvariants = [];
+  for (const agent of Object.values(policy.ai?.agents ?? {})) agent.modelSettings ??= {};
+  try {
+    validatePolicy(policy);
+  } catch (cause) {
+    throw new InstallerError(cause.message, { code: "SETTING_INVALID", cause });
+  }
+  if (policy.repository.displayName.trim() !== policy.repository.displayName || policy.repository.displayName.length > 100) {
+    throw new InstallerError("repository.displayName is invalid.", { code: "SETTING_INVALID" });
+  }
+  const normalizedOwnerLogins = canonicalOwnerLogins(policy.repository.ownerLogins);
+  if (normalizedOwnerLogins.some((login) => !LOGIN.test(login))
     || !equal(policy.merge.allowedUserAuthors, normalizedOwnerLogins)) {
     throw new InstallerError("Owner logins are invalid or out of sync.", { code: "SETTING_INVALID" });
-  }
-  policy.repository.ownerLogins = normalizedOwnerLogins;
-  if (policy.projectInvariants === undefined) policy.projectInvariants = [];
-  stringList(policy.projectInvariants, "projectInvariants", 64, 4_096);
-  for (const key of ["automaticPrReview", "reviewFeedbackTriage", "issueTriage", "ownerRequests"]) {
-    if (typeof policy.automation[key] !== "boolean") throw new InstallerError(`automation.${key} must be boolean.`, { code: "SETTING_INVALID" });
-  }
-  requiredString(policy.automation.maintenanceSchedule, "automation.maintenanceSchedule", 100);
-  if (!validMaintenanceSchedule(policy.automation.maintenanceSchedule)) throw new InstallerError("Maintenance schedule must contain five safe cron fields with valid ranges.", { code: "SETTING_INVALID" });
-  if (typeof policy.ai.tracing.enabled !== "boolean") throw new InstallerError("Tracing must be boolean.", { code: "SETTING_INVALID" });
-  if (policy.ai.tracing.includeSensitiveData && !policy.ai.tracing.enabled) {
-    throw new InstallerError("Sensitive trace export requires tracing to stay enabled.", { code: "SETTING_INVALID" });
   }
   for (const agentId of AGENT_IDS) {
     const agent = policy.ai.agents[agentId];
     if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, agent.provider) || !policy.ai.providers[agent.provider]) {
       throw new InstallerError(`${agentId} must use an installable provider.`, { code: "SETTING_INVALID" });
     }
-    modelId(agent.model, `${agentId} model`);
-    if (!EFFORTS.includes(agent.effort) || (agent.effort !== "none" && !policy.ai.providers[agent.provider].supportsReasoningEffort)) {
-      throw new InstallerError(`${agentId} effort is incompatible with its provider.`, { code: "SETTING_INVALID" });
-    }
-    if (agent.maxTurns !== 1 || !Number.isSafeInteger(agent.maximumAttempts) || agent.maximumAttempts < 1 || agent.maximumAttempts > 5) {
-      throw new InstallerError(`${agentId} turn and retry limits are invalid.`, { code: "SETTING_INVALID" });
-    }
-    if (agent.modelSettings === undefined) agent.modelSettings = {};
-    if (!agent.modelSettings || typeof agent.modelSettings !== "object" || Array.isArray(agent.modelSettings)) throw new InstallerError(`${agentId}.modelSettings must be a JSON object.`, { code: "SETTING_INVALID" });
-    validateJson(agent.modelSettings, `${agentId}.modelSettings`);
-    if (agent.modelSettings.reasoning && typeof agent.modelSettings.reasoning === "object"
-      && !Array.isArray(agent.modelSettings.reasoning) && Object.hasOwn(agent.modelSettings.reasoning, "effort")) {
-      throw new InstallerError(`${agentId}.modelSettings.reasoning.effort is invalid; use the top-level agent effort setting.`, { code: "SETTING_INVALID" });
-    }
-    if (typeof agent.workspace.enabled !== "boolean" || !equal(agent.workspace.allowWrites, baselinePolicy.ai.agents[agentId].workspace.allowWrites)) {
+    if (!equal(agent.workspace.allowWrites, baselinePolicy.ai.agents[agentId].workspace.allowWrites)) {
       throw new InstallerError(`${agentId} workspace boundary is invalid.`, { code: "SETTING_INVALID" });
     }
-    if (agent.workspace.enabled) {
-      modelId(agent.workspace.model, `${agentId} workspace model`);
-      if (!EFFORTS.includes(agent.workspace.effort)) throw new InstallerError(`${agentId} workspace effort is invalid.`, { code: "SETTING_INVALID" });
-    }
-  }
-  for (const [path, [minimum, maximum]] of Object.entries(CAPS)) {
-    const value = getPath(policy, path);
-    if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new InstallerError(`${path} must be between ${minimum} and ${maximum}.`, { code: "SETTING_INVALID" });
-  }
-  for (const path of ["review.allowedLabels", "review.managedLabels", "audit.repair.allowedPaths", "issues.managedLabels", "merge.allowedPaths"]) {
-    stringList(getPath(policy, path), path, 128, 1_024);
-  }
-  for (const key of ["autoRepair", "createDeferredIssues", "includeDiffInAgentContext"]) if (typeof policy.review[key] !== "boolean") throw new InstallerError(`review.${key} must be boolean.`, { code: "SETTING_INVALID" });
-  for (const key of ["enabled", "allowAdd"]) if (typeof policy.audit.repair[key] !== "boolean") throw new InstallerError(`audit.repair.${key} must be boolean.`, { code: "SETTING_INVALID" });
-  for (const key of ["allowAiImplementation", "closeExactDuplicates"]) if (typeof policy.issues[key] !== "boolean") throw new InstallerError(`issues.${key} must be boolean.`, { code: "SETTING_INVALID" });
-  if (!["MERGE", "SQUASH", "REBASE"].includes(policy.merge.method)) throw new InstallerError("merge.method is invalid.", { code: "SETTING_INVALID" });
-  for (const key of ["enabled", "allowAutomationPullRequests"]) if (typeof policy.merge[key] !== "boolean") throw new InstallerError(`merge.${key} must be boolean.`, { code: "SETTING_INVALID" });
-  for (const [name, label] of Object.entries(policy.labels)) {
-    if (!/^[0-9A-Fa-f]{6}$/.test(label.color) || typeof label.description !== "string" || label.description.length > 1_024) throw new InstallerError(`Label ${name} is invalid.`, { code: "SETTING_INVALID" });
-  }
-  for (const label of [...policy.review.allowedLabels, ...policy.review.managedLabels, ...policy.issues.managedLabels]) {
-    if (!policy.labels[label]) throw new InstallerError(`Policy references undefined label ${label}.`, { code: "SETTING_INVALID" });
-  }
-  for (const label of REQUIRED_RUNTIME_LABELS) {
-    if (!policy.labels[label]) throw new InstallerError(`Policy must define runtime label ${label}.`, { code: "SETTING_INVALID" });
-  }
-  for (const label of [...REVIEW_MANAGED_LABELS, ...policy.review.allowedLabels]) {
-    if (!policy.review.managedLabels.includes(label)) throw new InstallerError(`review.managedLabels must include ${label}.`, { code: "SETTING_INVALID" });
-  }
-  for (const label of [...ISSUE_MANAGED_LABELS, ...policy.review.allowedLabels]) {
-    if (!policy.issues.managedLabels.includes(label)) throw new InstallerError(`issues.managedLabels must include ${label}.`, { code: "SETTING_INVALID" });
   }
   if (policy.review.createDeferredIssues && !settings.modes.includes("issues")) {
     throw new InstallerError("Deferred issue creation requires the Issue triage workflow.", { code: "SETTING_INVALID" });

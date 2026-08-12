@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "853f2031733252f87a67b2d8919685cd890e552472eadb8ed5f037e5733ce0b9";
+const toolingManifestSha256 = "84be0ac91f63b99a5cc53bde53e6cc817688403bdae7dbdc2b4dca280e6bc706";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -78,14 +78,6 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
-});
-
-test("owner requests serialize per issue or pull request", async () => {
-  const assistant = await workflow("assistant");
-  assert.match(
-    assistant,
-    /concurrency:\n  group: codekeeper-assistant-\$\{\{ github\.event\.issue\.number \|\| github\.event\.pull_request\.number \|\| github\.run_id \}\}\n  cancel-in-progress: false/
-  );
 });
 
 test("caller bootstrap fetches the same immutable private action release as its reusable workflow", async () => {
@@ -484,6 +476,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(fixCaller, /automation_bot_login: \$\{\{ vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN \}\}/);
   const commands = await repositoryFile("tools/codekeeper/src/lib/commands.mjs");
   assert.match(commands, /pull\.base\?\.ref !== defaultBranch/);
+  assert.match(commands, /config\.repository\.defaultBranch/);
   assert.match(commands, /removeLabel\(number, "codekeeper:paused"\)/);
 });
 

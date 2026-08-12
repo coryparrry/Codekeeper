@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { copyFile, lstat, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";

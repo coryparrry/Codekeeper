@@ -9,7 +9,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
 import { automaticRepairMarker, deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "../src/lib/markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
-import { completeReviewFeedback } from "../src/lib/prepare.mjs";
+import { completeReviewFeedback } from "../src/lib/review-feedback.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import {
   isTrustedMaintenanceFindingIssue,
@@ -673,12 +673,132 @@ test("frozen review feedback detects edits past the prompt body limit", async ()
         }] }
       }];
     }
-  }, 7);
+  }, 7, config);
 
   const frozen = await feedbackFor(`${prefix}a`);
   const edited = await feedbackFor(`${prefix}b`);
   assert.equal(frozen[0].body, edited[0].body);
   assert.notDeepEqual(frozen, edited);
+});
+
+test("review feedback inventory cannot be built without repository policy", async () => {
+  await assert.rejects(
+    completeReviewFeedback({
+      async listPullReviews() { throw new Error("must reject before GitHub reads"); },
+      async listPullReviewThreads() { throw new Error("must reject before GitHub reads"); }
+    }, 7),
+    /requires repository owner policy/
+  );
+});
+
+test("conditional GitHub mutation blocks repair dispatch after feedback changes", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-repair-feedback-race-test-"));
+  const configSha256 = "9".repeat(64);
+  const reviewConfig = structuredClone(config);
+  reviewConfig.review.autoRepair = true;
+  const headSha = "a".repeat(40);
+  const baseSha = "b".repeat(40);
+  const frozenFeedback = {
+    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
+    body: "Repair this problem.", bodySha256: sha256("Repair this problem."),
+    url: "https://github.test/comment/41", state: "commented", threadId: "PRRT_thread",
+    rootCommentId: 41, resolved: false, outdated: false, path: "README.md", line: 1
+  };
+  const context = {
+    mode: "review", repository: "owner/repository", configSha256, runId: "7009",
+    runUrl: "https://github.com/owner/repository/actions/runs/7009",
+    pullRequest: {
+      number: 7, headSha, baseSha, diff: { truncated: false, disabled: false },
+      reviewFeedbackFrozen: true, reviewFeedback: [frozenFeedback]
+    }
+  };
+  const result = {
+    mode: "review", summary: "Repair the current feedback.", risk: "low", labels: [],
+    blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{
+      problemKey: "repair-race", disposition: "fix_now", type: "bug",
+      explanation: "Repair the current feedback.", validation: "The feedback is still active.",
+      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "manual", noActionReason: null
+  };
+  const pull = {
+    number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
+    user: { login: "contributor", type: "User" },
+    head: { sha: headSha, ref: "feature/repair", repo: { full_name: context.repository } },
+    base: { sha: baseSha, ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
+  };
+  let resolved = false;
+  let dispatches = 0;
+  let leaseComment = null;
+  const restoreGitHub = replaceGitHubMethods({
+    async getPull() { return structuredClone(pull); },
+    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: frozenFeedback.threadId, isResolved: resolved, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
+          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
+          author: { login: frozenFeedback.author }
+        }] }
+      }];
+    },
+    async listMaintenanceIssues() { return []; },
+    async listIssueComments() { return leaseComment ? [leaseComment] : []; },
+    async createComment(_number, body) {
+      await this.assertPullMutationCurrent();
+      leaseComment = {
+        id: 99,
+        body,
+        created_at: new Date().toISOString(),
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      };
+      return leaseComment;
+    },
+    async ensureLabels() {},
+    async replaceManagedLabels() {},
+    async upsertMarkerComment() {},
+    async upsertReviewReply() {},
+    async addLabels(number, labels) {
+      pull.labels.push(...labels.map((name) => ({ name })));
+      this.advancePullMutationState("POST", this.repoPath(`/issues/${number}/labels`), { labels });
+      resolved = true;
+    },
+    async removeLabel(_number, label) {
+      pull.labels = pull.labels.filter((item) => item.name !== label);
+    },
+    async createRepositoryDispatch() {
+      await this.assertPullMutationCurrent();
+      dispatches += 1;
+    },
+    async rollbackPullLabel(_number, label) {
+      pull.labels = pull.labels.filter((item) => item.name !== label);
+    }
+  });
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "review", context, result, configSha256, artifactConfig: reviewConfig
+    });
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
+      /review feedback changed after preparation/
+    );
+    assert.equal(dispatches, 0);
+    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
 });
 
 test("human-authored automation markers remain review feedback", async () => {
@@ -697,7 +817,7 @@ test("human-authored automation markers remain review feedback", async () => {
           ] }
         }];
       }
-    }, 7);
+    }, 7, config);
     assert.deepEqual(feedback.map((item) => item.sourceKey), ["review_comment:41"]);
   } finally {
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -1160,7 +1280,7 @@ test("issue publication does not close a duplicate after a concurrent user comme
   let comments = [];
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
-      if (number === 9) return { number, state: "open" };
+      if (number === 9) return { number, state: "open", updated_at: "2026-08-05T09:00:00Z" };
       return { number, title: "Report", state: "open", updated_at: updatedAt, labels };
     },
     async listIssueComments() { return structuredClone(comments); },
@@ -1228,7 +1348,7 @@ test("issue publication rejects a concurrent comment sharing its mutation timest
   let issueClosed = false;
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
-      if (number === 9) return { number, state: "open" };
+      if (number === 9) return { number, state: "open", updated_at: "2026-08-05T09:00:00Z" };
       return { number, title: "Report", state: "open", updated_at: updatedAt, labels };
     },
     async listIssueComments() { return structuredClone(comments); },
@@ -1269,7 +1389,7 @@ test("issue publication rejects a concurrent comment sharing its mutation timest
     });
     await assert.rejects(
       publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
-      /changed while Codekeeper reconciled comments/
+      /comments changed while Codekeeper published/
     );
     assert.equal(duplicateCommentPublished, false);
     assert.equal(issueClosed, false);
@@ -1414,7 +1534,7 @@ test("issue publication rejects same-timestamp subject drift after verified labe
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
     await assert.rejects(
       publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
-      /changed while Codekeeper reconciled labels/
+      /changed while Codekeeper published/
     );
     assert.equal(markerPublished, false);
   } finally {
@@ -1502,6 +1622,7 @@ test("fix publication does not create a repair PR after the issue changes", asyn
       issueReads += 1;
       return { number, state: "open", updated_at: issueReads === 1 ? "2026-08-05T10:00:00Z" : "2026-08-05T10:01:00Z" };
     },
+    async getBranchTip() { return null; },
     async findOpenPullByHead() { return null; },
     async createPull() { pullCreated = true; }
   });
@@ -1867,7 +1988,7 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
     ["protected", (pull) => pull, /is protected/, { protected: true }],
     ["branch moved", (pull) => pull, /head branch moved/, { protected: false, commit: { sha: "e".repeat(40) } }]
   ];
-  for (const [name, mutate, expected, branchOverride, commentsOverride, authorizationMode = "owner", expectedComments = 1] of cases) {
+  for (const [name, mutate, expected, branchOverride, commentsOverride, authorizationMode = "owner"] of cases) {
     await t.test(name, async () => {
       const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-pr-repair-negative-"));
       const configSha256 = "3".repeat(64);
@@ -1913,12 +2034,7 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
           expected
         );
         assert.equal(createPullCalls, 0);
-        assert.equal(comments.length, expectedComments);
-        if (expectedComments > 0) {
-          assert.equal(comments[0].number, context.target.number);
-          assert.equal(comments[0].marker, fixRunMarker(context.runId));
-          assert.deepEqual(comments[0].authorIdentity, identity);
-        }
+        assert.equal(comments.length, 0, "stale or ineligible repair targets must not be mutated");
       } finally {
         restoreGitHub();
         if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;

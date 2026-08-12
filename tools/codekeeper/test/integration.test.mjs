@@ -204,6 +204,8 @@ test("feedback-triggered review preparation freezes the complete current review 
             nodes: [
               { id: "PRRC_node_41", databaseId: 41, body: "Root timeout concern", url: "https://github.test/comment/41", path: "README.md", line: 1, originalLine: 1, author: { login: "reviewer" } },
               { id: "PRRC_node_42", databaseId: 42, body: "Please add a timeout test", url: "https://github.test/comment/42", path: "README.md", line: 1, originalLine: 1, author: { login: "owner" } },
+              { id: "PRRC_node_44", databaseId: 44, body: "/codekeeper fix", url: "https://github.test/comment/44", path: "README.md", line: 1, originalLine: 1, author: { login: "repository-owner" } },
+              { id: "PRRC_node_45", databaseId: 45, body: "/codekeeper fix", url: "https://github.test/comment/45", path: "README.md", line: 1, originalLine: 1, author: { login: "reviewer" } },
               { id: "PRRC_node_43", databaseId: 43, body: "Handled.\n\n<!-- codekeeper:review-feedback-reply=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->", url: "https://github.test/comment/43", path: "README.md", line: 1, originalLine: 1, author: { login: "codekeeper-app[bot]" } }
             ],
             pageInfo: { hasNextPage: false }
@@ -228,6 +230,7 @@ test("feedback-triggered review preparation freezes the complete current review 
     assert.deepEqual(context.pullRequest.reviewFeedback.map((item) => item.sourceKey), [
       "review_comment:41",
       "review_comment:42",
+      "review_comment:45",
       "review:7"
     ]);
     assert.equal(context.pullRequest.reviewFeedback[0].threadId, "PRRT_thread");
@@ -249,6 +252,7 @@ test("feedback-triggered review preparation freezes the complete current review 
     assert.deepEqual(result.reviewFeedback.flatMap((item) => item.sourceKeys), [
       "review_comment:41",
       "review_comment:42",
+      "review_comment:45",
       "review:7"
     ]);
     assert.ok(result.reviewFeedback.every((item) => item.disposition === "ignore"));
