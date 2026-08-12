@@ -957,6 +957,7 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
         databaseId: 99,
         author: "reviewer",
         body: "The repair must retain the authorization boundary.",
+        bodySha256: digest("The repair must retain the authorization boundary."),
         url: "https://github.com/acme/example/pull/42#discussion_r99",
         path: "src/authorization.mjs",
         line: 17,
