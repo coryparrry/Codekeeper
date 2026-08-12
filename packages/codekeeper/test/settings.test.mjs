@@ -113,6 +113,51 @@ test("settings reject runtime-incompatible model settings and managed-label remo
   );
 });
 
+test("settings cannot disable tracing while sensitive trace export is required", async () => {
+  const { policy, profiles } = await fixture(["review"]);
+  const baseline = structuredClone(policy);
+  baseline.ai.tracing.enabled = true;
+  baseline.ai.tracing.includeSensitiveData = true;
+  const settings = createEditableSettings({
+    policy: baseline,
+    modes: ["review"],
+    enabled: true,
+    profiles
+  });
+  settings.policy.ai.tracing.enabled = false;
+
+  assert.throws(
+    () => validateEditableSettings(settings, baseline),
+    /Sensitive trace export requires tracing to stay enabled/
+  );
+});
+
+test("an enabled issue workspace receives the OpenAI workspace key", async () => {
+  const { bundle, policy, settings } = await fixture(["issues"]);
+  settings.policy.ai.agents.issue.workspace.enabled = true;
+  validateEditableSettings(settings, policy);
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      root: "/tmp/widget",
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: HEAD_SHA,
+      viewerLogin: "coryparrry"
+    },
+    answers: {
+      ...settingsAnswers(settings),
+      preset: "openai",
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    }
+  });
+  const workflow = plan.files.find((file) => file.path === MODES.issues.target).contents;
+
+  assert.ok(plan.secrets.some((secret) => secret.name === "OPENAI_API_KEY"));
+  assert.match(workflow, /workspace_api_key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+});
+
 test("settings require each enabled capability to have its executing workflow", async () => {
   const { policy, settings } = await fixture(["review", "maintain"]);
   const automaticRepairWithoutFixer = structuredClone(settings);

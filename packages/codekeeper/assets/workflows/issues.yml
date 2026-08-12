@@ -32,6 +32,8 @@ jobs:
     secrets:
       # Match this secret to ai.agents.issue.provider in .github/codekeeper.json.
       model_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+      # Required while this mode keeps workspace.enabled=true.
+      workspace_api_key: ${{ secrets.OPENAI_API_KEY }}
       # Traces still export to OpenAI, so this must not be the DeepSeek key.
       trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
       app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}

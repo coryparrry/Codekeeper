@@ -320,6 +320,9 @@ export function validateEditableSettings(settings, baselinePolicy) {
   requiredString(policy.automation.maintenanceSchedule, "automation.maintenanceSchedule", 100);
   if (!validMaintenanceSchedule(policy.automation.maintenanceSchedule)) throw new InstallerError("Maintenance schedule must contain five safe cron fields with valid ranges.", { code: "SETTING_INVALID" });
   if (typeof policy.ai.tracing.enabled !== "boolean") throw new InstallerError("Tracing must be boolean.", { code: "SETTING_INVALID" });
+  if (policy.ai.tracing.includeSensitiveData && !policy.ai.tracing.enabled) {
+    throw new InstallerError("Sensitive trace export requires tracing to stay enabled.", { code: "SETTING_INVALID" });
+  }
   for (const agentId of AGENT_IDS) {
     const agent = policy.ai.agents[agentId];
     if (!policy.ai.providers[agent.provider]) throw new InstallerError(`${agentId} references an unknown provider.`, { code: "SETTING_INVALID" });

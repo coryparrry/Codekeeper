@@ -51,8 +51,8 @@
       "sourcePath": "examples/workflows/codekeeper-maintain.yml.example"
     },
     "workflows/issues.yml": {
-      "sha256": "15ece2b9b8b4e50956b110aef1643d3bab0dc4c73c5b13a1d65aa2caf4951cbd",
-      "bytes": 1382,
+      "sha256": "1d3d5f452a94ecf14533dbb4d80cd64134e4d30959897963a4e9e2b6add058f8",
+      "bytes": 1500,
       "sourcePath": "examples/workflows/codekeeper-issues.yml.example"
     },
     "workflows/fix.yml": {

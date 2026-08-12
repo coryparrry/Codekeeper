@@ -57,7 +57,7 @@ const EXPECTED_ASSETS = Object.freeze({
   "policies/openai.json": "9c7c5665d8471f474b83380b71cbc3cc528308258029dfbcc8d3786462283501",
   "workflows/assistant.yml": "58d92290268aca6fc25eb3ead3e12b969d4926e2ab371b2009caf2fbb47cbd66",
   "workflows/fix.yml": "72c50767a21b45213b250d40b191548da68675442a61ceeb6ac5f9eeea7edc1d",
-  "workflows/issues.yml": "15ece2b9b8b4e50956b110aef1643d3bab0dc4c73c5b13a1d65aa2caf4951cbd",
+  "workflows/issues.yml": "1d3d5f452a94ecf14533dbb4d80cd64134e4d30959897963a4e9e2b6add058f8",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
   "workflows/review.yml": "367b0af80030c0d3dd4d0f8bedfb54d958f10f072b0e72605616314a05185d0a"
 });
