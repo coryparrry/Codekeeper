@@ -188,7 +188,23 @@ test("settings require each enabled capability to have its executing workflow", 
   issueImplementationWithoutFixer.policy.issues.allowAiImplementation = true;
   assert.throws(
     () => validateEditableSettings(issueImplementationWithoutFixer, policy),
-    /Issue implementation requires the Fixer workflow/
+    /Issue implementation requires both.*Issue triage.*Fixer workflows/
+  );
+
+  const issueImplementationWithoutTriage = structuredClone(settings);
+  issueImplementationWithoutTriage.modes = ["fix"];
+  issueImplementationWithoutTriage.policy.issues.allowAiImplementation = true;
+  assert.throws(
+    () => validateEditableSettings(issueImplementationWithoutTriage, policy),
+    /Issue implementation requires both.*Issue triage.*Fixer workflows/
+  );
+
+  const automaticMergeWithoutReview = structuredClone(settings);
+  automaticMergeWithoutReview.modes = ["fix"];
+  automaticMergeWithoutReview.policy.merge.enabled = true;
+  assert.throws(
+    () => validateEditableSettings(automaticMergeWithoutReview, policy),
+    /Automatic merge requires the Review workflow.*repair workflow/
   );
 });
 

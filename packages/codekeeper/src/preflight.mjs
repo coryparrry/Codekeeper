@@ -265,6 +265,13 @@ export async function inspectInstallationFiles(root, {
   if (await exists(fsImpl, assistantPath)) {
     contents[ASSISTANT_WORKFLOW.target] = await fsImpl.readFile(assistantPath, "utf8");
     policy.automation.ownerRequests = callerBoolean(contents[ASSISTANT_WORKFLOW.target], "owner_requests") ?? policy.automation.ownerRequests;
+  } else {
+    const legacyOwnerRequests = [contents[MODES.issues.target], contents[MODES.fix.target]]
+      .filter(Boolean)
+      .map((source) => callerBoolean(source, "owner_requests"))
+      .filter((value) => typeof value === "boolean");
+    if (legacyOwnerRequests.includes(false)) policy.automation.ownerRequests = false;
+    else if (legacyOwnerRequests.includes(true)) policy.automation.ownerRequests = true;
   }
   const policySource = `${JSON.stringify(policy, null, 2)}\n`;
   const legacyPlannerProfile = ".github/codekeeper/agents/maintenance-planner.md";

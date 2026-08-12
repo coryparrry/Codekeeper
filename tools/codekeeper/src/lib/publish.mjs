@@ -7,6 +7,7 @@ import { GitHubClient } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
+import { completeReviewFeedback } from "./prepare.mjs";
 import { publishPullRequestRepair } from "./pr-repair.mjs";
 import { renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
@@ -343,6 +344,15 @@ async function currentReviewPull(github, context, config) {
   return pull;
 }
 
+async function assertCurrentReviewFeedback(github, context) {
+  const frozen = context.pullRequest.reviewFeedback ?? [];
+  if (frozen.length === 0) return;
+  const current = await completeReviewFeedback(github, context.pullRequest.number);
+  if (JSON.stringify(current) !== JSON.stringify(frozen)) {
+    throw new Error(`PR #${context.pullRequest.number} review feedback changed after preparation; stale feedback disposition will not publish`);
+  }
+}
+
 async function disableFailedAutoMergePostcondition(github, pullRequest, cause) {
   let disableError = null;
   try {
@@ -405,11 +415,14 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const github = new GitHubClient({ token, repository: context.repository });
   const pull = await currentReviewPull(github, context, config);
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
+  await assertCurrentReviewFeedback(github, context);
   const runUrl = trustedPublicationRunUrl(context);
   const automationBotLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
-  const blocking = result.blockingFindings.length > 0 || critical || result.mergeRecommendation === "block";
+  const blocking = result.blockingFindings.length > 0 || critical ||
+    result.reviewFeedback.some((feedback) => feedback.disposition === "fix_now") ||
+    result.mergeRecommendation === "block";
   const existingLabels = new Set((pull.labels ?? []).map((label) => typeof label === "string" ? label : label.name));
   const repairFeedback = result.reviewFeedback.filter((feedback) =>
     feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
