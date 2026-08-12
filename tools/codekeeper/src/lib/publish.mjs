@@ -13,6 +13,7 @@ import { renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderR
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
 const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
+const AUTOMATIC_REPAIR_LEASE_MAX_AGE_MS = 15 * 60 * 1000;
 
 function automaticRepairLeaseBody(state, scope, marker) {
   return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${marker}`;
@@ -45,7 +46,20 @@ export async function acquireAutomaticRepairLease({ github, context, pull, autom
   if (!active.some((comment) => String(comment.id) === String(created.id))) {
     throw new Error("Automatic repair lease was not visible after creation");
   }
-  const acquired = String(active[0]?.id) === String(created.id);
+  const expiryBoundary = Date.now() - AUTOMATIC_REPAIR_LEASE_MAX_AGE_MS;
+  const expired = active.filter((comment) => {
+    const createdAt = Date.parse(String(comment.created_at ?? ""));
+    return Number.isFinite(createdAt) && createdAt <= expiryBoundary;
+  });
+  for (const comment of expired) {
+    const match = comment.body.match(/<!-- codekeeper:repair-lease=([a-f0-9]{64}) -->$/);
+    await github.updateComment(
+      comment.id,
+      automaticRepairLeaseBody("expired", scope, match[0])
+    );
+  }
+  const eligible = active.filter((comment) => !expired.includes(comment));
+  const acquired = String(eligible[0]?.id) === String(created.id);
   const lease = { acquired, commentId: created.id, marker, scope };
   if (!acquired) {
     await github.updateComment(created.id, automaticRepairLeaseBody("released", scope, marker));
@@ -602,6 +616,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
       if (!lease.acquired) {
         automaticRepair.eligible = false;
       } else {
+        let markerAddAttempted = false;
         let markerAdded = false;
         try {
           const leasedPull = await currentReviewPull(github, context, config);
@@ -610,6 +625,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
             await releaseAutomaticRepairLease(github, lease, "released");
           } else {
             await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+            markerAddAttempted = true;
             await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
             markerAdded = true;
             await currentReviewPull(github, context, config);
@@ -625,17 +641,28 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
           }
         } catch (error) {
           let rollbackError = null;
-          if (markerAdded) {
+          let markerPresent = markerAdded;
+          if (!automaticRepair.dispatched && markerAddAttempted && !markerPresent) {
             try {
-              await github.removeLabel(pull.number, "codekeeper:auto-repaired");
+              markerPresent = issueLabelNames(await github.getPull(pull.number))
+                .includes("codekeeper:auto-repaired");
             } catch (cause) {
               rollbackError = cause;
             }
           }
-          try {
-            await releaseAutomaticRepairLease(github, lease, "failed");
-          } catch (cause) {
-            rollbackError ??= cause;
+          if (!automaticRepair.dispatched && markerPresent) {
+            try {
+              await github.removeLabel(pull.number, "codekeeper:auto-repaired");
+            } catch (cause) {
+              rollbackError ??= cause;
+            }
+          }
+          if (!automaticRepair.dispatched) {
+            try {
+              await releaseAutomaticRepairLease(github, lease, "failed");
+            } catch (cause) {
+              rollbackError ??= cause;
+            }
           }
           if (rollbackError) {
             throw new Error(

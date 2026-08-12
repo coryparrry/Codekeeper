@@ -6,7 +6,7 @@ import test from "node:test";
 import { GitHubClient } from "../src/lib/github.mjs";
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { sha256 } from "../src/lib/markers.mjs";
-import { publishIssue, publishReview } from "../src/lib/publish.mjs";
+import { acquireAutomaticRepairLease, publishIssue, publishReview } from "../src/lib/publish.mjs";
 
 const config = JSON.parse(await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8"));
 const profileFixtureRoot = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-hardening-profiles-"));
@@ -33,6 +33,44 @@ test.after(() => {
 });
 
 const identity = { login: "codekeeper[bot]", id: "123456" };
+
+test("an expired automatic-repair lease cannot block a later run", async () => {
+  const context = { repository: "owner/repository", runId: "new-run" };
+  const pull = { number: 7, head: { sha: "h".repeat(40) } };
+  const scope = sha256(JSON.stringify({
+    repository: context.repository,
+    pullNumber: pull.number,
+    headSha: pull.head.sha
+  }));
+  const oldMarker = `<!-- codekeeper:repair-lease=${sha256(JSON.stringify({ scope, runId: "old-run" }))} -->`;
+  const comments = [{
+    id: 1,
+    body: `<!-- codekeeper:repair-lease-active=${scope} -->\n${oldMarker}`,
+    created_at: new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+    user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+  }];
+  const github = {
+    async createComment(_number, body) {
+      const comment = {
+        id: 2,
+        body,
+        created_at: new Date().toISOString(),
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      };
+      comments.push(comment);
+      return structuredClone(comment);
+    },
+    async listIssueComments() { return structuredClone(comments); },
+    async updateComment(id, body) {
+      comments.find((comment) => comment.id === id).body = body;
+    }
+  };
+
+  const lease = await acquireAutomaticRepairLease({ github, context, pull, automationIdentity: identity });
+
+  assert.equal(lease.acquired, true);
+  assert.match(comments[0].body, /repair-lease-expired=/);
+});
 
 async function writeSealedArtifact(artifactDirectory, {
   mode, context, result, configSha256, patch = null, validation = { checks: [] }, artifactConfig = config
@@ -301,6 +339,8 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
   let concurrentMode = false;
   let concurrentAdds = 0;
   let releaseConcurrentAdd;
+  let failAddAfterMutation = false;
+  let failLeaseCompletion = false;
   let removalAttempts = 0;
   let nextLeaseCommentId = 1;
   const leaseComments = [];
@@ -314,6 +354,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       const comment = {
         id: nextLeaseCommentId,
         body,
+        created_at: new Date().toISOString(),
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
       };
       nextLeaseCommentId += 1;
@@ -322,6 +363,9 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     },
     async listIssueComments() { return structuredClone(leaseComments); },
     async updateComment(id, body) {
+      if (failLeaseCompletion && body.includes("repair-lease-completed=")) {
+        throw new Error("lease completion unavailable");
+      }
       const comment = leaseComments.find((candidate) => candidate.id === id);
       comment.body = body;
       return structuredClone(comment);
@@ -342,6 +386,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
         }
       }
       pull.labels = [...pull.labels, ...labelsToAdd.map((name) => ({ name }))];
+      if (failAddAfterMutation) throw new Error("label response unavailable");
     },
     async removeLabel(_number, label) {
       removalAttempts += 1;
@@ -397,6 +442,39 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       dispatches: 1,
       removals: 0,
       fulfilled: 2
+    });
+
+    pull.labels = [];
+    concurrentMode = false;
+    failLeaseCompletion = true;
+    const removalsBeforeCompletionFailure = removalAttempts;
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" }),
+      /lease completion unavailable/
+    );
+    assert.deepEqual({
+      markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
+      removals: removalAttempts - removalsBeforeCompletionFailure
+    }, {
+      markerPresent: true,
+      removals: 0
+    });
+
+    leaseComments.at(-1).created_at = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    pull.labels = [];
+    failLeaseCompletion = false;
+    failAddAfterMutation = true;
+    const dispatchesBeforeAmbiguousAdd = dispatchAttempts;
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" }),
+      /label response unavailable/
+    );
+    assert.deepEqual({
+      markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
+      dispatches: dispatchAttempts - dispatchesBeforeAmbiguousAdd
+    }, {
+      markerPresent: false,
+      dispatches: 0
     });
   } finally {
     restoreEnvironment();
