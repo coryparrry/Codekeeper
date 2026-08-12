@@ -112,13 +112,53 @@ test("an exited validation launcher cannot leave a background session holding th
     await assert.rejects(
       runValidationCommands([
         `${JSON.stringify(process.execPath)} ${JSON.stringify(fixturePath)}`
-      ], repositoryRoot, { timeoutMs: 25 }),
-      /timed out after 25ms/
+      ], repositoryRoot, { timeoutMs: 100 }),
+      /timed out after 100ms/
     );
-    assert.ok(Date.now() - started < 250, "background validation session held inherited pipes open");
+    assert.ok(Date.now() - started < 350, "background validation session held inherited pipes open");
     await new Promise((resolve) => setTimeout(resolve, 450));
     await assert.rejects(readFile(sentinelPath), { code: "ENOENT" });
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("validation escalation kills a detached descendant after launcher pipes close", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-escalation-"));
+  const fixturePath = path.join(directory, "detached-descendant.mjs");
+  const pidPath = path.join(directory, "descendant.pid");
+  const sentinelPath = path.join(directory, "escaped.txt");
+  await writeFile(fixturePath, `
+    import { spawn } from "node:child_process";
+    import { writeFileSync } from "node:fs";
+    const child = spawn(process.execPath, ["-e", ${JSON.stringify(`
+      process.on("SIGTERM", () => {});
+      setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(sentinelPath)}, "escaped"), 400);
+      setTimeout(() => {}, 2000);
+    `).replaceAll("`", "\\`")}], {
+      detached: true,
+      stdio: "ignore"
+    });
+    writeFileSync(${JSON.stringify(pidPath)}, String(child.pid));
+    child.unref();
+    setTimeout(() => {}, 2000);
+  `);
+  let descendantPid;
+  try {
+    await assert.rejects(
+      runValidationCommands([
+        `${JSON.stringify(process.execPath)} ${JSON.stringify(fixturePath)}`
+      ], repositoryRoot, { timeoutMs: 25 }),
+      /timed out after 25ms/
+    );
+    descendantPid = Number(await readFile(pidPath, "utf8"));
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await assert.rejects(readFile(sentinelPath), { code: "ENOENT" });
+    assert.throws(() => process.kill(descendantPid, 0), { code: "ESRCH" });
+  } finally {
+    if (Number.isSafeInteger(descendantPid)) {
+      try { process.kill(descendantPid, "SIGKILL"); } catch {}
+    }
     await rm(directory, { recursive: true, force: true });
   }
 });

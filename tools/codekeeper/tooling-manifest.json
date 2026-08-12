@@ -55,7 +55,7 @@
     },
     {
       "path": "src/lib/git.mjs",
-      "sha256": "1645bb42c9f7a666704a68ee44adc1a70b2ca36b735d4eed52233a0903a82db5"
+      "sha256": "37d49a73ff685d098054ea455fe0a599ca7220c3076acd5809f62c3ba8dc6edf"
     },
     {
       "path": "src/lib/github.mjs",
@@ -79,7 +79,7 @@
     },
     {
       "path": "src/lib/pr-repair.mjs",
-      "sha256": "33dcdc9d40f2b443b95d60be76c346306e2326615cb42e3b8788636f565321fa"
+      "sha256": "2519baa5d3a2e3693bac6a3b8bf87ca6590b285dd4f5a3350de2e78fa7e337a1"
     },
     {
       "path": "src/lib/prepare.mjs",
@@ -91,7 +91,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "b1c9a988360f82ac26b573ea9fb40640ee0543305310a28e7d33600a30eb3f89"
+      "sha256": "9a2278139f5e2915f646fff8dea98ffa0e7f028c1e21fdd8e2c83520b5a2afef"
     },
     {
       "path": "src/lib/render.mjs",

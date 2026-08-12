@@ -419,9 +419,11 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
       if (!timedOut) return;
       child.stdout.destroy();
       child.stderr.destroy();
+      if (killTimer) return;
       settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
     });
     child.once("close", (status, signal) => {
+      if (timedOut && killTimer) return;
       settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
     });
   });
