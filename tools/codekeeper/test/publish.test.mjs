@@ -679,6 +679,97 @@ test("frozen review feedback detects edits past the prompt body limit", async ()
   assert.notDeepEqual(frozen, edited);
 });
 
+test("review publication revalidates frozen feedback immediately before repair dispatch", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-repair-feedback-race-test-"));
+  const configSha256 = "9".repeat(64);
+  const reviewConfig = structuredClone(config);
+  reviewConfig.review.autoRepair = true;
+  const headSha = "a".repeat(40);
+  const baseSha = "b".repeat(40);
+  const frozenFeedback = {
+    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
+    body: "Repair this problem.", bodySha256: sha256("Repair this problem."),
+    url: "https://github.test/comment/41", state: "commented", threadId: "PRRT_thread",
+    rootCommentId: 41, resolved: false, outdated: false, path: "README.md", line: 1
+  };
+  const context = {
+    mode: "review", repository: "owner/repository", configSha256, runId: "7009",
+    runUrl: "https://github.com/owner/repository/actions/runs/7009",
+    pullRequest: {
+      number: 7, headSha, baseSha, diff: { truncated: false, disabled: false },
+      reviewFeedbackFrozen: true, reviewFeedback: [frozenFeedback]
+    }
+  };
+  const result = {
+    mode: "review", summary: "Repair the current feedback.", risk: "low", labels: [],
+    blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{
+      problemKey: "repair-race", disposition: "fix_now", type: "bug",
+      explanation: "Repair the current feedback.", validation: "The feedback is still active.",
+      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "manual", noActionReason: null
+  };
+  const pull = {
+    number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
+    user: { login: "contributor", type: "User" },
+    head: { sha: headSha, ref: "feature/repair", repo: { full_name: context.repository } },
+    base: { sha: baseSha, ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
+  };
+  let resolved = false;
+  let dispatches = 0;
+  const restoreGitHub = replaceGitHubMethods({
+    async getPull() { return structuredClone(pull); },
+    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: frozenFeedback.threadId, isResolved: resolved, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
+          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
+          author: { login: frozenFeedback.author }
+        }] }
+      }];
+    },
+    async listMaintenanceIssues() { return []; },
+    async ensureLabels() {},
+    async replaceManagedLabels() {},
+    async upsertMarkerComment() {},
+    async upsertReviewReply() {},
+    async addLabels(_number, labels) {
+      pull.labels.push(...labels.map((name) => ({ name })));
+      resolved = true;
+    },
+    async removeLabel(_number, label) {
+      pull.labels = pull.labels.filter((item) => item.name !== label);
+    },
+    async createRepositoryDispatch() { dispatches += 1; }
+  });
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "review", context, result, configSha256, artifactConfig: reviewConfig
+    });
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
+      /review feedback changed after preparation/
+    );
+    assert.equal(dispatches, 0);
+    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
 test("human-authored automation markers remain review feedback", async () => {
   const marker = "<!-- codekeeper:review-feedback-reply=" + "a".repeat(64) + " -->";
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;

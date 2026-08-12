@@ -5,6 +5,7 @@ import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./g
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
 import { REVIEW_MARKER, sha256 } from "./markers.mjs";
+import { parseOwnerCommand } from "./owner-commands.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
 import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
@@ -158,7 +159,7 @@ function boundedRepairComments(comments, config, { actor, authorizationMode }) {
     }));
 }
 
-export async function completeReviewFeedback(github, pullNumber) {
+export async function completeReviewFeedback(github, pullNumber, config = null) {
   const [reviews, threads] = await Promise.all([
     github.listPullReviews(pullNumber, 129),
     github.listPullReviewThreads(pullNumber, 129)
@@ -169,11 +170,16 @@ export async function completeReviewFeedback(github, pullNumber) {
     const normalizedAuthor = String(author ?? "").trim().toLowerCase();
     return Boolean(automationLogin && normalizedAuthor === automationLogin);
   };
+  const isPersistedOwnerCommand = (author, body) =>
+    config !== null
+    && isConfiguredOwner(config, author)
+    && parseOwnerCommand(body, automationLogin) !== null;
   const feedback = [];
   for (const review of reviews) {
     if (!String(review.body ?? "").trim()) continue;
     if (isAutomationFeedback(review.user?.login)) continue;
     const body = String(review.body ?? "");
+    if (isPersistedOwnerCommand(review.user?.login, body)) continue;
     feedback.push({
       sourceKey: `review:${review.id}`,
       kind: "review",
@@ -194,6 +200,7 @@ export async function completeReviewFeedback(github, pullNumber) {
     for (const comment of thread.comments?.nodes ?? []) {
       if (isAutomationFeedback(comment.author?.login)) continue;
       const body = String(comment.body ?? "");
+      if (isPersistedOwnerCommand(comment.author?.login, body)) continue;
       feedback.push({
         sourceKey: `review_comment:${comment.databaseId}`,
         kind: "review_comment",
@@ -237,7 +244,7 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     throw new Error("Automatic pull request review is off in the Codekeeper policy");
   }
   const reviewFeedback = feedbackEvent
-    ? await completeReviewFeedback(new GitHubClient({ token, repository }), pull.number)
+    ? await completeReviewFeedback(new GitHubClient({ token, repository }), pull.number, config)
     : [];
   const context = {
     mode: "review",

@@ -1,50 +1,21 @@
 import { GitHubClient } from "./github.mjs";
 import { readJson } from "./io.mjs";
 import { COMMAND_STATUS_MARKER } from "./markers.mjs";
+import {
+  OWNER_COMMANDS,
+  parseDirectOwnerCommand,
+  parseMentionOwnerCommand,
+  parseOwnerCommand,
+} from "./owner-commands.mjs";
 import { upsertDeferredReviewFeedback } from "./publish.mjs";
 
-const COMMANDS = new Set([
-  "status",
-  "review",
-  "rerun",
-  "triage",
-  "defer",
-  "implement",
-  "fix",
-  "stop",
-]);
+const COMMANDS = new Set(OWNER_COMMANDS);
 const ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 function labels(issue) {
   return (issue.labels ?? []).map((label) =>
     typeof label === "string" ? label : label.name,
   );
-}
-
-function parseCommand(body) {
-  const match = String(body ?? "")
-    .trim()
-    .match(
-      /^\/codekeeper\s+(status|review|rerun|triage|defer|implement|fix|stop)$/i,
-    );
-  return match ? match[1].toLowerCase() : null;
-}
-
-function parseMentionIntent(body, botLogin) {
-  const mention = String(botLogin ?? "")
-    .replace(/\[bot\]$/i, "")
-    .toLowerCase();
-  if (!mention) return null;
-  const escapedMention = mention.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = String(body ?? "")
-    .trim()
-    .match(
-      new RegExp(
-        `^@${escapedMention}\\s+(status|review|rerun|triage|defer|implement|fix|stop)$`,
-        "i",
-      ),
-    );
-  return match ? match[1].toLowerCase() : null;
 }
 
 function isOwner(config, actor) {
@@ -78,10 +49,10 @@ export async function runOwnerCommand({
   automationIdentity,
 }) {
   const event = await readJson(eventPath);
-  const directCommand = parseCommand(event.comment?.body);
-  const command =
-    directCommand ??
-    parseMentionIntent(event.comment?.body, automationIdentity?.login);
+  const command = parseOwnerCommand(
+    event.comment?.body,
+    automationIdentity?.login,
+  );
   const targetNumber = event.issue?.number ?? event.pull_request?.number;
   if (!COMMANDS.has(command)) {
     return {
@@ -168,8 +139,7 @@ export async function runOwnerCommand({
       : directComment;
     if (
       !sourceComment?.id ||
-      parseCommand(sourceComment.body) === "defer" ||
-      parseMentionIntent(sourceComment.body, automationIdentity?.login) ===
+      parseOwnerCommand(sourceComment.body, automationIdentity?.login) ===
         "defer"
     ) {
       throw new Error(
@@ -277,4 +247,7 @@ export async function runOwnerCommand({
   return { number, command, outcome };
 }
 
-export { parseCommand, parseMentionIntent };
+export {
+  parseDirectOwnerCommand as parseCommand,
+  parseMentionOwnerCommand as parseMentionIntent,
+};
