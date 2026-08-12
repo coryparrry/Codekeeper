@@ -114,7 +114,7 @@ jobs:
             const { config } = await loadConfig(process.env.CONFIG);
             const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
             const result = authorizeOwnerRequest({ event, config });
-            appendFileSync(process.env.GITHUB_OUTPUT, `authorized=${!result.skipped}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, "authorized=" + String(!result.skipped) + "\n");
           '
 
       - name: Create short-lived GitHub App token
