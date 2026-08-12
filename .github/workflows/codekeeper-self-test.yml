@@ -24,6 +24,9 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run repository lint and format checks
         run: npm run check
+      - name: Emit manifest refresh hashes
+        run: |
+          sha256sum packages/codekeeper/src/settings.mjs packages/codekeeper/test/deferred-issues.test.mjs
       - name: Install pinned Agents SDK runtime
         working-directory: tools/codekeeper
         run: npm ci --ignore-scripts --no-audit --no-fund
