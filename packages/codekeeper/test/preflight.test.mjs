@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadVerifiedAssets } from "../src/assets.mjs";
+import { SOURCE_COMMIT, SOURCE_REPOSITORY } from "../src/constants.mjs";
 import {
   assertNodeVersion,
   assertNoInstallationFiles,
@@ -21,6 +22,12 @@ import {
 } from "./helpers.mjs";
 
 const OTHER_SHA = "b".repeat(40);
+
+function installedWorkflow(source) {
+  return source
+    .replaceAll("OWNER/REPOSITORY", SOURCE_REPOSITORY)
+    .replaceAll("FULL_COMMIT_SHA", SOURCE_COMMIT);
+}
 
 function preflightRunner(root, options = {}) {
   const settings = {
@@ -213,6 +220,16 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     await writeFile(path.join(root, ".github", "workflows", "ci.yml"), "name: CI\n");
     await assertNoInstallationFiles(root);
   });
+  await t.test("unrelated workflow at the reserved assistant path blocks a rerun", async (t) => {
+    const root = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
+    await writeFile(path.join(root, ".github", "codekeeper.json"), "{}\n");
+    await writeFile(path.join(root, ".github", "workflows", "codekeeper-assistant.yml"), "name: Existing assistant\n");
+    await assert.rejects(
+      assertNoInstallationFiles(root, { allowExisting: true }),
+      assertInstallerCode(assert, "PATH_COLLISION")
+    );
+  });
   await t.test("unrelated profile file passes", async (t) => {
     const root = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
@@ -236,12 +253,12 @@ test("existing generated files are recognized as a rerunnable installation", asy
     ["repository-auditor.md", "agents/repository-auditor.md"],
     ["issue-triager.md", "agents/issue-triager.md"]
   ]) await writeFile(path.join(root, ".github", "codekeeper", "agents", name), bundle.contents[asset]);
-  await writeFile(path.join(root, ".github", "workflows", "codekeeper-review.yml"), bundle.contents["workflows/review.yml"]
+  await writeFile(path.join(root, ".github", "workflows", "codekeeper-review.yml"), installedWorkflow(bundle.contents["workflows/review.yml"])
     .replace("auto_review: true", "auto_review: false")
     .replace("feedback_triage: true", "feedback_triage: false"));
-  await writeFile(path.join(root, ".github", "workflows", "codekeeper-maintain.yml"), bundle.contents["workflows/maintain.yml"]
+  await writeFile(path.join(root, ".github", "workflows", "codekeeper-maintain.yml"), installedWorkflow(bundle.contents["workflows/maintain.yml"])
     .replace('cron: "17 7 * * *"', 'cron: "23 4 * * 2"'));
-  await writeFile(path.join(root, ".github", "workflows", "codekeeper-assistant.yml"), bundle.contents["workflows/assistant.yml"]
+  await writeFile(path.join(root, ".github", "workflows", "codekeeper-assistant.yml"), installedWorkflow(bundle.contents["workflows/assistant.yml"])
     .replace("owner_requests: true", "owner_requests: false"));
 
   const installation = await inspectInstallationFiles(root);
@@ -294,8 +311,8 @@ test("existing generated files are recognized as a rerunnable installation", asy
     ["repository-auditor.md", "agents/repository-auditor.md"],
     ["issue-triager.md", "agents/issue-triager.md"]
   ]) await writeFile(path.join(issuesRoot, ".github", "codekeeper", "agents", name), bundle.contents[asset]);
-  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper-issues.yml"), bundle.contents["workflows/issues.yml"]);
-  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper-assistant.yml"), bundle.contents["workflows/assistant.yml"]);
+  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper-issues.yml"), installedWorkflow(bundle.contents["workflows/issues.yml"]));
+  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper-assistant.yml"), installedWorkflow(bundle.contents["workflows/assistant.yml"]));
   const issuesOnly = await inspectRepository({ runner: preflightRunner(issuesRoot), cwd: issuesRoot });
   assert.deepEqual(issuesOnly.installation.modes, ["issues"]);
   assert.equal(issuesOnly.installation.policy.automation.ownerRequests, true);
@@ -304,7 +321,7 @@ test("existing generated files are recognized as a rerunnable installation", asy
   await rm(path.join(issuesRoot, ".github", "workflows", "codekeeper-assistant.yml"));
   await writeFile(
     path.join(issuesRoot, ".github", "workflows", "codekeeper-issues.yml"),
-    bundle.contents["workflows/issues.yml"].replace(
+    installedWorkflow(bundle.contents["workflows/issues.yml"]).replace(
       "enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}",
       "enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}\n      owner_requests: false"
     )

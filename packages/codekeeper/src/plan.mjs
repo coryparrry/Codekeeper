@@ -353,12 +353,6 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     enabled: answers.enabled !== false,
     profiles: answers.profiles ?? profileDefaults
   }).policy;
-  validateEditableSettings({
-    policy: inputPolicy,
-    modes,
-    enabled: answers.enabled !== false,
-    profiles: answers.profiles ?? profileDefaults
-  }, baselinePolicy);
   const displayName = answers.policy?.repository.displayName ?? answers.displayName;
   if (!validDisplayName(displayName)) throw new InstallerError("Repository display name is invalid.", { code: "PLAN_INVALID" });
   const ownerLogins = normalizeOwnerLogins(answers.policy?.repository.ownerLogins ?? answers.ownerLogins);
