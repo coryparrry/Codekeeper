@@ -179,7 +179,9 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
   let updatedAt = context.issue.updatedAt;
   let labels = [];
   let comments = [];
+  let injectAfterMarkerInventoryComment = false;
   let injectPostInventoryComment = false;
+  let markerInventoryAccepted = false;
   let duplicateInventoryAccepted = false;
   const calls = [];
   const issue = () => ({
@@ -195,6 +197,16 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
       if (number === 9) return { number, state: "open" };
+      if (injectAfterMarkerInventoryComment && markerInventoryAccepted) {
+        injectAfterMarkerInventoryComment = false;
+        comments.push({
+          id: 72,
+          body: "One more detail after marker verification.",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          user: { id: 1, login: "reporter", type: "User" }
+        });
+      }
       if (injectPostInventoryComment && duplicateInventoryAccepted) {
         injectPostInventoryComment = false;
         comments.push({
@@ -208,6 +220,9 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
       return issue();
     },
     async listIssueComments() {
+      if (comments.some((comment) => comment.id === 70) && !comments.some((comment) => comment.id === 71)) {
+        markerInventoryAccepted = true;
+      }
       if (comments.some((comment) => comment.id === 71)) duplicateInventoryAccepted = true;
       return structuredClone(comments);
     },
@@ -263,6 +278,27 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
     labels = [];
     comments = [];
     calls.length = 0;
+    markerInventoryAccepted = false;
+    duplicateInventoryAccepted = false;
+    injectAfterMarkerInventoryComment = true;
+    await assert.rejects(
+      publishIssue({
+        artifactDirectory,
+        config: issueConfig,
+        configSha256,
+        agentProfilePath: profilePaths.issue,
+        ...integrity,
+        token: "unused"
+      }),
+      /changed while Codekeeper reconciled comments/
+    );
+    assert.deepEqual(calls, ["marker", "duplicate-comment"]);
+
+    updatedAt = context.issue.updatedAt;
+    labels = [];
+    comments = [];
+    calls.length = 0;
+    markerInventoryAccepted = false;
     duplicateInventoryAccepted = false;
     injectPostInventoryComment = true;
     await assert.rejects(

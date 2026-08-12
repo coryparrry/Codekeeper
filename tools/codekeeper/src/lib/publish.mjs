@@ -926,14 +926,15 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
       )
       : assertExpectedManagedLabelMutation(before, current, desiredLabels, managedIssueLabels(config));
     expectedUpdatedAt = after.updated_at;
-    return after;
+    return { issue: after, comments: commentsAfter };
   };
-  let afterOwnedComment = await acceptOwnedCommentUpdate(
+  const markerAcceptance = await acceptOwnedCommentUpdate(
     afterLabelMutation,
     closingDuplicate ? markerMutation : null,
     closingDuplicate ? markerBody : null,
     commentsBeforeMarker
   );
+  let afterOwnedComment = markerAcceptance.issue;
 
   if (result.duplicateOf === issue.number) {
     throw new Error(`Issue #${issue.number} cannot be its own duplicate`);
@@ -943,9 +944,14 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     await currentIssue();
     const duplicate = await currentOpenIssue(github, duplicateContext, "duplicate assessment");
     const duplicateBody = `Closing as a duplicate of #${duplicate.number}.`;
-    const commentsBeforeDuplicate = await github.listIssueComments(issue.number);
+    const commentsBeforeDuplicate = markerAcceptance.comments;
     const duplicateMutation = await github.createComment(issue.number, duplicateBody);
-    afterOwnedComment = await acceptOwnedCommentUpdate(afterOwnedComment, duplicateMutation, duplicateBody, commentsBeforeDuplicate);
+    afterOwnedComment = (await acceptOwnedCommentUpdate(
+      afterOwnedComment,
+      duplicateMutation,
+      duplicateBody,
+      commentsBeforeDuplicate
+    )).issue;
     await currentIssue();
     await currentOpenIssue(github, duplicateContext, "duplicate assessment");
     assertExpectedOwnedCommentInventory(commentsBeforeDuplicate, await github.listIssueComments(issue.number), duplicateMutation, duplicateBody, automationIdentity, issue.number);
@@ -962,13 +968,26 @@ function matchesAutomationActor(actor, identity) {
   );
 }
 
-export function isTrustedMaintenanceIssue(issue, { marker, botLogin, botId }) {
-  const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
+function isRecoverableMaintenanceIssue(issue, marker, identity) {
   return Boolean(
     identity &&
     matchesAutomationActor(issue?.user, identity) &&
     typeof issue?.body === "string" &&
     issue.body.endsWith(marker)
+  );
+}
+
+export function isTrustedMaintenanceIssue(issue, { marker, botLogin, botId }) {
+  const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
+  return isRecoverableMaintenanceIssue(issue, marker, identity);
+}
+
+export function isTrustedMaintenanceFindingIssue(issue, comments, { marker, botLogin, botId }) {
+  const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
+  return Boolean(
+    isRecoverableMaintenanceIssue(issue, marker, identity) &&
+    Array.isArray(comments) &&
+    comments.some((comment) => isOwnedMarkerComment(comment, marker, identity))
   );
 }
 
@@ -981,7 +1000,9 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, rev
     const marker = findingMarker(fingerprint);
     let match;
     for (const issue of existing) {
-      if (isTrustedMaintenanceIssue(issue, {
+      if (typeof issue?.body !== "string" || !issue.body.endsWith(marker)) continue;
+      const comments = await github.listIssueComments(issue.number);
+      if (isTrustedMaintenanceFindingIssue(issue, comments, {
         marker,
         botLogin: automationIdentity.login,
         botId: automationIdentity.id
@@ -1013,6 +1034,7 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, rev
     } else {
       await revalidateBeforeMutation();
       const created = await github.createIssue({ title, body, labels });
+      await github.createComment(created.number, marker);
       published.push({ fingerprint, state: "created", issueNumber: created.number });
       existing.push(created);
     }

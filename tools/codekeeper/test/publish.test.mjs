@@ -12,6 +12,7 @@ import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepai
 import { completeReviewFeedback } from "../src/lib/prepare.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import {
+  isTrustedMaintenanceFindingIssue,
   isTrustedMaintenanceIssue,
   isTrustedRepairPull,
   publishAudit as publishAuditProduction,
@@ -473,18 +474,19 @@ ${marker}`,
   assert.deepEqual(published, [{ fingerprint, state: "reopened", issueNumber: 51 }]);
 });
 
-test("maintenance issue fingerprints require the configured App author", () => {
+test("maintenance issue fingerprints require the configured App author and marker comment", () => {
   const marker = findingMarker("b".repeat(64));
   const issue = {
     body: `Trusted maintenance finding\n${marker}`,
     user: { login: identity.login, id: Number(identity.id), type: "Bot" }
   };
   const options = { marker, botLogin: identity.login, botId: identity.id };
-  assert.equal(isTrustedMaintenanceIssue(issue, options), true);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { login: "person", id: 123456, type: "User" } }, options), false);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { login: "other-app[bot]", id: 123456, type: "Bot" } }, options), false);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { ...issue.user, id: 999 } }, options), false);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, body: `${issue.body}\nuntrusted suffix` }, options), false);
+  const comments = [{ body: marker, user: issue.user }];
+  assert.equal(isTrustedMaintenanceFindingIssue(issue, comments, options), true);
+  assert.equal(isTrustedMaintenanceFindingIssue(issue, [], options), false);
+  assert.equal(isTrustedMaintenanceFindingIssue(issue, [{ ...comments[0], user: { login: "person", id: 123456, type: "User" } }], options), false);
+  assert.equal(isTrustedMaintenanceFindingIssue({ ...issue, user: { login: "person", id: 123456, type: "User" } }, comments, options), false);
+  assert.equal(isTrustedMaintenanceFindingIssue({ ...issue, body: `${issue.body}\nuntrusted suffix` }, comments, options), false);
 });
 
 test("ignored and repairable inline feedback receive idempotent replies without resolving threads", async () => {
@@ -1910,7 +1912,7 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
   }
 });
 
-test("maintenance publication adopts an App-created issue after response loss", async () => {
+test("maintenance publication adopts only the issue whose App marker survived response loss", async () => {
   const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-retry-test-"));
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-retry-artifact-"));
   const configSha256 = "c".repeat(64);
@@ -1918,23 +1920,35 @@ test("maintenance publication adopts an App-created issue after response loss", 
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   const issues = [];
+  const comments = [];
   let creates = 0;
+  let markerAttempts = 0;
   let remoteBaseSha;
   const restoreGitHub = replaceGitHubMethods({
     async getBranch() { return { commit: { sha: remoteBaseSha } }; },
     async listMaintenanceIssues() { return issues; },
-    async listIssueComments() { throw new Error("orphan adoption must not require a second write"); },
+    async listIssueComments(number) { return comments.filter((comment) => comment.issueNumber === number); },
     async ensureLabels() {},
     async createIssue(input) {
       creates += 1;
       const issue = {
-        number: 1,
+        number: creates,
         state: "open",
         body: input.body,
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
       };
       issues.push(issue);
-      throw new Error("connection lost after issue creation");
+      if (creates === 1) throw new Error("connection lost after issue creation");
+      return issue;
+    },
+    async createComment(issueNumber, body) {
+      markerAttempts += 1;
+      comments.push({
+        issueNumber,
+        body,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      });
+      if (markerAttempts === 1) throw new Error("connection lost after marker creation");
     },
     async updateIssue(number, changes) {
       Object.assign(issues.find((issue) => issue.number === number), changes);
@@ -1971,11 +1985,16 @@ test("maintenance publication adopts an App-created issue after response loss", 
       publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
       /connection lost after issue creation/
     );
+    await assert.rejects(
+      publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+      /connection lost after marker creation/
+    );
     const retry = await publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
-    assert.equal(creates, 1);
-    assert.equal(issues.length, 1);
+    assert.equal(creates, 2);
+    assert.equal(issues.length, 2);
+    assert.equal(comments.length, 1);
     assert.deepEqual(retry.findings.map(({ state, issueNumber }) => ({ state, issueNumber })), [
-      { state: "updated", issueNumber: 1 }
+      { state: "updated", issueNumber: 2 }
     ]);
   } finally {
     process.chdir(originalDirectory);
@@ -2050,6 +2069,12 @@ test("maintenance repair notification remains singular after response loss", asy
     const restoreGitHub = replaceGitHubMethods({
       async getBranch() { return { commit: { sha: context.baseSha } }; },
       async listMaintenanceIssues() { return [maintenanceIssue]; },
+      async listIssueComments() {
+        return [{
+          body: findingMarker(repairFingerprint),
+          user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+        }];
+      },
       async ensureLabels() {},
       async updateIssue() {},
       async replaceManagedLabels() {},
