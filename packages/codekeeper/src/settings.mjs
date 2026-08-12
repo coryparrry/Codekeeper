@@ -145,8 +145,10 @@ function flattenPolicy(policy, value = policy, prefix = "", rows = [], parentKey
 }
 
 export function createEditableSettings({ policy, modes, enabled, profiles = {} }) {
+  const editablePolicy = clone(policy);
+  if (!modes.includes("issues")) editablePolicy.review.createDeferredIssues = false;
   return {
-    policy: clone(policy),
+    policy: editablePolicy,
     modes: [...modes],
     enabled: enabled !== false,
     profiles: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, profiles[id] ?? profiles[AGENT_PROFILES[id].target] ?? ""]))
@@ -257,7 +259,6 @@ function requiredString(value, name, maximum = 16_384) {
     throw new InstallerError(`${name} is invalid.`, { code: "SETTING_INVALID" });
   }
 }
-
 function modelId(value, name) {
   requiredString(value, name, 256);
   if (/\s/.test(value)) throw new InstallerError(`${name} cannot contain whitespace.`, { code: "SETTING_INVALID" });
@@ -416,6 +417,9 @@ export function validateEditableSettings(settings, baselinePolicy) {
   }
   for (const label of [...ISSUE_MANAGED_LABELS, ...policy.review.allowedLabels]) {
     if (!policy.issues.managedLabels.includes(label)) throw new InstallerError(`issues.managedLabels must include ${label}.`, { code: "SETTING_INVALID" });
+  }
+  if (policy.review.createDeferredIssues && !settings.modes.includes("issues")) {
+    throw new InstallerError("Deferred issue creation requires the Issue triage workflow.", { code: "SETTING_INVALID" });
   }
   if (policy.review.autoRepair && !(settings.modes.includes("review") && settings.modes.includes("fix"))) {
     throw new InstallerError("Automatic PR repair requires both the Review and Fixer workflows.", { code: "SETTING_INVALID" });
