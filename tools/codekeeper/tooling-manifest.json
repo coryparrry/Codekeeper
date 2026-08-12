@@ -55,7 +55,7 @@
     },
     {
       "path": "src/lib/git.mjs",
-      "sha256": "25bbb3e395ddc6a5bf297b7cdd4e19be131f11f8700df703b1c5ad199c98ddd1"
+      "sha256": "3772f0a0a15f846437b4ce4e3de1505b50dacc61571d6c105a465c40a416d4ad"
     },
     {
       "path": "src/lib/github.mjs",

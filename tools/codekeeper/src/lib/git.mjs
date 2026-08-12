@@ -339,12 +339,14 @@ function validationDescendantProcessIds(rootPid, runId) {
     .filter((pid) => pid !== rootPid && pid !== process.pid);
 }
 
-function signalValidationProcess(child, descendants, signal) {
-  try {
-    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
-    else child.kill(signal);
-  } catch (error) {
-    if (error.code !== "ESRCH") throw error;
+function signalValidationProcess(child, descendants, signal, launcherExited = false) {
+  if (!launcherExited) {
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
+      else child.kill(signal);
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
   }
   for (const pid of descendants) {
     try {
@@ -371,6 +373,7 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
     let descendants = [];
     let exitStatus = null;
     let exitSignal = null;
+    let launcherExited = false;
     let settled = false;
     let killTimer;
     const settle = (callback) => {
@@ -384,11 +387,11 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
       timedOut = true;
       try {
         descendants = validationDescendantProcessIds(child.pid, runId);
-        signalValidationProcess(child, descendants, "SIGTERM");
+        signalValidationProcess(child, descendants, "SIGTERM", launcherExited);
         killTimer = setTimeout(() => {
           try {
             descendants = [...new Set([...descendants, ...validationDescendantProcessIds(child.pid, runId)])];
-            signalValidationProcess(child, descendants, "SIGKILL");
+            signalValidationProcess(child, descendants, "SIGKILL", launcherExited);
             child.stdout.destroy();
             child.stderr.destroy();
             settle(() => resolve({ status: exitStatus, signal: exitSignal, stdout, stderr, timedOut }));
@@ -406,6 +409,7 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
       settle(() => reject(error));
     });
     child.once("exit", (status, signal) => {
+      launcherExited = true;
       exitStatus = status;
       exitSignal = signal;
       if (!timedOut) return;
