@@ -36,13 +36,13 @@
       "sourcePath": ".github/codekeeper.json#preset=openai"
     },
     "workflows/assistant.yml": {
-      "sha256": "58d92290268aca6fc25eb3ead3e12b969d4926e2ab371b2009caf2fbb47cbd66",
-      "bytes": 2794,
+      "sha256": "4c02233c71945860ea792b07fe408a4b911aa13cd8b0f739d88559a25e66c545",
+      "bytes": 2792,
       "sourcePath": "examples/workflows/codekeeper-assistant.yml.example"
     },
     "workflows/review.yml": {
-      "sha256": "596509edab1322b93ac4b16fc4e51e2da264bc5d5160f356407126a14e7912fb",
-      "bytes": 4245,
+      "sha256": "6043d9a64829d2e2df7630620c2b2653652a6b02bd251f644a1e07cc6a56aa3e",
+      "bytes": 4365,
       "sourcePath": "examples/workflows/codekeeper-review.yml.example"
     },
     "workflows/maintain.yml": {
@@ -68,7 +68,7 @@
       "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
     },
     "toolingManifest": {
-      "sha256": "638070e5972dbcfbeee9ac0d0449f52b32051a9015e28c335d8121f63a41db78",
+      "sha256": "67f99dd9104f7040e5f50138541a256c1497b264df377e707133e3a2d6c11cdf",
       "bytes": 3643,
       "sourcePath": "tools/codekeeper/tooling-manifest.json"
     }

@@ -329,7 +329,8 @@ export function validateEditableSettings(settings, baselinePolicy) {
   ]) {
     if (!equal(getPath(policy, path), getPath(baselinePolicy, path))) throw new InstallerError(`${path} is a read-only safety boundary.`, { code: "SETTING_INVALID" });
   }
-  requiredString(policy.repository.displayName, "repository.displayName", 256);
+  requiredString(policy.repository.displayName, "repository.displayName", 100);
+  if (policy.repository.displayName.trim() !== policy.repository.displayName) throw new InstallerError("repository.displayName is invalid.", { code: "SETTING_INVALID" });
   stringList(policy.repository.ownerLogins, "repository.ownerLogins", 64, 256);
   const normalizedOwnerLogins = policy.repository.ownerLogins.map((login) => login.toLowerCase());
   if (!normalizedOwnerLogins.length
@@ -338,6 +339,7 @@ export function validateEditableSettings(settings, baselinePolicy) {
     || !equal(policy.merge.allowedUserAuthors, policy.repository.ownerLogins)) {
     throw new InstallerError("Owner logins are invalid or out of sync.", { code: "SETTING_INVALID" });
   }
+  if (policy.projectInvariants === undefined) policy.projectInvariants = [];
   stringList(policy.projectInvariants, "projectInvariants", 64, 4_096);
   for (const key of ["automaticPrReview", "reviewFeedbackTriage", "issueTriage", "ownerRequests"]) {
     if (typeof policy.automation[key] !== "boolean") throw new InstallerError(`automation.${key} must be boolean.`, { code: "SETTING_INVALID" });
@@ -368,8 +370,10 @@ export function validateEditableSettings(settings, baselinePolicy) {
     if (typeof agent.workspace.enabled !== "boolean" || !equal(agent.workspace.allowWrites, baselinePolicy.ai.agents[agentId].workspace.allowWrites)) {
       throw new InstallerError(`${agentId} workspace boundary is invalid.`, { code: "SETTING_INVALID" });
     }
-    modelId(agent.workspace.model, `${agentId} workspace model`);
-    if (!EFFORTS.includes(agent.workspace.effort)) throw new InstallerError(`${agentId} workspace effort is invalid.`, { code: "SETTING_INVALID" });
+    if (agent.workspace.enabled) {
+      modelId(agent.workspace.model, `${agentId} workspace model`);
+      if (!EFFORTS.includes(agent.workspace.effort)) throw new InstallerError(`${agentId} workspace effort is invalid.`, { code: "SETTING_INVALID" });
+    }
   }
   for (const [path, [minimum, maximum]] of Object.entries(CAPS)) {
     const value = getPath(policy, path);

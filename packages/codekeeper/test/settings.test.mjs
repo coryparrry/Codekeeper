@@ -213,6 +213,32 @@ test("settings require each enabled capability to have its executing workflow", 
   assert.deepEqual(omittedModelSettings.policy.ai.agents.review.modelSettings, {});
 });
 
+test("settings preserve runtime-valid optional fields and display-name limits", async () => {
+  const { policy, settings } = await fixture(["review"]);
+
+  for (const displayName of [" Widget", "Widget ", "x".repeat(101)]) {
+    const invalid = structuredClone(settings);
+    invalid.policy.repository.displayName = displayName;
+    assert.throws(
+      () => validateEditableSettings(invalid, policy),
+      /repository\.displayName is invalid/
+    );
+  }
+  const bounded = structuredClone(settings);
+  bounded.policy.repository.displayName = "x".repeat(100);
+  validateEditableSettings(bounded, policy);
+
+  const optional = structuredClone(settings);
+  delete optional.policy.projectInvariants;
+  for (const agent of Object.values(optional.policy.ai.agents)) {
+    agent.workspace.enabled = false;
+    delete agent.workspace.model;
+    delete agent.workspace.effort;
+  }
+  validateEditableSettings(optional, policy);
+  assert.deepEqual(optional.policy.projectInvariants, []);
+});
+
 test("fresh settings can enable capabilities after bundled defaults are verified", async () => {
   const { bundle, settings } = await fixture(["review", "fix"]);
   const edited = structuredClone(settings);

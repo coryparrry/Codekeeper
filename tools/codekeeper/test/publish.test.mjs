@@ -9,6 +9,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
 import { deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
 import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
+import { completeReviewFeedback } from "../src/lib/prepare.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import {
   isTrustedMaintenanceIssue,
@@ -311,7 +312,8 @@ test("review publication rejects feedback that changed after preparation", async
   const configSha256 = "f".repeat(64);
   const frozenFeedback = {
     sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
-    body: "Please add a timeout test.", url: "https://github.test/comment/41",
+    body: "Please add a timeout test.", bodySha256: sha256("Please add a timeout test."),
+    url: "https://github.test/comment/41",
     state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
     resolved: false, outdated: false, path: "README.md", line: 1
   };
@@ -374,6 +376,28 @@ test("review publication rejects feedback that changed after preparation", async
   }
 });
 
+test("frozen review feedback detects edits past the prompt body limit", async () => {
+  const prefix = "x".repeat(7_000);
+  const feedbackFor = (body) => completeReviewFeedback({
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: "PRRT_thread", isResolved: false, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body, url: "https://github.test/comment/41",
+          path: "README.md", line: 1, originalLine: 1,
+          author: { login: "reviewer" }
+        }] }
+      }];
+    }
+  }, 7);
+
+  const frozen = await feedbackFor(`${prefix}a`);
+  const edited = await feedbackFor(`${prefix}b`);
+  assert.equal(frozen[0].body, edited[0].body);
+  assert.notDeepEqual(frozen, edited);
+});
+
 test("fix-now feedback blocks auto-merge even when repair dispatch is disabled", () => {
   const reviewConfig = structuredClone(config);
   reviewConfig.merge.enabled = true;
@@ -408,7 +432,8 @@ test("fix-if-cheap feedback suspends auto-merge while automatic repair is pendin
   reviewConfig.review.autoRepair = true;
   const frozenFeedback = {
     sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
-    body: "Please make this repair.", url: "https://github.test/comment/41",
+    body: "Please make this repair.", bodySha256: sha256("Please make this repair."),
+    url: "https://github.test/comment/41",
     state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
     resolved: false, outdated: false, path: "README.md", line: 1
   };

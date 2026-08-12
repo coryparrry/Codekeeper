@@ -55,11 +55,11 @@ const EXPECTED_ASSETS = Object.freeze({
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
   "policies/mixed.json": "c53612a50a6af7b3f6f00171160d333fc4ddefdcd7dbed1d925def56c53f94d7",
   "policies/openai.json": "9c7c5665d8471f474b83380b71cbc3cc528308258029dfbcc8d3786462283501",
-  "workflows/assistant.yml": "58d92290268aca6fc25eb3ead3e12b969d4926e2ab371b2009caf2fbb47cbd66",
+  "workflows/assistant.yml": "4c02233c71945860ea792b07fe408a4b911aa13cd8b0f739d88559a25e66c545",
   "workflows/fix.yml": "72c50767a21b45213b250d40b191548da68675442a61ceeb6ac5f9eeea7edc1d",
   "workflows/issues.yml": "1d3d5f452a94ecf14533dbb4d80cd64134e4d30959897963a4e9e2b6add058f8",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
-  "workflows/review.yml": "596509edab1322b93ac4b16fc4e51e2da264bc5d5160f356407126a14e7912fb"
+  "workflows/review.yml": "6043d9a64829d2e2df7630620c2b2653652a6b02bd251f644a1e07cc6a56aa3e"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
