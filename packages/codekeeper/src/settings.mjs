@@ -68,7 +68,7 @@ function clone(value) {
 }
 
 function pathParts(path) {
-  return path.split(".");
+  return Array.isArray(path) ? path : path.split(".");
 }
 
 function getPath(object, path) {
@@ -105,14 +105,16 @@ function enumChoices(path, policy) {
   return null;
 }
 
-function policyRow(policy, path, label = path) {
-  const value = getPath(policy, path);
+function policyRow(policy, path, label = path, keys = pathParts(path)) {
+  const value = getPath(policy, keys);
   const choices = enumChoices(path, policy);
+  const canonicalKeys = pathParts(path);
   return {
     id: `policy:${path}`,
     section: path.split(".")[0],
     label,
     path,
+    ...(keys.length === canonicalKeys.length && keys.every((key, index) => key === canonicalKeys[index]) ? {} : { keys }),
     value,
     readOnly: readOnlyPolicyPath(path),
     kind: readOnlyPolicyPath(path) ? "readonly"
@@ -125,15 +127,16 @@ function policyRow(policy, path, label = path) {
   };
 }
 
-function flattenPolicy(policy, value = policy, prefix = "", rows = []) {
+function flattenPolicy(policy, value = policy, prefix = "", rows = [], parentKeys = []) {
   for (const [key, child] of Object.entries(value)) {
     const path = prefix ? `${prefix}.${key}` : key;
+    const keys = [...parentKeys, key];
     if (path === "ai.providers" || /^ai\.agents\.[^.]+\.modelSettings$/.test(path)) {
-      rows.push(policyRow(policy, path));
+      rows.push(policyRow(policy, path, path, keys));
     } else if (child && typeof child === "object" && !Array.isArray(child)) {
-      flattenPolicy(policy, child, path, rows);
+      flattenPolicy(policy, child, path, rows, keys);
     } else {
-      rows.push(policyRow(policy, path));
+      rows.push(policyRow(policy, path, path, keys));
     }
   }
   return rows;
@@ -206,7 +209,7 @@ export function setSetting(settings, row, value) {
   } else if (row.id.startsWith("profile:")) {
     next.profiles[row.profile] = value;
   } else {
-    setPath(next.policy, row.path, value);
+    setPath(next.policy, row.keys ?? row.path, value);
     if (/^ai\.agents\.[^.]+\.provider$/.test(row.path)) {
       const agent = row.path.split(".")[2];
       const bundledModels = Object.hasOwn(MODEL_OPTIONS, value) ? MODEL_OPTIONS[value] : null;
