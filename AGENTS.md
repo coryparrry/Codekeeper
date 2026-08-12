@@ -1,42 +1,30 @@
-# Global working agreements
+# Repository Guidelines
 
-- When explaining something to the user, use the `Visualize` skill when it materially improves clarity.
-- The current request defines the task mode and scope. Use repository evidence and the nearest applicable `AGENTS.md`.
-- Be concise, direct, and candid. Challenge weak assumptions and distinguish verified facts from uncertainty.
-- Ground research in authoritative, current sources and link important evidence.
-- Preserve the original goal and constraints; finish authorized work end to end and verify the actual result before claiming completion.
-- Ask questions only when a decision is materially ambiguous, risky, or requires approval.
-- Use relevant skills; spawn subagents only for genuinely independent work and synthesize their findings.
-- Keep changes focused and simple. Avoid unrelated edits, unnecessary abstractions, broad refactors, and low-signal tests.
-- Test observable behavior, review substantial changes, and validate user-facing work in the real interface when applicable.
-- Preserve unrelated work and never take destructive, production, or external actions beyond what the user authorized.
-- Before editing a Git repository, inspect the branch and working tree. Stay on the current non-main branch; if implementation starts on `main`, create and publish a task branch.
-- Never discard, overwrite, hide, stage, or commit unrelated work. Use worktrees only when requested or genuinely required, and never under a system temporary directory.
-- After each feature, bug fix, or major change, commit and push. Complete requested PR flows end to end and use GitHub MCP when blocked by the sandbox.
-- Keep each PR within 3,000 changed lines; split larger work into coherent PRs.
-- Report meaningful blockers, outcomes, and evidence without noisy progress.
+## Project Structure & Module Organization
 
-## Tool efficiency
+Codekeeper is a Node.js 22+ ES-module repository. `tools/codekeeper/` contains the provider-configurable maintainer runtime, policies, evaluation harness, and runtime tests. `packages/codekeeper/` contains the distributable installer CLI, embedded workflow assets, and installer tests. Reusable GitHub workflows live in `.github/workflows/`; adopter-facing caller templates live in `examples/workflows/`. `acceptance/` is the offline end-to-end harness. Architecture, configuration, validation, and security guidance live in `docs/`, `VALIDATION.md`, and `SECURITY.md`.
 
-- Batch independent tool calls concurrently in one `functions.exec` using `Promise.allSettled`. Inspect every result. Keep dependent, conflicting, approval-sensitive, wait/resume, and adaptive operations sequential.
-- Keep tool output proportionate to the task. Prefer focused searches and line ranges when they are sufficient, and batch independent reads when their combined output remains manageable. Avoid accidental full-file, tool-schema, complete JSON, or unbounded-search dumps. When broad output is genuinely needed for correctness, retrieve it once; if output truncates, narrow the next query instead of rerunning the same broad command.
-- For builds, tests, and other long-running commands, use a 30-second initial yield. If the process is still running, wait 30–45 seconds before checking again. Do not poll every 1–5 seconds unless an interactive process or imminent timeout specifically requires it.
-- Do not stream complete build or test logs into model context. Prefer structured or quiet output and preserve full logs in a result bundle or local file when practical. On success, return the exit status and concise summary. On failure, inspect targeted errors and limited surrounding context before requesting more; do not rerun solely to obtain verbose output.
-- The root agent owns integration, conflict resolution, final judgment, and final validation.
-- Use the relevant skill or nearest repository instructions for specialized workflows such as Beads, Oracle, Apple/Xcode, UI automation, deployment, and GitHub review.
-- Do not apply specialized workflow mechanics globally merely because the corresponding tool or skill exists.
-- For user-visible UI changes, the root agent owns final validation of the exact fresh build. If visual inspection is unavailable, state that clearly rather than blocking or claiming it occurred.
+## Build, Test, and Development Commands
 
-## Agent skills
+- `npm ci && npm run check` — install root tooling, then run ESLint and Prettier checks.
+- `node tools/codekeeper/src/cli.mjs check-config` — validate repository policy and configuration.
+- `cd tools/codekeeper && npm ci && npm run check` — syntax-check the runtime, verify its generated tooling manifest, and run runtime tests.
+- `cd packages/codekeeper && npm ci && npm run check` — validate the installer package and test its CLI/assets.
+- `cd acceptance && npm run check` — run the deterministic offline acceptance fixture.
+- `bash scripts/release-source.sh --verify` — verify tracked-file inventory and `MANIFEST.sha256` before release work.
 
-### Issue tracker
+## Coding Style & Naming Conventions
 
-Issues and specs are tracked in this repository’s GitHub Issues. See `docs/agents/issue-tracker.md`.
+Use two-space indentation, double quotes, trailing commas, and `.mjs` ES modules. Prefer `camelCase` for functions and variables, `PascalCase` for components/classes, and descriptive kebab-case filenames where a module is not named for one exported type. Run `npm run check`; do not hand-format generated manifests or installer metadata.
 
-### Triage labels
+## Testing Guidelines
 
-Triage uses the five default canonical labels. See `docs/agents/triage-labels.md`.
+Tests use `node:test` with strict assertions and live beside each subsystem under `test/*.test.mjs`. Name tests after observable behavior, including failure, stale-state, timeout, and trust-boundary cases. Run the narrow suite while developing, then every affected package check. Runtime or workflow changes must keep `tools/codekeeper/tooling-manifest.json`, embedded assets, workflow pins, and release integrity synchronized.
 
-### Domain docs
+## Commit & Pull Request Guidelines
 
-Domain documentation uses the single-context layout. See `docs/agents/domain.md`.
+Follow the repository’s Conventional Commit history: `fix(review): ...`, `feat(assistant): ...`, `test(review): ...`, or `chore(release): ...`. Keep commits scoped to one root cause. PRs should lead with user-visible behavior, explain security or authority-boundary effects, link relevant issues, and list exact verification commands. Include screenshots for installer TUI changes and call out any unrun live or adopter-repository validation.
+
+## Security & Agent Workflow
+
+Never commit or paste provider keys, GitHub App PEMs, tokens, or live traces. Report vulnerabilities through GitHub private vulnerability reporting. For issue tracking, triage-label mapping, or domain documentation, follow `docs/agents/` when that configuration exists on the branch.
