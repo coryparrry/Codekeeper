@@ -513,10 +513,36 @@ export async function replyToReviewFeedback({ github, context, result, automatio
 
 export async function upsertDeferredReviewFeedback({ github, context, result, config, automationIdentity, dryRun = false, ownerRequested = false }) {
   const deferred = result.reviewFeedback?.filter((item) => item.disposition === "defer") ?? [];
-  if ((!ownerRequested && !config.review.createDeferredIssues) || deferred.length === 0) return [];
+  if (!ownerRequested && !config.review.createDeferredIssues) return [];
   const existing = await github.listMaintenanceIssues("codekeeper:deferred");
   const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
   const published = [];
+  const activeFingerprints = new Set(deferred.map((feedback) =>
+    deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.sourceKeys)
+  ));
+  const origin = `- Pull request: [#${context.pullRequest.number}](${context.pullRequest.url})`;
+  for (const issue of existing) {
+    const markerMatch = typeof issue.body === "string"
+      ? issue.body.match(/<!-- codekeeper:deferred=([a-f0-9]{64}) -->$/)
+      : null;
+    if (
+      issue.state !== "open" ||
+      !markerMatch ||
+      !issue.body.includes(origin) ||
+      activeFingerprints.has(markerMatch[1]) ||
+      !isTrustedMaintenanceIssue(issue, {
+        marker: markerMatch[0],
+        botLogin: automationIdentity.login,
+        botId: automationIdentity.id
+      })
+    ) continue;
+    if (dryRun) {
+      published.push({ fingerprint: markerMatch[1], state: "would-close", issueNumber: issue.number });
+      continue;
+    }
+    await github.updateIssue(issue.number, { state: "closed", state_reason: "completed" });
+    published.push({ fingerprint: markerMatch[1], state: "closed", issueNumber: issue.number });
+  }
   for (const feedback of deferred) {
     const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.sourceKeys);
     const marker = deferredReviewMarker(fingerprint);
