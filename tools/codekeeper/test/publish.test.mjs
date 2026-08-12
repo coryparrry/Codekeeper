@@ -9,6 +9,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
 import { deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
 import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
+import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import {
   isTrustedMaintenanceIssue,
   isTrustedRepairPull,
@@ -302,6 +303,91 @@ test("ignored and repairable inline feedback receive idempotent replies without 
   ]);
   assert.match(replies[0].body, /^No action:/);
   assert.match(replies[1].body, /^Fix now:/);
+});
+
+test("review publication rejects feedback that changed after preparation", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-stale-feedback-test-"));
+  const configSha256 = "f".repeat(64);
+  const frozenFeedback = {
+    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
+    body: "Please add a timeout test.", url: "https://github.test/comment/41",
+    state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
+    resolved: false, outdated: false, path: "README.md", line: 1
+  };
+  const context = {
+    mode: "review", repository: "owner/repository", configSha256, runId: "7000",
+    runUrl: "https://github.com/owner/repository/actions/runs/7000",
+    pullRequest: {
+      number: 7, headSha: "head", baseSha: "base",
+      diff: { truncated: false, disabled: false }, reviewFeedback: [frozenFeedback]
+    }
+  };
+  const result = {
+    mode: "review", summary: "Defer the valid follow-up.", risk: "low", labels: [],
+    blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{
+      problemKey: "timeout-test", disposition: "defer", type: "testing",
+      explanation: "Add timeout coverage.", validation: "Coverage is still absent.",
+      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "manual", noActionReason: null
+  };
+  const pull = {
+    number: 7, state: "open", draft: false, labels: [],
+    head: { sha: "head", ref: "feature", repo: { full_name: context.repository } },
+    base: { sha: "base", ref: config.repository.defaultBranch, repo: { full_name: context.repository } }
+  };
+  const restoreGitHub = replaceGitHubMethods({
+    async getPull() { return structuredClone(pull); },
+    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: frozenFeedback.threadId, isResolved: true, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
+          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
+          author: { login: frozenFeedback.author }
+        }] }
+      }];
+    }
+  });
+  try {
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "review", context, result, configSha256 });
+    await assert.rejects(
+      publishReview({ artifactDirectory, config, configSha256, ...integrity, token: "unused", dryRun: true }),
+      /review feedback changed after preparation/
+    );
+  } finally {
+    restoreGitHub();
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("fix-now feedback blocks auto-merge even when repair dispatch is disabled", () => {
+  const reviewConfig = structuredClone(config);
+  reviewConfig.merge.enabled = true;
+  reviewConfig.review.autoRepair = false;
+  const result = {
+    risk: "low", labels: [], blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{ disposition: "fix_now" }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto"
+  };
+  const decision = evaluateAutoMerge({
+    config: reviewConfig,
+    pullRequest: {
+      number: 7, state: "open", draft: false, labels: [],
+      user: { login: identity.login, type: "Bot" },
+      head: { ref: "automation/codekeeper/fix-now", repo: { full_name: "owner/repository" } },
+      base: { repo: { full_name: "owner/repository" } }
+    },
+    files: [{ filename: "README.md", additions: 1, deletions: 0 }],
+    reviewResult: result, reviewContextComplete: true, automationBotLogin: identity.login
+  });
+  assert.equal(decision.eligible, false);
+  assert.match(decision.reasons.join("\n"), /fix-now review feedback/);
+  assert.ok(reviewLabels(result).includes("codekeeper:blocked"));
+  assert.ok(!reviewLabels(result).includes("codekeeper:auto-merge"));
 });
 
 test("GraphQL follows the configured GitHub API host", () => {
