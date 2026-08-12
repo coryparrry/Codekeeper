@@ -5,7 +5,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-prof
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
 import { GitHubClient, isAmbiguousGitHubMutationError, isOwnedMarkerComment } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
-import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
+import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
 import { completeReviewFeedback } from "./prepare.mjs";
 import { publishPullRequestRepair } from "./pr-repair.mjs";
@@ -415,6 +415,17 @@ async function assertCurrentReviewFeedback(github, context) {
   }
 }
 
+function ownedAutomaticRepairHeads(comments, automationIdentity) {
+  const heads = new Set();
+  for (const comment of comments) {
+    const match = String(comment?.body ?? "").match(/<!-- codekeeper:auto-repair-head=([0-9a-f]{40}) -->$/i);
+    if (!match) continue;
+    const marker = automaticRepairMarker(match[1]);
+    if (isOwnedMarkerComment(comment, marker, automationIdentity)) heads.add(match[1].toLowerCase());
+  }
+  return heads;
+}
+
 async function disableFailedAutoMergePostcondition(github, pullRequest, cause) {
   let disableError = null;
   try {
@@ -489,11 +500,23 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const repairFeedback = result.reviewFeedback.filter((feedback) =>
     feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
   );
+  const repairRequested = (blocking || repairFeedback.length > 0) && config.review.autoRepair && !existingLabels.has("codekeeper:paused");
+  const repairMarked = existingLabels.has("codekeeper:auto-repaired");
+  let repairHeads = new Set();
+  if (repairMarked) {
+    repairHeads = ownedAutomaticRepairHeads(
+      await github.listIssueComments(pull.number),
+      expectedAutomationIdentity()
+    );
+  }
+  const repairPending = repairMarked && (repairHeads.size === 0 || repairHeads.has(pull.head.sha.toLowerCase()));
   const automaticRepair = {
-    eligible: (blocking || repairFeedback.length > 0) && config.review.autoRepair && !existingLabels.has("codekeeper:paused") && !existingLabels.has("codekeeper:auto-repaired"),
+    eligible: repairRequested && !repairPending,
+    pending: repairPending,
+    staleMarker: repairMarked && !repairPending,
     dispatched: false
   };
-  const suspendAutoMergeForRepair = (decision) => automaticRepair.eligible
+  const suspendAutoMergeForRepair = (decision) => automaticRepair.eligible || automaticRepair.pending
     ? { ...decision, eligible: false, reasons: [...decision.reasons, "Automatic repair is pending"] }
     : decision;
   const publicationState = (autoMerge) => {
@@ -523,6 +546,10 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
 
   const automationIdentity = expectedAutomationIdentity();
   let reconciledPull = await currentReviewPull(github, context, config);
+  if (automaticRepair.staleMarker) {
+    await github.removeLabel(pull.number, "codekeeper:auto-repaired");
+    reconciledPull = await currentReviewPull(github, context, config);
+  }
   const suspension = await suspendAutoMerge(
     github,
     reconciledPull,
@@ -626,6 +653,13 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
             await releaseAutomaticRepairLease(github, lease, "released");
           } else {
             await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+            await github.upsertMarkerComment(
+              pull.number,
+              automaticRepairMarker(pull.head.sha),
+              `Automatic repair is pending for head ${pull.head.sha}.`,
+              automationIdentity
+            );
+            await currentReviewPull(github, context, config);
             markerAddAttempted = true;
             await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
             markerAdded = true;

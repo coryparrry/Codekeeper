@@ -7,7 +7,7 @@ import test from "node:test";
 import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/lib/github.mjs";
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
-import { deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "../src/lib/markers.mjs";
+import { automaticRepairMarker, deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "../src/lib/markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
 import { completeReviewFeedback } from "../src/lib/prepare.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
@@ -744,11 +744,13 @@ test("fix-if-cheap feedback suspends auto-merge while automatic repair is pendin
     state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
     resolved: false, outdated: false, path: "README.md", line: 1
   };
+  const headSha = "1".repeat(40);
+  const baseSha = "2".repeat(40);
   const context = {
     mode: "review", repository: "owner/repository", configSha256, runId: "7004",
     runUrl: "https://github.com/owner/repository/actions/runs/7004",
     pullRequest: {
-      number: 7, headSha: "head", baseSha: "base",
+      number: 7, headSha, baseSha,
       diff: { truncated: false, disabled: false }, reviewFeedbackFrozen: true,
       reviewFeedback: [frozenFeedback]
     }
@@ -766,8 +768,8 @@ test("fix-if-cheap feedback suspends auto-merge while automatic repair is pendin
   const pull = {
     number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
     user: { login: identity.login, type: "Bot" },
-    head: { sha: "head", ref: "automation/codekeeper/cheap-repair", repo: { full_name: context.repository } },
-    base: { sha: "base", ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
+    head: { sha: headSha, ref: "automation/codekeeper/cheap-repair", repo: { full_name: context.repository } },
+    base: { sha: baseSha, ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
   };
   const restoreGitHub = replaceGitHubMethods({
     async getPull() { return structuredClone(pull); },
@@ -782,11 +784,19 @@ test("fix-if-cheap feedback suspends auto-merge while automatic repair is pendin
           author: { login: frozenFeedback.author }
         }] }
       }];
+    },
+    async listIssueComments() {
+      return [{
+        body: `Automatic repair is pending.\n${automaticRepairMarker(headSha)}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }];
     }
   });
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   try {
     process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
     const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "review", context, result, configSha256, artifactConfig: reviewConfig
     });
@@ -795,10 +805,19 @@ test("fix-if-cheap feedback suspends auto-merge while automatic repair is pendin
     });
     assert.equal(publication.autoMerge.eligible, false);
     assert.match(publication.autoMerge.reasons.join("\n"), /automatic repair is pending/i);
+
+    pull.labels = [{ name: "codekeeper:auto-repaired" }];
+    const repeated = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(repeated.autoMerge.eligible, false);
+    assert.match(repeated.autoMerge.reasons.join("\n"), /automatic repair is pending/i);
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
     else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
     await rm(artifactDirectory, { recursive: true, force: true });
   }
 });

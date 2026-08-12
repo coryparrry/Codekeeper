@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { GitHubClient } from "../src/lib/github.mjs";
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
-import { sha256 } from "../src/lib/markers.mjs";
+import { automaticRepairMarker, sha256 } from "../src/lib/markers.mjs";
 import { acquireAutomaticRepairLease, publishIssue, publishReview } from "../src/lib/publish.mjs";
 
 const config = JSON.parse(await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8"));
@@ -333,7 +333,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     runUrl: "https://github.com/owner/repository/actions/runs/7008",
     pullRequest: {
       number: 7,
-      headSha: "h".repeat(40),
+      headSha: "a".repeat(40),
       baseSha: "b".repeat(40),
       diff: { truncated: false, disabled: false },
       reviewFeedback: []
@@ -379,6 +379,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
   let failDispatchAfterMutation = false;
   let failLeaseCompletion = false;
   let removalAttempts = 0;
+  const repairMarkerCalls = [];
   let nextLeaseCommentId = 1;
   const leaseComments = [];
   const restoreGitHub = replaceGitHubMethods({
@@ -409,7 +410,11 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     },
     async ensureLabels() {},
     async replaceManagedLabels() {},
-    async upsertMarkerComment() {},
+    async upsertMarkerComment(_number, marker, body) {
+      if (marker === automaticRepairMarker(context.pullRequest.headSha)) {
+        repairMarkerCalls.push({ marker, body });
+      }
+    },
     async addLabels(_number, labelsToAdd) {
       if (concurrentMode) {
         concurrentAdds += 1;
@@ -457,12 +462,23 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       firstError: firstError?.message,
       markerPresentAfterFirstAttempt,
       dispatchAttempts,
-      retryDispatched: retry.automaticRepair.dispatched
+      retryDispatched: retry.automaticRepair.dispatched,
+      repairMarkerCalls
     }, {
       firstError: "dispatch unavailable",
       markerPresentAfterFirstAttempt: false,
       dispatchAttempts: 2,
-      retryDispatched: true
+      retryDispatched: true,
+      repairMarkerCalls: [
+        {
+          marker: automaticRepairMarker(context.pullRequest.headSha),
+          body: `Automatic repair is pending for head ${context.pullRequest.headSha}.`
+        },
+        {
+          marker: automaticRepairMarker(context.pullRequest.headSha),
+          body: `Automatic repair is pending for head ${context.pullRequest.headSha}.`
+        }
+      ]
     });
 
     pull.labels = [];

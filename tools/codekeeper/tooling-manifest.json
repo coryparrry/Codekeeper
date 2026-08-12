@@ -71,7 +71,7 @@
     },
     {
       "path": "src/lib/markers.mjs",
-      "sha256": "ccf5b28edb31ce84578f4d95f74b329e271b860767ea40f46727a2b09008676a"
+      "sha256": "83b57791cdf0cee6e3788c27aded8daa2ab5cf9a9c9be05c570c9c3bcab105a2"
     },
     {
       "path": "src/lib/policy.mjs",
@@ -87,11 +87,11 @@
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "4adba99dd56510d3847a54acddc1b70e02d6c7240ec17df415165bfcb148a14b"
+      "sha256": "cb16f717bef9593526dbc4c406f7f956f86dedbeec1667244e5646fd5b9317f7"
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "b40daa2a8e6d30262dfe2132ff9fba20fe683fe46731a331d26567b3a853f2d5"
+      "sha256": "befbb2cbe531a3c28d99e505066cf188258d878df427d898832d13a653f2dd09"
     },
     {
       "path": "src/lib/render.mjs",
@@ -103,7 +103,7 @@
     },
     {
       "path": "src/lib/validate.mjs",
-      "sha256": "5cc2d737f9c71723d3d189a72948f0ad4a034abb9a29fe5c9f9ebe4b4625ba3c"
+      "sha256": "615296d5a36d3b919cf80bf04edfd92f24d50e464abf83b3fcb5300ba81219cd"
     },
     {
       "path": "src/lib/workspace.mjs",

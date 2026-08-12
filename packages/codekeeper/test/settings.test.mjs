@@ -37,6 +37,7 @@ test("standard and advanced settings expose behavior, arbitrary models, profiles
   assert.equal(row(settings, "workflow:assistant").readOnly, true);
   assert.equal(row(settings, "policy:automation.reviewFeedbackTriage").kind, "boolean");
   assert.deepEqual(row(settings, "policy:ai.agents.review.provider").choices, ["openai", "deepseek", "openrouter"]);
+  assert.deepEqual(row(settings, "policy:ai.agents.review.effort").choices, ["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
   assert.equal(row(settings, "policy:ai.agents.review.model").kind, "string");
   assert.equal(row(settings, "policy:ai.agents.review.modelSettings", true).kind, "json");
   const providers = row(settings, "policy:ai.providers", true);
@@ -102,9 +103,12 @@ test("changing a provider selects a compatible default model", async () => {
 
   const deepseek = setSetting(settings, provider, "deepseek");
   assert.equal(deepseek.policy.ai.agents.review.model, "deepseek-v4-flash");
+  assert.deepEqual(row(deepseek, "policy:ai.agents.review.effort").choices, ["none"]);
+  assert.deepEqual(row(deepseek, "policy:ai.agents.review.workspace.effort").choices, ["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
 
   const openrouter = setSetting(settings, provider, "openrouter");
   assert.equal(openrouter.policy.ai.agents.review.model, "openai/gpt-5.6-sol");
+  assert.deepEqual(row(openrouter, "policy:ai.agents.review.effort").choices, ["none"]);
 
   const customProviderDefinition = {
     baseUrl: "https://models.example/v1",
@@ -177,6 +181,17 @@ test("settings keep unusable owner lists inside the editor", async () => {
       /Owner logins are invalid or out of sync/,
     );
   }
+});
+
+test("settings canonicalize runtime-valid owner logins before enforcing identity invariants", async () => {
+  const { policy, settings } = await fixture(["review"]);
+  settings.policy.repository.ownerLogins = [" Repository-Owner "];
+  settings.policy.merge.allowedUserAuthors = ["repository-owner"];
+
+  validateEditableSettings(settings, policy);
+
+  assert.deepEqual(settings.policy.repository.ownerLogins, ["repository-owner"]);
+  assert.deepEqual(settings.policy.merge.allowedUserAuthors, ["repository-owner"]);
 });
 
 test("settings cannot disable tracing while sensitive trace export is required", async () => {

@@ -11,6 +11,7 @@ import { agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
 import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
 import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
+import { validateFrozenReviewFeedback } from "../src/lib/validate.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -256,6 +257,36 @@ test("feedback-triggered review preparation freezes the complete current review 
     if (originalAutomationLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
     else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = originalAutomationLogin;
   }
+});
+
+test("inactive frozen review feedback cannot trigger repairs or deferred work", () => {
+  const sources = [
+    { sourceKey: "review_comment:1", kind: "review_comment", threadId: "resolved", resolved: true, outdated: false, state: "commented" },
+    { sourceKey: "review_comment:2", kind: "review_comment", threadId: "outdated", resolved: false, outdated: true, state: "commented" },
+    { sourceKey: "review:3", kind: "review", threadId: null, resolved: false, outdated: false, state: "DISMISSED" }
+  ];
+  const feedback = sources.map((source, index) => ({
+    problemKey: `inactive-${index}`,
+    disposition: ["fix_now", "fix_if_cheap", "defer"][index],
+    sourceKeys: [source.sourceKey],
+    threadIds: source.threadId ? [source.threadId] : []
+  }));
+
+  assert.throws(
+    () => validateFrozenReviewFeedback(sources, feedback),
+    /must ignore resolved, outdated, or dismissed frozen sources/
+  );
+  validateFrozenReviewFeedback(
+    sources,
+    feedback.map((item) => ({ ...item, disposition: "ignore" }))
+  );
+  assert.throws(
+    () => validateFrozenReviewFeedback(
+      [...sources, { sourceKey: "review:4", kind: "review", threadId: null, resolved: false, outdated: false, state: "CHANGES_REQUESTED" }],
+      [{ problemKey: "mixed", disposition: "ignore", sourceKeys: [...sources.map((item) => item.sourceKey), "review:4"], threadIds: ["resolved", "outdated"] }]
+    ),
+    /mixes active and inactive frozen sources/
+  );
 });
 
 function prepareAudit(root, directory, env = {}, repairAuthorized = false) {

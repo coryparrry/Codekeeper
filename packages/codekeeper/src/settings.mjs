@@ -102,7 +102,12 @@ function enumChoices(path, policy) {
   if (/^ai\.agents\.[^.]+\.provider$/.test(path)) {
     return Object.keys(MODEL_PROVIDER_SECRETS).filter((provider) => policy.ai.providers[provider]);
   }
-  if (/^ai\.agents\.[^.]+\.(?:workspace\.)?effort$/.test(path)) return EFFORTS;
+  const coordinatorEffort = path.match(/^ai\.agents\.([^.]+)\.effort$/);
+  if (coordinatorEffort) {
+    const provider = policy.ai.agents[coordinatorEffort[1]].provider;
+    return policy.ai.providers[provider]?.supportsReasoningEffort ? EFFORTS : ["none"];
+  }
+  if (/^ai\.agents\.[^.]+\.workspace\.effort$/.test(path)) return EFFORTS;
   if (path === "merge.method") return ["MERGE", "SQUASH", "REBASE"];
   return null;
 }
@@ -346,13 +351,14 @@ export function validateEditableSettings(settings, baselinePolicy) {
   requiredString(policy.repository.displayName, "repository.displayName", 100);
   if (policy.repository.displayName.trim() !== policy.repository.displayName) throw new InstallerError("repository.displayName is invalid.", { code: "SETTING_INVALID" });
   stringList(policy.repository.ownerLogins, "repository.ownerLogins", 64, 256);
-  const normalizedOwnerLogins = policy.repository.ownerLogins.map((login) => login.toLowerCase());
+  const normalizedOwnerLogins = policy.repository.ownerLogins.map((login) => login.trim().toLowerCase());
   if (!normalizedOwnerLogins.length
     || new Set(normalizedOwnerLogins).size !== normalizedOwnerLogins.length
-    || policy.repository.ownerLogins.some((login) => !LOGIN.test(login))
-    || !equal(policy.merge.allowedUserAuthors, policy.repository.ownerLogins)) {
+    || normalizedOwnerLogins.some((login) => !LOGIN.test(login))
+    || !equal(policy.merge.allowedUserAuthors, normalizedOwnerLogins)) {
     throw new InstallerError("Owner logins are invalid or out of sync.", { code: "SETTING_INVALID" });
   }
+  policy.repository.ownerLogins = normalizedOwnerLogins;
   if (policy.projectInvariants === undefined) policy.projectInvariants = [];
   stringList(policy.projectInvariants, "projectInvariants", 64, 4_096);
   for (const key of ["automaticPrReview", "reviewFeedbackTriage", "issueTriage", "ownerRequests"]) {
