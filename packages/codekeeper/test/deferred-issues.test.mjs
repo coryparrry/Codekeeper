@@ -7,10 +7,10 @@ const policy = JSON.parse(
   await readFile(new URL("../assets/policies/openai.json", import.meta.url), "utf8")
 );
 const profiles = {
-  review: "review profile",
-  audit: "audit profile",
-  issue: "issue profile",
-  fix: "fix profile"
+  "pr-reviewer": "review profile",
+  "repository-auditor": "audit profile",
+  "issue-triager": "issue profile",
+  fixer: "fix profile"
 };
 
 test("deferred issue creation requires the Issue triage workflow", () => {
@@ -20,6 +20,7 @@ test("deferred issue creation requires the Issue triage workflow", () => {
     enabled: true,
     profiles
   });
+  assert.equal(withoutIssues.policy.review.createDeferredIssues, false);
   withoutIssues.policy.review.createDeferredIssues = true;
 
   assert.throws(
@@ -33,7 +34,6 @@ test("deferred issue creation requires the Issue triage workflow", () => {
     enabled: true,
     profiles
   });
-  withIssues.policy.review.createDeferredIssues = true;
-
+  assert.equal(withIssues.policy.review.createDeferredIssues, true);
   assert.doesNotThrow(() => validateEditableSettings(withIssues, policy));
 });
