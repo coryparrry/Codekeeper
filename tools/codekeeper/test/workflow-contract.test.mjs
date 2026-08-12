@@ -422,7 +422,7 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(caller, /appendFileSync\(process\.env\.GITHUB_OUTPUT, `owner_command=\$\{commandIntent\}\\nroute=\$\{route\}\\n`\)/);
   assert.match(caller, /owner_command: \$\{\{ needs\.intent\.outputs\.owner_command == 'true' \}\}/);
   assert.match(caller, /intent:\n\s+name: Detect Codekeeper review feedback/);
-  assert.match(caller, /const commandIntent = trustedAssociation && \(slash \|\| mentioned\)/);
+  assert.match(caller, /const commandIntent = eventName === "pull_request_review_comment" && trustedAssociation && \(slash \|\| mentioned\)/);
   assert.match(caller, /bootstrap:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/);
   assert.match(caller, /review:\n\s+needs: \[intent, bootstrap\]\n\s+if: needs\.intent\.outputs\.route == 'true' && needs\.bootstrap\.result == 'success'/);
   assert.match(source, /!\(github\.event_name == 'pull_request_review_comment'[\s\S]*github\.event\.comment\.user\.login == inputs\.automation_bot_login\)/);
