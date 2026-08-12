@@ -4,7 +4,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-prof
 import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
-import { REVIEW_MARKER } from "./markers.mjs";
+import { REVIEW_MARKER, sha256 } from "./markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
 import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
@@ -174,11 +174,13 @@ export async function completeReviewFeedback(github, pullNumber) {
   for (const review of reviews) {
     if (!String(review.body ?? "").trim()) continue;
     if (isAutomationFeedback(review.user?.login, review.body)) continue;
+    const body = String(review.body ?? "");
     feedback.push({
       sourceKey: `review:${review.id}`,
       kind: "review",
       author: boundedText(review.user?.login, 256, "…"),
-      body: boundedText(review.body, 6000),
+      body: boundedText(body, 6000),
+      bodySha256: sha256(body),
       url: boundedText(review.html_url, 2048, "…"),
       state: boundedText(review.state, 64, "…"),
       threadId: null,
@@ -192,11 +194,13 @@ export async function completeReviewFeedback(github, pullNumber) {
     const rootCommentId = thread.comments?.nodes?.[0]?.databaseId ?? null;
     for (const comment of thread.comments?.nodes ?? []) {
       if (isAutomationFeedback(comment.author?.login, comment.body)) continue;
+      const body = String(comment.body ?? "");
       feedback.push({
         sourceKey: `review_comment:${comment.databaseId}`,
         kind: "review_comment",
         author: boundedText(comment.author?.login, 256, "…"),
-        body: boundedText(comment.body, 6000),
+        body: boundedText(body, 6000),
+        bodySha256: sha256(body),
         url: boundedText(comment.url, 2048, "…"),
         state: "commented",
         threadId: boundedText(thread.id, 512, "…"),
