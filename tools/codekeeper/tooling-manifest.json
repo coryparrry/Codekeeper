@@ -83,7 +83,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "9d34a20d7e0d0189c7c5b57051b449623e5919160f80ed7cc5baca8668d258ae"
+      "sha256": "ee5727093746c7ceef848cd482a6c133d1dfdec0a90b320bbce9236a6edb5870"
     },
     {
       "path": "src/lib/prompts.mjs",
@@ -91,7 +91,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "ce0960b384c997774ceff9bbe92ff2b3a8a0eeee886fe08ef6f9b6bdaac2f815"
+      "sha256": "19b42fb8a5bf02c830c3991e020bf35674bca63d09f8fed77ebbf8f758e40c07"
     },
     {
       "path": "src/lib/render.mjs",
