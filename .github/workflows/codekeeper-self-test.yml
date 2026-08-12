@@ -24,26 +24,6 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run repository lint and format checks
         run: npm run check
-      - name: Prepare source manifest refresh
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("MANIFEST.sha256")
-          entries = {}
-          for line in path.read_text().splitlines():
-              digest, name = line.split("  ", 1)
-              entries[name] = digest
-          entries["packages/codekeeper/src/settings.mjs"] = "50980f01df7571cc07565f61a0ef2ad9635dc1a931900beae1395960d02a04ad"
-          entries["packages/codekeeper/test/deferred-issues.test.mjs"] = "5886281d5844b679f22bc73888e026226a8272eeb0ad460dc34575e47eaf1127"
-          path.write_text("".join(f"{entries[name]}  {name}\n" for name in sorted(entries)))
-          PY
-      - name: Upload source manifest refresh
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codekeeper-manifest-refresh-${{ github.run_id }}
-          path: MANIFEST.sha256
-          retention-days: 1
-          if-no-files-found: error
       - name: Install pinned Agents SDK runtime
         working-directory: tools/codekeeper
         run: npm ci --ignore-scripts --no-audit --no-fund
