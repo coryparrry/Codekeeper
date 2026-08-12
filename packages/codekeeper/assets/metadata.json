@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "repository": "coryparrry/Codekeeper",
-    "commit": "89c6f0f964c1521c8b75ed08318bf175d9986e73"
+    "commit": "ce05fc173eba7ad7dca5c25f127ff391d0ce0ce2"
   },
   "assets": {
     "agents/pr-reviewer.md": {
@@ -68,7 +68,7 @@
       "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
     },
     "toolingManifest": {
-      "sha256": "12fc6a85322d0d13611d093815628677d0d6f180479f714b8a2fddd6e341c123",
+      "sha256": "33e30dba855e9051b842c208d937f454dfa293c827feb23f431fff6c4a03fd1c",
       "bytes": 3643,
       "sourcePath": "tools/codekeeper/tooling-manifest.json"
     }
