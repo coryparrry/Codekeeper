@@ -67,6 +67,12 @@ function clone(value) {
   return structuredClone(value);
 }
 
+function canonicalOwnerLogins(value) {
+  return Array.isArray(value)
+    ? value.map((login) => String(login).trim().toLowerCase())
+    : value;
+}
+
 function pathParts(path) {
   return Array.isArray(path) ? path : path.split(".");
 }
@@ -232,7 +238,11 @@ export function setSetting(settings, row, value) {
       }
       if (!next.policy.ai.providers[value]?.supportsReasoningEffort) next.policy.ai.agents[agent].effort = "none";
     }
-    if (row.path === "repository.ownerLogins") next.policy.merge.allowedUserAuthors = [...value];
+    if (row.path === "repository.ownerLogins") {
+      const ownerLogins = canonicalOwnerLogins(value);
+      next.policy.repository.ownerLogins = ownerLogins;
+      next.policy.merge.allowedUserAuthors = Array.isArray(ownerLogins) ? [...ownerLogins] : ownerLogins;
+    }
   }
   return next;
 }
@@ -351,7 +361,7 @@ export function validateEditableSettings(settings, baselinePolicy) {
   requiredString(policy.repository.displayName, "repository.displayName", 100);
   if (policy.repository.displayName.trim() !== policy.repository.displayName) throw new InstallerError("repository.displayName is invalid.", { code: "SETTING_INVALID" });
   stringList(policy.repository.ownerLogins, "repository.ownerLogins", 64, 256);
-  const normalizedOwnerLogins = policy.repository.ownerLogins.map((login) => login.trim().toLowerCase());
+  const normalizedOwnerLogins = canonicalOwnerLogins(policy.repository.ownerLogins);
   if (!normalizedOwnerLogins.length
     || new Set(normalizedOwnerLogins).size !== normalizedOwnerLogins.length
     || normalizedOwnerLogins.some((login) => !LOGIN.test(login))

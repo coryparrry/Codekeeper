@@ -194,6 +194,18 @@ test("settings canonicalize runtime-valid owner logins before enforcing identity
   assert.deepEqual(settings.policy.merge.allowedUserAuthors, ["repository-owner"]);
 });
 
+test("Advanced owner edits synchronize canonical merge authors", async () => {
+  const { settings } = await fixture(["review"]);
+  const edited = setSetting(
+    settings,
+    row(settings, "policy:repository.ownerLogins", true),
+    [" NewOwner "]
+  );
+
+  assert.deepEqual(edited.policy.repository.ownerLogins, ["newowner"]);
+  assert.deepEqual(edited.policy.merge.allowedUserAuthors, ["newowner"]);
+});
+
 test("settings cannot disable tracing while sensitive trace export is required", async () => {
   const { policy, profiles } = await fixture(["review"]);
   const baseline = structuredClone(policy);
