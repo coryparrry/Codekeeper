@@ -36,7 +36,7 @@ env:
   CODEKEEPER_TOOLING_MANIFEST_SHA256: 28c81e7d6d4cf316772c7b8a03be891f0572f8373c8d4ec476ef5e8ccd32ef61
 
 concurrency:
-  group: codekeeper-assistant-${{ github.run_id }}
+  group: codekeeper-assistant-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:

@@ -80,6 +80,14 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
 });
 
+test("owner requests serialize per issue or pull request", async () => {
+  const assistant = await workflow("assistant");
+  assert.match(
+    assistant,
+    /concurrency:\n  group: codekeeper-assistant-\$\{\{ github\.event\.issue\.number \|\| github\.event\.pull_request\.number \|\| github\.run_id \}\}\n  cancel-in-progress: false/
+  );
+});
+
 test("caller bootstrap fetches the same immutable private action release as its reusable workflow", async () => {
   const releaseSha = "a".repeat(40);
   for (const mode of modes) {
