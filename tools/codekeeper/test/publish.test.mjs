@@ -522,6 +522,8 @@ test("ignored and repairable inline feedback receive idempotent replies without 
 
 test("reclassified review-body feedback updates its PR-level deferred reply", async () => {
   const comments = [];
+  const retired = [];
+  const fingerprint = deferredReviewFingerprint("owner/repository", 7, "review:99");
   const context = {
     repository: "owner/repository",
     pullRequest: {
@@ -543,14 +545,19 @@ test("reclassified review-body feedback updates its PR-level deferred reply", as
     github: {
       async upsertMarkerComment(number, marker, body) {
         comments.push({ number, marker, body });
+      },
+      async retireReviewFeedbackReply(number, marker, body) {
+        retired.push({ number, marker, body });
       }
     },
     context,
     result,
-    automationIdentity: identity
+    automationIdentity: identity,
+    retiredFingerprints: [fingerprint]
   });
 
   assert.equal(comments.length, 1);
+  assert.equal(retired.length, 0);
   assert.match(comments[0].body, /^Fix now:/);
   assert.equal(published[0].commentId, null);
   assert.equal(published[0].disposition, "fix_now");
