@@ -3,13 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
-import { GitHubClient } from "./github.mjs";
+import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
-import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "./markers.mjs";
+import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
 import { publishPullRequestRepair } from "./pr-repair.mjs";
-import { renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
+import { renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
+
+const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
 
 function singleLine(value, maximum = 256) {
   return String(value ?? "")
@@ -232,7 +234,7 @@ export async function reconcileAutoMerge(github, pullRequest, config, decision) 
   return { enabled: false, disabled: false, reason: decision.reasons.join("; ") };
 }
 
-async function suspendAutoMerge(github, pullRequest, refreshPull) {
+async function suspendAutoMerge(github, pullRequest) {
   if (!pullRequest.auto_merge) return { pullRequest, disabled: false };
   let disableError = null;
   try {
@@ -244,7 +246,7 @@ async function suspendAutoMerge(github, pullRequest, refreshPull) {
 
   let refreshedPull;
   try {
-    refreshedPull = await refreshPull();
+    refreshedPull = await github.getPull(pullRequest.number);
   } catch (error) {
     throw new Error(`Could not verify auto-merge was suspended for PR #${pullRequest.number}: ${error.message}`, { cause: error });
   }
@@ -255,22 +257,15 @@ async function suspendAutoMerge(github, pullRequest, refreshPull) {
   return { pullRequest: refreshedPull, disabled: true };
 }
 
-async function currentReviewPull(github, context, config) {
-  const pull = await github.getPull(context.pullRequest.number);
-  if (pull.state !== "open") throw new Error(`PR #${pull.number} is not open`);
-  if (pull.head.sha !== context.pullRequest.headSha) {
-    throw new Error(`PR #${pull.number} moved from ${context.pullRequest.headSha} to ${pull.head.sha}; stale review will not publish`);
+function ownedAutomaticRepairHeads(comments, automationIdentity) {
+  const heads = new Set();
+  for (const comment of comments) {
+    const match = String(comment?.body ?? "").match(/<!-- codekeeper:auto-repair-head=([0-9a-f]{40}) -->$/i);
+    if (!match) continue;
+    const marker = automaticRepairMarker(match[1]);
+    if (isOwnedMarkerComment(comment, marker, automationIdentity)) heads.add(match[1].toLowerCase());
   }
-  if (pull.base.sha !== context.pullRequest.baseSha) {
-    throw new Error(`PR #${pull.number} base moved from ${context.pullRequest.baseSha} to ${pull.base.sha}; stale review will not publish`);
-  }
-  if (pull.base.ref !== config.repository.defaultBranch) {
-    throw new Error(`PR #${pull.number} base branch changed from ${config.repository.defaultBranch} to ${pull.base.ref}; stale review will not publish`);
-  }
-  if (pull.head.repo?.full_name !== context.repository || pull.base.repo?.full_name !== context.repository) {
-    throw new Error(`PR #${pull.number} repository changed; stale review will not publish`);
-  }
-  return pull;
+  return heads;
 }
 
 async function disableFailedAutoMergePostcondition(github, pullRequest, cause) {
@@ -305,7 +300,7 @@ async function verifyAutoMergePostcondition({
 }) {
   let verifiedPull;
   try {
-    verifiedPull = await currentReviewPull(github, context, config);
+    verifiedPull = await github.assertPullMutationCurrent();
   } catch (error) {
     return disableFailedAutoMergePostcondition(github, activationPull, error);
   }
@@ -333,18 +328,42 @@ async function verifyAutoMergePostcondition({
 export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
   const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
-  const pull = await currentReviewPull(github, context, config);
+  const pull = await github.beginPullMutation({
+    repository: context.repository,
+    pullRequest: context.pullRequest,
+    policy: config
+  });
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
   const runUrl = trustedPublicationRunUrl(context);
   const automationBotLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
-  const blocking = result.blockingFindings.length > 0 || critical || result.mergeRecommendation === "block";
+  const blocking = result.blockingFindings.length > 0 || critical ||
+    result.reviewFeedback.some((feedback) => feedback.disposition === "fix_now") ||
+    result.mergeRecommendation === "block";
   const existingLabels = new Set((pull.labels ?? []).map((label) => typeof label === "string" ? label : label.name));
+  const repairFeedback = result.reviewFeedback.filter((feedback) =>
+    feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
+  );
+  const repairRequested = (blocking || repairFeedback.length > 0) && config.review.autoRepair && !existingLabels.has("codekeeper:paused");
+  const repairMarked = existingLabels.has("codekeeper:auto-repaired");
+  let repairHeads = new Set();
+  if (repairMarked) {
+    repairHeads = ownedAutomaticRepairHeads(
+      await github.listIssueComments(pull.number),
+      expectedAutomationIdentity()
+    );
+  }
+  const repairPending = repairMarked && (repairHeads.size === 0 || repairHeads.has(pull.head.sha.toLowerCase()));
   const automaticRepair = {
-    eligible: blocking && config.review.autoRepair && !existingLabels.has("codekeeper:paused") && !existingLabels.has("codekeeper:auto-repaired"),
+    eligible: repairRequested && !repairPending,
+    pending: repairPending,
+    staleMarker: repairMarked && !repairPending,
     dispatched: false
   };
+  const suspendAutoMergeForRepair = (decision) => automaticRepair.eligible || automaticRepair.pending
+    ? { ...decision, eligible: false, reasons: [...decision.reasons, "Automatic repair is pending"] }
+    : decision;
   const publicationState = (autoMerge) => {
     const desiredSet = new Set(reviewLabels(result));
     desiredSet.delete("codekeeper:auto-merge");
@@ -362,7 +381,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     };
   };
 
-  const autoMerge = evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin });
+  const autoMerge = suspendAutoMergeForRepair(evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin }));
   const initialState = publicationState(autoMerge);
 
   if (dryRun) {
@@ -371,14 +390,14 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   }
 
   const automationIdentity = expectedAutomationIdentity();
-  let reconciledPull = await currentReviewPull(github, context, config);
-  const suspension = await suspendAutoMerge(
-    github,
-    reconciledPull,
-    () => currentReviewPull(github, context, config)
-  );
+  let reconciledPull = pull;
+  if (automaticRepair.staleMarker) {
+    await github.removeLabel(pull.number, "codekeeper:auto-repaired");
+    reconciledPull = await github.getPull(pull.number);
+  }
+  const suspension = await suspendAutoMerge(github, reconciledPull);
   reconciledPull = suspension.pullRequest;
-  let publishedAutoMerge = evaluateAutoMerge({ config, pullRequest: reconciledPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
+  let publishedAutoMerge = suspendAutoMergeForRepair(evaluateAutoMerge({ config, pullRequest: reconciledPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login }));
   const eligibleState = publicationState(publishedAutoMerge);
   const manualFallbackState = publicationState({ ...publishedAutoMerge, eligible: false });
   const provisionedLabels = [...new Set([...eligibleState.desiredLabels, ...manualFallbackState.desiredLabels])];
@@ -386,9 +405,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
 
   const writePublicationState = async (decision) => {
     const state = publicationState(decision);
-    await currentReviewPull(github, context, config);
     await github.replaceManagedLabels(pull.number, state.desiredLabels, config.review.managedLabels);
-    await currentReviewPull(github, context, config);
     await github.upsertMarkerComment(
       pull.number,
       REVIEW_MARKER,
@@ -399,6 +416,24 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   };
 
   let { desiredLabels } = await writePublicationState(publishedAutoMerge);
+  const deferredIssues = await upsertDeferredReviewFeedback({
+    github,
+    context,
+    result,
+    config,
+    automationIdentity,
+    dryRun
+  });
+  const feedbackReplies = await replyToReviewFeedback({
+    github,
+    context,
+    result,
+    automationIdentity,
+    dryRun,
+    retiredFingerprints: deferredIssues
+      .filter((item) => item.state === "closed" || item.state === "would-close")
+      .map((item) => item.fingerprint)
+  });
   let autoMergeResult = {
     enabled: false,
     disabled: suspension.disabled,
@@ -406,7 +441,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   };
 
   if (publishedAutoMerge.eligible) {
-    const activationPull = await currentReviewPull(github, context, config);
+    const activationPull = await github.getPull(pull.number);
     const activationDecision = evaluateAutoMerge({ config, pullRequest: activationPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
     if (!activationDecision.eligible) {
       publishedAutoMerge = activationDecision;
@@ -439,18 +474,184 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   }
 
   if (automaticRepair.eligible) {
-    await currentReviewPull(github, context, config);
     await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+    await github.upsertMarkerComment(
+      pull.number,
+      automaticRepairMarker(pull.head.sha),
+      `Automatic repair is pending for head ${pull.head.sha}.`,
+      automationIdentity
+    );
     await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
-    await currentReviewPull(github, context, config);
-    await github.createRepositoryDispatch("codekeeper_fix", {
-      number: pull.number,
-      head_sha: pull.head.sha
-    });
+    try {
+      await github.createRepositoryDispatch("codekeeper_fix", {
+        number: pull.number,
+        head_sha: pull.head.sha,
+        authorization_mode: "policy",
+        review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
+      });
+    } catch (error) {
+      await github.rollbackPullLabel(pull.number, "codekeeper:auto-repaired");
+      throw error;
+    }
     automaticRepair.dispatched = true;
   }
 
-  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, blocking };
+  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, deferredIssues, feedbackReplies, blocking };
+}
+
+function rootReviewCommentIds(sources) {
+  return [...new Set(sources
+    .filter((source) => source.sourceKey.startsWith("review_comment:"))
+    .map((source) => source.rootCommentId ?? Number(source.sourceKey.slice("review_comment:".length)))
+    .filter((commentId) => Number.isSafeInteger(commentId) && commentId > 0))];
+}
+
+export async function replyToReviewFeedback({ github, context, result, automationIdentity, dryRun = false, retiredFingerprints = [] }) {
+  const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
+  const activeFingerprints = new Set((result.reviewFeedback ?? [])
+    .flatMap((feedback) => [...new Set(feedback.sourceKeys)])
+    .map((sourceKey) => deferredReviewFingerprint(context.repository, context.pullRequest.number, sourceKey)));
+  const replies = [];
+  for (const feedback of result.reviewFeedback.filter((item) => item.disposition !== "defer")) {
+    const label = feedback.disposition === "fix_now" ? "Fix now"
+      : feedback.disposition === "fix_if_cheap" ? "Fix if cheap"
+        : "No action";
+    const body = `${label}: ${sanitizeMarkdown(feedback.explanation)}\n\nValidation: ${sanitizeMarkdown(feedback.validation)}`;
+    for (const sourceKey of [...new Set(feedback.sourceKeys)]) {
+      const source = sourcesByKey.get(sourceKey);
+      const commentIds = rootReviewCommentIds(source ? [source] : []);
+      const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, sourceKey);
+      if (commentIds.length === 0) {
+        if (!dryRun) {
+          await github.upsertMarkerComment(context.pullRequest.number, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
+        }
+        replies.push({ problemKey: feedback.problemKey, commentId: null, disposition: feedback.disposition, dryRun });
+        continue;
+      }
+      for (const commentId of commentIds) {
+        if (!dryRun) {
+          await github.upsertReviewReply(context.pullRequest.number, commentId, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
+        }
+        replies.push({ problemKey: feedback.problemKey, commentId, disposition: feedback.disposition, dryRun });
+      }
+    }
+  }
+  const retiredBody = "No longer current: this prior review-feedback disposition was replaced by the complete current review publication.";
+  for (const fingerprint of [...new Set(retiredFingerprints)].filter((item) => !activeFingerprints.has(item))) {
+    if (!dryRun) {
+      await github.retireReviewFeedbackReply(
+        context.pullRequest.number,
+        reviewFeedbackReplyMarker(fingerprint),
+        retiredBody,
+        automationIdentity
+      );
+    }
+    replies.push({ problemKey: null, commentId: null, disposition: "retired", dryRun });
+  }
+  return replies;
+}
+
+export async function upsertDeferredReviewFeedback({ github, context, result, config, automationIdentity, dryRun = false, ownerRequested = false }) {
+  const deferred = result.reviewFeedback?.filter((item) => item.disposition === "defer") ?? [];
+  if (!ownerRequested && !config.review.createDeferredIssues) return [];
+  const existing = await github.listMaintenanceIssues("codekeeper:deferred");
+  const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
+  const published = [];
+  const deferredSources = deferred.flatMap((feedback) =>
+    [...new Set(feedback.sourceKeys)].map((sourceKey) => ({ feedback, sourceKey }))
+  );
+  const activeFingerprints = new Set(deferredSources.map(({ sourceKey }) =>
+    deferredReviewFingerprint(context.repository, context.pullRequest.number, sourceKey)
+  ));
+  const origin = `- Pull request: [#${context.pullRequest.number}](${context.pullRequest.url})`;
+  for (const issue of ownerRequested ? [] : existing) {
+    const markerMatch = typeof issue.body === "string"
+      ? issue.body.match(/<!-- codekeeper:deferred=([a-f0-9]{64}) -->$/)
+      : null;
+    if (
+      issue.state !== "open" ||
+      !markerMatch ||
+      !issue.body.includes(origin) ||
+      activeFingerprints.has(markerMatch[1]) ||
+      !isTrustedMaintenanceIssue(issue, {
+        marker: markerMatch[0],
+        botLogin: automationIdentity.login,
+        botId: automationIdentity.id
+      })
+    ) continue;
+    if (dryRun) {
+      published.push({ fingerprint: markerMatch[1], state: "would-close", issueNumber: issue.number });
+      continue;
+    }
+    await github.updateIssue(issue.number, {
+      body: issue.body.replace(markerMatch[0], `${DEFERRED_RECONCILED_MARKER}\n${markerMatch[0]}`),
+      state: "closed",
+      state_reason: "completed"
+    });
+    published.push({ fingerprint: markerMatch[1], state: "closed", issueNumber: issue.number });
+  }
+  for (const { feedback, sourceKey } of deferredSources) {
+    const scopedFeedback = { ...feedback, sourceKeys: [sourceKey] };
+    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, sourceKey);
+    const marker = deferredReviewMarker(fingerprint);
+    const match = existing.find((issue) => isTrustedMaintenanceIssue(issue, {
+      marker,
+      botLogin: automationIdentity.login,
+      botId: automationIdentity.id
+    }));
+    const sources = [sourcesByKey.get(sourceKey)].filter(Boolean);
+    const labels = ["codekeeper:deferred", issueTypeLabel(feedback.type)];
+    const title = singleLine(`[Deferred from PR #${context.pullRequest.number}] ${feedback.explanation}`, 256);
+    const body = renderDeferredIssue({
+      feedback: scopedFeedback,
+      pullRequest: context.pullRequest,
+      sources,
+      marker,
+      runUrl: context.runUrl
+    });
+    const automaticallyReconciled = match?.state === "closed" && match.body.includes(DEFERRED_RECONCILED_MARKER);
+    if (match?.state === "closed" && !automaticallyReconciled) {
+      published.push({ fingerprint, state: "acknowledged", issueNumber: match.number });
+      continue;
+    }
+    if (dryRun) {
+      published.push({
+        fingerprint,
+        state: automaticallyReconciled ? "would-reopen" : match ? "would-update" : "would-create",
+        issueNumber: match?.number ?? null
+      });
+      continue;
+    }
+    await github.ensureLabels(config.labels, labels);
+    let issue;
+    if (match) {
+      issue = await github.updateIssue(match.number, {
+        title,
+        body,
+        ...(automaticallyReconciled ? { state: "open", state_reason: null } : {})
+      });
+      await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
+    } else {
+      issue = await github.createIssue({ title, body, labels });
+      existing.push(issue);
+    }
+    const issueUrl = issue.html_url ?? `https://github.com/${context.repository}/issues/${issue.number}`;
+    const reply = `Deferred verified review feedback to [issue #${issue.number}](${issueUrl}). This review thread remains open for human disposition.`;
+    const rootCommentIds = rootReviewCommentIds(sources);
+    if (rootCommentIds.length > 0) {
+      for (const commentId of rootCommentIds) {
+        await github.upsertReviewReply(context.pullRequest.number, commentId, reviewFeedbackReplyMarker(fingerprint), reply, automationIdentity);
+      }
+    } else {
+      await github.upsertMarkerComment(context.pullRequest.number, reviewFeedbackReplyMarker(fingerprint), reply, automationIdentity);
+    }
+    published.push({
+      fingerprint,
+      state: automaticallyReconciled ? "reopened" : match ? "updated" : "created",
+      issueNumber: issue.number
+    });
+  }
+  return published;
 }
 
 export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
@@ -462,6 +663,21 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   const runUrl = trustedPublicationRunUrl(context);
 
   const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
+  const automationIdentity = expectedAutomationIdentity();
+  const deferredMarker = typeof issue.body === "string"
+    ? issue.body.match(/<!-- codekeeper:deferred=[a-f0-9]{64} -->$/)?.[0]
+    : null;
+  if (
+    issueLabelNames(issue).includes("codekeeper:deferred") &&
+    deferredMarker &&
+    isTrustedMaintenanceIssue(issue, {
+      marker: deferredMarker,
+      botLogin: automationIdentity.login,
+      botId: automationIdentity.id
+    })
+  ) {
+    desired.add("codekeeper:deferred");
+  }
   if (config.issues.allowAiImplementation && result.implementationRecommendation === "ai-ready") {
     desired.add("codekeeper:ready");
   }
@@ -497,7 +713,7 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     issue.number,
     ISSUE_TRIAGE_MARKER,
     comment,
-    expectedAutomationIdentity()
+    automationIdentity
   );
 
   if (result.duplicateOf === issue.number) {

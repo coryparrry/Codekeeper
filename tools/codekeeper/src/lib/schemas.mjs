@@ -104,6 +104,27 @@ function reviewFindingSchema() {
   });
 }
 
+function reviewFeedbackSchema() {
+  return object({
+    problemKey: stringSchema({ maxLength: LIMITS.key }),
+    disposition: { enum: ["fix_now", "fix_if_cheap", "defer", "ignore"] },
+    type: { enum: ["bug", "enhancement", "documentation", "question", "security", "maintenance", "testing"] },
+    explanation: stringSchema({ maxLength: LIMITS.body }),
+    validation: stringSchema({ maxLength: LIMITS.body }),
+    sourceKeys: {
+      type: "array",
+      items: stringSchema({ maxLength: LIMITS.key }),
+      minItems: 1,
+      maxItems: 128
+    },
+    threadIds: {
+      type: "array",
+      items: stringSchema({ maxLength: LIMITS.key }),
+      maxItems: 128
+    }
+  });
+}
+
 export function reviewSchema(config) {
   return object({
       mode: { const: "review" },
@@ -123,6 +144,11 @@ export function reviewSchema(config) {
         type: "array",
         items: reviewFindingSchema(),
         maxItems: config.review.maximumNonBlockingFindings
+      },
+      reviewFeedback: {
+        type: "array",
+        items: reviewFeedbackSchema(),
+        maxItems: 128
       },
       tests: object({
         adequate: { type: "boolean" },
@@ -214,6 +240,11 @@ export function fixSchema(target = null) {
         }),
         maxItems: 8
       },
+      resolvedReviewThreadIds: {
+        type: "array",
+        items: stringSchema({ maxLength: LIMITS.key }),
+        maxItems: 128
+      },
       readyForReview: { type: "boolean" },
       noChangeReason: nullableString(LIMITS.body)
     });
@@ -281,9 +312,10 @@ function validateReviewFinding(finding, name, { blocking = false } = {}) {
 
 export function validateReviewResult(result, config) {
   if (result && typeof result === "object" && !Object.hasOwn(result, "diagram")) result.diagram = null;
+  if (result && typeof result === "object" && !Object.hasOwn(result, "reviewFeedback")) result.reviewFeedback = [];
   assertExactKeys(result, [
     "mode", "summary", "risk", "labels", "blockingFindings", "nonBlockingFindings",
-    "tests", "diagram", "mergeRecommendation", "noActionReason"
+    "reviewFeedback", "tests", "diagram", "mergeRecommendation", "noActionReason"
   ], "result");
   assert(result.mode === "review", "mode must be review");
   assertString(result.summary, "summary", { maxLength: LIMITS.summary });
@@ -303,6 +335,29 @@ export function validateReviewResult(result, config) {
     const name = `nonBlockingFindings[${index}]`;
     validateReviewFinding(finding, name);
     assert(finding.severity !== "critical", `${name} cannot contain a critical finding`);
+  });
+  assert(Array.isArray(result.reviewFeedback), "reviewFeedback must be an array");
+  assert(result.reviewFeedback.length <= 128, "too many review feedback groups");
+  const problemKeys = new Set();
+  const sourceKeys = new Set();
+  result.reviewFeedback.forEach((feedback, index) => {
+    const name = `reviewFeedback[${index}]`;
+    assertExactKeys(feedback, ["problemKey", "disposition", "type", "explanation", "validation", "sourceKeys", "threadIds"], name);
+    assertString(feedback.problemKey, `${name}.problemKey`, { maxLength: LIMITS.key });
+    const normalizedProblemKey = feedback.problemKey.normalize("NFKC").trim().toLowerCase();
+    assert(!problemKeys.has(normalizedProblemKey), `duplicate review feedback problemKey ${feedback.problemKey}`);
+    problemKeys.add(normalizedProblemKey);
+    assertEnum(feedback.disposition, ["fix_now", "fix_if_cheap", "defer", "ignore"], `${name}.disposition`);
+    assertEnum(feedback.type, ["bug", "enhancement", "documentation", "question", "security", "maintenance", "testing"], `${name}.type`);
+    assertString(feedback.explanation, `${name}.explanation`, { maxLength: LIMITS.body });
+    assertString(feedback.validation, `${name}.validation`, { maxLength: LIMITS.body });
+    assertUniqueStrings(feedback.sourceKeys, `${name}.sourceKeys`, { maximum: 128, itemMaximum: LIMITS.key });
+    assert(feedback.sourceKeys.length > 0, `${name}.sourceKeys must not be empty`);
+    for (const sourceKey of feedback.sourceKeys) {
+      assert(!sourceKeys.has(sourceKey), `review feedback source ${sourceKey} is classified more than once`);
+      sourceKeys.add(sourceKey);
+    }
+    assertUniqueStrings(feedback.threadIds, `${name}.threadIds`, { maximum: 128, itemMaximum: LIMITS.key });
   });
   assertExactKeys(result.tests, ["adequate", "notes"], "tests");
   assert(typeof result.tests.adequate === "boolean", "tests.adequate must be boolean");
@@ -432,8 +487,9 @@ export function validateIssueResult(result, config) {
 }
 
 export function validateFixResult(result, target) {
+  if (result && typeof result === "object" && !Object.hasOwn(result, "resolvedReviewThreadIds")) result.resolvedReviewThreadIds = [];
   assertExactKeys(result, [
-    "mode", "summary", "risk", "targetKind", "targetNumber", "changedSummary", "testsRun", "readyForReview", "noChangeReason"
+    "mode", "summary", "risk", "targetKind", "targetNumber", "changedSummary", "testsRun", "resolvedReviewThreadIds", "readyForReview", "noChangeReason"
   ], "result");
   assert(result.mode === "fix", "mode must be fix");
   assertString(result.summary, "summary", { maxLength: LIMITS.summary });
@@ -452,6 +508,15 @@ export function validateFixResult(result, target) {
     assertExactKeys(test, ["command", "result"], `testsRun[${index}]`);
     assertString(test.command, `testsRun[${index}].command`, { maxLength: LIMITS.command });
     assertString(test.result, `testsRun[${index}].result`, { maxLength: LIMITS.result });
+  }
+  assertUniqueStrings(result.resolvedReviewThreadIds, "resolvedReviewThreadIds", { maximum: 128, itemMaximum: LIMITS.key });
+  const allowedReviewThreadIds = new Set(target?.reviewThreadIds ?? []);
+  assert(
+    result.resolvedReviewThreadIds.every((threadId) => allowedReviewThreadIds.has(threadId)),
+    "resolvedReviewThreadIds contains a thread outside the frozen repair request"
+  );
+  if (result.resolvedReviewThreadIds.length > 0) {
+    assert(result.targetKind === "pull_request", "only pull request repair can resolve review threads");
   }
   assert(typeof result.readyForReview === "boolean", "readyForReview must be boolean");
   assertNullableString(result.noChangeReason, "noChangeReason", LIMITS.body);

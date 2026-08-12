@@ -25,7 +25,36 @@ function boundedText(value, maximum, suffix = "\n…[truncated]") {
   return `${text.slice(0, Math.max(0, maximum - suffix.length))}${suffix}`;
 }
 
-export function frozenPullRepairSubject(pull, comments) {
+export function frozenPullRepairReviewThreads(threads, reviewThreadIds) {
+  if (reviewThreadIds.length === 0) return [];
+  const byId = new Map(threads.map((thread) => [thread.id, thread]));
+  const selected = reviewThreadIds.map((threadId) => {
+    const thread = byId.get(threadId);
+    if (!thread) throw new Error(`PR repair review thread ${threadId} no longer exists`);
+    return {
+      id: thread.id,
+      isResolved: Boolean(thread.isResolved),
+      isOutdated: Boolean(thread.isOutdated),
+      comments: (thread.comments?.nodes ?? thread.comments ?? []).map((comment) => ({
+        id: boundedText(comment.id, 512, "…"),
+        databaseId: comment.databaseId,
+        author: boundedText(comment.author?.login ?? comment.author, 256, "…"),
+        body: boundedText(comment.body, 6000),
+        bodySha256: sha256(String(comment.body ?? "")),
+        url: boundedText(comment.url, 2048, "…"),
+        path: boundedText(comment.path, 4096, "…"),
+        line: comment.line ?? null,
+        originalLine: comment.originalLine ?? null
+      }))
+    };
+  });
+  if (Buffer.byteLength(JSON.stringify(selected), "utf8") > 262144) {
+    throw new Error("Selected PR repair review thread evidence exceeds 262144 bytes");
+  }
+  return selected;
+}
+
+export function frozenPullRepairSubject(pull, comments, reviewThreads = []) {
   return {
     number: pull?.number,
     title: boundedText(pull?.title, 512, "…"),
@@ -38,12 +67,13 @@ export function frozenPullRepairSubject(pull, comments) {
         body: boundedText(comment?.body, 12000),
         createdAt: comment?.created_at ?? ""
       }))
-      : []
+      : [],
+    reviewThreads: Array.isArray(reviewThreads) ? reviewThreads : []
   };
 }
 
-export function frozenPullRepairSubjectSha256(pull, comments) {
-  return sha256(JSON.stringify(frozenPullRepairSubject(pull, comments)));
+export function frozenPullRepairSubjectSha256(pull, comments, reviewThreads = []) {
+  return sha256(JSON.stringify(frozenPullRepairSubject(pull, comments, reviewThreads)));
 }
 
 function requiredText(value, name) {
@@ -65,7 +95,8 @@ export function frozenPullRepairTarget(context, config) {
     baseRef: requiredText(target.baseRef, "base ref"),
     baseSha: requiredText(target.baseSha, "base SHA"),
     baseRepository: requiredText(target.baseRepository, "base repository"),
-    subjectSha256: requiredText(target.subjectSha256, "repair evidence SHA-256")
+    subjectSha256: requiredText(target.subjectSha256, "repair evidence SHA-256"),
+    reviewThreadIds: Array.isArray(target.reviewThreadIds) ? [...target.reviewThreadIds] : []
   };
   if (!COMMIT_SHA.test(frozen.headSha) || !COMMIT_SHA.test(frozen.baseSha) || !SHA256.test(frozen.subjectSha256)) {
     throw new Error("Frozen PR target requires full head and base commit SHAs plus repair evidence SHA-256");
@@ -127,8 +158,12 @@ async function currentFrozenPull(github, target, { rejectPaused = false } = {}) 
     error.code = "CODEKEEPER_PAUSED";
     throw error;
   }
-  const comments = await github.listIssueComments(target.number);
-  if (frozenPullRepairSubjectSha256(pull, comments) !== target.subjectSha256) {
+  const [comments, liveReviewThreads] = await Promise.all([
+    github.listIssueComments(target.number),
+    target.reviewThreadIds.length > 0 ? github.listPullReviewThreads(target.number) : []
+  ]);
+  const reviewThreads = frozenPullRepairReviewThreads(liveReviewThreads, target.reviewThreadIds);
+  if (frozenPullRepairSubjectSha256(pull, comments, reviewThreads) !== target.subjectSha256) {
     throw new Error(`PR #${target.number} repair evidence changed after implementation started`);
   }
   await assertWritableFrozenBranch(github, target);
@@ -229,6 +264,25 @@ export async function publishPullRequestRepair({
     const pushedSha = gitOperations.pushHeadToBranch(target.headRef, github.token);
     if (pushedSha !== commitSha) throw new Error(`PR repair pushed ${pushedSha}; expected ${commitSha}`);
     const updatedPull = assertLivePullRepairTarget(await github.getPull(target.number), target, { expectedHeadSha: commitSha });
+    let resolvedReviewThreadIds = [];
+    let reviewThreadWarning = null;
+    try {
+      for (const threadId of result.resolvedReviewThreadIds ?? []) {
+        await github.resolveReviewThread(threadId);
+      }
+      if ((result.resolvedReviewThreadIds?.length ?? 0) > 0) {
+        const threads = await github.listPullReviewThreads(target.number);
+        const byId = new Map(threads.map((thread) => [thread.id, thread]));
+        for (const threadId of result.resolvedReviewThreadIds) {
+          if (byId.get(threadId)?.isResolved !== true) {
+            throw new Error(`Review thread ${threadId} was not resolved after the verified fix was pushed`);
+          }
+        }
+        resolvedReviewThreadIds = [...result.resolvedReviewThreadIds];
+      }
+    } catch (error) {
+      reviewThreadWarning = `The repair commit was pushed, but review-thread reconciliation was incomplete: ${sanitizeMarkdown(error.message)}`;
+    }
     return {
       updated: true,
       pullRequest: target.number,
@@ -237,6 +291,8 @@ export async function publishPullRequestRepair({
       previousHeadSha: target.headSha,
       headSha: commitSha,
       files: patch.files,
+      resolvedReviewThreadIds,
+      ...(reviewThreadWarning ? { reviewThreadWarning } : {}),
       dryRun: false
     };
   } catch (error) {

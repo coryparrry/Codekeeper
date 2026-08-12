@@ -1,19 +1,18 @@
-# Copy to .github/workflows/codekeeper-issues.yml, then replace OWNER/REPOSITORY
+# Copy to .github/workflows/codekeeper-assistant.yml, then replace OWNER/REPOSITORY
 # and FULL_COMMIT_SHA with the published maintainer repository and release commit.
-name: Codekeeper issue triage
-run-name: "Codekeeper issue triage #${{ github.event.issue.number || github.event.client_payload.number }}"
+name: Codekeeper repository assistant
+run-name: "Codekeeper assistant #${{ github.event.issue.number || github.event.pull_request.number }}"
 
 on:
-  issues:
-    types: [opened, reopened, edited]
   issue_comment:
     types: [created]
-  repository_dispatch:
-    types: [codekeeper_issue]
+  pull_request_review_comment:
+    types: [created]
 
 permissions:
   contents: read
   issues: read
+  pull-requests: read
 
 jobs:
   bootstrap:
@@ -23,17 +22,13 @@ jobs:
       - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
         with:
           artifact-name: codekeeper-tooling-${{ github.run_id }}
-  triage:
+  assistant:
     needs: bootstrap
-    uses: OWNER/REPOSITORY/.github/workflows/codekeeper-issues.yml@FULL_COMMIT_SHA
+    uses: OWNER/REPOSITORY/.github/workflows/codekeeper-assistant.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
-      auto_triage: true
+      owner_requests: true
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:
-      # Match this secret to ai.agents.issue.provider in .github/codekeeper.json.
-      model_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
-      # Traces still export to OpenAI, so this must not be the DeepSeek key.
-      trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
       app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}

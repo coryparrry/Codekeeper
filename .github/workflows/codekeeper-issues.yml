@@ -13,11 +13,11 @@ on:
         required: false
         default: true
         type: boolean
-      owner_requests:
-        description: Admit eligible owner commands from issue comments.
+      automation_bot_login:
+        description: Installed GitHub App bot login, used to authenticate owner-requested dispatches.
         required: false
-        default: true
-        type: boolean
+        default: ""
+        type: string
       app_client_id:
         description: GitHub App client ID. This identifier is not secret.
         required: true
@@ -43,17 +43,17 @@ permissions:
   issues: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 490f9ddc0f22e744450a6bff79546ee9db271ab2bc37402bf2e9f6e203671f8e
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 0725c35024fb4da927624106645fa819b72399df79b2c9b6e8534d4cc9ca4f14
 
 concurrency:
-  group: codekeeper-issue-${{ github.event.issue.number }}
+  group: codekeeper-issue-${{ github.event.issue.number || github.event.client_payload.number }}
   cancel-in-progress: true
 
 jobs:
   workspace:
     name: Codekeeper issue workspace specialist
-    # Automatic triage is limited to trusted issue lifecycle events. Comment-triggered
-    # triage remains restricted to an eligible configured owner by prepare-issue.
+    # Automatic triage is limited to trusted issue lifecycle events. Owner requests
+    # remain restricted by both the caller gate and prepare-issue.
     if: >-
       inputs.enabled &&
       !github.event.issue.pull_request &&
@@ -62,13 +62,9 @@ jobs:
         (github.event.action == 'opened' ||
          github.event.action == 'reopened' ||
          github.event.action == 'edited')) ||
-       (inputs.owner_requests &&
-        github.event_name == 'issue_comment' &&
-        (github.event.comment.body == '/codekeeper triage' ||
-         startsWith(github.event.comment.body, '/codekeeper triage ')) &&
-        (github.event.comment.author_association == 'OWNER' ||
-         github.event.comment.author_association == 'MEMBER' ||
-         github.event.comment.author_association == 'COLLABORATOR')))
+       (github.event_name == 'repository_dispatch' &&
+        github.event.action == 'codekeeper_issue' &&
+        github.actor == inputs.automation_bot_login))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -131,6 +127,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
           TRIAGE_MODE: ${{ github.event_name == 'issues' && 'automatic' || 'manual' }}
+          REQUESTED_BY: ${{ github.event.client_payload.requested_by || github.actor }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -145,7 +142,7 @@ jobs:
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
             --event "$GITHUB_EVENT_PATH" \
-            --actor "$GITHUB_ACTOR" \
+            --actor "$REQUESTED_BY" \
             --triage-mode "$TRIAGE_MODE" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {
@@ -317,6 +314,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
           TRIAGE_MODE: ${{ github.event_name == 'issues' && 'automatic' || 'manual' }}
+          REQUESTED_BY: ${{ github.event.client_payload.requested_by || github.actor }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -331,7 +329,7 @@ jobs:
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
             --event "$GITHUB_EVENT_PATH" \
-            --actor "$GITHUB_ACTOR" \
+            --actor "$REQUESTED_BY" \
             --triage-mode "$TRIAGE_MODE" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {

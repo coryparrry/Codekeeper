@@ -1,3 +1,6 @@
+import { sha256 } from "./markers.mjs";
+import { completeReviewFeedback } from "./review-feedback.mjs";
+
 const API_VERSION = "2022-11-28";
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRY_ATTEMPTS = 2;
@@ -5,6 +8,7 @@ const MAX_RETRY_ATTEMPTS = 2;
 const MAX_RETRY_DELAY_MS = 5_000;
 const RETRYABLE_STATUS = new Set([408, 429]);
 const TRANSIENT_GRAPHQL_ERROR_TYPES = new Set(["INTERNAL", "INTERNAL_ERROR", "RATE_LIMITED", "SERVICE_UNAVAILABLE"]);
+const PULL_MUTATION_COMPENSATION = Symbol("pull-mutation-compensation");
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -82,6 +86,16 @@ function isGraphqlMutation(query) {
   return /^\s*mutation\b/i.test(String(query));
 }
 
+function labelNames(subject) {
+  return [...new Set((subject?.labels ?? []).map((label) =>
+    String(typeof label === "string" ? label : label?.name ?? "").trim()
+  ).filter(Boolean))].sort();
+}
+
+function sameStrings(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 
 function normalizeLogin(value) {
   return String(value ?? "").trim().toLowerCase();
@@ -150,6 +164,131 @@ export class GitHubClient {
     this.retryAttempts = retryAttempts(transport.retries, DEFAULT_RETRY_ATTEMPTS);
     this.sleep = typeof transport.sleep === "function" ? transport.sleep : sleep;
     this.now = typeof transport.now === "function" ? transport.now : Date.now;
+    this.pullMutation = null;
+  }
+
+  async beginPullMutation({ repository, pullRequest, policy }) {
+    if (this.pullMutation) throw new Error("A conditional pull mutation is already active");
+    if (repository !== this.repository) throw new Error("Conditional pull mutation repository does not match the GitHub client");
+    if (!pullRequest || !Number.isSafeInteger(pullRequest.number) || pullRequest.number <= 0) {
+      throw new Error("Conditional pull mutation requires a pull request number");
+    }
+    if (!policy?.repository || !Array.isArray(policy.repository.ownerLogins)) {
+      throw new Error("Conditional pull mutation requires repository policy");
+    }
+    const mutationPolicy = {
+      repository: {
+        defaultBranch: String(policy.repository.defaultBranch ?? ""),
+        ownerLogins: policy.repository.ownerLogins.map(String)
+      }
+    };
+    if (!mutationPolicy.repository.defaultBranch) {
+      throw new Error("Conditional pull mutation requires the default branch policy");
+    }
+    const feedback = pullRequest.reviewFeedback ?? [];
+    this.pullMutation = {
+      number: pullRequest.number,
+      repository,
+      headSha: pullRequest.headSha,
+      baseSha: pullRequest.baseSha,
+      baseRef: pullRequest.baseRef ?? mutationPolicy.repository.defaultBranch,
+      feedbackFrozen: pullRequest.reviewFeedbackFrozen === true || feedback.length > 0,
+      feedbackSha256: sha256(JSON.stringify(feedback)),
+      labels: null,
+      addedLabels: new Set(),
+      policy: mutationPolicy
+    };
+    try {
+      return await this.assertPullMutationCurrent({ captureLabels: true });
+    } catch (error) {
+      this.pullMutation = null;
+      throw error;
+    }
+  }
+
+  async assertPullMutationCurrent({ captureLabels = false } = {}) {
+    const expected = this.pullMutation;
+    if (!expected) return null;
+    const [pull, feedback] = await Promise.all([
+      this.getPull(expected.number),
+      expected.feedbackFrozen
+        ? completeReviewFeedback(this, expected.number, expected.policy)
+        : Promise.resolve([])
+    ]);
+    this.assertPullMutationIdentity(pull);
+    const currentLabels = labelNames(pull);
+    if (currentLabels.includes("codekeeper:paused")) {
+      throw new Error(`PR #${pull.number} is paused; publication will not mutate GitHub`);
+    }
+    if (captureLabels || expected.labels === null) {
+      expected.labels = currentLabels;
+    } else if (!sameStrings(currentLabels, expected.labels)) {
+      throw new Error(`PR #${pull.number} labels changed; stale publication will not mutate GitHub`);
+    }
+    if (expected.feedbackFrozen && sha256(JSON.stringify(feedback)) !== expected.feedbackSha256) {
+      throw new Error(`PR #${pull.number} review feedback changed after preparation; stale publication will not mutate GitHub`);
+    }
+    return pull;
+  }
+
+  assertPullMutationIdentity(pull) {
+    const expected = this.pullMutation;
+    if (!expected) throw new Error("No conditional pull mutation is active");
+    if (pull.state !== "open") throw new Error(`PR #${pull.number} is not open`);
+    if (pull.draft) throw new Error(`PR #${pull.number} became a draft; stale publication will not mutate GitHub`);
+    if (pull.head?.sha !== expected.headSha) {
+      throw new Error(`PR #${pull.number} moved from ${expected.headSha} to ${pull.head?.sha}; stale publication will not mutate GitHub`);
+    }
+    if (pull.base?.sha !== expected.baseSha) {
+      throw new Error(`PR #${pull.number} base moved from ${expected.baseSha} to ${pull.base?.sha}; stale publication will not mutate GitHub`);
+    }
+    if (pull.base?.ref !== expected.baseRef || pull.base?.ref !== expected.policy.repository.defaultBranch) {
+      throw new Error(`PR #${pull.number} base branch changed; stale publication will not mutate GitHub`);
+    }
+    if (pull.head?.repo?.full_name !== expected.repository || pull.base?.repo?.full_name !== expected.repository) {
+      throw new Error(`PR #${pull.number} repository changed; stale publication will not mutate GitHub`);
+    }
+  }
+
+  advancePullMutationState(method, endpoint, body) {
+    const expected = this.pullMutation;
+    if (!expected || expected.labels === null) return;
+    const labelEndpoint = this.repoPath(`/issues/${expected.number}/labels`);
+    if (method === "POST" && endpoint === labelEndpoint && Array.isArray(body?.labels)) {
+      const additions = body.labels.map(String);
+      additions.filter((label) => !expected.labels.includes(label)).forEach((label) => expected.addedLabels.add(label));
+      expected.labels = [...new Set([...expected.labels, ...additions])].sort();
+      return;
+    }
+    if (method === "DELETE" && endpoint.startsWith(`${labelEndpoint}/`)) {
+      const removed = decodeURIComponent(endpoint.slice(labelEndpoint.length + 1));
+      expected.labels = expected.labels.filter((label) => label !== removed);
+      expected.addedLabels.delete(removed);
+      return;
+    }
+    if (method === "PATCH" && endpoint === this.repoPath(`/issues/${expected.number}`) && Array.isArray(body?.labels)) {
+      expected.labels = [...new Set(body.labels.map(String))].sort();
+    }
+  }
+
+  async rollbackPullLabel(number, label) {
+    const expected = this.pullMutation;
+    if (!expected || number !== expected.number || !expected.addedLabels.has(label)) {
+      throw new Error(`Cannot roll back unowned conditional label ${label}`);
+    }
+    const pull = await this.getPull(number);
+    this.assertPullMutationIdentity(pull);
+    try {
+      await this.request(
+        "DELETE",
+        this.repoPath(`/issues/${number}/labels/${encodeURIComponent(label)}`),
+        { guardToken: PULL_MUTATION_COMPENSATION }
+      );
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      expected.labels = expected.labels.filter((item) => item !== label);
+      expected.addedLabels.delete(label);
+    }
   }
 
   retryDelay(response, attempt) {
@@ -189,9 +328,13 @@ export class GitHubClient {
     throw new Error("GitHub retry budget exhausted");
   }
 
-  async request(method, endpoint, { body, headers = {}, retries } = {}) {
+  async request(method, endpoint, { body, headers = {}, retries, guardToken } = {}) {
+    const normalizedMethod = String(method).toUpperCase();
+    if (!isRetrySafeMethod(normalizedMethod) && this.pullMutation && guardToken !== PULL_MUTATION_COMPENSATION) {
+      await this.assertPullMutationCurrent();
+    }
     const url = endpoint.startsWith("http") ? endpoint : `${this.apiUrl}${endpoint}`;
-    const retryBudget = retries ?? (isRetrySafeMethod(method) ? this.retryAttempts : 0);
+    const retryBudget = retries ?? (isRetrySafeMethod(normalizedMethod) ? this.retryAttempts : 0);
     const { response, text, payload } = await this.fetchWithRetry(url, {
       method,
       headers: {
@@ -225,6 +368,7 @@ export class GitHubClient {
       error.payload = payload;
       throw error;
     }
+    this.advancePullMutationState(normalizedMethod, endpoint, body);
     return { data: payload, headers: response.headers, status: response.status };
   }
 
@@ -264,6 +408,59 @@ export class GitHubClient {
     return this.paginate(this.repoPath(`/pulls/${number}/files`), { limit });
   }
 
+  async listPullReviews(number, limit = 100) {
+    return this.paginate(this.repoPath(`/pulls/${number}/reviews`), { limit });
+  }
+
+  async getReviewComment(commentId) {
+    return (await this.request("GET", this.repoPath(`/pulls/comments/${commentId}`))).data;
+  }
+
+  async listPullReviewComments(number) {
+    return this.paginate(this.repoPath(`/pulls/${number}/comments`));
+  }
+
+  async listPullReviewThreads(number, limit = 200) {
+    const query = `
+      query PullReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            reviewThreads(first: 100, after: $after) {
+              nodes {
+                id
+                isResolved
+                isOutdated
+                comments(first: 100) {
+                  nodes { id databaseId body url path line originalLine author { login } }
+                  pageInfo { hasNextPage }
+                }
+              }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }
+      }
+    `;
+    const threads = [];
+    let after = null;
+    while (threads.length < limit) {
+      const data = await this.graphql(query, { owner: this.owner, repo: this.repo, number, after });
+      const connection = data?.repository?.pullRequest?.reviewThreads;
+      if (!connection || !Array.isArray(connection.nodes)) throw new Error(`PR #${number} has invalid review-thread metadata`);
+      for (const thread of connection.nodes) {
+        if (thread.comments?.pageInfo?.hasNextPage) throw new Error(`PR #${number} has a review thread with more than 100 comments`);
+        threads.push(thread);
+        if (threads.length === limit) break;
+      }
+      if (!connection.pageInfo?.hasNextPage) return threads;
+      if (threads.length === limit || !connection.pageInfo.endCursor) {
+        throw new Error(`PR #${number} has more than ${limit} review threads`);
+      }
+      after = connection.pageInfo.endCursor;
+    }
+    return threads;
+  }
+
   async listIssueComments(number) {
     return this.paginate(this.repoPath(`/issues/${number}/comments`));
   }
@@ -301,6 +498,28 @@ export class GitHubClient {
     return (await this.request("PATCH", this.repoPath(`/issues/comments/${commentId}`), { body: { body } })).data;
   }
 
+  async createReviewReply(number, commentId, body) {
+    return (await this.request("POST", this.repoPath(`/pulls/${number}/comments/${commentId}/replies`), { body: { body } })).data;
+  }
+
+  async updateReviewComment(commentId, body) {
+    return (await this.request("PATCH", this.repoPath(`/pulls/comments/${commentId}`), { body: { body } })).data;
+  }
+
+  async upsertReviewReply(number, commentId, marker, body, authorIdentity) {
+    const expectedAuthor = normalizeAutomationIdentity(authorIdentity);
+    if (!expectedAuthor) throw new Error("A configured GitHub App bot identity is required for review replies");
+    const comments = await this.listPullReviewComments(number);
+    const existing = comments.find((comment) =>
+      Number(comment.in_reply_to_id) === Number(commentId) &&
+      isOwnedMarkerComment(comment, marker, expectedAuthor)
+    );
+    const content = `${body}\n${marker}`;
+    return existing
+      ? this.updateReviewComment(existing.id, content)
+      : this.createReviewReply(number, commentId, content);
+  }
+
   async upsertMarkerComment(number, marker, body, authorIdentity) {
     const expectedAuthor = normalizeAutomationIdentity(authorIdentity);
     if (!expectedAuthor) {
@@ -312,6 +531,28 @@ export class GitHubClient {
     );
     const content = `${body}\n${marker}`;
     return existing ? this.updateComment(existing.id, content) : this.createComment(number, content);
+  }
+
+  async retireReviewFeedbackReply(number, marker, body, authorIdentity) {
+    const expectedAuthor = normalizeAutomationIdentity(authorIdentity);
+    if (!expectedAuthor) {
+      throw new Error("A configured GitHub App bot identity is required to retire review replies");
+    }
+    const [comments, reviewComments] = await Promise.all([
+      this.listIssueComments(number),
+      this.listPullReviewComments(number)
+    ]);
+    const content = `${body}\n${marker}`;
+    const updates = [
+      ...comments
+        .filter((comment) => isOwnedMarkerComment(comment, marker, expectedAuthor))
+        .map((comment) => this.updateComment(comment.id, content)),
+      ...reviewComments
+        .filter((comment) => isOwnedMarkerComment(comment, marker, expectedAuthor))
+        .map((comment) => this.updateReviewComment(comment.id, content))
+    ];
+    await Promise.all(updates);
+    return updates.length;
   }
 
   async ensureLabel(name, definition) {
@@ -442,8 +683,21 @@ export class GitHubClient {
     return this.graphql(query, { pullRequestId: pullRequestNodeId });
   }
 
+  async resolveReviewThread(threadId) {
+    const query = `
+      mutation ResolveReviewThread($threadId: ID!) {
+        resolveReviewThread(input: { threadId: $threadId }) {
+          thread { id isResolved }
+        }
+      }
+    `;
+    return this.graphql(query, { threadId });
+  }
+
   async graphql(query, variables = {}) {
-    const retries = isGraphqlMutation(query) ? 0 : this.retryAttempts;
+    const mutation = isGraphqlMutation(query);
+    if (mutation && this.pullMutation) await this.assertPullMutationCurrent();
+    const retries = mutation ? 0 : this.retryAttempts;
     const { response, payload } = await this.fetchWithRetry(this.graphqlUrl, {
       method: "POST",
       headers: {

@@ -33,6 +33,23 @@ function findingList(findings) {
     .join("\n");
 }
 
+const FEEDBACK_LABELS = Object.freeze({
+  fix_now: "Fix now",
+  fix_if_cheap: "Fix if cheap",
+  defer: "Defer",
+  ignore: "Ignore"
+});
+
+function feedbackTriage(feedback = []) {
+  return Object.entries(FEEDBACK_LABELS).map(([disposition, label]) => {
+    const items = feedback.filter((item) => item.disposition === disposition);
+    const rendered = items.length
+      ? items.map((item) => `- **${safeMarkdown(item.problemKey)}** — ${safeMarkdown(item.explanation)}\n  _Validation:_ ${safeMarkdown(item.validation)}`).join("\n")
+      : "None.";
+    return `#### ${label}\n\n${rendered}`;
+  }).join("\n\n");
+}
+
 function workflowRunEvidence(runUrl = "") {
   return runUrl ? `\n\n<sub>Codekeeper workflow run: ${runUrl}</sub>` : "";
 }
@@ -62,6 +79,10 @@ ${findingList(result.blockingFindings)}
 ### Non-blocking findings
 
 ${findingList(result.nonBlockingFindings)}
+
+### Review feedback triage
+
+${feedbackTriage(result.reviewFeedback)}
 
 ### Test assessment
 
@@ -115,6 +136,31 @@ ${safeMarkdown(finding.proposedAction)}
 - Stable key: \`${safeInlineCode(finding.problemKey)}\`${source}
 
 <!-- codekeeper:fingerprint=${fingerprint} -->`;
+}
+
+export function renderDeferredIssue({ feedback, pullRequest, sources, marker, runUrl = "" }) {
+  const sourceLinks = sources.length
+    ? sources.map((source) => `- [${safeMarkdown(source.sourceKey)}](${source.url}) — ${safeMarkdown(source.author || "unknown")}`).join("\n")
+    : "- The original review source is no longer linkable.";
+  const run = runUrl ? `\n- Review run: ${runUrl}` : "";
+  return `## Deferred outcome
+
+${safeMarkdown(feedback.explanation)}
+
+## Verification
+
+${safeMarkdown(feedback.validation)}
+
+## Origin
+
+- Pull request: [#${pullRequest.number}](${pullRequest.url})
+- Initial type: \`${feedback.type}\`${run}
+
+### Review sources
+
+${sourceLinks}
+
+${marker}`;
 }
 
 export function renderRepairPullRequest({ titleSummary, body, finding, issueNumber, fingerprint, validationSummary, files }) {

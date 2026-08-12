@@ -63,10 +63,14 @@ function hasCriticalFinding(result) {
     .some((finding) => finding?.severity === "critical");
 }
 
+function hasFixNowFeedback(result) {
+  return (result?.reviewFeedback ?? []).some((feedback) => feedback?.disposition === "fix_now");
+}
+
 export function reviewLabels(result) {
   const labels = new Set(["codekeeper:reviewed", `codekeeper:risk-${result.risk}`, ...result.labels]);
   if (!result.tests.adequate) labels.add("codekeeper:needs-tests");
-  if (result.blockingFindings.length > 0 || hasCriticalFinding(result) || result.mergeRecommendation === "block") {
+  if (result.blockingFindings.length > 0 || hasCriticalFinding(result) || hasFixNowFeedback(result) || result.mergeRecommendation === "block") {
     labels.add("codekeeper:blocked");
   } else if (result.mergeRecommendation === "auto") {
     labels.add("codekeeper:auto-merge");
@@ -83,7 +87,8 @@ export function issueTypeLabel(type) {
     documentation: "codekeeper:type-documentation",
     question: "codekeeper:type-question",
     security: "codekeeper:type-security",
-    maintenance: "codekeeper:type-maintenance"
+    maintenance: "codekeeper:type-maintenance",
+    testing: "codekeeper:type-testing"
   };
   return map[type] ?? "codekeeper:type-maintenance";
 }
@@ -151,6 +156,7 @@ export function evaluateAutoMerge({
     if (reviewResult.risk !== "low") reasons.push(`AI review risk is ${reviewResult.risk}`);
     if (reviewResult.blockingFindings.length > 0) reasons.push("AI review has blocking findings");
     if (hasCriticalFinding(reviewResult)) reasons.push("AI review has a critical finding");
+    if (hasFixNowFeedback(reviewResult)) reasons.push("AI review has fix-now review feedback");
     if (!reviewResult.tests.adequate) reasons.push("AI review says test coverage is inadequate");
     if (reviewResult.mergeRecommendation !== "auto") reasons.push(`AI merge recommendation is ${reviewResult.mergeRecommendation}`);
   }

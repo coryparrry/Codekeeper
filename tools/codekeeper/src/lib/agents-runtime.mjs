@@ -247,7 +247,8 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     if (mode === "fix" && (
       output.readyForReview === true ||
       (output.testsRun?.length ?? 0) > 0 ||
-      Boolean(output.changedSummary)
+      Boolean(output.changedSummary) ||
+      (output.resolvedReviewThreadIds?.length ?? 0) > 0
     )) {
       throw new Error("Coordinator cannot claim implementation or tests without workspace evidence");
     }
@@ -273,6 +274,16 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
         throw new Error("Coordinator omitted a specialist blocker");
       }
     }
+    for (const feedback of output.reviewFeedback ?? []) {
+      if (!exactMember(feedback, specialistResult.reviewFeedback ?? [])) {
+        throw new Error("Coordinator introduced review feedback triage not present in workspace evidence");
+      }
+    }
+    for (const feedback of specialistResult.reviewFeedback ?? []) {
+      if (!exactMember(feedback, output.reviewFeedback ?? [])) {
+        throw new Error("Coordinator omitted review feedback triage from workspace evidence");
+      }
+    }
     if (isMorePermissive(output.risk, specialistResult.risk, ["high", "medium", "low"])) {
       throw new Error("Coordinator review risk is more permissive than workspace evidence");
     }
@@ -287,6 +298,9 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
         throw new Error("Coordinator introduced a review label not present in workspace evidence");
       }
     }
+  }
+  if (mode === "fix") {
+    assertEvidenceField(output, specialistResult, "resolvedReviewThreadIds", "Coordinator changed the specialist review-thread resolution set");
   }
   if (mode === "audit") {
     assertEvidenceField(output, specialistResult, "summary", "Coordinator audit summary differs from workspace evidence");
@@ -588,6 +602,15 @@ function deterministicNoWorkspaceResult(mode, context) {
       labels: [],
       blockingFindings: [],
       nonBlockingFindings: [],
+      reviewFeedback: (context.pullRequest?.reviewFeedback ?? []).map((feedback, index) => ({
+        problemKey: `workspace-disabled-feedback-${index + 1}`,
+        disposition: "ignore",
+        type: "maintenance",
+        explanation: "The optional workspace specialist is disabled, so Codekeeper did not evaluate this feedback.",
+        validation: "No workspace evidence was available; the feedback remains unresolved for maintainer review.",
+        sourceKeys: [feedback.sourceKey],
+        threadIds: feedback.threadId ? [feedback.threadId] : []
+      })),
       tests: { adequate: false, notes: "Test adequacy cannot be established without workspace evidence." },
       diagram: null,
       mergeRecommendation: "manual",

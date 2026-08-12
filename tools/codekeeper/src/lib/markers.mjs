@@ -21,6 +21,32 @@ export function findingMarker(fingerprint) {
   return `<!-- codekeeper:fingerprint=${fingerprint} -->`;
 }
 
+export function deferredReviewFingerprint(repository, pullNumber, sourceKeys) {
+  const normalizedSourceKeys = [...new Set((Array.isArray(sourceKeys) ? sourceKeys : [sourceKeys])
+    .map((sourceKey) => String(sourceKey ?? "").normalize("NFKC").trim().toLowerCase())
+    .filter(Boolean))].sort();
+  return sha256(JSON.stringify({
+    version: 2,
+    repository: String(repository ?? "").trim().toLowerCase(),
+    pullNumber,
+    sourceKeys: normalizedSourceKeys
+  }));
+}
+
+export function deferredReviewMarker(fingerprint) {
+  return `<!-- codekeeper:deferred=${fingerprint} -->`;
+}
+
+export function reviewFeedbackReplyMarker(fingerprint) {
+  return `<!-- codekeeper:review-feedback-reply=${fingerprint} -->`;
+}
+
+export function automaticRepairMarker(headSha) {
+  const normalized = String(headSha ?? "").trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(normalized)) throw new Error("Automatic repair marker requires a full head SHA");
+  return `<!-- codekeeper:auto-repair-head=${normalized} -->`;
+}
+
 export function repairMarker(fingerprint) {
   return `<!-- codekeeper:repair=${fingerprint} -->`;
 }

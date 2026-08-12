@@ -11,6 +11,7 @@ import { agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
 import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
 import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
+import { validateFrozenReviewFeedback } from "../src/lib/validate.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
@@ -156,6 +157,139 @@ test("review context terminates a large bounded diff and rejects excessive chang
   await assert.rejects(
     boundedChangedFilesBetween(base, head, 1, root),
     /changed-file context exceeds configured maximum/
+  );
+});
+
+test("feedback-triggered review preparation freezes the complete current review surface", async () => {
+  const root = await createRepository();
+  await writeFile(path.join(root, "README.md"), "# Example\n\nFeedback target.\n");
+  run("git", ["add", "README.md"], root);
+  run("git", ["commit", "-qm", "feedback target"], root);
+  const revision = run("git", ["rev-parse", "HEAD"], root).trim();
+  const comparisonHead = run("git", ["rev-parse", "HEAD"], projectRoot).trim();
+  const comparisonBase = comparisonHead;
+  const eventPath = bundle(root, "review-feedback-event.json");
+  await writeFile(eventPath, JSON.stringify({
+    action: "created",
+    repository: { full_name: "acme/example" },
+    comment: { id: 42, pull_request_review_id: 7, body: "Please add a timeout test." },
+    pull_request: {
+      number: 7,
+      title: "Feedback inventory",
+      body: "",
+      draft: false,
+      html_url: "https://github.com/acme/example/pull/7",
+      user: { login: "contributor" },
+      base: { ref: "main", sha: comparisonBase },
+      head: { ref: "feature", sha: comparisonHead, repo: { full_name: "acme/example" } }
+    }
+  }));
+  const originalFetch = globalThis.fetch;
+  const originalAutomationLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = "codekeeper-app[bot]";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/pulls/7/reviews")) {
+      return new Response(JSON.stringify([
+        { id: 7, body: "General review note", state: "CHANGES_REQUESTED", html_url: "https://github.test/review/7", user: { login: "reviewer" } },
+        { id: 8, body: "Codekeeper automation review", state: "COMMENTED", html_url: "https://github.test/review/8", user: { login: "codekeeper-app[bot]" } }
+      ]), { status: 200 });
+    }
+    if (String(url).endsWith("/graphql")) {
+      const reviewThreads = {
+        nodes: [{
+          id: "PRRT_thread",
+          isResolved: false,
+          isOutdated: false,
+          comments: {
+            nodes: [
+              { id: "PRRC_node_41", databaseId: 41, body: "Root timeout concern", url: "https://github.test/comment/41", path: "README.md", line: 1, originalLine: 1, author: { login: "reviewer" } },
+              { id: "PRRC_node_42", databaseId: 42, body: "Please add a timeout test", url: "https://github.test/comment/42", path: "README.md", line: 1, originalLine: 1, author: { login: "owner" } },
+              { id: "PRRC_node_44", databaseId: 44, body: "/codekeeper fix", url: "https://github.test/comment/44", path: "README.md", line: 1, originalLine: 1, author: { login: "repository-owner" } },
+              { id: "PRRC_node_45", databaseId: 45, body: "/codekeeper fix", url: "https://github.test/comment/45", path: "README.md", line: 1, originalLine: 1, author: { login: "reviewer" } },
+              { id: "PRRC_node_43", databaseId: 43, body: "Handled.\n\n<!-- codekeeper:review-feedback-reply=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->", url: "https://github.test/comment/43", path: "README.md", line: 1, originalLine: 1, author: { login: "codekeeper-app[bot]" } }
+            ],
+            pageInfo: { hasNextPage: false }
+          }
+        }],
+        pageInfo: { hasNextPage: false, endCursor: null }
+      };
+      return new Response(JSON.stringify({
+        data: { repository: { pullRequest: { reviewThreads } } }
+      }), { status: 200 });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+  try {
+    const context = await prepareReview({
+      eventPath,
+      directory: bundle(root, "review-feedback"),
+      config: templateConfig,
+      token: "read-token",
+      ...agentProfileOptions(root, "review", revision)
+    });
+    assert.deepEqual(context.pullRequest.reviewFeedback.map((item) => item.sourceKey), [
+      "review_comment:41",
+      "review_comment:42",
+      "review_comment:45",
+      "review:7"
+    ]);
+    assert.equal(context.pullRequest.reviewFeedback[0].threadId, "PRRT_thread");
+
+    const config = structuredClone(templateConfig);
+    config.ai.agents.review.workspace.enabled = false;
+    config.ai.tracing.enabled = false;
+    const resultPath = bundle(root, "review-feedback-result.json");
+    const metadata = await runAgentFromBundle({
+      mode: "review",
+      directory: bundle(root, "review-feedback"),
+      config,
+      resultPath,
+      apiKey: "",
+      sdkLoader: async () => { throw new Error("provider must not load"); }
+    });
+    assert.equal(metadata.provider, "deterministic");
+    const result = JSON.parse(await readFile(resultPath, "utf8"));
+    assert.deepEqual(result.reviewFeedback.flatMap((item) => item.sourceKeys), [
+      "review_comment:41",
+      "review_comment:42",
+      "review_comment:45",
+      "review:7"
+    ]);
+    assert.ok(result.reviewFeedback.every((item) => item.disposition === "ignore"));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalAutomationLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = originalAutomationLogin;
+  }
+});
+
+test("inactive frozen review feedback cannot trigger repairs or deferred work", () => {
+  const sources = [
+    { sourceKey: "review_comment:1", kind: "review_comment", threadId: "resolved", resolved: true, outdated: false, state: "commented" },
+    { sourceKey: "review_comment:2", kind: "review_comment", threadId: "outdated", resolved: false, outdated: true, state: "commented" },
+    { sourceKey: "review:3", kind: "review", threadId: null, resolved: false, outdated: false, state: "DISMISSED" }
+  ];
+  const feedback = sources.map((source, index) => ({
+    problemKey: `inactive-${index}`,
+    disposition: ["fix_now", "fix_if_cheap", "defer"][index],
+    sourceKeys: [source.sourceKey],
+    threadIds: source.threadId ? [source.threadId] : []
+  }));
+
+  assert.throws(
+    () => validateFrozenReviewFeedback(sources, feedback),
+    /must ignore resolved, outdated, or dismissed frozen sources/
+  );
+  validateFrozenReviewFeedback(
+    sources,
+    feedback.map((item) => ({ ...item, disposition: "ignore" }))
+  );
+  assert.throws(
+    () => validateFrozenReviewFeedback(
+      [...sources, { sourceKey: "review:4", kind: "review", threadId: null, resolved: false, outdated: false, state: "CHANGES_REQUESTED" }],
+      [{ problemKey: "mixed", disposition: "ignore", sourceKeys: [...sources.map((item) => item.sourceKey), "review:4"], threadIds: ["resolved", "outdated"] }]
+    ),
+    /mixes active and inactive frozen sources/
   );
 });
 
@@ -392,6 +526,36 @@ test("manual issue preparation requires an explicitly authorised actor", async (
     () => run("node", [cli, "prepare-issue", "--config", ".github/codekeeper.json", "--event", event, "--actor", "untrusted-user", "--triage-mode", "manual", "--directory", directory, ...agentProfileCliArgs(root, "issue")], root, { GITHUB_REPOSITORY: "acme/example" }),
     /Command failed/
   );
+
+  const dispatchEvent = bundle(root, "issue-dispatch-event.json");
+  const dispatchDirectory = bundle(root, "issue-dispatch-input");
+  await writeFile(dispatchEvent, JSON.stringify({
+    action: "codekeeper_issue",
+    repository: { full_name: "acme/example" },
+    client_payload: { number: 5, requested_by: "repository-owner" }
+  }), "utf8");
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => new Response(JSON.stringify(
+    String(url).includes("/issues/5")
+      ? { number: 5, title: "Example", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
+      : []
+  ), { status: 200 });
+  try {
+    const prepared = await prepareIssue({
+      eventPath: dispatchEvent,
+      actor: "repository-owner",
+      triageMode: "manual",
+      directory: dispatchDirectory,
+      config: templateConfig,
+      token: "read-token",
+      configSha256: digest(await readFile(path.join(root, ".github/codekeeper.json"))),
+      ...agentProfileOptions(root, "issue")
+    });
+    assert.equal(prepared.issue.number, 5);
+    assert.equal(prepared.triageMode, "manual");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("maintenance repair authorization requires enabled policy but not a second owner approval", async (context) => {
@@ -424,7 +588,7 @@ test("maintenance repair authorization requires enabled policy but not a second 
   assert.equal(prepared.repairAuthorizedBy, "github-actions[bot]");
 });
 
-test("manual issue and fix preparation authorize owner login casing variants", async () => {
+test("an explicit owner implementation request is sufficient when automatic issue implementation is off", async () => {
   const root = await createRepository();
   const issueDirectory = bundle(root, "case-insensitive-issue-input");
   const fixDirectory = bundle(root, "case-insensitive-fix-input");
@@ -435,7 +599,7 @@ test("manual issue and fix preparation authorize owner login casing variants", a
   }), "utf8");
   const config = structuredClone(templateConfig);
   config.repository.ownerLogins = ["Repository-Owner"];
-  config.issues.allowAiImplementation = true;
+  config.issues.allowAiImplementation = false;
   const originalFetch = globalThis.fetch;
   const originalRepository = process.env.GITHUB_REPOSITORY;
   process.env.GITHUB_REPOSITORY = "acme/example";
@@ -731,6 +895,37 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
   ];
   process.env.GITHUB_REPOSITORY = "acme/example";
   globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/graphql")) {
+      return new Response(JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [{
+                  id: "PRRT_thread",
+                  isResolved: false,
+                  isOutdated: false,
+                  comments: {
+                    nodes: [{
+                      id: "PRRC_comment",
+                      databaseId: 99,
+                      body: "The repair must retain the authorization boundary.",
+                      url: "https://github.com/acme/example/pull/42#discussion_r99",
+                      path: "src/authorization.mjs",
+                      line: 17,
+                      originalLine: 17,
+                      author: { login: "reviewer" }
+                    }],
+                    pageInfo: { hasNextPage: false }
+                  }
+                }],
+                pageInfo: { hasNextPage: false, endCursor: null }
+              }
+            }
+          }
+        }
+      }), { status: 200 });
+    }
     if (String(url).includes("/comments")) return new Response(JSON.stringify(comments), { status: 200 });
     if (String(url).includes("/pulls/42")) {
       return new Response(JSON.stringify({
@@ -778,6 +973,7 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
       config,
       token: "read-token",
       expectedHead: revision,
+      reviewThreadIds: ["PRRT_thread"],
       ...agentProfileOptions(root, "fix")
     });
     assert.equal(prepared.target.kind, "pull_request");
@@ -787,6 +983,22 @@ test("automatic PR repair requires its one-shot marker and every repair honors p
     );
     assert.match(prepared.pullRequest.comments[0].body, /blocking review finding/);
     assert.doesNotMatch(JSON.stringify(prepared.pullRequest.comments), /ATTACKER INSTRUCTION/);
+    assert.deepEqual(prepared.pullRequest.reviewThreads, [{
+      id: "PRRT_thread",
+      isResolved: false,
+      isOutdated: false,
+      comments: [{
+        id: "PRRC_comment",
+        databaseId: 99,
+        author: "reviewer",
+        body: "The repair must retain the authorization boundary.",
+        bodySha256: digest("The repair must retain the authorization boundary."),
+        url: "https://github.com/acme/example/pull/42#discussion_r99",
+        path: "src/authorization.mjs",
+        line: 17,
+        originalLine: 17
+      }]
+    }]);
     labels = [{ name: "codekeeper:auto-repaired" }, { name: "codekeeper:paused" }];
     await assert.rejects(
       prepareFix({

@@ -26,6 +26,20 @@ function strictBoolean(value, name) {
   throw new Error(`${name} must be true or false`);
 }
 
+function stringList(value, name) {
+  if (value === undefined || value === "") return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`${name} must be a JSON string array`);
+  }
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+    throw new Error(`${name} must be a JSON string array`);
+  }
+  return parsed;
+}
+
 function bundleFile(directory, filePath, flag) {
   const resolved = path.resolve(filePath);
   const relative = path.relative(directory, resolved);
@@ -163,6 +177,7 @@ async function main() {
         actor: args.require("actor"),
         authorizationMode: args.get("authorization-mode", "owner"),
         expectedHead: args.get("expected-head", ""),
+        reviewThreadIds: stringList(args.get("review-thread-ids", ""), "review-thread-ids"),
         directory,
         config,
         token,

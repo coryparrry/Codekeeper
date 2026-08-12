@@ -7,8 +7,10 @@ import test from "node:test";
 import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/lib/github.mjs";
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
-import { findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
-import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
+import { automaticRepairMarker, deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "../src/lib/markers.mjs";
+import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
+import { completeReviewFeedback } from "../src/lib/review-feedback.mjs";
+import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import {
   isTrustedMaintenanceIssue,
   isTrustedRepairPull,
@@ -17,7 +19,9 @@ import {
   publishIssue as publishIssueProduction,
   publishReview as publishReviewProduction,
   reconcileAutoMerge,
-  repairBranch
+  repairBranch,
+  replyToReviewFeedback,
+  upsertDeferredReviewFeedback
 } from "../src/lib/publish.mjs";
 
 const config = JSON.parse(
@@ -179,6 +183,296 @@ test("sticky marker comments ignore human and unrelated-bot spoofing", () => {
   assert.equal(isOwnedMarkerComment({ ...trusted, body: `${trusted.body}\nuntrusted suffix` }, marker, identity), false);
 });
 
+test("verified deferred feedback creates one idempotent issue with backlinks and triage metadata", async () => {
+  const context = {
+    repository: "owner/repository",
+    runUrl: "https://github.com/owner/repository/actions/runs/9",
+    pullRequest: {
+      number: 7,
+      url: "https://github.com/owner/repository/pull/7",
+      reviewFeedback: [
+        { sourceKey: "review_comment:41", rootCommentId: 41, author: "reviewer", url: "https://github.com/owner/repository/pull/7#discussion_r41" },
+        { sourceKey: "review_comment:42", rootCommentId: 41, author: "owner", url: "https://github.com/owner/repository/pull/7#discussion_r42" }
+      ]
+    }
+  };
+  const feedback = {
+    problemKey: "timeout-regression-coverage",
+    disposition: "defer",
+    type: "testing",
+    explanation: "Add deterministic timeout regression coverage.",
+    validation: "The current head still lacks the timeout case.",
+    sourceKeys: ["review_comment:41"],
+    threadIds: ["PRRT_thread"]
+  };
+  const fingerprint = deferredReviewFingerprint(context.repository, 7, feedback.sourceKeys);
+  const existing = [];
+  const calls = { created: [], updated: [], replies: [], labels: [] };
+  const github = {
+    async listMaintenanceIssues() { return existing; },
+    async ensureLabels(_definitions, labels) { calls.labels.push(labels); },
+    async createIssue(input) {
+      calls.created.push(input);
+      const issue = { ...input, number: 51, html_url: "https://github.com/owner/repository/issues/51", state: "open", user: { login: identity.login, id: Number(identity.id), type: "Bot" } };
+      return issue;
+    },
+    async updateIssue(number, input) {
+      calls.updated.push({ number, input });
+      return { ...existing[0], ...input };
+    },
+    async replaceManagedLabels() {},
+    async upsertReviewReply(number, commentId, marker, body) { calls.replies.push({ number, commentId, marker, body }); }
+  };
+  const input = { github, context, result: { reviewFeedback: [feedback] }, config, automationIdentity: identity };
+
+  const created = await upsertDeferredReviewFeedback(input);
+  assert.deepEqual(created.map((item) => item.state), ["created"]);
+  assert.deepEqual(calls.created[0].labels, ["codekeeper:deferred", "codekeeper:type-testing"]);
+  assert.match(calls.created[0].body, /pull\/7#discussion_r41/);
+  assert.match(calls.created[0].body, new RegExp(deferredReviewMarker(fingerprint)));
+  assert.equal(calls.replies[0].commentId, 41);
+  assert.match(calls.replies[0].body, /issue #51/);
+
+  existing.push({
+    ...calls.created[0],
+    number: 51,
+    state: "open",
+    user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+  });
+  feedback.problemKey = "renamed-timeout-coverage";
+  const updated = await upsertDeferredReviewFeedback(input);
+  assert.deepEqual(updated.map((item) => item.state), ["updated"]);
+  assert.equal(calls.created.length, 1);
+  assert.equal(calls.updated.length, 1);
+  assert.equal(calls.replies.length, 2, "one idempotent thread-reply upsert runs per publication");
+
+  const automaticPolicyOff = structuredClone(config);
+  automaticPolicyOff.review.createDeferredIssues = false;
+  assert.deepEqual(await upsertDeferredReviewFeedback({
+    ...input,
+    config: automaticPolicyOff,
+    ownerRequested: false,
+    dryRun: true
+  }), []);
+  assert.deepEqual((await upsertDeferredReviewFeedback({
+    ...input,
+    config: automaticPolicyOff,
+    ownerRequested: true,
+    dryRun: true
+  })).map((item) => item.state), ["would-update"]);
+});
+
+test("deferred feedback identity stays per-source when the model regroups findings", async () => {
+  const context = {
+    repository: "owner/repository",
+    runUrl: "https://github.com/owner/repository/actions/runs/9",
+    pullRequest: {
+      number: 7,
+      url: "https://github.com/owner/repository/pull/7",
+      reviewFeedback: [
+        { sourceKey: "review:41", author: "reviewer", url: "https://github.com/owner/repository/pull/7#pullrequestreview-41" },
+        { sourceKey: "review:42", author: "reviewer", url: "https://github.com/owner/repository/pull/7#pullrequestreview-42" }
+      ]
+    }
+  };
+  const existing = [];
+  const created = [];
+  const updated = [];
+  const github = {
+    async listMaintenanceIssues() { return existing; },
+    async ensureLabels() {},
+    async createIssue(input) {
+      const issue = {
+        ...input,
+        number: 50 + created.length,
+        html_url: `https://github.com/owner/repository/issues/${50 + created.length}`,
+        state: "open",
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      };
+      created.push(issue);
+      return issue;
+    },
+    async updateIssue(number, input) {
+      updated.push({ number, input });
+      const issue = existing.find((candidate) => candidate.number === number);
+      Object.assign(issue, input);
+      return issue;
+    },
+    async replaceManagedLabels() {},
+    async upsertMarkerComment() {}
+  };
+  const grouped = {
+    problemKey: "grouped",
+    disposition: "defer",
+    type: "testing",
+    explanation: "Track both sources.",
+    validation: "Both remain current.",
+    sourceKeys: ["review:41", "review:42"],
+    threadIds: []
+  };
+
+  await upsertDeferredReviewFeedback({
+    github,
+    context,
+    result: { reviewFeedback: [grouped] },
+    config,
+    automationIdentity: identity
+  });
+  assert.equal(created.length, 2);
+
+  await upsertDeferredReviewFeedback({
+    github,
+    context,
+    result: { reviewFeedback: [
+      { ...grouped, problemKey: "split-41", sourceKeys: ["review:41"] },
+      { ...grouped, problemKey: "split-42", sourceKeys: ["review:42"] }
+    ] },
+    config,
+    automationIdentity: identity
+  });
+  assert.equal(created.length, 2);
+  assert.equal(updated.length, 2);
+});
+
+test("deferred review issues close when their source is no longer deferred", async () => {
+  const sourceKeys = ["review_comment:41"];
+  const fingerprint = deferredReviewFingerprint("owner/repository", 7, sourceKeys);
+  const marker = deferredReviewMarker(fingerprint);
+  const updates = [];
+  const github = {
+    async listMaintenanceIssues() {
+      return [{
+        number: 51,
+        state: "open",
+        body: `## Origin
+
+- Pull request: [#7](https://github.com/owner/repository/pull/7)
+
+${marker}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }];
+    },
+    async updateIssue(number, changes) { updates.push({ number, changes }); }
+  };
+
+  const published = await upsertDeferredReviewFeedback({
+    github,
+    context: {
+      repository: "owner/repository",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/owner/repository/pull/7",
+        reviewFeedback: []
+      }
+    },
+    result: { reviewFeedback: [] },
+    config,
+    automationIdentity: identity
+  });
+
+  assert.equal(updates[0].number, 51);
+  assert.equal(updates[0].changes.state, "closed");
+  assert.equal(updates[0].changes.state_reason, "completed");
+  assert.match(updates[0].changes.body, /deferred-reconciled/);
+  assert.ok(updates[0].changes.body.endsWith(marker));
+  assert.deepEqual(published, [{ fingerprint, state: "closed", issueNumber: 51 }]);
+});
+
+test("owner-requested deferral does not reconcile unrelated deferred issues", async () => {
+  const updates = [];
+  const github = {
+    async listMaintenanceIssues() {
+      return [{
+        number: 51,
+        state: "open",
+        body: `## Origin
+
+- Pull request: [#7](https://github.com/owner/repository/pull/7)
+
+${deferredReviewMarker("f".repeat(64))}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }];
+    },
+    async updateIssue(number, changes) { updates.push({ number, changes }); }
+  };
+
+  assert.deepEqual(await upsertDeferredReviewFeedback({
+    github,
+    context: {
+      repository: "owner/repository",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/owner/repository/pull/7",
+        reviewFeedback: []
+      }
+    },
+    result: { reviewFeedback: [] },
+    config,
+    automationIdentity: identity,
+    ownerRequested: true
+  }), []);
+  assert.deepEqual(updates, []);
+});
+
+test("automatically reconciled deferred issues reopen when the source is deferred again", async () => {
+  const sourceKeys = ["review_comment:41"];
+  const fingerprint = deferredReviewFingerprint("owner/repository", 7, sourceKeys);
+  const marker = deferredReviewMarker(fingerprint);
+  const updates = [];
+  const github = {
+    async listMaintenanceIssues() {
+      return [{
+        number: 51,
+        state: "closed",
+        body: `## Origin
+
+- Pull request: [#7](https://github.com/owner/repository/pull/7)
+
+<!-- codekeeper:deferred-reconciled -->
+${marker}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }];
+    },
+    async ensureLabels() {},
+    async updateIssue(number, changes) {
+      updates.push({ number, changes });
+      return { number, html_url: "https://github.com/owner/repository/issues/51", ...changes };
+    },
+    async replaceManagedLabels() {},
+    async upsertReviewReply() {}
+  };
+  const feedback = {
+    problemKey: "defer-again",
+    disposition: "defer",
+    type: "testing",
+    explanation: "The current source needs deferred work again.",
+    validation: "The source is actionable again.",
+    sourceKeys,
+    threadIds: ["PRRT_thread"]
+  };
+
+  const published = await upsertDeferredReviewFeedback({
+    github,
+    context: {
+      repository: "owner/repository",
+      runUrl: "https://github.com/owner/repository/actions/runs/9",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/owner/repository/pull/7",
+        reviewFeedback: [{ sourceKey: "review_comment:41", rootCommentId: 41, author: "reviewer", url: "https://github.com/owner/repository/pull/7#discussion_r41" }]
+      }
+    },
+    result: { reviewFeedback: [feedback] },
+    config,
+    automationIdentity: identity
+  });
+
+  assert.equal(updates[0].changes.state, "open");
+  assert.equal(updates[0].changes.state_reason, null);
+  assert.doesNotMatch(updates[0].changes.body, /deferred-reconciled/);
+  assert.deepEqual(published, [{ fingerprint, state: "reopened", issueNumber: 51 }]);
+});
+
 test("maintenance issue fingerprints require the configured App author", () => {
   const marker = findingMarker("b".repeat(64));
   const issue = {
@@ -191,6 +485,447 @@ test("maintenance issue fingerprints require the configured App author", () => {
   assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { login: "other-app[bot]", id: 123456, type: "Bot" } }, options), false);
   assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { ...issue.user, id: 999 } }, options), false);
   assert.equal(isTrustedMaintenanceIssue({ ...issue, body: `${issue.body}\nuntrusted suffix` }, options), false);
+});
+
+test("ignored and repairable inline feedback receive idempotent replies without resolving threads", async () => {
+  const replies = [];
+  const context = {
+    repository: "owner/repository",
+    pullRequest: {
+      number: 7,
+      reviewFeedback: [
+        { sourceKey: "review_comment:41", rootCommentId: 41 },
+        { sourceKey: "review_comment:42", rootCommentId: 41 },
+        { sourceKey: "review_comment:43", rootCommentId: 43 }
+      ]
+    }
+  };
+  const result = { reviewFeedback: [
+    { problemKey: "duplicate-style-request", disposition: "ignore", explanation: "This duplicates an already resolved preference.", validation: "No current defect remains.", sourceKeys: ["review_comment:41", "review_comment:42"] },
+    { problemKey: "current-null-crash", disposition: "fix_now", explanation: "The current head can crash.", validation: "A regression test reproduces it.", sourceKeys: ["review_comment:43"] }
+  ] };
+  const published = await replyToReviewFeedback({
+    github: { async upsertReviewReply(number, commentId, marker, body) { replies.push({ number, commentId, marker, body }); } },
+    context,
+    result,
+    automationIdentity: identity
+  });
+  assert.deepEqual(published.map(({ commentId, disposition }) => ({ commentId, disposition })), [
+    { commentId: 41, disposition: "ignore" },
+    { commentId: 41, disposition: "ignore" },
+    { commentId: 43, disposition: "fix_now" }
+  ]);
+  assert.match(replies[0].body, /^No action:/);
+  assert.match(replies[1].body, /^No action:/);
+  assert.match(replies[2].body, /^Fix now:/);
+});
+
+test("reclassified review-body feedback updates its PR-level deferred reply", async () => {
+  const comments = [];
+  const retired = [];
+  const fingerprint = deferredReviewFingerprint("owner/repository", 7, "review:99");
+  const context = {
+    repository: "owner/repository",
+    pullRequest: {
+      number: 7,
+      reviewFeedback: [
+        { sourceKey: "review:99", kind: "review", author: "reviewer" }
+      ]
+    }
+  };
+  const result = { reviewFeedback: [{
+    problemKey: "review-body-follow-up",
+    disposition: "fix_now",
+    explanation: "The current review-body finding is valid.",
+    validation: "A regression test now covers it.",
+    sourceKeys: ["review:99"]
+  }] };
+
+  const published = await replyToReviewFeedback({
+    github: {
+      async upsertMarkerComment(number, marker, body) {
+        comments.push({ number, marker, body });
+      },
+      async retireReviewFeedbackReply(number, marker, body) {
+        retired.push({ number, marker, body });
+      }
+    },
+    context,
+    result,
+    automationIdentity: identity,
+    retiredFingerprints: [fingerprint]
+  });
+
+  assert.equal(comments.length, 1);
+  assert.equal(retired.length, 0);
+  assert.match(comments[0].body, /^Fix now:/);
+  assert.equal(published[0].commentId, null);
+  assert.equal(published[0].disposition, "fix_now");
+});
+
+test("complete feedback publication retires disappeared PR-level replies", async () => {
+  const fingerprint = deferredReviewFingerprint("owner/repository", 7, "review:99");
+  const marker = reviewFeedbackReplyMarker(fingerprint);
+  const updates = [];
+  const published = await replyToReviewFeedback({
+    github: {
+      async retireReviewFeedbackReply(number, retiredMarker, body) {
+        updates.push({ number, marker: retiredMarker, body });
+      }
+    },
+    context: {
+      repository: "owner/repository",
+      pullRequest: { number: 7, reviewFeedback: [] }
+    },
+    result: { reviewFeedback: [] },
+    automationIdentity: identity,
+    retiredFingerprints: [fingerprint]
+  });
+
+  assert.equal(updates[0].number, 7);
+  assert.match(updates[0].body, /^No longer current:/);
+  assert.equal(updates[0].marker, marker);
+  assert.equal(published[0].disposition, "retired");
+});
+
+test("review publication rejects feedback that changed after preparation", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-stale-feedback-test-"));
+  const configSha256 = "f".repeat(64);
+  const frozenFeedback = {
+    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
+    body: "Please add a timeout test.", bodySha256: sha256("Please add a timeout test."),
+    url: "https://github.test/comment/41",
+    state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
+    resolved: false, outdated: false, path: "README.md", line: 1
+  };
+  const context = {
+    mode: "review", repository: "owner/repository", configSha256, runId: "7000",
+    runUrl: "https://github.com/owner/repository/actions/runs/7000",
+    pullRequest: {
+      number: 7, headSha: "head", baseSha: "base",
+      diff: { truncated: false, disabled: false }, reviewFeedbackFrozen: true,
+      reviewFeedback: [frozenFeedback]
+    }
+  };
+  const result = {
+    mode: "review", summary: "Defer the valid follow-up.", risk: "low", labels: [],
+    blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{
+      problemKey: "timeout-test", disposition: "defer", type: "testing",
+      explanation: "Add timeout coverage.", validation: "Coverage is still absent.",
+      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "manual", noActionReason: null
+  };
+  const pull = {
+    number: 7, state: "open", draft: false, labels: [],
+    head: { sha: "head", ref: "feature", repo: { full_name: context.repository } },
+    base: { sha: "base", ref: config.repository.defaultBranch, repo: { full_name: context.repository } }
+  };
+  const restoreGitHub = replaceGitHubMethods({
+    async getPull() { return structuredClone(pull); },
+    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: frozenFeedback.threadId, isResolved: true, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
+          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
+          author: { login: frozenFeedback.author }
+        }] }
+      }];
+    }
+  });
+  try {
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "review", context, result, configSha256 });
+    await assert.rejects(
+      publishReview({ artifactDirectory, config, configSha256, ...integrity, token: "unused", dryRun: true }),
+      /review feedback changed after preparation/
+    );
+
+    context.pullRequest.reviewFeedback = [];
+    result.reviewFeedback = [];
+    const emptyIntegrity = await writeSealedArtifact(artifactDirectory, { mode: "review", context, result, configSha256 });
+    await assert.rejects(
+      publishReview({ artifactDirectory, config, configSha256, ...emptyIntegrity, token: "unused", dryRun: true }),
+      /review feedback changed after preparation/
+    );
+  } finally {
+    restoreGitHub();
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("frozen review feedback detects edits past the prompt body limit", async () => {
+  const prefix = "x".repeat(7_000);
+  const feedbackFor = (body) => completeReviewFeedback({
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: "PRRT_thread", isResolved: false, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body, url: "https://github.test/comment/41",
+          path: "README.md", line: 1, originalLine: 1,
+          author: { login: "reviewer" }
+        }] }
+      }];
+    }
+  }, 7, config);
+
+  const frozen = await feedbackFor(`${prefix}a`);
+  const edited = await feedbackFor(`${prefix}b`);
+  assert.equal(frozen[0].body, edited[0].body);
+  assert.notDeepEqual(frozen, edited);
+});
+
+test("review feedback inventory cannot be built without repository policy", async () => {
+  await assert.rejects(
+    completeReviewFeedback({
+      async listPullReviews() { throw new Error("must reject before GitHub reads"); },
+      async listPullReviewThreads() { throw new Error("must reject before GitHub reads"); }
+    }, 7),
+    /requires repository owner policy/
+  );
+});
+
+test("conditional GitHub mutation blocks repair dispatch after feedback changes", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-repair-feedback-race-test-"));
+  const configSha256 = "9".repeat(64);
+  const reviewConfig = structuredClone(config);
+  reviewConfig.review.autoRepair = true;
+  const headSha = "a".repeat(40);
+  const baseSha = "b".repeat(40);
+  const frozenFeedback = {
+    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
+    body: "Repair this problem.", bodySha256: sha256("Repair this problem."),
+    url: "https://github.test/comment/41", state: "commented", threadId: "PRRT_thread",
+    rootCommentId: 41, resolved: false, outdated: false, path: "README.md", line: 1
+  };
+  const context = {
+    mode: "review", repository: "owner/repository", configSha256, runId: "7009",
+    runUrl: "https://github.com/owner/repository/actions/runs/7009",
+    pullRequest: {
+      number: 7, headSha, baseSha, diff: { truncated: false, disabled: false },
+      reviewFeedbackFrozen: true, reviewFeedback: [frozenFeedback]
+    }
+  };
+  const result = {
+    mode: "review", summary: "Repair the current feedback.", risk: "low", labels: [],
+    blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{
+      problemKey: "repair-race", disposition: "fix_now", type: "bug",
+      explanation: "Repair the current feedback.", validation: "The feedback is still active.",
+      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "manual", noActionReason: null
+  };
+  const pull = {
+    number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
+    user: { login: "contributor", type: "User" },
+    head: { sha: headSha, ref: "feature/repair", repo: { full_name: context.repository } },
+    base: { sha: baseSha, ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
+  };
+  let resolved = false;
+  let dispatches = 0;
+  const restoreGitHub = replaceGitHubMethods({
+    async getPull() { return structuredClone(pull); },
+    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: frozenFeedback.threadId, isResolved: resolved, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
+          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
+          author: { login: frozenFeedback.author }
+        }] }
+      }];
+    },
+    async listMaintenanceIssues() { return []; },
+    async ensureLabels() {},
+    async replaceManagedLabels() {},
+    async upsertMarkerComment() {},
+    async upsertReviewReply() {},
+    async addLabels(number, labels) {
+      pull.labels.push(...labels.map((name) => ({ name })));
+      this.advancePullMutationState("POST", this.repoPath(`/issues/${number}/labels`), { labels });
+      resolved = true;
+    },
+    async removeLabel(_number, label) {
+      pull.labels = pull.labels.filter((item) => item.name !== label);
+    },
+    async createRepositoryDispatch() {
+      await this.assertPullMutationCurrent();
+      dispatches += 1;
+    },
+    async rollbackPullLabel(_number, label) {
+      pull.labels = pull.labels.filter((item) => item.name !== label);
+    }
+  });
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "review", context, result, configSha256, artifactConfig: reviewConfig
+    });
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
+      /review feedback changed after preparation/
+    );
+    assert.equal(dispatches, 0);
+    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("human-authored automation markers remain review feedback", async () => {
+  const marker = "<!-- codekeeper:review-feedback-reply=" + "a".repeat(64) + " -->";
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = "codekeeper-app[bot]";
+  try {
+    const feedback = await completeReviewFeedback({
+      async listPullReviews() { return []; },
+      async listPullReviewThreads() {
+        return [{
+          id: "PRRT_thread", isResolved: false, isOutdated: false,
+          comments: { nodes: [
+            { databaseId: 41, body: `Human feedback\n\n${marker}`, author: { login: "reviewer" } },
+            { databaseId: 42, body: `Automation reply\n\n${marker}`, author: { login: "codekeeper-app[bot]" } }
+          ] }
+        }];
+      }
+    }, 7, config);
+    assert.deepEqual(feedback.map((item) => item.sourceKey), ["review_comment:41"]);
+  } finally {
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+  }
+});
+
+test("fix-now feedback blocks auto-merge even when repair dispatch is disabled", () => {
+  const reviewConfig = structuredClone(config);
+  reviewConfig.merge.enabled = true;
+  reviewConfig.review.autoRepair = false;
+  const result = {
+    risk: "low", labels: [], blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{ disposition: "fix_now" }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto"
+  };
+  const decision = evaluateAutoMerge({
+    config: reviewConfig,
+    pullRequest: {
+      number: 7, state: "open", draft: false, labels: [],
+      user: { login: identity.login, type: "Bot" },
+      head: { ref: "automation/codekeeper/fix-now", repo: { full_name: "owner/repository" } },
+      base: { repo: { full_name: "owner/repository" } }
+    },
+    files: [{ filename: "README.md", additions: 1, deletions: 0 }],
+    reviewResult: result, reviewContextComplete: true, automationBotLogin: identity.login
+  });
+  assert.equal(decision.eligible, false);
+  assert.match(decision.reasons.join("\n"), /fix-now review feedback/);
+  assert.ok(reviewLabels(result).includes("codekeeper:blocked"));
+  assert.ok(!reviewLabels(result).includes("codekeeper:auto-merge"));
+});
+
+test("fix-if-cheap feedback suspends auto-merge while automatic repair is pending", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-review-cheap-repair-test-"));
+  const configSha256 = "e".repeat(64);
+  const reviewConfig = structuredClone(config);
+  reviewConfig.merge.enabled = true;
+  reviewConfig.review.autoRepair = true;
+  const frozenFeedback = {
+    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
+    body: "Please make this repair.", bodySha256: sha256("Please make this repair."),
+    url: "https://github.test/comment/41",
+    state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
+    resolved: false, outdated: false, path: "README.md", line: 1
+  };
+  const headSha = "1".repeat(40);
+  const baseSha = "2".repeat(40);
+  const context = {
+    mode: "review", repository: "owner/repository", configSha256, runId: "7004",
+    runUrl: "https://github.com/owner/repository/actions/runs/7004",
+    pullRequest: {
+      number: 7, headSha, baseSha,
+      diff: { truncated: false, disabled: false }, reviewFeedbackFrozen: true,
+      reviewFeedback: [frozenFeedback]
+    }
+  };
+  const result = {
+    mode: "review", summary: "Queue the cheap repair.", risk: "low", labels: [],
+    blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{
+      problemKey: "cheap-repair", disposition: "fix_if_cheap", type: "bug",
+      explanation: "Apply the bounded repair.", validation: "The repair remains applicable.",
+      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto", noActionReason: null
+  };
+  const pull = {
+    number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
+    user: { login: identity.login, type: "Bot" },
+    head: { sha: headSha, ref: "automation/codekeeper/cheap-repair", repo: { full_name: context.repository } },
+    base: { sha: baseSha, ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
+  };
+  const restoreGitHub = replaceGitHubMethods({
+    async getPull() { return structuredClone(pull); },
+    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: frozenFeedback.threadId, isResolved: false, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
+          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
+          author: { login: frozenFeedback.author }
+        }] }
+      }];
+    },
+    async listIssueComments() {
+      return [{
+        body: `Automatic repair is pending.\n${automaticRepairMarker(headSha)}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }];
+    }
+  });
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "review", context, result, configSha256, artifactConfig: reviewConfig
+    });
+    const publication = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(publication.autoMerge.eligible, false);
+    assert.match(publication.autoMerge.reasons.join("\n"), /automatic repair is pending/i);
+
+    pull.labels = [{ name: "codekeeper:auto-repaired" }];
+    const repeated = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(repeated.autoMerge.eligible, false);
+    assert.match(repeated.autoMerge.reasons.join("\n"), /automatic repair is pending/i);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
 });
 
 test("GraphQL follows the configured GitHub API host", () => {
@@ -393,6 +1128,7 @@ test("review publication activates auto-merge last and falls back safely", async
       return structuredClone(pull);
     },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listMaintenanceIssues() { return []; },
     async enableAutoMerge() {
       calls.push({ type: "enable" });
       if (rejectEnable) throw new Error("GitHub rejected enablement");
@@ -567,7 +1303,7 @@ test("issue publication does not close a duplicate after the triaged issue chang
   }
 });
 
-test("issue publication accepts its exact managed-label mutation before publishing the App marker", async () => {
+test("issue publication accepts its exact managed-label mutation and preserves a trusted deferred marker", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-label-revision-test-"));
   const configSha256 = "c".repeat(64);
   const issueConfig = structuredClone(config);
@@ -580,12 +1316,12 @@ test("issue publication accepts its exact managed-label mutation before publishi
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   let updatedAt = context.issue.updatedAt;
-  let labels = [{ name: "external" }, { name: "codekeeper:priority-p1" }];
+  let labels = [{ name: "external" }, { name: "codekeeper:priority-p1" }, { name: "codekeeper:deferred" }];
   let markerPublished = false;
   const issue = () => ({
-    number: 7, title: "Report", body: "Details", state: "open", updated_at: updatedAt,
+    number: 7, title: "Report", body: `Details\n${deferredReviewMarker("f".repeat(64))}`, state: "open", updated_at: updatedAt,
     html_url: "https://github.com/owner/repository/issues/7",
-    user: { id: 1, login: "reporter", type: "User" }, labels
+    user: { id: Number(identity.id), login: identity.login, type: "Bot" }, labels
   });
   const restoreGitHub = replaceGitHubMethods({
     async getIssue() { return issue(); },
@@ -602,7 +1338,7 @@ test("issue publication accepts its exact managed-label mutation before publishi
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256, artifactConfig: issueConfig });
     await publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" });
     assert.equal(markerPublished, true);
-    assert.deepEqual(labels.map((label) => label.name).sort(), ["codekeeper:priority-p3", "codekeeper:ready", "codekeeper:type-bug", "external"].sort());
+    assert.deepEqual(labels.map((label) => label.name).sort(), ["codekeeper:deferred", "codekeeper:priority-p3", "codekeeper:ready", "codekeeper:type-bug", "external"].sort());
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -838,7 +1574,7 @@ test("fix publication does not create a repair PR after the issue changes", asyn
   }
 });
 
-function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), runId = "7001", authorizationMode = "owner" }) {
+function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), runId = "7001", authorizationMode = "owner", reviewThreads = [] }) {
   const pull = {
     number: 42,
     title: "Repair this change",
@@ -868,10 +1604,46 @@ function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), ru
       baseRef: config.repository.defaultBranch,
       baseSha,
       baseRepository: "owner/repository",
-      subjectSha256: frozenPullRepairSubjectSha256(pull, comments)
+      reviewThreadIds: reviewThreads.map((thread) => thread.id),
+      subjectSha256: frozenPullRepairSubjectSha256(pull, comments, reviewThreads)
     },
-    pullRequest: frozenPullRepairSubject(pull, comments)
+    pullRequest: {
+      ...frozenPullRepairSubject(pull, comments, reviewThreads),
+      reviewThreads
+    }
   };
+}
+
+function frozenRepairReviewThread(body = "Please preserve this review evidence.", isResolved = false) {
+  return {
+    id: "PRRT_thread",
+    isResolved,
+    isOutdated: false,
+    comments: [{
+      id: "PRRC_node_41",
+      databaseId: 41,
+      author: "reviewer",
+      body,
+      bodySha256: sha256(body),
+      url: "https://example.test/pull/42#discussion_r41",
+      path: "README.md",
+      line: 1,
+      originalLine: 1
+    }]
+  };
+}
+
+test("frozen PR repair threads hash complete bodies beyond the prompt limit", () => {
+  const prefix = "x".repeat(7000);
+  const first = frozenPullRepairReviewThreads([liveRepairReviewThread(`${prefix}a`)], ["PRRT_thread"]);
+  const second = frozenPullRepairReviewThreads([liveRepairReviewThread(`${prefix}b`)], ["PRRT_thread"]);
+  assert.equal(first[0].comments[0].body, second[0].comments[0].body);
+  assert.notEqual(first[0].comments[0].bodySha256, second[0].comments[0].bodySha256);
+});
+
+function liveRepairReviewThread(body, isResolved = false) {
+  const frozen = frozenRepairReviewThread(body, isResolved);
+  return { ...frozen, comments: { nodes: frozen.comments } };
 }
 
 function liveRepairPull(context, overrides = {}) {
@@ -925,6 +1697,9 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
   let pushes = 0;
   let createPullCalls = 0;
   let rejectPush = false;
+  let rejectThreadResolution = false;
+  let reviewThreadBody = "Please preserve this review evidence.";
+  let reviewThreadResolved = false;
   const failureComments = [];
   try {
     await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
@@ -939,11 +1714,12 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
     const patch = execFileSync("git", ["diff", "--binary", "--full-index", "HEAD"], { cwd: repository });
     await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
     git(repository, ["checkout", "--", "README.md"]);
-    const context = pullRepairContext({ configSha256, headSha });
+    const context = pullRepairContext({ configSha256, headSha, reviewThreads: [frozenRepairReviewThread()] });
+    const result = { ...pullRepairResult(), resolvedReviewThreadIds: ["PRRT_thread"] };
     const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "fix",
       context,
-      result: pullRepairResult(),
+      result,
       configSha256,
       patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: ["README.md"] }
     });
@@ -958,6 +1734,12 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       async createPull() { createPullCalls += 1; throw new Error("must not create a second pull request"); },
       async updateIssue() { throw new Error("must not close or mutate an issue"); },
       async enableAutoMerge() { throw new Error("must not enable auto-merge"); },
+      async resolveReviewThread(threadId) {
+        assert.equal(threadId, "PRRT_thread");
+        if (rejectThreadResolution) throw new Error("thread resolution unavailable");
+        reviewThreadResolved = true;
+      },
+      async listPullReviewThreads() { return [liveRepairReviewThread(reviewThreadBody, reviewThreadResolved)]; },
       async upsertMarkerComment(number, marker, body, authorIdentity) {
         if (!rejectPush) throw new Error("successful PR repair should not publish a failure comment");
         failureComments.push({ number, marker, body, authorIdentity });
@@ -967,6 +1749,28 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
       process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
       process.chdir(repository);
+      reviewThreadBody = "This review evidence changed after preparation.";
+      rejectPush = true;
+      await assert.rejects(
+        publishFix({
+          artifactDirectory,
+          config,
+          configSha256,
+          ...integrity,
+          token: "token",
+          prRepairGit: {
+            configureAutomationIdentity() {},
+            createCommitOnCurrentHead,
+            pushHeadToBranch() { throw new Error("thread mutation reached push"); }
+          }
+        }),
+        /repair evidence changed/
+      );
+      assert.equal(pushes, 0);
+      failureComments.length = 0;
+      reviewThreadBody = "Please preserve this review evidence.";
+      rejectPush = false;
+
       const repair = await publishFix({
         artifactDirectory,
         config,
@@ -989,6 +1793,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
         }
       });
       assert.equal(repair.updated, true);
+      assert.deepEqual(repair.resolvedReviewThreadIds, ["PRRT_thread"]);
       assert.equal(repair.previousHeadSha, headSha);
       assert.equal(repair.headSha, liveHead);
       assert.equal(pushes, 1);
@@ -999,6 +1804,34 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
 
       git(repository, ["reset", "--hard", headSha]);
       liveHead = headSha;
+      reviewThreadResolved = false;
+      rejectThreadResolution = true;
+      const partialRepair = await publishFix({
+        artifactDirectory,
+        config,
+        configSha256,
+        ...integrity,
+        token: "token",
+        prRepairGit: {
+          configureAutomationIdentity() {},
+          createCommitOnCurrentHead,
+          pushHeadToBranch() {
+            pushes += 1;
+            liveHead = git(repository, ["rev-parse", "HEAD"]);
+            return liveHead;
+          }
+        }
+      });
+      assert.equal(partialRepair.updated, true);
+      assert.deepEqual(partialRepair.resolvedReviewThreadIds, []);
+      assert.match(partialRepair.reviewThreadWarning, /thread resolution unavailable/);
+      assert.equal(pushes, 2);
+      assert.equal(failureComments.length, 0);
+
+      git(repository, ["reset", "--hard", headSha]);
+      liveHead = headSha;
+      reviewThreadResolved = false;
+      rejectThreadResolution = false;
       rejectPush = true;
       await assert.rejects(
         publishFix({
@@ -1015,7 +1848,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
         }),
         /non-fast-forward update rejected/
       );
-      assert.equal(pushes, 1);
+      assert.equal(pushes, 2);
       assert.equal(createPullCalls, 0);
       assert.equal(failureComments.length, 1);
       assert.equal(failureComments[0].number, context.target.number);

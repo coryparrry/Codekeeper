@@ -201,3 +201,53 @@ test("review validator rejects a critical finding hidden as non-blocking", () =>
     /cannot contain a critical finding/
   );
 });
+
+test("review feedback uses four exhaustive triage buckets and stable unique problem keys", () => {
+  const base = {
+    mode: "review",
+    summary: "Review feedback was checked against the current head.",
+    risk: "low",
+    labels: [],
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: [
+      {
+        problemKey: "missing-timeout-regression",
+        disposition: "defer",
+        type: "testing",
+        explanation: "The concern is valid but outside this pull request's bounded outcome.",
+        validation: "The current head still lacks the timeout regression case.",
+        sourceKeys: ["review_comment:41", "review_comment:42"],
+        threadIds: ["PRRT_kwDOExample"]
+      },
+      {
+        problemKey: "stale-null-comment",
+        disposition: "ignore",
+        type: "bug",
+        explanation: "The cited null path no longer exists.",
+        validation: "The current head guards the value before use.",
+        sourceKeys: ["review:7"],
+        threadIds: []
+      }
+    ],
+    tests: { adequate: true, notes: "Current behavior is covered." },
+    diagram: null,
+    mergeRecommendation: "manual",
+    noActionReason: null
+  };
+  assert.equal(validateReviewResult(structuredClone(base), config).reviewFeedback[0].disposition, "defer");
+  assert.throws(
+    () => validateReviewResult({
+      ...structuredClone(base),
+      reviewFeedback: base.reviewFeedback.map((item) => ({ ...item, problemKey: "duplicate" }))
+    }, config),
+    /duplicate review feedback problemKey/
+  );
+  assert.throws(
+    () => validateReviewResult({
+      ...structuredClone(base),
+      reviewFeedback: [{ ...base.reviewFeedback[0], disposition: "later" }]
+    }, config),
+    /disposition must be one of fix_now, fix_if_cheap, defer, ignore/
+  );
+});

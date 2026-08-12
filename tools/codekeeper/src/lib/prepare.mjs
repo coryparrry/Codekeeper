@@ -4,8 +4,9 @@ import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-prof
 import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
-import { REVIEW_MARKER } from "./markers.mjs";
-import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
+import { REVIEW_MARKER, sha256 } from "./markers.mjs";
+import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pr-repair.mjs";
+import { completeReviewFeedback } from "./review-feedback.mjs";
 import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
 import { assertRunnerOwnedDirectory, runUrl } from "./workspace.mjs";
@@ -172,6 +173,16 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     }
   }
   const pull = ensureSameRepositoryPullRequest(event, repository);
+  const feedbackEvent = Boolean(event.review || event.comment?.pull_request_review_id || event.client_payload?.review_feedback);
+  if (feedbackEvent && event.action !== "codekeeper_review" && config.automation.reviewFeedbackTriage !== true) {
+    throw new Error("Automatic review-feedback triage is off in the Codekeeper policy");
+  }
+  if (!feedbackEvent && event.action !== "codekeeper_review" && config.automation.automaticPrReview !== true) {
+    throw new Error("Automatic pull request review is off in the Codekeeper policy");
+  }
+  const reviewFeedback = feedbackEvent
+    ? await completeReviewFeedback(new GitHubClient({ token, repository }), pull.number, config)
+    : [];
   const context = {
     mode: "review",
     repository,
@@ -187,7 +198,9 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
       baseRef: boundedText(pull.base?.ref ?? config.repository.defaultBranch, 512, "…"),
       headRef: boundedText(pull.head?.ref, 512, "…"),
       baseSha: pull.base?.sha,
-      headSha: pull.head?.sha
+      headSha: pull.head?.sha,
+      reviewFeedbackFrozen: feedbackEvent,
+      reviewFeedback
     }
   };
   if (!context.pullRequest.baseSha || !context.pullRequest.headSha) {
@@ -264,11 +277,19 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   if (triageMode === "manual" && !isConfiguredOwner(config, actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request Codekeeper issue triage`);
   }
+  if (triageMode === "automatic" && config.automation.issueTriage !== true) {
+    throw new Error("Automatic issue triage is off in the Codekeeper policy");
+  }
   const event = await readJson(eventPath);
   const repository = repositoryFromEvent(event);
+  const github = new GitHubClient({ token, repository });
+  if (!event.issue && event.action === "codekeeper_issue") {
+    const number = Number(event.client_payload?.number);
+    if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Issue dispatch has no valid issue number");
+    event.issue = await github.getIssue(number);
+  }
   const issue = event.issue;
   if (!issue || issue.pull_request) throw new Error("Issue payload is missing or refers to a pull request");
-  const github = new GitHubClient({ token, repository });
   const [existing, pulls] = await Promise.all([
     github.listOpenIssues(config.issues.maximumOpenIssueContext),
     github.listOpenPulls(config.issues.maximumOpenIssueContext)
@@ -302,10 +323,14 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
+export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", reviewThreadIds = [], directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
   const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha);
   if (!["owner", "policy"].includes(authorizationMode)) {
     throw new Error("Codekeeper fix authorization mode must be owner or policy");
+  }
+  if (!Array.isArray(reviewThreadIds) || reviewThreadIds.length > 128 || new Set(reviewThreadIds).size !== reviewThreadIds.length
+    || reviewThreadIds.some((threadId) => typeof threadId !== "string" || !threadId.trim() || threadId.length > 512)) {
+    throw new Error("Codekeeper fix review thread IDs are invalid");
   }
   if (authorizationMode === "owner" && !isConfiguredOwner(config, actor)) {
     throw new Error(`Actor ${actor || "unknown"} is not authorised to request a Codekeeper fix`);
@@ -345,6 +370,12 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
         throw new Error("Automatic review repair requires the codekeeper:auto-repaired marker");
       }
     }
+    const reviewThreads = reviewThreadIds.length > 0
+      ? frozenPullRepairReviewThreads(
+        await github.listPullReviewThreads(targetNumber),
+        reviewThreadIds
+      )
+      : [];
     if (!/^[0-9a-f]{40}$/i.test(String(pull.head?.sha ?? "")) || !/^[0-9a-f]{40}$/i.test(String(pull.base?.sha ?? ""))) {
       throw new Error(`PR #${targetNumber} is missing full head or base commit SHAs`);
     }
@@ -355,23 +386,26 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       headSha: pull.head.sha,
       headRepository: pull.head.repo.full_name,
       baseRef: pull.base.ref,
+      reviewThreadIds: [...reviewThreadIds],
       baseSha: pull.base.sha,
       baseRepository: pull.base.repo.full_name
     };
     baseSha = target.headSha;
-    const frozenSubject = frozenPullRepairSubject(pull, comments);
+    const frozenSubject = frozenPullRepairSubject(pull, comments, reviewThreads);
     subject = {
       pullRequest: {
         ...frozenSubject,
         body: boundedText(frozenSubject.body, 12000),
-        comments: boundedRepairComments(comments, config, { actor, authorizationMode })
+        comments: boundedRepairComments(comments, config, { actor, authorizationMode }),
+        reviewThreads
       }
     };
-    target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments);
+    target.subjectSha256 = frozenPullRepairSubjectSha256(pull, comments, reviewThreads);
   } else {
-    if (!config.issues.allowAiImplementation) {
+    if (authorizationMode === "policy" && !config.issues.allowAiImplementation) {
       throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
     }
+    if (reviewThreadIds.length > 0) throw new Error("Issue implementation cannot resolve pull request review threads");
     const labels = boundedLabels(issue.labels);
     if (authorizationMode === "policy" && labels.includes("codekeeper:paused")) {
       throw new Error(`Issue #${targetNumber} is paused`);

@@ -18,9 +18,14 @@ on:
         default: true
         type: boolean
       feedback_triage:
-        description: Classify eligible pull request review feedback when the caller enables that trigger.
+        description: Automatically triage pull request reviews and review comments.
         required: false
         default: true
+        type: boolean
+      owner_command:
+        description: The trusted caller classified this review comment as an owner command.
+        required: false
+        default: false
         type: boolean
       automation_bot_login:
         description: Installed GitHub App bot login, used only to admit its own PRs.
@@ -51,22 +56,31 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 490f9ddc0f22e744450a6bff79546ee9db271ab2bc37402bf2e9f6e203671f8e
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 0725c35024fb4da927624106645fa819b72399df79b2c9b6e8534d4cc9ca4f14
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.actor != inputs.automation_bot_login }}
 
 jobs:
   workspace:
     name: Codekeeper review workspace specialist
     if: >-
       inputs.enabled &&
+      !inputs.owner_command &&
       ((github.event_name == 'repository_dispatch' &&
         github.event.action == 'codekeeper_review' &&
         github.actor == inputs.automation_bot_login) ||
-       (inputs.auto_review &&
-        github.event_name != 'repository_dispatch' &&
+       (((inputs.auto_review && github.event_name == 'pull_request_target') ||
+         (inputs.feedback_triage &&
+          inputs.automation_bot_login != '' &&
+          github.actor != inputs.automation_bot_login &&
+          !(github.event_name == 'pull_request_review_comment' &&
+            (github.event.comment.author_association == 'OWNER' ||
+             github.event.comment.author_association == 'MEMBER' ||
+             github.event.comment.author_association == 'COLLABORATOR') &&
+            contains(fromJSON('["/codekeeper status","/codekeeper review","/codekeeper rerun","/codekeeper triage","/codekeeper defer","/codekeeper implement","/codekeeper fix","/codekeeper stop"]'), github.event.comment.body)) &&
+          (github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment'))) &&
         !github.event.pull_request.draft &&
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.base.ref == github.event.repository.default_branch))
@@ -142,6 +156,7 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
+          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -342,6 +357,7 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
+          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -608,18 +624,31 @@ jobs:
         env:
           ENABLED: ${{ inputs.enabled }}
           AUTO_REVIEW: ${{ inputs.auto_review }}
+          AUTO_REVIEW_FEEDBACK: ${{ inputs.feedback_triage }}
+          IS_REVIEW_FEEDBACK: ${{ github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment' || (github.event_name == 'repository_dispatch' && github.event.client_payload.review_feedback) }}
           IS_COMMAND_REVIEW: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review' }}
+          IS_OWNER_COMMAND_REVIEW: ${{ inputs.owner_command }}
           IS_DRAFT: ${{ github.event.pull_request.draft || github.event.client_payload.draft }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.event.client_payload.head_repository }}
           REPOSITORY: ${{ github.repository }}
           BASE_REF: ${{ github.event.pull_request.base.ref || github.event.client_payload.base_ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ACTOR: ${{ github.actor }}
+          AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
           ANALYZE_RESULT: ${{ needs.analyze.result }}
           SEAL_RESULT: ${{ needs.seal.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
+          [[ "$IS_REVIEW_FEEDBACK" == "true" && -n "$AUTOMATION_BOT_LOGIN" && "$ACTOR" == "$AUTOMATION_BOT_LOGIN" ]] && {
+            echo "Codekeeper-authored review feedback is intentionally ignored."
+            exit 0
+          }
+          [[ "$IS_OWNER_COMMAND_REVIEW" == "true" ]] && {
+            echo "Owner review command is intentionally routed by the repository assistant."
+            exit 0
+          }
           [[ "$ENABLED" == "true" ]] || { echo "Codekeeper is disabled; this required gate fails closed."; exit 1; }
-          [[ "$IS_COMMAND_REVIEW" == "true" || "$AUTO_REVIEW" == "true" ]] || { echo "Automatic PR review is disabled; this required gate fails closed."; exit 1; }
+          [[ "$IS_COMMAND_REVIEW" == "true" || ("$IS_REVIEW_FEEDBACK" == "true" && "$AUTO_REVIEW_FEEDBACK" == "true") || ("$IS_REVIEW_FEEDBACK" != "true" && "$AUTO_REVIEW" == "true") ]] || { echo "The matching automatic review policy is disabled; this required gate fails closed."; exit 1; }
           [[ "$IS_DRAFT" != "true" ]] || { echo "Draft pull requests require manual review."; exit 1; }
           [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]] || { echo "Fork pull requests require manual review."; exit 1; }
           [[ "$BASE_REF" == "$DEFAULT_BRANCH" ]] || { echo "Only default-branch pull request targets are supported."; exit 1; }
