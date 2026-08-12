@@ -166,7 +166,11 @@ export async function runOwnerCommand({
     const sourceComment = directComment?.in_reply_to_id
       ? await github.getReviewComment(directComment.in_reply_to_id)
       : directComment;
-    if (!sourceComment?.id || parseCommand(sourceComment.body) === "defer") {
+    if (
+      !sourceComment?.id ||
+      parseCommand(sourceComment.body) === "defer" ||
+      parseMentionIntent(sourceComment.body, automationIdentity?.login) === "defer"
+    ) {
       throw new Error(
         "/codekeeper defer must reply to the review comment that should become an issue",
       );

@@ -263,19 +263,24 @@ export async function publishPullRequestRepair({
     const pushedSha = gitOperations.pushHeadToBranch(target.headRef, github.token);
     if (pushedSha !== commitSha) throw new Error(`PR repair pushed ${pushedSha}; expected ${commitSha}`);
     const updatedPull = assertLivePullRepairTarget(await github.getPull(target.number), target, { expectedHeadSha: commitSha });
-    for (const threadId of result.resolvedReviewThreadIds ?? []) {
-      await github.resolveReviewThread(threadId);
-    }
     let resolvedReviewThreadIds = [];
-    if ((result.resolvedReviewThreadIds?.length ?? 0) > 0) {
-      const threads = await github.listPullReviewThreads(target.number);
-      const byId = new Map(threads.map((thread) => [thread.id, thread]));
-      for (const threadId of result.resolvedReviewThreadIds) {
-        if (byId.get(threadId)?.isResolved !== true) {
-          throw new Error(`Review thread ${threadId} was not resolved after the verified fix was pushed`);
-        }
+    let reviewThreadWarning = null;
+    try {
+      for (const threadId of result.resolvedReviewThreadIds ?? []) {
+        await github.resolveReviewThread(threadId);
       }
-      resolvedReviewThreadIds = [...result.resolvedReviewThreadIds];
+      if ((result.resolvedReviewThreadIds?.length ?? 0) > 0) {
+        const threads = await github.listPullReviewThreads(target.number);
+        const byId = new Map(threads.map((thread) => [thread.id, thread]));
+        for (const threadId of result.resolvedReviewThreadIds) {
+          if (byId.get(threadId)?.isResolved !== true) {
+            throw new Error(`Review thread ${threadId} was not resolved after the verified fix was pushed`);
+          }
+        }
+        resolvedReviewThreadIds = [...result.resolvedReviewThreadIds];
+      }
+    } catch (error) {
+      reviewThreadWarning = `The repair commit was pushed, but review-thread reconciliation was incomplete: ${sanitizeMarkdown(error.message)}`;
     }
     return {
       updated: true,
@@ -286,6 +291,7 @@ export async function publishPullRequestRepair({
       headSha: commitSha,
       files: patch.files,
       resolvedReviewThreadIds,
+      ...(reviewThreadWarning ? { reviewThreadWarning } : {}),
       dryRun: false
     };
   } catch (error) {

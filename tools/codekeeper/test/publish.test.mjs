@@ -1063,6 +1063,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
   let pushes = 0;
   let createPullCalls = 0;
   let rejectPush = false;
+  let rejectThreadResolution = false;
   let reviewThreadBody = "Please preserve this review evidence.";
   let reviewThreadResolved = false;
   const failureComments = [];
@@ -1101,6 +1102,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       async enableAutoMerge() { throw new Error("must not enable auto-merge"); },
       async resolveReviewThread(threadId) {
         assert.equal(threadId, "PRRT_thread");
+        if (rejectThreadResolution) throw new Error("thread resolution unavailable");
         reviewThreadResolved = true;
       },
       async listPullReviewThreads() { return [liveRepairReviewThread(reviewThreadBody, reviewThreadResolved)]; },
@@ -1169,6 +1171,33 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       git(repository, ["reset", "--hard", headSha]);
       liveHead = headSha;
       reviewThreadResolved = false;
+      rejectThreadResolution = true;
+      const partialRepair = await publishFix({
+        artifactDirectory,
+        config,
+        configSha256,
+        ...integrity,
+        token: "token",
+        prRepairGit: {
+          configureAutomationIdentity() {},
+          createCommitOnCurrentHead,
+          pushHeadToBranch() {
+            pushes += 1;
+            liveHead = git(repository, ["rev-parse", "HEAD"]);
+            return liveHead;
+          }
+        }
+      });
+      assert.equal(partialRepair.updated, true);
+      assert.deepEqual(partialRepair.resolvedReviewThreadIds, []);
+      assert.match(partialRepair.reviewThreadWarning, /thread resolution unavailable/);
+      assert.equal(pushes, 2);
+      assert.equal(failureComments.length, 0);
+
+      git(repository, ["reset", "--hard", headSha]);
+      liveHead = headSha;
+      reviewThreadResolved = false;
+      rejectThreadResolution = false;
       rejectPush = true;
       await assert.rejects(
         publishFix({
@@ -1185,7 +1214,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
         }),
         /non-fast-forward update rejected/
       );
-      assert.equal(pushes, 1);
+      assert.equal(pushes, 2);
       assert.equal(createPullCalls, 0);
       assert.equal(failureComments.length, 1);
       assert.equal(failureComments[0].number, context.target.number);

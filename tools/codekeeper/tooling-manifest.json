@@ -47,7 +47,7 @@
     },
     {
       "path": "src/lib/commands.mjs",
-      "sha256": "28b4d8ec8c1ff8031687485e22613d0b3c4e14db76acf0bbc5f84485b272d3de"
+      "sha256": "cc132cd8dc394a8681ba862788858402e45b470a66d207037d1ffcd63b85d40e"
     },
     {
       "path": "src/lib/config.mjs",
@@ -79,7 +79,7 @@
     },
     {
       "path": "src/lib/pr-repair.mjs",
-      "sha256": "d80efcbfa9bd09695b6ac08f6de4821047d505b7931ad295ce6ff867497daaf1"
+      "sha256": "f27ea202dcf810736bf532689c07cea9679e603e9e920326159f8063cf5c51fc"
     },
     {
       "path": "src/lib/prepare.mjs",
