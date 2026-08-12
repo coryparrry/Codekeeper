@@ -324,23 +324,23 @@ export async function runOwnerCommand({
     });
     outcome = "The bounded owner-requested implementation was queued.";
   } else if (command === "fix") {
+    if (!issue.pull_request)
+      throw new Error("/codekeeper fix requires a pull request");
     const payload = {
       number,
       authorization_mode: "owner",
       requested_by: actor,
     };
-    if (issue.pull_request) {
-      const pull = await github.getPull(number);
-      payload.head_sha = pull.head.sha;
-      if (event.comment?.pull_request_review_id) {
-        const threads = await github.listPullReviewThreads(number);
-        const thread = threads.find((candidate) =>
-          (candidate.comments?.nodes ?? []).some(
-            (comment) => comment.databaseId === event.comment.id,
-          ),
-        );
-        if (thread) payload.review_thread_ids = [thread.id];
-      }
+    const pull = await github.getPull(number);
+    payload.head_sha = pull.head.sha;
+    if (event.comment?.pull_request_review_id) {
+      const threads = await github.listPullReviewThreads(number);
+      const thread = threads.find((candidate) =>
+        (candidate.comments?.nodes ?? []).some(
+          (comment) => comment.databaseId === event.comment.id,
+        ),
+      );
+      if (thread) payload.review_thread_ids = [thread.id];
     }
     await dispatchAfterUnpausing(
       github,

@@ -1046,6 +1046,46 @@ test("plain-prompt updates derive the bot-login requirement from the effective p
   assert.equal(plan.variables.some((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"), false);
 });
 
+test("plain-prompt updates validate capabilities after rendering the selected workflows", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review", "fix"],
+      capabilities: ["reviewRepair"]
+    })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  assert.equal(JSON.parse(contents[".github/codekeeper.json"]).review.autoRepair, true);
+
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: initial.modes,
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-acme[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: answers({
+      modes: ["review"],
+      capabilities: []
+    })
+  });
+
+  assert.equal(update.policy.review.autoRepair, false);
+  assert.equal(update.files.some((file) => file.path === MODES.fix.target && file.delete), true);
+});
+
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {
   const url = new URL(appRegistrationUrl({
     repository: "Acme/Widget",

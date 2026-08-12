@@ -10,7 +10,8 @@ import {
   MODE_IDS,
   MODES,
   POLICY_TARGET,
-  SETUP_BRANCH
+  SETUP_BRANCH,
+  SOURCE_REPOSITORY
 } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 import { requireSuccess } from "./command-runner.mjs";
@@ -19,6 +20,23 @@ import { upgradePolicy } from "./policy.mjs";
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const GITHUB_WORKFLOW_REFERENCE = /(?:coryparrry\/Codekeeper|\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-)/i;
+
+function isInstalledCodekeeperWorkflow(source, mode) {
+  const activeUses = source
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^(?:-\s+)?uses:/.test(line))
+    .map((line) => line.replace(/^-\s+/, ""));
+  const actionPrefix = `uses: ${SOURCE_REPOSITORY}/tools/codekeeper@`;
+  const workflowPrefix = `uses: ${SOURCE_REPOSITORY}/.github/workflows/codekeeper-${mode}.yml@`;
+  if (activeUses.length !== 2) return false;
+  const action = activeUses.find((line) => line.startsWith(actionPrefix));
+  const workflow = activeUses.find((line) => line.startsWith(workflowPrefix));
+  if (!action || !workflow) return false;
+  const actionCommit = action.slice(actionPrefix.length);
+  const workflowCommit = workflow.slice(workflowPrefix.length);
+  return FULL_SHA.test(actionCommit) && actionCommit === workflowCommit;
+}
 
 function callerBoolean(source, name) {
   const matches = [...source.matchAll(new RegExp(`^\\s*${name}:\\s*(true|false)\\s*$`, "gm"))];
@@ -187,6 +205,10 @@ export async function assertNoInstallationFiles(root, {
         throw new InstallerError("A case-colliding or symlinked Codekeeper workflow exists.", { code: "PATH_COLLISION" });
       }
       if (!allowExisting) throw new InstallerError("A Codekeeper workflow already exists.", { code: "EXISTING_INSTALLATION" });
+      const source = await fsImpl.readFile(path.join(workflowsRoot, entry.name), "utf8");
+      if (!isInstalledCodekeeperWorkflow(source, knownWorkflow.mode)) {
+        throw new InstallerError(`Existing workflow ${entry.name} is not an installed Codekeeper caller.`, { code: "PATH_COLLISION" });
+      }
       continue;
     }
     if (entry.isSymbolicLink()) {
