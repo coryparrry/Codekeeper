@@ -8,6 +8,7 @@ import { upgradePolicy } from "../src/policy.mjs";
 import { editProfileWithEditor } from "../src/settings-tui.mjs";
 import {
   createEditableSettings,
+  parseSettingValue,
   setSetting,
   settingsAnswers,
   settingsRows,
@@ -91,6 +92,18 @@ test("changing a provider selects a compatible default model", async () => {
 
   const openrouter = setSetting(settings, provider, "openrouter");
   assert.equal(openrouter.policy.ai.agents.review.model, "openai/gpt-5.6-sol");
+
+  const customSettings = structuredClone(settings);
+  customSettings.policy.ai.providers.custom = {
+    baseUrl: "https://models.example/v1",
+    apiKeySecret: "CUSTOM_API_KEY",
+    supportsReasoningEffort: false
+  };
+  const customProvider = row(customSettings, "policy:ai.agents.review.provider");
+  const currentModel = customSettings.policy.ai.agents.review.model;
+  const custom = setSetting(customSettings, customProvider, "custom");
+  assert.equal(custom.policy.ai.agents.review.model, currentModel);
+  assert.equal(custom.policy.ai.agents.review.effort, "none");
 });
 
 test("settings reject runtime-incompatible model settings and managed-label removal", async () => {
@@ -240,6 +253,9 @@ test("settings preserve runtime-valid optional fields and display-name limits", 
   }
   validateEditableSettings(optional, policy);
   assert.deepEqual(optional.policy.projectInvariants, []);
+  const workspaceModel = row(optional, "policy:ai.agents.review.workspace.model");
+  assert.equal(workspaceModel.kind, "string");
+  assert.equal(parseSettingValue(workspaceModel, "gpt-5.6-sol"), "gpt-5.6-sol");
 });
 
 test("fresh settings can enable capabilities after bundled defaults are verified", async () => {
