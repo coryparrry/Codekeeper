@@ -60,7 +60,7 @@ for (const mode of ["audit", "fix"]) {
       const configSha256 = "a".repeat(64);
       await writeFile(contextPath, JSON.stringify({
         mode,
-        repository: "acme/example",
+        repository: process.env.GITHUB_REPOSITORY ?? "acme/example",
         configSha256,
         baseSha,
       }), "utf8");
