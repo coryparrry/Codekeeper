@@ -428,7 +428,16 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     automationIdentity,
     dryRun
   });
-  const feedbackReplies = await replyToReviewFeedback({ github, context, result, automationIdentity, dryRun });
+  const feedbackReplies = await replyToReviewFeedback({
+    github,
+    context,
+    result,
+    automationIdentity,
+    dryRun,
+    retiredFingerprints: deferredIssues
+      .filter((item) => item.state === "closed" || item.state === "would-close")
+      .map((item) => item.fingerprint)
+  });
   let autoMergeResult = {
     enabled: false,
     disabled: suspension.disabled,
@@ -493,29 +502,44 @@ function rootReviewCommentIds(sources) {
     .filter((commentId) => Number.isSafeInteger(commentId) && commentId > 0))];
 }
 
-export async function replyToReviewFeedback({ github, context, result, automationIdentity, dryRun = false }) {
+export async function replyToReviewFeedback({ github, context, result, automationIdentity, dryRun = false, retiredFingerprints = [] }) {
   const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
   const replies = [];
   for (const feedback of result.reviewFeedback.filter((item) => item.disposition !== "defer")) {
-    const commentIds = rootReviewCommentIds(feedback.sourceKeys.map((key) => sourcesByKey.get(key)).filter(Boolean));
-    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.sourceKeys);
     const label = feedback.disposition === "fix_now" ? "Fix now"
       : feedback.disposition === "fix_if_cheap" ? "Fix if cheap"
         : "No action";
     const body = `${label}: ${sanitizeMarkdown(feedback.explanation)}\n\nValidation: ${sanitizeMarkdown(feedback.validation)}`;
-    if (commentIds.length === 0) {
-      if (!dryRun) {
-        await github.upsertMarkerComment(context.pullRequest.number, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
+    for (const sourceKey of [...new Set(feedback.sourceKeys)]) {
+      const source = sourcesByKey.get(sourceKey);
+      const commentIds = rootReviewCommentIds(source ? [source] : []);
+      const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, sourceKey);
+      if (commentIds.length === 0) {
+        if (!dryRun) {
+          await github.upsertMarkerComment(context.pullRequest.number, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
+        }
+        replies.push({ problemKey: feedback.problemKey, commentId: null, disposition: feedback.disposition, dryRun });
+        continue;
       }
-      replies.push({ problemKey: feedback.problemKey, commentId: null, disposition: feedback.disposition, dryRun });
-      continue;
-    }
-    for (const commentId of commentIds) {
-      if (!dryRun) {
-        await github.upsertReviewReply(context.pullRequest.number, commentId, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
+      for (const commentId of commentIds) {
+        if (!dryRun) {
+          await github.upsertReviewReply(context.pullRequest.number, commentId, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
+        }
+        replies.push({ problemKey: feedback.problemKey, commentId, disposition: feedback.disposition, dryRun });
       }
-      replies.push({ problemKey: feedback.problemKey, commentId, disposition: feedback.disposition, dryRun });
     }
+  }
+  const retiredBody = "No longer current: this prior review-feedback disposition was replaced by the complete current review publication.";
+  for (const fingerprint of [...new Set(retiredFingerprints)]) {
+    if (!dryRun) {
+      await github.retireReviewFeedbackReply(
+        context.pullRequest.number,
+        reviewFeedbackReplyMarker(fingerprint),
+        retiredBody,
+        automationIdentity
+      );
+    }
+    replies.push({ problemKey: null, commentId: null, disposition: "retired", dryRun });
   }
   return replies;
 }
@@ -526,8 +550,11 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
   const existing = await github.listMaintenanceIssues("codekeeper:deferred");
   const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
   const published = [];
-  const activeFingerprints = new Set(deferred.map((feedback) =>
-    deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.sourceKeys)
+  const deferredSources = deferred.flatMap((feedback) =>
+    [...new Set(feedback.sourceKeys)].map((sourceKey) => ({ feedback, sourceKey }))
+  );
+  const activeFingerprints = new Set(deferredSources.map(({ sourceKey }) =>
+    deferredReviewFingerprint(context.repository, context.pullRequest.number, sourceKey)
   ));
   const origin = `- Pull request: [#${context.pullRequest.number}](${context.pullRequest.url})`;
   for (const issue of ownerRequested ? [] : existing) {
@@ -556,19 +583,20 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
     });
     published.push({ fingerprint: markerMatch[1], state: "closed", issueNumber: issue.number });
   }
-  for (const feedback of deferred) {
-    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.sourceKeys);
+  for (const { feedback, sourceKey } of deferredSources) {
+    const scopedFeedback = { ...feedback, sourceKeys: [sourceKey] };
+    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, sourceKey);
     const marker = deferredReviewMarker(fingerprint);
     const match = existing.find((issue) => isTrustedMaintenanceIssue(issue, {
       marker,
       botLogin: automationIdentity.login,
       botId: automationIdentity.id
     }));
-    const sources = feedback.sourceKeys.map((key) => sourcesByKey.get(key)).filter(Boolean);
+    const sources = [sourcesByKey.get(sourceKey)].filter(Boolean);
     const labels = ["codekeeper:deferred", issueTypeLabel(feedback.type)];
     const title = singleLine(`[Deferred from PR #${context.pullRequest.number}] ${feedback.explanation}`, 256);
     const body = renderDeferredIssue({
-      feedback,
+      feedback: scopedFeedback,
       pullRequest: context.pullRequest,
       sources,
       marker,

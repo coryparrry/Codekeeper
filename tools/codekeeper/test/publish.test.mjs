@@ -7,7 +7,7 @@ import test from "node:test";
 import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/lib/github.mjs";
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
-import { deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
+import { deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "../src/lib/markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
 import { completeReviewFeedback } from "../src/lib/prepare.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
@@ -202,7 +202,7 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
     type: "testing",
     explanation: "Add deterministic timeout regression coverage.",
     validation: "The current head still lacks the timeout case.",
-    sourceKeys: ["review_comment:41", "review_comment:42"],
+    sourceKeys: ["review_comment:41"],
     threadIds: ["PRRT_thread"]
   };
   const fingerprint = deferredReviewFingerprint(context.repository, 7, feedback.sourceKeys);
@@ -260,6 +260,78 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
     ownerRequested: true,
     dryRun: true
   })).map((item) => item.state), ["would-update"]);
+});
+
+test("deferred feedback identity stays per-source when the model regroups findings", async () => {
+  const context = {
+    repository: "owner/repository",
+    runUrl: "https://github.com/owner/repository/actions/runs/9",
+    pullRequest: {
+      number: 7,
+      url: "https://github.com/owner/repository/pull/7",
+      reviewFeedback: [
+        { sourceKey: "review:41", author: "reviewer", url: "https://github.com/owner/repository/pull/7#pullrequestreview-41" },
+        { sourceKey: "review:42", author: "reviewer", url: "https://github.com/owner/repository/pull/7#pullrequestreview-42" }
+      ]
+    }
+  };
+  const existing = [];
+  const created = [];
+  const updated = [];
+  const github = {
+    async listMaintenanceIssues() { return existing; },
+    async ensureLabels() {},
+    async createIssue(input) {
+      const issue = {
+        ...input,
+        number: 50 + created.length,
+        html_url: `https://github.com/owner/repository/issues/${50 + created.length}`,
+        state: "open",
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      };
+      created.push(issue);
+      return issue;
+    },
+    async updateIssue(number, input) {
+      updated.push({ number, input });
+      const issue = existing.find((candidate) => candidate.number === number);
+      Object.assign(issue, input);
+      return issue;
+    },
+    async replaceManagedLabels() {},
+    async upsertMarkerComment() {}
+  };
+  const grouped = {
+    problemKey: "grouped",
+    disposition: "defer",
+    type: "testing",
+    explanation: "Track both sources.",
+    validation: "Both remain current.",
+    sourceKeys: ["review:41", "review:42"],
+    threadIds: []
+  };
+
+  await upsertDeferredReviewFeedback({
+    github,
+    context,
+    result: { reviewFeedback: [grouped] },
+    config,
+    automationIdentity: identity
+  });
+  assert.equal(created.length, 2);
+
+  await upsertDeferredReviewFeedback({
+    github,
+    context,
+    result: { reviewFeedback: [
+      { ...grouped, problemKey: "split-41", sourceKeys: ["review:41"] },
+      { ...grouped, problemKey: "split-42", sourceKeys: ["review:42"] }
+    ] },
+    config,
+    automationIdentity: identity
+  });
+  assert.equal(created.length, 2);
+  assert.equal(updated.length, 2);
 });
 
 test("deferred review issues close when their source is no longer deferred", async () => {
@@ -440,10 +512,12 @@ test("ignored and repairable inline feedback receive idempotent replies without 
   });
   assert.deepEqual(published.map(({ commentId, disposition }) => ({ commentId, disposition })), [
     { commentId: 41, disposition: "ignore" },
+    { commentId: 41, disposition: "ignore" },
     { commentId: 43, disposition: "fix_now" }
   ]);
   assert.match(replies[0].body, /^No action:/);
-  assert.match(replies[1].body, /^Fix now:/);
+  assert.match(replies[1].body, /^No action:/);
+  assert.match(replies[2].body, /^Fix now:/);
 });
 
 test("reclassified review-body feedback updates its PR-level deferred reply", async () => {
@@ -480,6 +554,31 @@ test("reclassified review-body feedback updates its PR-level deferred reply", as
   assert.match(comments[0].body, /^Fix now:/);
   assert.equal(published[0].commentId, null);
   assert.equal(published[0].disposition, "fix_now");
+});
+
+test("complete feedback publication retires disappeared PR-level replies", async () => {
+  const fingerprint = deferredReviewFingerprint("owner/repository", 7, "review:99");
+  const marker = reviewFeedbackReplyMarker(fingerprint);
+  const updates = [];
+  const published = await replyToReviewFeedback({
+    github: {
+      async retireReviewFeedbackReply(number, retiredMarker, body) {
+        updates.push({ number, marker: retiredMarker, body });
+      }
+    },
+    context: {
+      repository: "owner/repository",
+      pullRequest: { number: 7, reviewFeedback: [] }
+    },
+    result: { reviewFeedback: [] },
+    automationIdentity: identity,
+    retiredFingerprints: [fingerprint]
+  });
+
+  assert.equal(updates[0].number, 7);
+  assert.match(updates[0].body, /^No longer current:/);
+  assert.equal(updates[0].marker, marker);
+  assert.equal(published[0].disposition, "retired");
 });
 
 test("review publication rejects feedback that changed after preparation", async () => {
