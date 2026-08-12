@@ -332,7 +332,7 @@ test("profile editor receives the generated path without a command shell", async
   const edited = await editProfileWithEditor({
     profile: "pr-reviewer",
     source: "# Reviewer\n",
-    environment: { EDITOR: "test-editor" },
+    environment: { EDITOR: "test-editor --wait --reuse-window" },
     suspendTerminal: (callback) => callback(),
     spawnEditor(editor, args, options) {
       invocation = { editor, args, options };
@@ -348,7 +348,8 @@ test("profile editor receives the generated path without a command shell", async
 
   assert.equal(edited, "# Reviewer\n");
   assert.equal(invocation.editor, "test-editor");
-  assert.equal(invocation.args.length, 1);
+  assert.deepEqual(invocation.args.slice(0, -1), ["--wait", "--reuse-window"]);
+  assert.equal(invocation.args.length, 3);
   assert.equal(invocation.options.shell, false);
 });
 

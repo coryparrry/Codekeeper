@@ -34,6 +34,51 @@ function fitLine(value, width) {
   return `${[...text].slice(0, Math.max(1, width - 1)).join("")}…`;
 }
 
+function parseEditorCommand(command) {
+  const argv = [];
+  let token = "";
+  let tokenStarted = false;
+  let quote = null;
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else if (character === "\\" && quote === '"' && ['"', "\\"].includes(command[index + 1])) {
+        token += command[index + 1];
+        index += 1;
+      } else {
+        token += character;
+      }
+      tokenStarted = true;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (tokenStarted) argv.push(token);
+      token = "";
+      tokenStarted = false;
+      continue;
+    }
+    if (["'", '"'].includes(character)) {
+      quote = character;
+      tokenStarted = true;
+      continue;
+    }
+    if (character === "\\" && command[index + 1] && /[\s'"\\]/.test(command[index + 1])) {
+      token += command[index + 1];
+      tokenStarted = true;
+      index += 1;
+      continue;
+    }
+    token += character;
+    tokenStarted = true;
+  }
+  if (quote) throw new InstallerError("$EDITOR or $VISUAL contains an unterminated quote.", { code: "EDITOR_INVALID" });
+  if (tokenStarted) argv.push(token);
+  if (!argv[0]) throw new InstallerError("Set $EDITOR or $VISUAL to a valid editor command.", { code: "EDITOR_INVALID" });
+  return argv;
+}
+
 export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [settings, setSettings] = useState(spec.settings);
   const [advanced, setAdvanced] = useState(false);
@@ -189,7 +234,8 @@ export async function editProfileWithEditor({ profile, source, environment = pro
     const status = await suspendTerminal(() => runEditor
       ? runEditor(editor, file)
       : new Promise((resolve, reject) => {
-        const child = spawnEditor(editor, [file], { stdio: "inherit", shell: false });
+        const [executable, ...arguments_] = parseEditorCommand(editor);
+        const child = spawnEditor(executable, [...arguments_, file], { stdio: "inherit", shell: false });
         child.once("error", reject);
         child.once("exit", (code, signal) => resolve(signal ? 1 : code ?? 1));
       }));
