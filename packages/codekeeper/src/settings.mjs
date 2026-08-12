@@ -285,6 +285,7 @@ function validateJson(value, name, depth = 0) {
   if (value === null || typeof value !== "object" || [...entries].length > 128) throw new InstallerError(`${name} is invalid.`, { code: "SETTING_INVALID" });
   for (const [key, child] of Array.isArray(value) ? value.entries() : Object.entries(value)) {
     if (["__proto__", "constructor", "prototype"].includes(String(key))) throw new InstallerError(`${name} contains a forbidden key.`, { code: "SETTING_INVALID" });
+    if (!Array.isArray(value) && String(key).length > 16_384) throw new InstallerError(`${name} contains an overlong key.`, { code: "SETTING_INVALID" });
     validateJson(child, `${name}.${key}`, depth + 1);
   }
 }
