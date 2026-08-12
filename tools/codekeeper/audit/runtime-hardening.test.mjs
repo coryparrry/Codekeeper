@@ -19,6 +19,24 @@ function setEnvironment(name, value) {
   };
 }
 
+async function processExecutionState(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if (error?.code === "ESRCH") return "missing";
+    throw error;
+  }
+  if (process.platform !== "linux") return "running";
+  try {
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const commandEnd = stat.lastIndexOf(")");
+    return commandEnd >= 0 ? stat.slice(commandEnd + 2).split(" ", 1)[0] : "running";
+  } catch (error) {
+    if (error?.code === "ENOENT") return "missing";
+    throw error;
+  }
+}
+
 test("validation commands cannot inherit Codekeeper provider credentials", async () => {
   const restoreModel = setEnvironment("CODEKEEPER_MODEL_API_KEY", "audit-canary-model");
   const restoreTrace = setEnvironment("CODEKEEPER_TRACE_API_KEY", "audit-canary-trace");
@@ -182,7 +200,10 @@ test("validation escalation kills a detached descendant after launcher pipes clo
     descendantPid = Number(await readFile(pidPath, "utf8"));
     await new Promise((resolve) => setTimeout(resolve, 450));
     await assert.rejects(readFile(sentinelPath), { code: "ENOENT" });
-    assert.throws(() => process.kill(descendantPid, 0), { code: "ESRCH" });
+    assert.ok(
+      ["missing", "Z"].includes(await processExecutionState(descendantPid)),
+      "detached descendant remained capable of execution"
+    );
   } finally {
     if (Number.isSafeInteger(descendantPid)) {
       try { process.kill(descendantPid, "SIGKILL"); } catch {}

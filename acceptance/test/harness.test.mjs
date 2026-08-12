@@ -661,6 +661,27 @@ test("review rejects an explicitly selected run created before the supplied trig
   assert.equal(result.passed, false);
 });
 
+test("review requires a complete timezone-qualified trigger instant", async () => {
+  for (const boundary of ["1", "2026-08-08", "2026-08-08T00:00:00"]) {
+    await assert.rejects(
+      runScenario({
+        scenario: "review-introduced-defect",
+        options: await manualRunOptions({
+          pr: "12",
+          "run-id": "77",
+          "run-created-after": boundary,
+          "app-login": APP.login,
+          "app-id": APP.id
+        }),
+        gh: fakeGh({ scenario: "review-introduced-defect" }).runner,
+        now: () => new Date(NOW),
+        sleep: async () => {}
+      }),
+      /--run-created-after must be an ISO-8601 timestamp/
+    );
+  }
+});
+
 test("issue triage rejects stale publisher-run evidence and wrong durable titles", async () => {
   const good = fakeGh({ scenario: "issue-triage-related" });
   const pass = await runScenario({ scenario: "issue-triage-related", options: await manualRunOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });

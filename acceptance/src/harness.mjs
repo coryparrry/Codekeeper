@@ -10,6 +10,7 @@ const REPOSITORY_PATTERN = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
 const SHA = new RegExp(`^${SHA_PATTERN}$`, "i");
 const REPOSITORY = new RegExp(`^${REPOSITORY_PATTERN}$`);
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
+const ISO_8601_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 const SAFE_PREFIX = /^(?!\/)(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)+$/;
 const MAX_REPOSITORY_LENGTH = 140;
 const MAX_GITHUB_URL_LENGTH = 2048;
@@ -232,7 +233,9 @@ function decodeBase64(text, label) {
 }
 
 function validTimestamp(value) {
-  return typeof value === "string" && Number.isFinite(Date.parse(value));
+  return typeof value === "string"
+    && ISO_8601_INSTANT.test(value)
+    && Number.isFinite(Date.parse(value));
 }
 
 function happensOnOrAfter(value, boundary) {
