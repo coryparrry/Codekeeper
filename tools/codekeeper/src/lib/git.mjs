@@ -300,12 +300,47 @@ function appendOutputTail(current, chunk) {
   return Buffer.concat([retained, bytes]);
 }
 
-function signalValidationProcess(child, signal) {
+function validationDescendantProcessIds(rootPid) {
+  if (process.platform === "win32" || !rootPid) return [];
+  const result = spawnSync("ps", ["-Ao", "pid=,ppid="], {
+    encoding: "utf8",
+    timeout: VALIDATION_KILL_GRACE_MS,
+    maxBuffer: 1024 * 1024
+  });
+  if (result.error || result.status !== 0) return [];
+  const children = new Map();
+  for (const line of result.stdout.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const parentPid = Number(match[2]);
+    const siblings = children.get(parentPid) ?? [];
+    siblings.push(pid);
+    children.set(parentPid, siblings);
+  }
+  const descendants = [];
+  const pending = [...(children.get(rootPid) ?? [])];
+  while (pending.length > 0) {
+    const pid = pending.pop();
+    descendants.push(pid);
+    pending.push(...(children.get(pid) ?? []));
+  }
+  return descendants.reverse();
+}
+
+function signalValidationProcess(child, descendants, signal) {
   try {
     if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
     else child.kill(signal);
   } catch (error) {
     if (error.code !== "ESRCH") throw error;
+  }
+  for (const pid of descendants) {
+    try {
+      process.kill(pid, signal);
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
   }
 }
 
@@ -321,33 +356,46 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
     let timedOut = false;
+    let descendants = [];
+    let settled = false;
     let killTimer;
+    const settle = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      clearTimeout(killTimer);
+      callback();
+    };
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
       try {
-        signalValidationProcess(child, "SIGTERM");
+        descendants = validationDescendantProcessIds(child.pid);
+        signalValidationProcess(child, descendants, "SIGTERM");
         killTimer = setTimeout(() => {
           try {
-            signalValidationProcess(child, "SIGKILL");
+            descendants = [...new Set([...descendants, ...validationDescendantProcessIds(child.pid)])];
+            signalValidationProcess(child, descendants, "SIGKILL");
           } catch (error) {
-            reject(error);
+            settle(() => reject(error));
           }
         }, VALIDATION_KILL_GRACE_MS);
       } catch (error) {
-        reject(error);
+        settle(() => reject(error));
       }
     }, timeoutMs);
     child.stdout.on("data", (chunk) => { stdout = appendOutputTail(stdout, chunk); });
     child.stderr.on("data", (chunk) => { stderr = appendOutputTail(stderr, chunk); });
     child.once("error", (error) => {
-      clearTimeout(timeoutTimer);
-      clearTimeout(killTimer);
-      reject(error);
+      settle(() => reject(error));
+    });
+    child.once("exit", (status, signal) => {
+      if (!timedOut) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+      settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
     });
     child.once("close", (status, signal) => {
-      clearTimeout(timeoutTimer);
-      clearTimeout(killTimer);
-      resolve({ status, signal, stdout, stderr, timedOut });
+      settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
     });
   });
 }

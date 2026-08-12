@@ -638,11 +638,13 @@ test("issue publication does not close a duplicate after a concurrent user comme
   let issueClosed = false;
   let updatedAt = context.issue.updatedAt;
   let labels = [];
+  let comments = [];
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
       if (number === 9) return { number, state: "open" };
       return { number, title: "Report", state: "open", updated_at: updatedAt, labels };
     },
+    async listIssueComments() { return structuredClone(comments); },
     async ensureLabels() {},
     async replaceManagedLabels(_number, desiredLabels) {
       labels = desiredLabels.map((name) => ({ name }));
@@ -652,13 +654,15 @@ test("issue publication does not close a duplicate after a concurrent user comme
       triageCommentPublished = true;
       const ownedUpdatedAt = "2026-08-05T10:01:00Z";
       updatedAt = "2026-08-05T10:01:30Z";
-      return {
+      const mutation = {
         id: 70,
         body: `${body}\n${marker}`,
         created_at: ownedUpdatedAt,
         updated_at: ownedUpdatedAt,
         user: { id: Number(identity.id), login: identity.login, type: "Bot" }
       };
+      comments = [mutation];
+      return mutation;
     },
     async createComment(_number, body) { duplicateCommentPublished ||= body.includes("Closing as a duplicate"); },
     async updateIssue() { issueClosed = true; }
@@ -674,6 +678,80 @@ test("issue publication does not close a duplicate after a concurrent user comme
       /changed while Codekeeper reconciled comments/
     );
     assert.equal(triageCommentPublished, true);
+    assert.equal(duplicateCommentPublished, false);
+    assert.equal(issueClosed, false);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("issue publication rejects a concurrent comment sharing its mutation timestamp", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-comment-collision-test-"));
+  const configSha256 = "b".repeat(64);
+  const issueConfig = structuredClone(config);
+  issueConfig.issues.closeExactDuplicates = true;
+  const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7006", runUrl: "https://github.com/owner/repository/actions/runs/7006", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
+  const result = {
+    mode: "issue", summary: "Exact duplicate.", type: "bug", priority: "p3", labels: [], actionable: true,
+    missingInformation: [], duplicateOf: 9, duplicateConfidence: "high", implementationRecommendation: "manual", comment: "Thanks for the report."
+  };
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  let updatedAt = context.issue.updatedAt;
+  let labels = [];
+  let comments = [];
+  let duplicateCommentPublished = false;
+  let issueClosed = false;
+  const restoreGitHub = replaceGitHubMethods({
+    async getIssue(number) {
+      if (number === 9) return { number, state: "open" };
+      return { number, title: "Report", state: "open", updated_at: updatedAt, labels };
+    },
+    async listIssueComments() { return structuredClone(comments); },
+    async ensureLabels() {},
+    async replaceManagedLabels(_number, desiredLabels) {
+      labels = desiredLabels.map((name) => ({ name }));
+      updatedAt = "2026-08-05T10:00:30Z";
+    },
+    async upsertMarkerComment(_number, marker, body) {
+      updatedAt = "2026-08-05T10:01:00Z";
+      const mutation = {
+        id: 70,
+        body: `${body}\n${marker}`,
+        created_at: updatedAt,
+        updated_at: updatedAt,
+        user: { id: Number(identity.id), login: identity.login, type: "Bot" }
+      };
+      comments = [
+        mutation,
+        {
+          id: 71,
+          body: "One more detail from the reporter.",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          user: { id: 1, login: "reporter", type: "User" }
+        }
+      ];
+      return mutation;
+    },
+    async createComment(_number, body) { duplicateCommentPublished ||= body.includes("Closing as a duplicate"); },
+    async updateIssue() { issueClosed = true; }
+  });
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "issue", context, result, configSha256, artifactConfig: issueConfig
+    });
+    await assert.rejects(
+      publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
+      /changed while Codekeeper reconciled comments/
+    );
     assert.equal(duplicateCommentPublished, false);
     assert.equal(issueClosed, false);
   } finally {

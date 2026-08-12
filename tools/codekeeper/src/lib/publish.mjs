@@ -163,6 +163,56 @@ function issuePublicationSubject(issue) {
   };
 }
 
+function issuePublicationComment(comment, issueNumber) {
+  const id = Number(comment?.id);
+  const createdAt = comment?.created_at;
+  const updatedAt = comment?.updated_at;
+  if (
+    !Number.isSafeInteger(id) || id <= 0 ||
+    typeof comment?.body !== "string" ||
+    typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt)) ||
+    typeof updatedAt !== "string" || !Number.isFinite(Date.parse(updatedAt))
+  ) {
+    throw new Error(`Issue #${issueNumber} has invalid comment metadata`);
+  }
+  return {
+    id,
+    body: comment.body,
+    createdAt,
+    updatedAt,
+    author: {
+      id: comment?.user?.id ?? null,
+      login: comment?.user?.login ?? null,
+      type: comment?.user?.type ?? null
+    }
+  };
+}
+
+function issueCommentInventory(comments, issueNumber) {
+  if (!Array.isArray(comments)) throw new Error(`Issue #${issueNumber} has invalid comment inventory`);
+  const inventory = comments
+    .map((comment) => issuePublicationComment(comment, issueNumber))
+    .sort((left, right) => left.id - right.id);
+  if (new Set(inventory.map((comment) => comment.id)).size !== inventory.length) {
+    throw new Error(`Issue #${issueNumber} has duplicate comment metadata`);
+  }
+  return inventory;
+}
+
+function assertExpectedOwnedCommentInventory(before, after, comment, expectedBody, identity, issueNumber) {
+  const mutation = issuePublicationComment(comment, issueNumber);
+  if (!matchesAutomationActor(comment.user, identity) || mutation.body !== expectedBody) {
+    throw new Error(`Issue #${issueNumber} changed while Codekeeper reconciled comments`);
+  }
+  const expected = new Map(issueCommentInventory(before, issueNumber).map((item) => [item.id, item]));
+  expected.set(mutation.id, mutation);
+  const actual = issueCommentInventory(after, issueNumber);
+  const expectedInventory = [...expected.values()].sort((left, right) => left.id - right.id);
+  if (JSON.stringify(actual) !== JSON.stringify(expectedInventory)) {
+    throw new Error(`Issue #${issueNumber} changed while Codekeeper reconciled comments`);
+  }
+}
+
 function assertExpectedManagedLabelMutation(before, after, desired, managed) {
   if (after?.pull_request || after?.state !== "open") throw new Error(`Issue #${before.number} is no longer eligible`);
   if (JSON.stringify(issuePublicationSubject(after)) !== JSON.stringify(issuePublicationSubject(before))) {
@@ -182,7 +232,7 @@ function assertExpectedManagedLabelMutation(before, after, desired, managed) {
   return after;
 }
 
-function assertExpectedOwnedCommentMutation(before, after, comment, expectedBody, identity, desired, managed) {
+function assertExpectedOwnedCommentMutation(before, after, comment, expectedBody, identity, desired, managed, commentsBefore, commentsAfter) {
   const issue = assertExpectedManagedLabelMutation(before, after, desired, managed);
   const commentUpdatedAt = comment?.updated_at ?? comment?.created_at;
   if (
@@ -194,6 +244,7 @@ function assertExpectedOwnedCommentMutation(before, after, comment, expectedBody
   ) {
     throw new Error(`Issue #${before.number} changed while Codekeeper reconciled comments`);
   }
+  assertExpectedOwnedCommentInventory(commentsBefore, commentsAfter, comment, expectedBody, identity, before.number);
   return issue;
 }
 
@@ -638,14 +689,17 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     managedIssueLabels(config)
   );
   const markerBody = `${comment}\n${ISSUE_TRIAGE_MARKER}`;
+  const closingDuplicate = config.issues.closeExactDuplicates && result.duplicateOf && result.duplicateConfidence === "high";
+  const commentsBeforeMarker = closingDuplicate ? await github.listIssueComments(issue.number) : null;
   const markerMutation = await github.upsertMarkerComment(
     issue.number,
     ISSUE_TRIAGE_MARKER,
     comment,
     automationIdentity
   );
-  const acceptOwnedCommentUpdate = async (before, commentMutation = null, expectedBody = null) => {
+  const acceptOwnedCommentUpdate = async (before, commentMutation = null, expectedBody = null, commentsBefore = null) => {
     const current = await github.getIssue(issue.number);
+    const commentsAfter = commentsBefore ? await github.listIssueComments(issue.number) : null;
     const after = commentMutation
       ? assertExpectedOwnedCommentMutation(
         before,
@@ -654,17 +708,19 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
         expectedBody,
         automationIdentity,
         desiredLabels,
-        managedIssueLabels(config)
+        managedIssueLabels(config),
+        commentsBefore,
+        commentsAfter
       )
       : assertExpectedManagedLabelMutation(before, current, desiredLabels, managedIssueLabels(config));
     expectedUpdatedAt = after.updated_at;
     return after;
   };
-  const closingDuplicate = config.issues.closeExactDuplicates && result.duplicateOf && result.duplicateConfidence === "high";
   let afterOwnedComment = await acceptOwnedCommentUpdate(
     afterLabelMutation,
     closingDuplicate ? markerMutation : null,
-    closingDuplicate ? markerBody : null
+    closingDuplicate ? markerBody : null,
+    commentsBeforeMarker
   );
 
   if (result.duplicateOf === issue.number) {
@@ -675,8 +731,9 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     await currentIssue();
     const duplicate = await currentOpenIssue(github, duplicateContext, "duplicate assessment");
     const duplicateBody = `Closing as a duplicate of #${duplicate.number}.`;
+    const commentsBeforeDuplicate = await github.listIssueComments(issue.number);
     const duplicateMutation = await github.createComment(issue.number, duplicateBody);
-    afterOwnedComment = await acceptOwnedCommentUpdate(afterOwnedComment, duplicateMutation, duplicateBody);
+    afterOwnedComment = await acceptOwnedCommentUpdate(afterOwnedComment, duplicateMutation, duplicateBody, commentsBeforeDuplicate);
     await currentIssue();
     await currentOpenIssue(github, duplicateContext, "duplicate assessment");
     await github.updateIssue(issue.number, { state: "closed", state_reason: "not_planned" });

@@ -11,6 +11,21 @@ export { providerCompatibleJsonSchema } from "./schemas.mjs";
 
 const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 5 * 60 * 1000;
 
+async function closeProviderWithDeadline(modelProvider, timeoutMs) {
+  const timeoutError = new Error(`Codekeeper provider cleanup timed out after ${timeoutMs}ms`);
+  let timer;
+  try {
+    await Promise.race([
+      modelProvider.close(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(timeoutError), timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const MODE_NAMES = Object.freeze({
   review: "Pull request reviewer",
   audit: "Repository auditor",
@@ -597,7 +612,7 @@ export async function runConfiguredAgent({
   } finally {
     if (modelProvider && typeof modelProvider.close === "function") {
       try {
-        await modelProvider.close();
+        await closeProviderWithDeadline(modelProvider, turnTimeoutMs);
       } catch (error) {
         reportDiagnostic(diagnostic, "provider-close", lastFailureAttempt);
         // The provider close failure is the final runtime result at this boundary.

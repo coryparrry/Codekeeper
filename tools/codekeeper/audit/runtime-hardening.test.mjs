@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runConfiguredAgent } from "../src/lib/agents-runtime.mjs";
 import { runValidationCommands } from "../src/lib/git.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -53,6 +54,45 @@ test("a hung validation command is terminated within the workflow budget", async
   assert.equal(outcome.timedOut, false, "validation execution exceeded its bounded deadline");
   assert.equal(outcome.signal, null, "validation execution was killed instead of failing closed");
   assert.notEqual(outcome.code, null, "validation execution did not report a bounded exit");
+});
+
+test("a validation descendant cannot escape the deadline in a new process group", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-descendant-"));
+  const fixturePath = path.join(directory, "escaped-descendant.mjs");
+  const gitModuleUrl = new URL("../src/lib/git.mjs", import.meta.url).href;
+  await writeFile(fixturePath, `
+    import { spawn } from "node:child_process";
+    spawn(process.execPath, ["-e", "setTimeout(() => {}, 2000)"], {
+      detached: true,
+      stdio: ["ignore", 1, 2]
+    });
+    setTimeout(() => {}, 2000);
+  `);
+  const validationCommand = `${JSON.stringify(process.execPath)} ${JSON.stringify(fixturePath)}`;
+  const script = `import { runValidationCommands } from ${JSON.stringify(gitModuleUrl)}; await runValidationCommands([${JSON.stringify(validationCommand)}], process.cwd(), { timeoutMs: 25 });`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: repositoryRoot,
+    stdio: ["ignore", "ignore", "ignore"]
+  });
+  try {
+    const outcome = await new Promise((resolve) => {
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+      }, 750);
+      child.once("close", (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal, timedOut });
+      });
+    });
+    assert.equal(outcome.timedOut, false, "escaped validation descendant exceeded its bounded deadline");
+    assert.equal(outcome.signal, null, "validation execution was killed instead of failing closed");
+    assert.notEqual(outcome.code, null, "validation execution did not report a bounded exit");
+  } finally {
+    child.kill("SIGKILL");
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("a hung model-provider turn is terminated within the workflow budget", async () => {
@@ -114,6 +154,39 @@ test("a hung model-provider turn is terminated within the workflow budget", asyn
   assert.equal(outcome.timedOut, false, "model-provider execution exceeded its bounded deadline");
   assert.equal(outcome.signal, null, "model-provider execution was killed instead of failing closed");
   assert.notEqual(outcome.code, null, "model-provider execution did not report a bounded exit");
+});
+
+test("model-provider cleanup cannot exceed the provider deadline", async () => {
+  const config = JSON.parse(await readFile(path.join(repositoryRoot, ".github/codekeeper.json"), "utf8"));
+  config.ai.tracing.enabled = false;
+  config.ai.agents.issue.maximumAttempts = 1;
+  const sdkLoader = async () => ({
+    Agent: class Agent {},
+    OpenAIProvider: class OpenAIProvider {
+      close() { return new Promise(() => {}); }
+    },
+    Runner: class Runner {
+      async run() { return { finalOutput: JSON.stringify({ mode: "issue", summary: "No action." }) }; }
+    }
+  });
+  await assert.rejects(
+    runConfiguredAgent({
+      mode: "issue",
+      config,
+      prompt: "audit",
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { mode: { type: "string" }, summary: { type: "string" } },
+        required: ["mode", "summary"]
+      },
+      apiKey: "audit-model-key",
+      sdkLoader,
+      profile: "Issue triager profile",
+      turnTimeoutMs: 25
+    }),
+    /provider cleanup timed out after 25ms/
+  );
 });
 
 test("CLI errors cannot inject additional GitHub workflow commands", async () => {

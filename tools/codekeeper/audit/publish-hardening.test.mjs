@@ -140,6 +140,7 @@ test("issue duplicate closure survives Codekeeper's own marker-comment update", 
   };
   let updatedAt = context.issue.updatedAt;
   let labels = [];
+  let comments = [];
   const calls = [];
   const issue = () => ({
     number: 7,
@@ -156,6 +157,7 @@ test("issue duplicate closure survives Codekeeper's own marker-comment update", 
       if (number === 9) return { number, state: "open" };
       return issue();
     },
+    async listIssueComments() { return structuredClone(comments); },
     async ensureLabels() {},
     async replaceManagedLabels(_number, desiredLabels) {
       labels = desiredLabels.map((name) => ({ name }));
@@ -164,22 +166,28 @@ test("issue duplicate closure survives Codekeeper's own marker-comment update", 
     async upsertMarkerComment(_number, marker, body) {
       calls.push("marker");
       updatedAt = "2026-08-05T10:01:00Z";
-      return {
+      const mutation = {
+        id: 70,
         body: `${body}\n${marker}`,
         created_at: updatedAt,
         updated_at: updatedAt,
         user: { id: Number(identity.id), login: identity.login, type: "Bot" }
       };
+      comments = [mutation];
+      return mutation;
     },
     async createComment(_number, body) {
       calls.push("duplicate-comment");
       updatedAt = "2026-08-05T10:01:30Z";
-      return {
+      const mutation = {
+        id: 71,
         body,
         created_at: updatedAt,
         updated_at: updatedAt,
         user: { id: Number(identity.id), login: identity.login, type: "Bot" }
       };
+      comments.push(mutation);
+      return mutation;
     },
     async updateIssue() { calls.push("close"); }
   });
