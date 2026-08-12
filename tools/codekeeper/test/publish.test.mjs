@@ -204,7 +204,7 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
     sourceKeys: ["review_comment:41", "review_comment:42"],
     threadIds: ["PRRT_thread"]
   };
-  const fingerprint = deferredReviewFingerprint(context.repository, 7, feedback.problemKey);
+  const fingerprint = deferredReviewFingerprint(context.repository, 7, feedback.sourceKeys);
   const existing = [];
   const calls = { created: [], updated: [], replies: [], labels: [] };
   const github = {
@@ -238,6 +238,7 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
     state: "open",
     user: { login: identity.login, id: Number(identity.id), type: "Bot" }
   });
+  feedback.problemKey = "renamed-timeout-coverage";
   const updated = await upsertDeferredReviewFeedback(input);
   assert.deepEqual(updated.map((item) => item.state), ["updated"]);
   assert.equal(calls.created.length, 1);
@@ -397,6 +398,77 @@ test("fix-now feedback blocks auto-merge even when repair dispatch is disabled",
   assert.match(decision.reasons.join("\n"), /fix-now review feedback/);
   assert.ok(reviewLabels(result).includes("codekeeper:blocked"));
   assert.ok(!reviewLabels(result).includes("codekeeper:auto-merge"));
+});
+
+test("fix-if-cheap feedback suspends auto-merge while automatic repair is pending", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-review-cheap-repair-test-"));
+  const configSha256 = "e".repeat(64);
+  const reviewConfig = structuredClone(config);
+  reviewConfig.merge.enabled = true;
+  reviewConfig.review.autoRepair = true;
+  const frozenFeedback = {
+    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
+    body: "Please make this repair.", url: "https://github.test/comment/41",
+    state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
+    resolved: false, outdated: false, path: "README.md", line: 1
+  };
+  const context = {
+    mode: "review", repository: "owner/repository", configSha256, runId: "7004",
+    runUrl: "https://github.com/owner/repository/actions/runs/7004",
+    pullRequest: {
+      number: 7, headSha: "head", baseSha: "base",
+      diff: { truncated: false, disabled: false }, reviewFeedbackFrozen: true,
+      reviewFeedback: [frozenFeedback]
+    }
+  };
+  const result = {
+    mode: "review", summary: "Queue the cheap repair.", risk: "low", labels: [],
+    blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{
+      problemKey: "cheap-repair", disposition: "fix_if_cheap", type: "bug",
+      explanation: "Apply the bounded repair.", validation: "The repair remains applicable.",
+      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto", noActionReason: null
+  };
+  const pull = {
+    number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
+    user: { login: identity.login, type: "Bot" },
+    head: { sha: "head", ref: "automation/codekeeper/cheap-repair", repo: { full_name: context.repository } },
+    base: { sha: "base", ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
+  };
+  const restoreGitHub = replaceGitHubMethods({
+    async getPull() { return structuredClone(pull); },
+    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: frozenFeedback.threadId, isResolved: false, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
+          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
+          author: { login: frozenFeedback.author }
+        }] }
+      }];
+    }
+  });
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "review", context, result, configSha256, artifactConfig: reviewConfig
+    });
+    const publication = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(publication.autoMerge.eligible, false);
+    assert.match(publication.autoMerge.reasons.join("\n"), /automatic repair is pending/i);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
 });
 
 test("GraphQL follows the configured GitHub API host", () => {

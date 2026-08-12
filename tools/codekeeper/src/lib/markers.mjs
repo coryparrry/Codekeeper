@@ -21,12 +21,15 @@ export function findingMarker(fingerprint) {
   return `<!-- codekeeper:fingerprint=${fingerprint} -->`;
 }
 
-export function deferredReviewFingerprint(repository, pullNumber, problemKey) {
+export function deferredReviewFingerprint(repository, pullNumber, sourceKeys) {
+  const normalizedSourceKeys = [...new Set((Array.isArray(sourceKeys) ? sourceKeys : [sourceKeys])
+    .map((sourceKey) => String(sourceKey ?? "").normalize("NFKC").trim().toLowerCase())
+    .filter(Boolean))].sort();
   return sha256(JSON.stringify({
-    version: 1,
+    version: 2,
     repository: String(repository ?? "").trim().toLowerCase(),
     pullNumber,
-    problemKey: String(problemKey ?? "").normalize("NFKC").trim().toLowerCase()
+    sourceKeys: normalizedSourceKeys
   }));
 }
 
