@@ -319,7 +319,8 @@ test("review publication rejects feedback that changed after preparation", async
     runUrl: "https://github.com/owner/repository/actions/runs/7000",
     pullRequest: {
       number: 7, headSha: "head", baseSha: "base",
-      diff: { truncated: false, disabled: false }, reviewFeedback: [frozenFeedback]
+      diff: { truncated: false, disabled: false }, reviewFeedbackFrozen: true,
+      reviewFeedback: [frozenFeedback]
     }
   };
   const result = {
@@ -356,6 +357,14 @@ test("review publication rejects feedback that changed after preparation", async
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "review", context, result, configSha256 });
     await assert.rejects(
       publishReview({ artifactDirectory, config, configSha256, ...integrity, token: "unused", dryRun: true }),
+      /review feedback changed after preparation/
+    );
+
+    context.pullRequest.reviewFeedback = [];
+    result.reviewFeedback = [];
+    const emptyIntegrity = await writeSealedArtifact(artifactDirectory, { mode: "review", context, result, configSha256 });
+    await assert.rejects(
+      publishReview({ artifactDirectory, config, configSha256, ...emptyIntegrity, token: "unused", dryRun: true }),
       /review feedback changed after preparation/
     );
   } finally {

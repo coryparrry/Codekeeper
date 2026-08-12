@@ -252,6 +252,7 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
       headRef: boundedText(pull.head?.ref, 512, "…"),
       baseSha: pull.base?.sha,
       headSha: pull.head?.sha,
+      reviewFeedbackFrozen: feedbackEvent,
       reviewFeedback
     }
   };
