@@ -27,6 +27,7 @@ jobs:
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       auto_review: true
+      feedback_triage: true
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:

@@ -38,6 +38,7 @@ jobs:
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-fix.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
+      owner_requests: true
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       issue_number: ${{ github.event.client_payload.number || inputs.issue_number || '' }}
       dry_run: ${{ inputs.dry_run || false }}

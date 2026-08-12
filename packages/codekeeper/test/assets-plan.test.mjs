@@ -20,6 +20,7 @@ import {
   MODEL_OPTIONS,
   MODES,
   OPENAI_SECRET,
+  OPENROUTER_SECRET,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
   SOURCE_COMMIT,
@@ -31,12 +32,14 @@ import {
   buildInstallPlan,
   completionGuidance,
   documentMap,
+  normalizeModelChoices,
   normalizeModes,
   normalizeOwnerLogins,
   requiredSecretNames,
   setupPullRequestBody,
   workflowMap
 } from "../src/plan.mjs";
+import { upgradePolicy } from "../src/policy.mjs";
 import {
   assertInstallerCode,
   HEAD_SHA,
@@ -50,12 +53,12 @@ const EXPECTED_ASSETS = Object.freeze({
   "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
   "agents/pr-reviewer.md": "6b89c645090e0684a677f57d8d08c87db4b823f1f5a2c271710a7c8a061ae283",
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
-  "policies/mixed.json": "1aa32a2ccbd4e92654c656abe9b0c438d059682b12f6831cba3f3721ccc28c89",
-  "policies/openai.json": "21aeaeb91356c4240c8083a629e64210bc8c037b2d23f821b4f12defd4b01793",
-  "workflows/fix.yml": "947ee9bde8a1e4f5a99126792038a0e65c0a66ebe73a8c3fb2687bc3681f75e8",
-  "workflows/issues.yml": "3260d387b1ae7f76e21fdd0228062e139be3a25f047bfbd5762f638b67e153ca",
+  "policies/mixed.json": "86bc5f0661627a493e8a65a38f46d7ebd4e68b41e9216d9b61242f762f6db7c1",
+  "policies/openai.json": "a6aee81b4167b9c656fc3d8b1a9034d110f27f9fdbeca1427b98376ba1d84b8b",
+  "workflows/fix.yml": "2ffb386e66d41beaf42f3e5f1c8a38415596098cbd2a047b73a574d9aec3ae8e",
+  "workflows/issues.yml": "77309242f348d75ed1bf8cf82ecef99e65bcf2f5fd19f54b0974fd168650dbb6",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
-  "workflows/review.yml": "ef33b3a226330ff13253bd086f498ff51697e6825042dc6562047d525faaa54c"
+  "workflows/review.yml": "1f706efb117d6dbdb8a4569c13578c40db8a603ce033ac6107864a4a2624d5a3"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
@@ -139,6 +142,21 @@ test("checkpoint-backed assets are byte-for-byte source release files", async ()
   }
 });
 
+test("the pinned runtime accepts the policy version emitted by this installer", async () => {
+  const bundle = await loadVerifiedAssets();
+  const emittedVersion = JSON.parse(renderPolicy(bundle.contents["policies/openai.json"], {
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"]
+  })).version;
+  const pinnedConfig = execFileSync("git", ["show", `${SOURCE_COMMIT}:tools/codekeeper/src/lib/config.mjs`], {
+    cwd: REPOSITORY_ROOT,
+    encoding: "utf8"
+  });
+  assert.equal(emittedVersion, 3);
+  assert.match(pinnedConfig, /config\.version === 3/);
+});
+
 test("bundled provenance is byte-for-byte metadata from the pinned source release", async () => {
   const bundle = await loadVerifiedAssets();
   assert.deepEqual(Object.keys(bundle.metadata.provenance).sort(), Object.keys(CHECKPOINT_PROVENANCE_PATHS).sort());
@@ -218,21 +236,42 @@ test("rendered policies personalize only repository identity while retaining con
     assert.equal(rendered.merge.enabled, false);
     assert.ok(rendered.audit.repair.protectedPaths.length > 0);
     assert.ok(rendered.audit.repair.validationCommands.includes("git diff --check"));
-    assert.deepEqual(rendered.ai, original.ai);
+    assert.deepEqual(rendered.ai, upgradePolicy(original).ai);
   }
 });
 
 test("a same-provider model change stays in policy and does not rewrite a workflow", async () => {
   const bundle = await loadVerifiedAssets();
   const custom = JSON.parse(bundle.contents["policies/openai.json"]);
-  custom.ai.agents.review.model = "gpt-5.6-luna";
+  custom.ai.agents.review.provider = "openrouter";
+  custom.ai.agents.review.model = "anthropic/claude-sonnet-4.5";
+  custom.ai.agents.review.effort = "none";
+  custom.ai.agents.review.modelSettings = {
+    temperature: 0.7,
+    providerData: { route: "latency" }
+  };
   custom.ai.agents.review.workspace.model = "gpt-5.6-luna";
+  const models = normalizeModelChoices({
+    modes: ["review"],
+    preset: "openai",
+    bundle,
+    policySource: JSON.stringify(custom),
+    choices: {
+      review: {
+        provider: "openrouter",
+        model: "anthropic/claude-sonnet-4.5",
+        effort: "none"
+      }
+    }
+  });
   const renderedPolicy = JSON.parse(renderPolicy(JSON.stringify(custom), {
     displayName: "Widget",
     defaultBranch: "main",
-    ownerLogins: ["coryparrry"]
+    ownerLogins: ["coryparrry"],
+    models
   }));
-  assert.equal(renderedPolicy.ai.agents.review.model, "gpt-5.6-luna");
+  assert.equal(renderedPolicy.ai.agents.review.model, "anthropic/claude-sonnet-4.5");
+  assert.deepEqual(renderedPolicy.ai.agents.review.modelSettings, custom.ai.agents.review.modelSettings);
   assert.equal(renderedPolicy.ai.agents.review.workspace.model, "gpt-5.6-luna");
   for (const mode of MODE_IDS) {
     const rendered = renderWorkflow(bundle.contents[MODES[mode].asset], {
@@ -243,6 +282,38 @@ test("a same-provider model change stays in policy and does not rewrite a workfl
     });
     assert.doesNotMatch(rendered, /gpt-5\.6-(?:sol|terra|luna)/);
   }
+});
+
+test("retaining a curated model preserves adopter-edited model settings", async () => {
+  const bundle = await loadVerifiedAssets();
+  const custom = JSON.parse(bundle.contents["policies/openai.json"]);
+  custom.ai.agents.review.modelSettings = {
+    text: { verbosity: "high" },
+    providerData: { serviceTier: "flex" }
+  };
+  const currentOption = MODEL_OPTIONS.openai.find((option) =>
+    option.provider === custom.ai.agents.review.provider
+      && option.model === custom.ai.agents.review.model
+      && option.effort === custom.ai.agents.review.effort
+  );
+  assert.ok(currentOption);
+
+  const models = normalizeModelChoices({
+    modes: ["review"],
+    preset: "openai",
+    bundle,
+    policySource: JSON.stringify(custom),
+    choices: { review: currentOption.id }
+  });
+  const renderedPolicy = JSON.parse(renderPolicy(JSON.stringify(custom), {
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    models
+  }));
+
+  assert.deepEqual(models.review.modelSettings, custom.ai.agents.review.modelSettings);
+  assert.deepEqual(renderedPolicy.ai.agents.review.modelSettings, custom.ai.agents.review.modelSettings);
 });
 
 test("policy reruns add newly required labels without replacing adopter customizations", async () => {
@@ -321,6 +392,32 @@ test("each rendered workflow contains exactly the paired immutable bootstrap and
   assert.doesNotMatch(openaiIssue, /secrets\.DEEPSEEK_API_KEY/);
 });
 
+test("generated callers honor the rendered policy automation controls", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  policy.automation.automaticPrReview = false;
+  policy.automation.reviewFeedbackTriage = false;
+  policy.automation.issueTriage = false;
+  policy.automation.ownerRequests = false;
+  policy.automation.maintenanceSchedule = "5 4 * * 1";
+  const files = renderInstallFiles(bundle, {
+    modes: ["review", "maintain", "issues", "fix"],
+    preset: "openai",
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    policySource: JSON.stringify(policy),
+    enforceBundledDefaults: false
+  });
+  const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
+  assert.match(contents[MODES.review.target], /auto_review: false/);
+  assert.match(contents[MODES.review.target], /feedback_triage: false/);
+  assert.match(contents[MODES.issues.target], /auto_triage: false/);
+  assert.match(contents[MODES.issues.target], /owner_requests: false/);
+  assert.match(contents[MODES.fix.target], /owner_requests: false/);
+  assert.match(contents[MODES.maintain.target], /cron: "5 4 \* \* 1"/);
+});
+
 test("renderInstallFiles emits policy, every profile, and only selected callers with verified output digests", async () => {
   const bundle = await loadVerifiedAssets();
   const files = renderInstallFiles(bundle, {
@@ -372,6 +469,28 @@ test("every non-empty mode subset has the exact mixed and OpenAI secret matrix",
       assert.deepEqual(requiredSecretNames({ modes, preset }), expected, `${preset}: ${modes.join(",")}`);
     }
   }
+});
+
+test("alternative coordinators still request OpenAI for enabled workspaces", () => {
+  assert.deepEqual(requiredSecretNames({
+    modes: ["review"],
+    models: {
+      review: { provider: "openrouter", model: "anthropic/claude-sonnet", effort: "none" }
+    },
+    tracing: false
+  }), [OPENAI_SECRET, OPENROUTER_SECRET, APP_SECRET]);
+});
+
+test("legacy policies keep deferred issue publication off until the publisher is installed", async () => {
+  const bundle = await loadVerifiedAssets();
+  const legacy = JSON.parse(bundle.contents["policies/openai.json"]);
+  legacy.version = 2;
+  delete legacy.automation;
+  delete legacy.review.createDeferredIssues;
+  delete legacy.ai.providers.openrouter;
+  delete legacy.labels["codekeeper:deferred"];
+  legacy.issues.managedLabels = legacy.issues.managedLabels.filter((label) => label !== "codekeeper:deferred");
+  assert.equal(upgradePolicy(legacy).review.createDeferredIssues, false);
 });
 
 test("install plan is frozen, applies startup first, and documents selected workflows without credential values", async () => {
@@ -481,8 +600,8 @@ test("model choices update the selected agent and optional tracing needs no trac
   const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
   assert.equal(policy.ai.agents.review.model, "gpt-5.6-terra");
   assert.equal(policy.ai.agents.review.effort, "medium");
-  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-terra");
-  assert.equal(policy.ai.agents.review.workspace.effort, "medium");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-sol");
+  assert.equal(policy.ai.agents.review.workspace.effort, "high");
   assert.equal(policy.ai.tracing.enabled, false);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, APP_SECRET]);
   assert.match(plan.pullRequest.body, /OpenAI traces are \*\*disabled\*\*/);
@@ -507,11 +626,162 @@ test("each role can use any supported provider and model", async () => {
 
   assert.equal(policy.ai.agents.review.provider, "deepseek");
   assert.equal(policy.ai.agents.review.model, "deepseek-v4-flash");
+  assert.equal(policy.ai.agents.review.workspace.enabled, true);
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-sol");
   assert.equal(policy.ai.agents.issue.provider, "openai");
   assert.equal(policy.ai.agents.issue.model, "gpt-5.6-luna");
   assert.match(reviewWorkflow, /secrets\.DEEPSEEK_API_KEY/);
   assert.match(issueWorkflow, /secrets\.OPENAI_API_KEY/);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, DEEPSEEK_SECRET, APP_SECRET]);
+});
+
+test("arbitrary OpenRouter coordinator models preserve the OpenAI workspace specialist", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+  const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
+  const workflow = plan.files.find((file) => file.path === MODES.review.target).contents;
+
+  assert.deepEqual(plan.models.review, {
+    provider: "openrouter",
+    model: "anthropic/claude-sonnet-4.5",
+    effort: "none",
+    choice: null
+  });
+  assert.equal(policy.version, 3);
+  assert.equal(policy.ai.agents.review.provider, "openrouter");
+  assert.equal(policy.ai.agents.review.model, "anthropic/claude-sonnet-4.5");
+  assert.equal(policy.ai.agents.review.workspace.enabled, true);
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-sol");
+  assert.equal(policy.ai.providers.openrouter.api, "chat_completions");
+  assert.equal(policy.ai.providers.openrouter.structuredOutputs, false);
+  assert.match(workflow, /secrets\.OPENROUTER_API_KEY/);
+  assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, OPENROUTER_SECRET, APP_SECRET]);
+});
+
+test("rerunning an OpenRouter coordinator with an enabled workspace does not request its existing OpenAI key", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: initial.modes,
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-acme[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      displayName: "Renamed Widget",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+
+  assert.deepEqual(update.secrets, []);
+});
+
+test("rerunning an OpenRouter coordinator with a disabled workspace does not request an unused OpenAI key", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const policy = JSON.parse(contents[".github/codekeeper.json"]);
+  policy.ai.agents.review.workspace.enabled = false;
+  contents[".github/codekeeper.json"] = `${JSON.stringify(policy, null, 2)}\n`;
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy,
+        policySource: contents[".github/codekeeper.json"],
+        modes: initial.modes,
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-acme[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      displayName: "Renamed Widget",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+
+  assert.deepEqual(update.secrets, []);
 });
 
 test("fixer can use any supported model without a separate planner credential", async () => {
@@ -547,7 +817,7 @@ test("OpenAI model choices include Luna, Terra, and Sol and map Luna to one agen
     choice: "luna-max"
   });
   assert.equal(policy.ai.agents.review.model, "gpt-5.6-luna");
-  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-sol");
 });
 
 test("a rerun creates a configuration-only update and preserves edited profiles", async () => {

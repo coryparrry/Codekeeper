@@ -65,7 +65,7 @@ test("configuration rejects unsupported user auto-merge, unknown keys, and unsaf
   userAutoMerge.merge.allowUserPullRequests = true;
   await assert.rejects(
     loadConfig(await writeConfig(userAutoMerge)),
-    /merge\.allowUserPullRequests must remain false in version 2/
+    /merge\.allowUserPullRequests must remain false in version 3/
   );
 
   const unknownRoot = structuredClone(source);
@@ -124,6 +124,51 @@ test("configuration rejects resource limits above global ceilings and accepts th
     await assert.rejects(loadConfig(await writeConfig(invalid)), /must be at most/);
   }
   await assert.doesNotReject(loadConfig(await writeConfig(structuredClone(source))));
+});
+
+test("policy v3 exposes autonomous defaults and OpenRouter without changing workspace ownership", async () => {
+  const { config } = await loadConfig(await writeConfig(structuredClone(source)));
+  assert.equal(config.version, 3);
+  assert.equal(config.automation.automaticPrReview, true);
+  assert.equal(config.automation.reviewFeedbackTriage, true);
+  assert.equal(config.automation.issueTriage, true);
+  assert.equal(config.automation.ownerRequests, true);
+  assert.equal(config.automation.maintenanceSchedule, "17 7 * * *");
+  assert.equal(config.review.createDeferredIssues, false);
+  assert.deepEqual(config.ai.providers.openrouter, {
+    baseUrl: "https://openrouter.ai/api/v1",
+    api: "chat_completions",
+    structuredOutputs: false,
+    supportsReasoningEffort: false
+  });
+  assert.equal(config.ai.agents.review.workspace.model, "gpt-5.6-sol");
+});
+
+test("maintenance schedules use supported GitHub Actions cron fields and ranges", async () => {
+  for (const schedule of ["20/15 * * * *", "*/15 0-23/2 1,15 JAN-DEC MON-FRI"]) {
+    const valid = structuredClone(source);
+    valid.automation.maintenanceSchedule = schedule;
+    await assert.doesNotReject(loadConfig(await writeConfig(valid)), schedule);
+  }
+
+  for (const schedule of [
+    "foo bar baz qux quux",
+    "60 * * * *",
+    "* 24 * * *",
+    "* * 0 * *",
+    "* * * 13 *",
+    "* * * * 7",
+    "10-5 * * * *",
+    "*/0 * * * *"
+  ]) {
+    const invalid = structuredClone(source);
+    invalid.automation.maintenanceSchedule = schedule;
+    await assert.rejects(
+      loadConfig(await writeConfig(invalid)),
+      /automation\.maintenanceSchedule must use supported GitHub Actions cron syntax/,
+      schedule
+    );
+  }
 });
 
 test("configuration bounds policy list cardinality", async () => {

@@ -7,12 +7,14 @@ import {
   AGENT_PROFILES,
   ASSET_KEYS,
   MODE_IDS,
+  MODEL_PROVIDER_SECRETS,
   MODES,
   POLICY_TARGET,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
+import { upgradePolicy } from "./policy.mjs";
 
 const DEFAULT_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FULL_SHA = /^[0-9a-f]{40}$/;
@@ -116,16 +118,16 @@ export function renderPolicy(policySource, {
 }) {
   let policy;
   try {
-    policy = JSON.parse(policySource);
+    policy = upgradePolicy(JSON.parse(policySource));
   } catch (cause) {
-    throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
+    throw new InstallerError("Bundled policy is invalid or unsupported.", { code: "ASSET_POLICY_INVALID", cause });
   }
   if (enforceBundledDefaults) assertDisabledPolicy(policy);
   let requiredPolicy;
   try {
-    requiredPolicy = JSON.parse(requiredPolicySource);
+    requiredPolicy = upgradePolicy(JSON.parse(requiredPolicySource));
   } catch (cause) {
-    throw new InstallerError("Bundled policy is not valid JSON.", { code: "ASSET_POLICY_INVALID", cause });
+    throw new InstallerError("Bundled policy is invalid or unsupported.", { code: "ASSET_POLICY_INVALID", cause });
   }
   if (!policy.repository || !policy.merge || !Array.isArray(policy.merge.allowedUserAuthors)) {
     throw new InstallerError("Bundled policy cannot be tailored safely.", { code: "ASSET_POLICY_INVALID" });
@@ -150,15 +152,13 @@ export function renderPolicy(policySource, {
     agent.provider = selection.provider;
     agent.model = selection.model;
     agent.effort = selection.effort;
-    agent.modelSettings = selection.provider === "openai"
-      ? { text: { verbosity: "low" } }
-      : { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } };
-    if (agent.workspace) {
-      agent.workspace.enabled = selection.provider === "openai" && mode !== "issues";
-      agent.workspace.allowWrites = agent.workspace.enabled && (mode === "maintain" || mode === "fix");
-      agent.workspace.model = selection.model;
-      agent.workspace.effort = selection.effort;
-    }
+    agent.modelSettings = Object.hasOwn(selection, "modelSettings")
+      ? structuredClone(selection.modelSettings)
+      : selection.provider === "openai"
+        ? { text: { verbosity: "low" } }
+        : selection.provider === "deepseek"
+          ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
+          : {};
   }
   if (!Array.isArray(policy.audit.repair.protectedPaths) || !policy.audit.repair.protectedPaths.length) {
     throw new InstallerError("Rendered policy has no protected paths.", { code: "UNSAFE_POLICY" });
@@ -185,7 +185,7 @@ function assertPinnedWorkflow(source, sourceRepository, sourceCommit) {
   }
 }
 
-export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, preset }) {
+export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, preset, automation = null }) {
   if (!MODE_IDS.includes(mode)) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   if (count(template, "OWNER/REPOSITORY") !== 3 || count(template, "FULL_COMMIT_SHA") !== 3) {
     throw new InstallerError(`Bundled ${mode} workflow has unexpected placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
@@ -200,12 +200,43 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
     .replaceAll("FULL_COMMIT_SHA", sourceCommit);
 
   const resolvedProvider = provider ?? (mode === "issues" && preset === "mixed" ? "deepseek" : "openai");
-  const desiredSecret = resolvedProvider === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY";
-  const modelSecretPattern = /model_api_key: \$\{\{ secrets\.(?:OPENAI|DEEPSEEK)_API_KEY \}\}/;
+  const desiredSecret = MODEL_PROVIDER_SECRETS[resolvedProvider];
+  if (!desiredSecret) throw new InstallerError(`Unsupported model provider: ${resolvedProvider}`, { code: "PLAN_INVALID" });
+  const modelSecretPattern = /model_api_key: \$\{\{ secrets\.(?:OPENAI|DEEPSEEK|OPENROUTER)_API_KEY \}\}/;
   if (!modelSecretPattern.test(rendered)) {
     throw new InstallerError(`Bundled ${mode} workflow has no model API key placeholder.`, { code: "WORKFLOW_RENDER_INVALID" });
   }
   rendered = rendered.replace(modelSecretPattern, `model_api_key: \${{ secrets.${desiredSecret} }}`);
+  if (automation) {
+    if (mode === "review") {
+      if (typeof automation.automaticPrReview !== "boolean" || typeof automation.reviewFeedbackTriage !== "boolean"
+        || count(rendered, "auto_review: true") !== 1 || count(rendered, "feedback_triage: true") !== 1) {
+        throw new InstallerError("Review automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+      }
+      rendered = rendered
+        .replace("auto_review: true", `auto_review: ${automation.automaticPrReview}`)
+        .replace("feedback_triage: true", `feedback_triage: ${automation.reviewFeedbackTriage}`);
+    } else if (mode === "issues") {
+      if (typeof automation.issueTriage !== "boolean" || typeof automation.ownerRequests !== "boolean"
+        || count(rendered, "auto_triage: true") !== 1 || count(rendered, "owner_requests: true") !== 1) {
+        throw new InstallerError("Issue automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+      }
+      rendered = rendered
+        .replace("auto_triage: true", `auto_triage: ${automation.issueTriage}`)
+        .replace("owner_requests: true", `owner_requests: ${automation.ownerRequests}`);
+    } else if (mode === "fix") {
+      if (typeof automation.ownerRequests !== "boolean" || count(rendered, "owner_requests: true") !== 1) {
+        throw new InstallerError("Owner-request automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+      }
+      rendered = rendered.replace("owner_requests: true", `owner_requests: ${automation.ownerRequests}`);
+    } else if (mode === "maintain") {
+      if (typeof automation.maintenanceSchedule !== "string" || !automation.maintenanceSchedule.trim()
+        || count(rendered, 'cron: "17 7 * * *"') !== 1) {
+        throw new InstallerError("Maintenance automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+      }
+      rendered = rendered.replace('cron: "17 7 * * *"', `cron: ${JSON.stringify(automation.maintenanceSchedule)}`);
+    }
+  }
   if (rendered.includes("OWNER/REPOSITORY") || rendered.includes("FULL_COMMIT_SHA")) {
     throw new InstallerError(`Rendered ${mode} workflow contains unresolved placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
   }
@@ -227,18 +258,20 @@ export function renderInstallFiles(bundle, {
   enforceBundledDefaults = true
 }) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
+  const policyContents = renderPolicy(policySource, {
+    displayName,
+    defaultBranch,
+    ownerLogins,
+    capabilities,
+    models,
+    tracing,
+    enforceBundledDefaults,
+    requiredPolicySource: bundle.contents[`policies/${preset}.json`]
+  });
+  const renderedPolicy = JSON.parse(policyContents);
   const rendered = [{
     path: POLICY_TARGET,
-    contents: renderPolicy(policySource, {
-      displayName,
-      defaultBranch,
-      ownerLogins,
-      capabilities,
-      models,
-      tracing,
-      enforceBundledDefaults,
-      requiredPolicySource: bundle.contents[`policies/${preset}.json`]
-    })
+    contents: policyContents
   }];
   for (const profile of AGENT_PROFILE_IDS) {
     rendered.push({
@@ -254,7 +287,8 @@ export function renderInstallFiles(bundle, {
         sourceCommit,
         mode,
         provider: models[mode]?.provider,
-        preset
+        preset,
+        automation: renderedPolicy.automation
       })
     });
   }

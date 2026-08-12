@@ -4,6 +4,15 @@ import { readJson } from "./io.mjs";
 export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "fix"]);
 const PROVIDER_APIS = new Set(["responses", "chat_completions"]);
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
+const CRON_MONTHS = new Map([["JAN", 1], ["FEB", 2], ["MAR", 3], ["APR", 4], ["MAY", 5], ["JUN", 6], ["JUL", 7], ["AUG", 8], ["SEP", 9], ["OCT", 10], ["NOV", 11], ["DEC", 12]]);
+const CRON_WEEKDAYS = new Map([["SUN", 0], ["MON", 1], ["TUE", 2], ["WED", 3], ["THU", 4], ["FRI", 5], ["SAT", 6]]);
+const CRON_FIELDS = Object.freeze([
+  Object.freeze({ minimum: 0, maximum: 59 }),
+  Object.freeze({ minimum: 0, maximum: 23 }),
+  Object.freeze({ minimum: 1, maximum: 31 }),
+  Object.freeze({ minimum: 1, maximum: 12, names: CRON_MONTHS }),
+  Object.freeze({ minimum: 0, maximum: 6, names: CRON_WEEKDAYS })
+]);
 const LIMITS = Object.freeze({
   stringLength: 16_384,
   listEntries: 128,
@@ -103,6 +112,44 @@ function boolean(value, name) {
   return value;
 }
 
+function cronValue(value, { minimum, maximum, names }) {
+  const named = names?.get(value.toUpperCase());
+  if (named !== undefined) return named;
+  if (!/^\d+$/.test(value)) return null;
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric >= minimum && numeric <= maximum ? numeric : null;
+}
+
+function validCronBase(value, field) {
+  if (value === "*") return true;
+  const range = value.split("-");
+  if (range.length === 1) return cronValue(range[0], field) !== null;
+  if (range.length !== 2) return false;
+  const start = cronValue(range[0], field);
+  const end = cronValue(range[1], field);
+  return start !== null && end !== null && start <= end;
+}
+
+function validCronField(value, field) {
+  if (!value || value.startsWith(",") || value.endsWith(",")) return false;
+  return value.split(",").every((entry) => {
+    const parts = entry.split("/");
+    if (parts.length > 2 || !validCronBase(parts[0], field)) return false;
+    if (parts.length === 1) return true;
+    const step = Number(parts[1]);
+    return /^\d+$/.test(parts[1])
+      && Number.isSafeInteger(step)
+      && step > 0
+      && step <= field.maximum - field.minimum + 1;
+  });
+}
+
+function validCronSchedule(value) {
+  const fields = value.trim().split(/\s+/);
+  return fields.length === CRON_FIELDS.length
+    && fields.every((field, index) => validCronField(field, CRON_FIELDS[index]));
+}
+
 function isLoopbackHostname(hostname) {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (normalized === "localhost" || normalized.endsWith(".localhost") || normalized === "::1") return true;
@@ -185,6 +232,7 @@ const REQUIRED_RUNTIME_LABELS = [
   "codekeeper:auto-repaired",
   "codekeeper:auto-merge",
   "codekeeper:duplicate-candidate",
+  "codekeeper:deferred",
   "codekeeper:needs-tests",
   "codekeeper:priority-p1",
   "codekeeper:priority-p2",
@@ -217,6 +265,7 @@ const ISSUE_MANAGED_LABELS = [
   "codekeeper:ready",
   "codekeeper:manual-review",
   "codekeeper:duplicate-candidate",
+  "codekeeper:deferred",
   "codekeeper:priority-p1",
   "codekeeper:priority-p2",
   "codekeeper:priority-p3",
@@ -332,8 +381,8 @@ export function getAgentRuntimeSettings(config, mode, { mutationAuthorized = tru
 export async function loadConfig(configPath = ".github/codekeeper.json") {
   const resolved = path.resolve(configPath);
   const config = await readJson(resolved);
-  fixedObject(config, "policy", ["version", "repository", "projectInvariants", "ai", "labels", "review", "audit", "issues", "merge"]);
-  assert(config.version === 2, "version must be 2");
+  fixedObject(config, "policy", ["version", "repository", "projectInvariants", "automation", "ai", "labels", "review", "audit", "issues", "merge"]);
+  assert(config.version === 3, "version must be 3");
   fixedObject(config.repository, "repository", ["displayName", "defaultBranch", "ownerLogins", "automationBranchPrefix"]);
   nonEmptyString(config.repository.displayName, "repository.displayName", 256);
   nonEmptyString(config.repository.defaultBranch, "repository.defaultBranch", 255);
@@ -344,6 +393,13 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
   assert(new Set(normalizedOwnerLogins).size === normalizedOwnerLogins.length, "repository.ownerLogins must not contain duplicates after normalization");
   config.repository.ownerLogins = normalizedOwnerLogins;
   stringArray(config.projectInvariants ?? [], "projectInvariants", { maximumEntries: LIMITS.projectInvariants, maximumLength: 4_096 });
+  fixedObject(config.automation, "automation", ["automaticPrReview", "reviewFeedbackTriage", "issueTriage", "ownerRequests", "maintenanceSchedule"]);
+  boolean(config.automation.automaticPrReview, "automation.automaticPrReview");
+  boolean(config.automation.reviewFeedbackTriage, "automation.reviewFeedbackTriage");
+  boolean(config.automation.issueTriage, "automation.issueTriage");
+  boolean(config.automation.ownerRequests, "automation.ownerRequests");
+  nonEmptyString(config.automation.maintenanceSchedule, "automation.maintenanceSchedule", 100);
+  assert(validCronSchedule(config.automation.maintenanceSchedule), "automation.maintenanceSchedule must use supported GitHub Actions cron syntax");
   validateAi(config);
 
   dynamicObject(config.labels, "labels", LIMITS.labelEntries);
@@ -358,8 +414,9 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
     assert(config.labels[label], `runtime requires undefined label ${label}`);
   }
 
-  fixedObject(config.review, "review", ["autoRepair", "maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
+  fixedObject(config.review, "review", ["autoRepair", "createDeferredIssues", "maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
   boolean(config.review.autoRepair, "review.autoRepair");
+  boolean(config.review.createDeferredIssues, "review.createDeferredIssues");
   cappedNonNegativeInteger(config.review.maximumBlockingFindings, "review.maximumBlockingFindings", LIMITS.maximumBlockingFindings);
   cappedNonNegativeInteger(config.review.maximumNonBlockingFindings, "review.maximumNonBlockingFindings", LIMITS.maximumNonBlockingFindings);
   cappedPositiveInteger(config.review.maximumDiffBytes, "review.maximumDiffBytes", LIMITS.maximumDiffBytes);
@@ -405,7 +462,7 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
   boolean(config.merge.enabled, "merge.enabled");
   boolean(config.merge.allowAutomationPullRequests, "merge.allowAutomationPullRequests");
   boolean(config.merge.allowUserPullRequests, "merge.allowUserPullRequests");
-  assert(!config.merge.allowUserPullRequests, "merge.allowUserPullRequests must remain false in version 2");
+  assert(!config.merge.allowUserPullRequests, "merge.allowUserPullRequests must remain false in version 3");
   assert(["MERGE", "SQUASH", "REBASE"].includes(config.merge.method), "merge.method must be MERGE, SQUASH, or REBASE");
   cappedPositiveInteger(config.merge.maximumFiles, "merge.maximumFiles", LIMITS.maximumMergeFiles);
   cappedPositiveInteger(config.merge.maximumChangedLines, "merge.maximumChangedLines", LIMITS.maximumMergeChangedLines);

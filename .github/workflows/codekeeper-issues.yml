@@ -13,6 +13,11 @@ on:
         required: false
         default: true
         type: boolean
+      owner_requests:
+        description: Admit eligible owner commands from issue comments.
+        required: false
+        default: true
+        type: boolean
       app_client_id:
         description: GitHub App client ID. This identifier is not secret.
         required: true
@@ -38,7 +43,7 @@ permissions:
   issues: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 4f954a432be7b1c30dbaaaec0019bd50671b177c22748f3aba0b8e18a9cadccc
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 490f9ddc0f22e744450a6bff79546ee9db271ab2bc37402bf2e9f6e203671f8e
 
 concurrency:
   group: codekeeper-issue-${{ github.event.issue.number }}
@@ -57,7 +62,8 @@ jobs:
         (github.event.action == 'opened' ||
          github.event.action == 'reopened' ||
          github.event.action == 'edited')) ||
-       (github.event_name == 'issue_comment' &&
+       (inputs.owner_requests &&
+        github.event_name == 'issue_comment' &&
         (github.event.comment.body == '/codekeeper triage' ||
          startsWith(github.event.comment.body, '/codekeeper triage ')) &&
         (github.event.comment.author_association == 'OWNER' ||

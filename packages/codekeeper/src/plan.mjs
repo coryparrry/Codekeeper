@@ -9,11 +9,10 @@ import {
   CAPABILITY_IDS,
   CLIENT_ID_VARIABLE,
   CONSERVATIVE_BOUNDARIES,
-  DEEPSEEK_SECRET,
   ENABLED_VARIABLE,
   MODE_IDS,
   MODES,
-  OPENAI_SECRET,
+  MODEL_PROVIDER_SECRETS,
   PRESET_IDS,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
@@ -25,6 +24,7 @@ import {
 } from "./constants.mjs";
 import { renderInstallFiles, sha256 } from "./assets.mjs";
 import { InstallerError } from "./errors.mjs";
+import { upgradePolicy } from "./policy.mjs";
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const BOT_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,99})\[bot\]$/;
@@ -114,12 +114,19 @@ export function capabilitySummary(capabilities, modes = null) {
   return ids.map((id) => `${CAPABILITIES[id].label}: ${capabilities[id] ? "on" : "off"}.`);
 }
 
-export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET, tracing = true }) {
+export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET, tracing = true, policy = null }) {
   const selected = normalizeModes(modes);
   const names = [];
   const providers = new Set(modelAssignments(selected).map(({ key }) => models?.[key]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
-  if (providers.has("openai")) names.push(OPENAI_SECRET);
-  if (providers.has("deepseek")) names.push(DEEPSEEK_SECRET);
+  for (const mode of selected) {
+    const agent = policy?.ai?.agents?.[MODES[mode].policyAgent];
+    if (MODES[mode].workspaceProvider && (!policy || agent?.workspace?.enabled === true)) {
+      providers.add(MODES[mode].workspaceProvider);
+    }
+  }
+  for (const [provider, secret] of Object.entries(MODEL_PROVIDER_SECRETS)) {
+    if (providers.has(provider)) names.push(secret);
+  }
   if (tracing) names.push(TRACE_SECRET);
   names.push(APP_SECRET);
   return Object.freeze(names);
@@ -127,9 +134,14 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
 
 function existingSecretNames(installation) {
   const providers = new Set(modelAssignments(installation.modes).map(({ agent }) => installation.policy.ai.agents[agent].provider));
+  for (const mode of installation.modes) {
+    const agent = installation.policy.ai.agents[MODES[mode].policyAgent];
+    if (agent.workspace?.enabled && MODES[mode].workspaceProvider) providers.add(MODES[mode].workspaceProvider);
+  }
   return new Set([
-    ...(providers.has("openai") ? [OPENAI_SECRET] : []),
-    ...(providers.has("deepseek") ? [DEEPSEEK_SECRET] : []),
+    ...Object.entries(MODEL_PROVIDER_SECRETS)
+      .filter(([provider]) => providers.has(provider))
+      .map(([, secret]) => secret),
     ...(installation.policy.ai.tracing.enabled ? [TRACE_SECRET] : []),
     APP_SECRET
   ]);
@@ -137,20 +149,35 @@ function existingSecretNames(installation) {
 
 export function normalizeModelChoices({ modes, preset, bundle, choices = {}, policySource = bundle.contents[`policies/${preset}.json`] }) {
   const selected = normalizeModes(modes);
-  const policy = JSON.parse(policySource);
+  const policy = upgradePolicy(JSON.parse(policySource));
   const normalized = {};
   for (const assignment of modelAssignments(selected)) {
     const { key, agent: agentId, workflow } = assignment;
     const agent = policy.ai.agents[agentId];
     const defaultOption = ALL_MODEL_OPTIONS.find((option) => option.provider === agent.provider && option.model === agent.model && option.effort === agent.effort);
-    const choiceId = choices[key] ?? defaultOption?.id;
-    const choice = ALL_MODEL_OPTIONS.find((option) => option.id === choiceId);
-    if (!choice) throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    const requested = choices[key] ?? defaultOption?.id;
+    const choice = typeof requested === "string"
+      ? ALL_MODEL_OPTIONS.find((option) => option.id === requested)
+      : requested;
+    if (!choice || typeof choice !== "object") throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    const provider = String(choice.provider ?? "").trim();
+    const model = String(choice.model ?? "").trim();
+    const effort = String(choice.effort ?? "none").trim();
+    if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, provider) || !policy.ai.providers[provider]
+      || !model || model.length > 256 || /[\s\u0000-\u001f\u007f]/.test(model)
+      || !["none", "minimal", "low", "medium", "high", "max", "xhigh"].includes(effort)
+      || (effort !== "none" && !policy.ai.providers[provider]?.supportsReasoningEffort)) {
+      throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    }
+    const preservesCurrentSettings = provider === agent.provider
+      && model === agent.model
+      && effort === agent.effort;
     normalized[key] = Object.freeze({
-      provider: choice.provider,
-      model: choice.model,
-      effort: choice.effort,
-      choice: choice.id
+      provider,
+      model,
+      effort,
+      choice: typeof requested === "string" ? choice.id : null,
+      ...(preservesCurrentSettings ? { modelSettings: structuredClone(agent.modelSettings) } : {})
     });
   }
   const assignmentKeys = new Set(modelAssignments(selected).map(({ key }) => key));
@@ -349,7 +376,8 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (installation && !changedFiles.length && !variables.length) {
     throw new InstallerError("The selected configuration does not change the current installation.", { code: "NO_CHANGES" });
   }
-  const requiredSecrets = requiredSecretNames({ modes, models, tracing });
+  const renderedPolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
+  const requiredSecrets = requiredSecretNames({ modes, models, tracing, policy: renderedPolicy });
   const secretNames = installation
     ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))
     : requiredSecrets;
@@ -469,11 +497,20 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   for (const assignment of modelAssignments(modes)) {
     const { key, agent: agentId, label, workflow } = assignment;
     const agent = presetPolicy.ai.agents[agentId];
-    const choices = ALL_MODEL_OPTIONS;
-    const defaultChoice = choices.find((choice) => choice.provider === agent.provider && choice.model === agent.model && choice.effort === agent.effort) ?? choices[0];
-    models[key] = await prompt.select(tuiOptions(prompt, {
+    const defaultChoice = ALL_MODEL_OPTIONS.find((choice) => choice.provider === agent.provider && choice.model === agent.model && choice.effort === agent.effort);
+    const customChoiceId = `current-custom-${key}`;
+    const newCustomChoiceId = `custom-${key}`;
+    const choices = [
+      ...(defaultChoice ? [] : [{
+        id: customChoiceId,
+        label: `Current custom model · ${agent.provider} · ${agent.model} · ${agent.effort} effort`
+      }]),
+      ...ALL_MODEL_OPTIONS,
+      { id: newCustomChoiceId, label: "Custom provider and model" }
+    ];
+    const selectedModel = await prompt.select(tuiOptions(prompt, {
       message: `Assign a model to the ${label}:`,
-      defaultValue: defaultChoice.id,
+      defaultValue: defaultChoice?.id ?? customChoiceId,
       choices: choices.map((choice) => ({ value: choice.id, label: choice.label }))
     }, {
       step: "models",
@@ -482,6 +519,39 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
         "You can change this choice later in .github/codekeeper.json."
       ]
     }));
+    if (selectedModel === newCustomChoiceId) {
+      const provider = await prompt.select(tuiOptions(prompt, {
+        message: `Choose the provider for the ${label}:`,
+        defaultValue: agent.provider,
+        choices: Object.keys(MODEL_PROVIDER_SECRETS).map((value) => ({ value, label: value }))
+      }, {
+        step: "models",
+        description: ["Provider credentials are collected separately and never written to the repository."]
+      }));
+      const model = await prompt.inputText(tuiOptions(prompt, {
+        message: `Enter the model ID for the ${label}:`,
+        defaultValue: provider === agent.provider ? agent.model : ""
+      }, {
+        step: "models",
+        description: ["Use the exact model ID accepted by the selected provider."]
+      }));
+      const effort = presetPolicy.ai.providers[provider].supportsReasoningEffort
+        ? await prompt.select(tuiOptions(prompt, {
+          message: `Choose the reasoning effort for the ${label}:`,
+          defaultValue: provider === agent.provider ? agent.effort : "medium",
+          choices: ["none", "minimal", "low", "medium", "high", "max", "xhigh"]
+            .map((value) => ({ value, label: value }))
+        }, {
+          step: "models",
+          description: ["The provider must support the selected reasoning effort."]
+        }))
+        : "none";
+      models[key] = { provider, model, effort };
+    } else {
+      models[key] = selectedModel === customChoiceId
+        ? { provider: agent.provider, model: agent.model, effort: agent.effort }
+        : selectedModel;
+    }
   }
   const tracing = prompt?.kind === "ink"
     ? await prompt.select({
@@ -579,7 +649,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     output.write("Setup does not call a model. API keys go directly to GitHub CLI. Codekeeper does not display or store their values.\n");
     output.write("The installer sends the selected App key file directly to GitHub CLI. It does not read or display the key.\n");
     const selectedModels = normalizeModelChoices({ modes, preset, bundle, choices: models, policySource: JSON.stringify(presetPolicy) });
-    for (const name of requiredSecretNames({ modes, models: selectedModels, tracing })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
+    for (const name of requiredSecretNames({ modes, models: selectedModels, tracing, policy: presetPolicy })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
   } else {
     output.write("\nThe current GitHub App settings and existing API keys stay unchanged. If this edit needs a new key, the installer requests it after the final review.\n");
   }

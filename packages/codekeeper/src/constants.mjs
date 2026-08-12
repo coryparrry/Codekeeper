@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "8d2ea1aa4250c14fc3ae6b6006fc90913f3a2ac1";
+export const SOURCE_COMMIT = "c5dce91476ed75c8c1338307567fb12502c6a5ae";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -14,6 +14,7 @@ export const MODES = Object.freeze({
     agentLabel: "Pull request reviewer",
     description: "Reviews pull requests from this repository. Adds comments, labels, and a blocking result.",
     policyAgent: "review",
+    workspaceProvider: "openai",
     target: ".github/workflows/codekeeper-review.yml",
     asset: "workflows/review.yml",
     trigger: "same-repository pull request"
@@ -24,6 +25,7 @@ export const MODES = Object.freeze({
     agentLabel: "Repository auditor",
     description: "Runs repository audits manually or on a schedule. Live runs can repair the repository when repair is on.",
     policyAgent: "audit",
+    workspaceProvider: "openai",
     target: ".github/workflows/codekeeper-maintain.yml",
     asset: "workflows/maintain.yml",
     trigger: "schedule or manual run"
@@ -34,6 +36,7 @@ export const MODES = Object.freeze({
     agentLabel: "Issue triager",
     description: "Adds labels and comments to issues. Automatic duplicate closure stays off.",
     policyAgent: "issue",
+    workspaceProvider: null,
     target: ".github/workflows/codekeeper-issues.yml",
     asset: "workflows/issues.yml",
     trigger: "issue or issue comment"
@@ -44,6 +47,7 @@ export const MODES = Object.freeze({
     agentLabel: "Fixer",
     description: "Validates and implements ready issues or pull request repairs in one workspace pass.",
     policyAgent: "fix",
+    workspaceProvider: "openai",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
     trigger: "ready issue, owner command, or manual run"
@@ -143,6 +147,12 @@ export const APP_SECRET = "CODEKEEPER_APP_PRIVATE_KEY";
 export const TRACE_SECRET = "OPENAI_TRACE_API_KEY";
 export const OPENAI_SECRET = "OPENAI_API_KEY";
 export const DEEPSEEK_SECRET = "DEEPSEEK_API_KEY";
+export const OPENROUTER_SECRET = "OPENROUTER_API_KEY";
+export const MODEL_PROVIDER_SECRETS = Object.freeze({
+  openai: OPENAI_SECRET,
+  deepseek: DEEPSEEK_SECRET,
+  openrouter: OPENROUTER_SECRET
+});
 export const ENABLED_VARIABLE = "CODEKEEPER_ENABLED";
 export const CLIENT_ID_VARIABLE = "CODEKEEPER_APP_CLIENT_ID";
 export const BOT_LOGIN_VARIABLE = "CODEKEEPER_AUTOMATION_BOT_LOGIN";
@@ -150,6 +160,7 @@ export const BOT_LOGIN_VARIABLE = "CODEKEEPER_AUTOMATION_BOT_LOGIN";
 export const SECRET_PURPOSES = Object.freeze({
   [OPENAI_SECRET]: "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key.",
   [DEEPSEEK_SECRET]: "DeepSeek API key for each role assigned to DeepSeek",
+  [OPENROUTER_SECRET]: "OpenRouter API key for each role assigned to OpenRouter",
   [TRACE_SECRET]: "Separate OpenAI Platform API key for trace export. Do not reuse the model API key.",
   [APP_SECRET]: "downloaded GitHub App PEM private key used to mint App installation tokens"
 });

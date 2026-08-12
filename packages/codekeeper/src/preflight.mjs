@@ -13,6 +13,7 @@ import {
 } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 import { requireSuccess } from "./command-runner.mjs";
+import { upgradePolicy } from "./policy.mjs";
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -199,6 +200,11 @@ export async function inspectInstallationFiles(root, {
   }
   if (!policy?.ai?.agents || !policy?.repository || !policy?.audit || !policy?.issues || !policy?.merge) {
     throw new InstallerError("The existing Codekeeper policy does not have the required sections.", { code: "EXISTING_INSTALLATION_INVALID" });
+  }
+  try {
+    policy = upgradePolicy(policy);
+  } catch (cause) {
+    throw new InstallerError("The existing Codekeeper policy version is unsupported.", { code: "EXISTING_INSTALLATION_INVALID", cause });
   }
   // The planner was removed from the production flow. Strip its legacy policy
   // entry during reruns so the current strict policy validator can accept the

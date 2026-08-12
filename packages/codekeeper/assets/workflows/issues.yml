@@ -27,6 +27,7 @@ jobs:
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       auto_triage: true
+      owner_requests: true
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:
       # Match this secret to ai.agents.issue.provider in .github/codekeeper.json.
