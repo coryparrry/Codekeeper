@@ -95,6 +95,34 @@ test("a validation descendant cannot escape the deadline in a new process group"
   }
 });
 
+test("an exited validation launcher cannot leave a background session holding the deadline open", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-exited-validation-launcher-"));
+  const fixturePath = path.join(directory, "background-session.mjs");
+  const sentinelPath = path.join(directory, "escaped.txt");
+  await writeFile(fixturePath, `
+    import { spawn } from "node:child_process";
+    const child = spawn(process.execPath, ["-e", ${JSON.stringify(`setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(sentinelPath)}, "escaped"), 400)`).replaceAll("`", "\\`")}], {
+      detached: true,
+      stdio: ["ignore", 1, 2]
+    });
+    child.unref();
+  `);
+  try {
+    const started = Date.now();
+    await assert.rejects(
+      runValidationCommands([
+        `${JSON.stringify(process.execPath)} ${JSON.stringify(fixturePath)}`
+      ], repositoryRoot, { timeoutMs: 25 }),
+      /timed out after 25ms/
+    );
+    assert.ok(Date.now() - started < 250, "background validation session held inherited pipes open");
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await assert.rejects(readFile(sentinelPath), { code: "ENOENT" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("a hung model-provider turn is terminated within the workflow budget", async () => {
   const runtimeModuleUrl = new URL("../src/lib/agents-runtime.mjs", import.meta.url).href;
   const configPath = path.join(repositoryRoot, ".github/codekeeper.json");

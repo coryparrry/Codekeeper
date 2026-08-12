@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { copyFile, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -300,20 +301,29 @@ function appendOutputTail(current, chunk) {
   return Buffer.concat([retained, bytes]);
 }
 
-function validationDescendantProcessIds(rootPid) {
+function validationDescendantProcessIds(rootPid, runId) {
   if (process.platform === "win32" || !rootPid) return [];
-  const result = spawnSync("ps", ["-Ao", "pid=,ppid="], {
+  let result = spawnSync("ps", ["e", "-ww", "-Ao", "pid=,ppid=,command="], {
     encoding: "utf8",
     timeout: VALIDATION_KILL_GRACE_MS,
     maxBuffer: 1024 * 1024
   });
+  if (result.error || result.status !== 0) {
+    result = spawnSync("ps", ["-Ao", "pid=,ppid="], {
+      encoding: "utf8",
+      timeout: VALIDATION_KILL_GRACE_MS,
+      maxBuffer: 1024 * 1024
+    });
+  }
   if (result.error || result.status !== 0) return [];
   const children = new Map();
+  const marked = [];
   for (const line of result.stdout.split("\n")) {
-    const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+    const match = line.trim().match(/^(\d+)\s+(\d+)(?:\s+(.*))?$/);
     if (!match) continue;
     const pid = Number(match[1]);
     const parentPid = Number(match[2]);
+    if (runId && match[3]?.includes(`CODEKEEPER_VALIDATION_RUN_ID=${runId}`)) marked.push(pid);
     const siblings = children.get(parentPid) ?? [];
     siblings.push(pid);
     children.set(parentPid, siblings);
@@ -325,7 +335,8 @@ function validationDescendantProcessIds(rootPid) {
     descendants.push(pid);
     pending.push(...(children.get(pid) ?? []));
   }
-  return descendants.reverse();
+  return [...new Set([...descendants.reverse(), ...marked])]
+    .filter((pid) => pid !== rootPid && pid !== process.pid);
 }
 
 function signalValidationProcess(child, descendants, signal) {
@@ -347,9 +358,10 @@ function signalValidationProcess(child, descendants, signal) {
 function runValidationProcess(command, { cwd, environment, timeoutMs }) {
   return new Promise((resolve, reject) => {
     const detached = process.platform !== "win32";
+    const runId = randomUUID();
     const child = spawn("bash", ["-c", command], {
       cwd,
-      env: environment,
+      env: { ...environment, CODEKEEPER_VALIDATION_RUN_ID: runId },
       detached,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -357,6 +369,8 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
     let stderr = Buffer.alloc(0);
     let timedOut = false;
     let descendants = [];
+    let exitStatus = null;
+    let exitSignal = null;
     let settled = false;
     let killTimer;
     const settle = (callback) => {
@@ -369,12 +383,15 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
       try {
-        descendants = validationDescendantProcessIds(child.pid);
+        descendants = validationDescendantProcessIds(child.pid, runId);
         signalValidationProcess(child, descendants, "SIGTERM");
         killTimer = setTimeout(() => {
           try {
-            descendants = [...new Set([...descendants, ...validationDescendantProcessIds(child.pid)])];
+            descendants = [...new Set([...descendants, ...validationDescendantProcessIds(child.pid, runId)])];
             signalValidationProcess(child, descendants, "SIGKILL");
+            child.stdout.destroy();
+            child.stderr.destroy();
+            settle(() => resolve({ status: exitStatus, signal: exitSignal, stdout, stderr, timedOut }));
           } catch (error) {
             settle(() => reject(error));
           }
@@ -389,6 +406,8 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
       settle(() => reject(error));
     });
     child.once("exit", (status, signal) => {
+      exitStatus = status;
+      exitSignal = signal;
       if (!timedOut) return;
       child.stdout.destroy();
       child.stderr.destroy();
