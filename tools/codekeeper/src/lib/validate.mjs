@@ -137,6 +137,34 @@ async function writeArtifact({ artifactDirectory, context, result, patch = null,
   return { manifest, manifestSha256: sha256(await readRegularFile(manifestPath)) };
 }
 
+function inactiveReviewSource(source) {
+  return source?.resolved === true || source?.outdated === true ||
+    (source?.kind === "review" && String(source.state ?? "").trim().toLowerCase() === "dismissed");
+}
+
+export function validateFrozenReviewFeedback(sourceFeedback, resultFeedback) {
+  const expectedSources = new Set(sourceFeedback.map((item) => item.sourceKey));
+  const actualSources = new Set(resultFeedback.flatMap((item) => item.sourceKeys));
+  if (expectedSources.size !== actualSources.size || [...expectedSources].some((source) => !actualSources.has(source))) {
+    throw new Error("Review feedback classifications must cover the complete frozen review surface exactly once");
+  }
+  const sourcesByKey = new Map(sourceFeedback.map((item) => [item.sourceKey, item]));
+  for (const feedback of resultFeedback) {
+    const sources = feedback.sourceKeys.map((key) => sourcesByKey.get(key));
+    const inactiveSources = sources.filter(inactiveReviewSource);
+    if (inactiveSources.length > 0 && inactiveSources.length !== sources.length) {
+      throw new Error(`Review feedback ${feedback.problemKey} mixes active and inactive frozen sources`);
+    }
+    if (inactiveSources.length > 0 && feedback.disposition !== "ignore") {
+      throw new Error(`Review feedback ${feedback.problemKey} must ignore resolved, outdated, or dismissed frozen sources`);
+    }
+    const expectedThreadIds = [...new Set(sources.map((source) => source?.threadId).filter(Boolean))].sort();
+    if (JSON.stringify([...feedback.threadIds].sort()) !== JSON.stringify(expectedThreadIds)) {
+      throw new Error(`Review feedback ${feedback.problemKey} has thread IDs outside its frozen sources`);
+    }
+  }
+}
+
 function reviewResult(context, result) {
   const findings = [...result.blockingFindings, ...result.nonBlockingFindings];
   const changedFiles = new Set(changedFilesBetween(context.pullRequest.baseSha, context.pullRequest.headSha));
@@ -158,18 +186,7 @@ function reviewResult(context, result) {
     }
   }
   const sourceFeedback = context.pullRequest.reviewFeedback ?? [];
-  const expectedSources = new Set(sourceFeedback.map((item) => item.sourceKey));
-  const actualSources = new Set(result.reviewFeedback.flatMap((item) => item.sourceKeys));
-  if (expectedSources.size !== actualSources.size || [...expectedSources].some((source) => !actualSources.has(source))) {
-    throw new Error("Review feedback classifications must cover the complete frozen review surface exactly once");
-  }
-  const sourcesByKey = new Map(sourceFeedback.map((item) => [item.sourceKey, item]));
-  for (const feedback of result.reviewFeedback) {
-    const expectedThreadIds = [...new Set(feedback.sourceKeys.map((key) => sourcesByKey.get(key)?.threadId).filter(Boolean))].sort();
-    if (JSON.stringify([...feedback.threadIds].sort()) !== JSON.stringify(expectedThreadIds)) {
-      throw new Error(`Review feedback ${feedback.problemKey} has thread IDs outside its frozen sources`);
-    }
-  }
+  validateFrozenReviewFeedback(sourceFeedback, result.reviewFeedback);
   return result;
 }
 
