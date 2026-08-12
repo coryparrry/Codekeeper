@@ -5,6 +5,7 @@ import path from "node:path";
 
 const MAX_CAPTURE_FILE_BYTES = 1024 * 1024;
 const MAX_CAPTURE_PATCH_BYTES = 5 * 1024 * 1024;
+const CAPTURE_GIT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_VALIDATION_TIMEOUT_MS = 5 * 60 * 1000;
 const VALIDATION_KILL_GRACE_MS = 100;
 const MAX_VALIDATION_OUTPUT_BYTES = 12000;
@@ -84,14 +85,14 @@ export async function collectWorkingTreeChanges(
     git(["ls-files", "--others", "--exclude-standard", "-z"], { cwd, encoding: null }).stdout
   );
   const rawTokens = splitNul(
-    git(["diff", "--raw", "-z", "HEAD"], { cwd, encoding: null }).stdout
+    git(["diff", "--raw", "--full-index", "-z", "HEAD"], { cwd, encoding: null }).stdout
   );
   const rawByPath = new Map();
   for (let index = 0; index < rawTokens.length;) {
     const metadata = rawTokens[index++];
-    const match = metadata?.match(/^:(\d{6}) (\d{6}) \S+ \S+ ([A-Z][0-9]*)$/);
+    const match = metadata?.match(/^:(\d{6}) (\d{6}) (\S+) \S+ ([A-Z][0-9]*)$/);
     const oldPath = rawTokens[index++];
-    const renamedOrCopied = match?.[3]?.startsWith("R") || match?.[3]?.startsWith("C");
+    const renamedOrCopied = match?.[4]?.startsWith("R") || match?.[4]?.startsWith("C");
     const filePath = renamedOrCopied ? rawTokens[index++] : oldPath;
     if (!match || !filePath) throw new Error("Could not parse git diff --raw output");
     const oldMode = match[1];
@@ -100,6 +101,7 @@ export async function collectWorkingTreeChanges(
     rawByPath.set(filePath, {
       oldMode,
       newMode,
+      oldObject: match[3],
       modeChanged: oldMode !== "000000" && newMode !== "000000" && oldMode !== newMode,
       specialMode: !["100644", "100755"].includes(activeMode)
     });
@@ -190,6 +192,36 @@ export async function collectWorkingTreeChanges(
       item.bytes = 0;
     }
   }
+
+  const oldObjects = [
+    ...new Set(
+      [...byPath.values()]
+        .map((item) => item.oldObject)
+        .filter((object) => object && !/^0+$/.test(object))
+    )
+  ];
+  if (oldObjects.length > 0) {
+    const oldSizes = git(["cat-file", "--batch-check=%(objectsize)"], {
+      cwd,
+      input: `${oldObjects.join("\n")}\n`,
+      timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+    }).stdout.trim().split("\n");
+    if (oldSizes.length !== oldObjects.length || oldSizes.some((size) => !/^\d+$/.test(size))) {
+      throw new Error("Could not determine pre-change blob sizes");
+    }
+    const sizeByObject = new Map(
+      oldObjects.map((object, index) => [object, Number(oldSizes[index])])
+    );
+    for (const item of byPath.values()) {
+      if (sizeByObject.get(item.oldObject) > maximumFileBytes) {
+        item.captureSkipped = true;
+        item.binary = false;
+        item.additions = 0;
+        item.deletions = 0;
+      }
+    }
+  }
+  for (const item of byPath.values()) delete item.oldObject;
 
   const files = [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
   const additions = files.reduce((sum, item) => sum + (item.additions ?? 0), 0);
