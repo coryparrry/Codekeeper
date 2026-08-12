@@ -5,6 +5,7 @@ import { SOURCE_COMMIT } from "../src/constants.mjs";
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
+const MINIMUM_RELEASE_CHECKPOINT = "cf9e0cabadb3bc638a42bfc21ed9db58b176ecb3";
 
 function resolveDefaultBranchRef(repositoryRoot, defaultBranch) {
   const localRef = `refs/heads/${defaultBranch}`;
@@ -27,10 +28,11 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.check, /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
 });
 
-test("installer source pin is a full commit reachable from the repository default branch", () => {
+test("installer source pin is a full reviewed checkpoint reachable from the repository default branch", () => {
   assert.match(SOURCE_COMMIT, /^[0-9a-f]{40}$/);
   const defaultBranchRef = resolveDefaultBranchRef(REPOSITORY_ROOT, SOURCE_DEFAULT_BRANCH);
   git(REPOSITORY_ROOT, ["merge-base", "--is-ancestor", SOURCE_COMMIT, defaultBranchRef]);
+  git(REPOSITORY_ROOT, ["merge-base", "--is-ancestor", MINIMUM_RELEASE_CHECKPOINT, SOURCE_COMMIT]);
 });
 
 test("source-pin ancestry accepts local and renamed-remote default-branch refs", async (t) => {

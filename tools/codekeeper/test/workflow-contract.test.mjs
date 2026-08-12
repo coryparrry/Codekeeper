@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "bc24a5367565e541e03c25c26d1422de635b0561a6feff45d1e3db8dbbd19a1f";
+const toolingManifestSha256 = "aca2520eeed8c1100b5576fd37280b97c6eb6df906c2beba65a2f1fcdf21288f";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -139,13 +139,13 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
       Array(count).fill(bootstrapToolingArtifactName),
       `${mode} must consume the caller bootstrap artifact by run ID only so failed-job reruns reuse verified tooling`
     );
-    const workspaceArtifactName = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-workspace-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    const workspaceArtifactName = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-workspace-\${{ github.run_id }}`;
     const workspaceArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-workspace-[^\n]+)$/gm)]
       .map((match) => match[1]);
     assert.deepEqual(
       workspaceArtifactNames,
       [workspaceArtifactName, workspaceArtifactName],
-      `${mode} workspace handoff must remain attempt-scoped`
+      `${mode} workspace handoff must remain available to failed-job reruns`
     );
     assert.doesNotMatch(source, /job\.workflow_repository/);
     assert.doesNotMatch(source, /repository: \$\{\{ job\.workflow_repository \}\}/);
@@ -303,12 +303,13 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
   }
 });
 
-test("candidate and sealed artifact handoffs retain exact run-and-attempt names", async () => {
+test("workflow handoff artifacts survive failed-job reruns and producers replace full reruns", async () => {
   for (const mode of modes) {
     const source = await workflow(mode);
     const artifactPrefix = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}`;
-    const candidateArtifactName = `${artifactPrefix}-candidate-\${{ github.run_id }}-\${{ github.run_attempt }}`;
-    const sealedArtifactName = `${artifactPrefix}-artifact-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    const workspaceArtifactName = `${artifactPrefix}-workspace-\${{ github.run_id }}`;
+    const candidateArtifactName = `${artifactPrefix}-candidate-\${{ github.run_id }}`;
+    const sealedArtifactName = `${artifactPrefix}-artifact-\${{ github.run_id }}`;
     const candidateHandoffCount = mode === "maintain" || mode === "fix" ? 3 : 2;
     const candidateArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-candidate-[^\n]+)$/gm)]
       .map((match) => match[1]);
@@ -317,13 +318,33 @@ test("candidate and sealed artifact handoffs retain exact run-and-attempt names"
     assert.deepEqual(
       candidateArtifactNames,
       Array(candidateHandoffCount).fill(candidateArtifactName),
-      `${mode} candidate producer and consumer must use the same run-and-attempt artifact name`
+      `${mode} candidate producer and consumers must use the same run-stable artifact name`
     );
     assert.deepEqual(
       sealedArtifactNames,
       [sealedArtifactName, sealedArtifactName],
-      `${mode} sealed artifact producer and consumer must use the same run-and-attempt artifact name`
+      `${mode} sealed artifact producer and consumer must use the same run-stable artifact name`
     );
+    const replaceableUploads = [...source.matchAll(/uses: actions\/upload-artifact@[^\n]+\n\s+with:\n\s+name: (codekeeper-[^\n]+)\n\s+path: [^\n]+\n\s+retention-days: 1\n\s+if-no-files-found: error\n\s+overwrite: true/g)]
+      .map((match) => match[1]);
+    assert.deepEqual(
+      replaceableUploads,
+      [workspaceArtifactName, candidateArtifactName, sealedArtifactName],
+      `${mode} must replace each run-stable handoff when every job is rerun`
+    );
+  }
+});
+
+test("issue preparation can read pull requests in every caller and job that invokes it", async () => {
+  const source = await workflow("issues");
+  const caller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
+  const workflowPermissions = source.slice(source.indexOf("\npermissions:"), source.indexOf("\nenv:"));
+  assert.match(workflowPermissions, /pull-requests: read/);
+  assert.match(caller, /permissions:\n\s+contents: read\n\s+issues: read\n\s+pull-requests: read/);
+
+  for (const section of [jobSection(source, "workspace", "analyze"), jobSection(source, "analyze", "seal")]) {
+    assert.match(section, /prepare-issue/);
+    assert.match(section, /permissions:\n\s+contents: read\n\s+issues: read\n\s+pull-requests: read/);
   }
 });
 

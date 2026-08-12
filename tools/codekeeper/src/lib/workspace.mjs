@@ -2,7 +2,7 @@ import path from "node:path";
 
 function isWithin(parent, child) {
   const relative = path.relative(parent, child);
-  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== "..");
+  return relative === "" || (!path.isAbsolute(relative) && !relative.startsWith(`..${path.sep}`) && relative !== "..");
 }
 
 // Prompts, model output, and generated artifacts must never be written through
@@ -17,7 +17,7 @@ export function assertRunnerOwnedDirectory(directory, cwd = process.cwd()) {
   }
   const resolvedDirectory = path.resolve(directory);
   const resolvedCwd = path.resolve(cwd);
-  if (isWithin(resolvedCwd, resolvedDirectory)) {
+  if (isWithin(resolvedCwd, resolvedDirectory) || isWithin(resolvedDirectory, resolvedCwd)) {
     throw new Error("--directory must be outside the checked-out repository");
   }
   return resolvedDirectory;

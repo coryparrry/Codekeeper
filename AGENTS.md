@@ -28,4 +28,4 @@ Follow the repository’s Conventional Commit history: `fix(review): ...`, `feat
 ## Security & Agent Workflow
 
 Never commit or paste provider keys, GitHub App PEMs, tokens, or live traces. Report vulnerabilities through GitHub private vulnerability reporting.
-Release and source pins must be full, reviewed commits reachable from the repository default branch; verify ancestry before publication.
+Release and source pins must be full, reviewed commits reachable from the repository default branch and containing the intended runtime; ancestry alone is insufficient, so verify the exact checkpoint before publication.

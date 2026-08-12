@@ -11,11 +11,12 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, "../../..");
 const releaseScript = path.join(repositoryRoot, "scripts/release-source.sh");
 
-function run(command, args, cwd) {
+function run(command, args, cwd, { env = process.env } = {}) {
   return execFileSync(command, args, {
     cwd,
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    env
   });
 }
 
@@ -105,6 +106,57 @@ test("failed verification leaves no final archive and a corrected retry succeeds
   const stdout = run("bash", ["scripts/release-source.sh", "--output", "../artifacts"], checkout);
   assert.match(stdout, /verified source archive/);
   assert.equal((await readdir(output)).filter((name) => name.endsWith(".tar.gz")).length, 1);
+});
+
+test("archive inventory explicitly forces C byte-order sorting", async (context) => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "codekeeper-release-locale-test-"));
+  context.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+
+  const checkout = path.join(fixtureRoot, "checkout");
+  const shimDirectory = path.join(fixtureRoot, "bin");
+  const scripts = path.join(checkout, "scripts");
+  await mkdir(shimDirectory);
+  await mkdir(scripts, { recursive: true });
+  await copyFile(releaseScript, path.join(scripts, "release-source.sh"));
+
+  const systemSort = run("which", ["sort"], checkout).trim();
+  assert.match(systemSort, /^\/[A-Za-z0-9_./-]+$/);
+  await writeFile(
+    path.join(shimDirectory, "sort"),
+    `#!/bin/sh\nif [ "$LC_ALL" != C ]; then exit 97; fi\nexec "${systemSort}" "$@"\n`,
+    { encoding: "utf8", mode: 0o755 }
+  );
+
+  const fixtureFiles = new Map([
+    ["Z-source.mjs", "export const upper = true;\n"],
+    ["_source.mjs", "export const underscore = true;\n"],
+    ["a-source.mjs", "export const lower = true;\n"]
+  ]);
+  for (const [name, contents] of fixtureFiles) {
+    await writeFile(path.join(checkout, name), contents, "utf8");
+  }
+  const script = await readFile(path.join(scripts, "release-source.sh"));
+  const manifest = [
+    ...[...fixtureFiles].map(([name, contents]) => `${digest(contents)}  ${name}`),
+    `${digest(script)}  scripts/release-source.sh`
+  ].sort().join("\n");
+  await writeFile(path.join(checkout, "MANIFEST.sha256"), `${manifest}\n`, "utf8");
+
+  run("git", ["init", "-q"], checkout);
+  run("git", ["config", "user.name", "Test"], checkout);
+  run("git", ["config", "user.email", "test@example.com"], checkout);
+  run("git", ["add", "."], checkout);
+  run("git", ["commit", "-qm", "locale fixture"], checkout);
+
+  const stdout = run("bash", ["scripts/release-source.sh", "--verify"], checkout, {
+    env: {
+      ...process.env,
+      LANG: "POSIX",
+      LC_ALL: "POSIX",
+      PATH: `${shimDirectory}${path.delimiter}${process.env.PATH}`
+    }
+  });
+  assert.match(stdout, /verified source archive/);
 });
 
 test("worktree verification checks pending content without weakening archive cleanliness", async (context) => {
