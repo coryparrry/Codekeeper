@@ -179,7 +179,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   );
 }
 
-export async function editProfileWithEditor({ profile, source, environment = process.env, suspendTerminal = (callback) => callback(), runEditor = null }) {
+export async function editProfileWithEditor({ profile, source, environment = process.env, suspendTerminal = (callback) => callback(), runEditor = null, spawnEditor = spawn }) {
   const editor = String(environment.EDITOR ?? environment.VISUAL ?? "").trim();
   if (!editor) throw new InstallerError("Set $EDITOR or $VISUAL before editing an agent profile.", { code: "EDITOR_UNAVAILABLE" });
   const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-profile-"));
@@ -189,7 +189,7 @@ export async function editProfileWithEditor({ profile, source, environment = pro
     const status = await suspendTerminal(() => runEditor
       ? runEditor(editor, file)
       : new Promise((resolve, reject) => {
-        const child = spawn(editor, [file], { stdio: "inherit", shell: true });
+        const child = spawnEditor(editor, [file], { stdio: "inherit", shell: false });
         child.once("error", reject);
         child.once("exit", (code, signal) => resolve(signal ? 1 : code ?? 1));
       }));
