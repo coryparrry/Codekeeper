@@ -33,11 +33,10 @@ jobs:
             const body = String(process.env.COMMENT_BODY ?? "").trim().toLowerCase();
             const association = String(process.env.AUTHOR_ASSOCIATION ?? "");
             const bot = String(process.env.AUTOMATION_BOT_LOGIN ?? "").replace(/\[bot\]$/i, "").toLowerCase();
+            const escapedBot = bot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             const actions = ["status", "review", "rerun", "triage", "defer", "implement", "fix", "stop"];
             const slash = new RegExp(`^/codekeeper\\s+(${actions.join("|")})$`, "i").test(body);
-            const mentioned = bot && body.includes(`@${bot}`)
-              ? actions.filter((action) => new RegExp(`\\b${action}\\b`, "i").test(body)).length === 1
-              : false;
+            const mentioned = bot && new RegExp(`^@${escapedBot}\\s+(${actions.join("|")})$`, "i").test(body);
             const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
             appendFileSync(process.env.GITHUB_OUTPUT, `route=${trustedAssociation && (slash || mentioned)}\n`);
           '
