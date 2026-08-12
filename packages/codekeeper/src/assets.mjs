@@ -209,15 +209,26 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
   rendered = rendered.replace(modelSecretPattern, `model_api_key: \${{ secrets.${desiredSecret} }}`);
   if (automation) {
     if (mode === "review") {
-      if (typeof automation.automaticPrReview !== "boolean" || count(rendered, "auto_review: true") !== 1) {
+      if (typeof automation.automaticPrReview !== "boolean" || typeof automation.reviewFeedbackTriage !== "boolean"
+        || count(rendered, "auto_review: true") !== 1 || count(rendered, "feedback_triage: true") !== 1) {
         throw new InstallerError("Review automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
       }
-      rendered = rendered.replace("auto_review: true", `auto_review: ${automation.automaticPrReview}`);
+      rendered = rendered
+        .replace("auto_review: true", `auto_review: ${automation.automaticPrReview}`)
+        .replace("feedback_triage: true", `feedback_triage: ${automation.reviewFeedbackTriage}`);
     } else if (mode === "issues") {
-      if (typeof automation.issueTriage !== "boolean" || count(rendered, "auto_triage: true") !== 1) {
+      if (typeof automation.issueTriage !== "boolean" || typeof automation.ownerRequests !== "boolean"
+        || count(rendered, "auto_triage: true") !== 1 || count(rendered, "owner_requests: true") !== 1) {
         throw new InstallerError("Issue automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
       }
-      rendered = rendered.replace("auto_triage: true", `auto_triage: ${automation.issueTriage}`);
+      rendered = rendered
+        .replace("auto_triage: true", `auto_triage: ${automation.issueTriage}`)
+        .replace("owner_requests: true", `owner_requests: ${automation.ownerRequests}`);
+    } else if (mode === "fix") {
+      if (typeof automation.ownerRequests !== "boolean" || count(rendered, "owner_requests: true") !== 1) {
+        throw new InstallerError("Owner-request automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+      }
+      rendered = rendered.replace("owner_requests: true", `owner_requests: ${automation.ownerRequests}`);
     } else if (mode === "maintain") {
       if (typeof automation.maintenanceSchedule !== "string" || !automation.maintenanceSchedule.trim()
         || count(rendered, 'cron: "17 7 * * *"') !== 1) {

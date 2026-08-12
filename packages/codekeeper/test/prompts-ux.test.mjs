@@ -320,6 +320,30 @@ test("an existing custom model remains the default during a guided rerun", async
   assert.match(modelPrompt.options.choices[0].label, /Current custom model.*anthropic\/claude-sonnet/);
 });
 
+test("a fresh guided setup can assign an arbitrary OpenRouter model", async () => {
+  const bundle = await loadVerifiedAssets();
+  const prompt = setupPrompt({ recommended: false, modes: ["review"], preset: "openai" });
+  const originalSelect = prompt.select.bind(prompt);
+  prompt.select = async (options) => {
+    if (options.message === "Assign a model to the Pull request reviewer:") return "custom-review";
+    if (options.message === "Choose the provider for the Pull request reviewer:") return "openrouter";
+    return originalSelect(options);
+  };
+  const originalInputText = prompt.inputText.bind(prompt);
+  prompt.inputText = async (options) => {
+    if (options.message === "Enter the model ID for the Pull request reviewer:") return "anthropic/claude-sonnet-4.5";
+    return originalInputText(options);
+  };
+
+  const answers = await collectSetupAnswers({ prompt, bundle, output: textSink(), snapshot: snapshot() });
+
+  assert.deepEqual(answers.models.review, {
+    provider: "openrouter",
+    model: "anthropic/claude-sonnet-4.5",
+    effort: "none"
+  });
+});
+
 test("enabling an existing installation explicitly describes immediate activation", async () => {
   const bundle = await loadVerifiedAssets();
   const policy = JSON.parse(bundle.contents["policies/openai.json"]);

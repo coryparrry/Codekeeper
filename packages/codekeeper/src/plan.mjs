@@ -499,10 +499,15 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     const agent = presetPolicy.ai.agents[agentId];
     const defaultChoice = ALL_MODEL_OPTIONS.find((choice) => choice.provider === agent.provider && choice.model === agent.model && choice.effort === agent.effort);
     const customChoiceId = `current-custom-${key}`;
-    const choices = defaultChoice ? ALL_MODEL_OPTIONS : [{
-      id: customChoiceId,
-      label: `Current custom model · ${agent.provider} · ${agent.model} · ${agent.effort} effort`
-    }, ...ALL_MODEL_OPTIONS];
+    const newCustomChoiceId = `custom-${key}`;
+    const choices = [
+      ...(defaultChoice ? [] : [{
+        id: customChoiceId,
+        label: `Current custom model · ${agent.provider} · ${agent.model} · ${agent.effort} effort`
+      }]),
+      ...ALL_MODEL_OPTIONS,
+      { id: newCustomChoiceId, label: "Custom provider and model" }
+    ];
     const selectedModel = await prompt.select(tuiOptions(prompt, {
       message: `Assign a model to the ${label}:`,
       defaultValue: defaultChoice?.id ?? customChoiceId,
@@ -514,9 +519,39 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
         "You can change this choice later in .github/codekeeper.json."
       ]
     }));
-    models[key] = selectedModel === customChoiceId
-      ? { provider: agent.provider, model: agent.model, effort: agent.effort }
-      : selectedModel;
+    if (selectedModel === newCustomChoiceId) {
+      const provider = await prompt.select(tuiOptions(prompt, {
+        message: `Choose the provider for the ${label}:`,
+        defaultValue: agent.provider,
+        choices: Object.keys(MODEL_PROVIDER_SECRETS).map((value) => ({ value, label: value }))
+      }, {
+        step: "models",
+        description: ["Provider credentials are collected separately and never written to the repository."]
+      }));
+      const model = await prompt.inputText(tuiOptions(prompt, {
+        message: `Enter the model ID for the ${label}:`,
+        defaultValue: provider === agent.provider ? agent.model : ""
+      }, {
+        step: "models",
+        description: ["Use the exact model ID accepted by the selected provider."]
+      }));
+      const effort = presetPolicy.ai.providers[provider].supportsReasoningEffort
+        ? await prompt.select(tuiOptions(prompt, {
+          message: `Choose the reasoning effort for the ${label}:`,
+          defaultValue: provider === agent.provider ? agent.effort : "medium",
+          choices: ["none", "minimal", "low", "medium", "high", "max", "xhigh"]
+            .map((value) => ({ value, label: value }))
+        }, {
+          step: "models",
+          description: ["The provider must support the selected reasoning effort."]
+        }))
+        : "none";
+      models[key] = { provider, model, effort };
+    } else {
+      models[key] = selectedModel === customChoiceId
+        ? { provider: agent.provider, model: agent.model, effort: agent.effort }
+        : selectedModel;
+    }
   }
   const tracing = prompt?.kind === "ink"
     ? await prompt.select({

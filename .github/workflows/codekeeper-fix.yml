@@ -8,6 +8,11 @@ on:
         required: false
         default: true
         type: boolean
+      owner_requests:
+        description: Admit eligible owner commands from issue comments.
+        required: false
+        default: true
+        type: boolean
       automation_bot_login:
         description: Installed GitHub App bot login that may authorize ready-label implementation.
         required: false
@@ -65,6 +70,7 @@ jobs:
     name: Codekeeper owner command
     if: >-
       inputs.enabled &&
+      inputs.owner_requests &&
       github.event_name == 'issue_comment' &&
       (github.event.comment.author_association == 'OWNER' ||
        github.event.comment.author_association == 'MEMBER' ||
@@ -176,7 +182,9 @@ jobs:
        github.event.action == 'labeled' &&
        github.event.label.name == 'codekeeper:ready' &&
        github.event.sender.login == inputs.automation_bot_login) ||
-      (github.event.comment.body == '/codekeeper fix' &&
+      (inputs.owner_requests &&
+       github.event_name == 'issue_comment' &&
+       github.event.comment.body == '/codekeeper fix' &&
         (github.event.comment.author_association == 'OWNER' ||
          github.event.comment.author_association == 'MEMBER' ||
          github.event.comment.author_association == 'COLLABORATOR')))

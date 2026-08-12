@@ -396,10 +396,12 @@ test("generated callers honor the rendered policy automation controls", async ()
   const bundle = await loadVerifiedAssets();
   const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
   policy.automation.automaticPrReview = false;
+  policy.automation.reviewFeedbackTriage = false;
   policy.automation.issueTriage = false;
+  policy.automation.ownerRequests = false;
   policy.automation.maintenanceSchedule = "5 4 * * 1";
   const files = renderInstallFiles(bundle, {
-    modes: ["review", "maintain", "issues"],
+    modes: ["review", "maintain", "issues", "fix"],
     preset: "openai",
     displayName: "Widget",
     defaultBranch: "main",
@@ -409,7 +411,10 @@ test("generated callers honor the rendered policy automation controls", async ()
   });
   const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
   assert.match(contents[MODES.review.target], /auto_review: false/);
+  assert.match(contents[MODES.review.target], /feedback_triage: false/);
   assert.match(contents[MODES.issues.target], /auto_triage: false/);
+  assert.match(contents[MODES.issues.target], /owner_requests: false/);
+  assert.match(contents[MODES.fix.target], /owner_requests: false/);
   assert.match(contents[MODES.maintain.target], /cron: "5 4 \* \* 1"/);
 });
 

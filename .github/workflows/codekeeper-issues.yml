@@ -13,6 +13,11 @@ on:
         required: false
         default: true
         type: boolean
+      owner_requests:
+        description: Admit eligible owner commands from issue comments.
+        required: false
+        default: true
+        type: boolean
       app_client_id:
         description: GitHub App client ID. This identifier is not secret.
         required: true
@@ -57,7 +62,8 @@ jobs:
         (github.event.action == 'opened' ||
          github.event.action == 'reopened' ||
          github.event.action == 'edited')) ||
-       (github.event_name == 'issue_comment' &&
+       (inputs.owner_requests &&
+        github.event_name == 'issue_comment' &&
         (github.event.comment.body == '/codekeeper triage' ||
          startsWith(github.event.comment.body, '/codekeeper triage ')) &&
         (github.event.comment.author_association == 'OWNER' ||

@@ -17,6 +17,11 @@ on:
         required: false
         default: true
         type: boolean
+      feedback_triage:
+        description: Classify eligible pull request review feedback when the caller enables that trigger.
+        required: false
+        default: true
+        type: boolean
       automation_bot_login:
         description: Installed GitHub App bot login, used only to admit its own PRs.
         required: false
