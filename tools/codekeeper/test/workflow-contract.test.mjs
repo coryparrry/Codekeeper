@@ -428,27 +428,18 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   const fix = await workflow("fix");
   const caller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issue, /auto_triage:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
-  assert.match(issue, /owner_requests:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(issue, /inputs\.auto_triage &&\s+github\.event_name == 'issues'/);
   for (const action of ["opened", "reopened", "edited"]) assert.match(issue, new RegExp(`github\\.event\\.action == '${action}'`));
-  assert.match(issue, /inputs\.owner_requests &&\s+github\.event_name == 'issue_comment'/);
-  assert.match(issue, /github\.event\.comment\.body == '\/codekeeper triage'/);
-  assert.match(issue, /startsWith\(github\.event\.comment\.body, '\/codekeeper triage '\)/);
-  assert.match(issue, /github\.event\.comment\.author_association == 'OWNER'/);
+  assert.doesNotMatch(issue, /owner_requests|github\.event\.comment\.body/);
   assert.match(issue, /TRIAGE_MODE: \$\{\{ github\.event_name == 'issues' && 'automatic' \|\| 'manual' \}\}/);
   assert.match(issue, /codekeeper_issue[\s\S]*github\.actor == inputs\.automation_bot_login/);
   assert.match(issue, /prepare-issue[\s\S]*--actor "\$REQUESTED_BY"/);
   assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
   assert.match(caller, /issues:\n\s+types: \[opened, reopened, edited\]/);
   assert.match(caller, /auto_triage: true/);
-  assert.match(caller, /owner_requests: true/);
   assert.match(caller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
 
-  assert.match(fix, /github\.event\.comment\.body == '\/codekeeper fix'/);
-  assert.match(fix, /owner_requests:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
-  assert.match(fix, /inputs\.owner_requests &&\s+github\.event_name == 'issue_comment'/);
-  assert.doesNotMatch(fix, /startsWith\(github\.event\.comment\.body, '\/codekeeper fix '\)/);
-  assert.match(fix, /github\.event\.comment\.author_association == 'OWNER'/);
+  assert.doesNotMatch(fix, /owner_requests|github\.event\.comment\.body/);
   assert.match(fix, /allow-users: \$\{\{ github\.actor \}\}/);
   assert.match(fix, /--target-number "\$TARGET_NUMBER"/);
   assert.match(fix, /fromJSON\(steps\.prepare\.outputs\.result\)\.baseSha/);
@@ -469,7 +460,6 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(fixCaller, /issues:\n\s+types: \[labeled\]/);
   assert.doesNotMatch(fixCaller, /issue_comment:/);
   assert.match(fixCaller, /automation_bot_login: \$\{\{ vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN \}\}/);
-  assert.match(fixCaller, /owner_requests: true/);
   const commands = await repositoryFile("tools/codekeeper/src/lib/commands.mjs");
   assert.match(commands, /pull\.base\?\.ref !== config\.repository\.defaultBranch/);
   assert.match(commands, /removeLabel\(number, "codekeeper:paused"\)/);
