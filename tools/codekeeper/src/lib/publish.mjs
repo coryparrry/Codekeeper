@@ -503,6 +503,9 @@ function rootReviewCommentIds(sources) {
 
 export async function replyToReviewFeedback({ github, context, result, automationIdentity, dryRun = false, retiredFingerprints = [] }) {
   const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
+  const activeFingerprints = new Set((result.reviewFeedback ?? [])
+    .flatMap((feedback) => [...new Set(feedback.sourceKeys)])
+    .map((sourceKey) => deferredReviewFingerprint(context.repository, context.pullRequest.number, sourceKey)));
   const replies = [];
   for (const feedback of result.reviewFeedback.filter((item) => item.disposition !== "defer")) {
     const label = feedback.disposition === "fix_now" ? "Fix now"
@@ -529,7 +532,7 @@ export async function replyToReviewFeedback({ github, context, result, automatio
     }
   }
   const retiredBody = "No longer current: this prior review-feedback disposition was replaced by the complete current review publication.";
-  for (const fingerprint of [...new Set(retiredFingerprints)]) {
+  for (const fingerprint of [...new Set(retiredFingerprints)].filter((item) => !activeFingerprints.has(item))) {
     if (!dryRun) {
       await github.retireReviewFeedbackReply(
         context.pullRequest.number,
