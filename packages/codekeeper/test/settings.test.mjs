@@ -48,6 +48,19 @@ test("standard and advanced settings expose behavior, arbitrary models, profiles
   assert.equal(advanced.filter((candidate) => candidate.id.startsWith("release:")).every((candidate) => candidate.readOnly), true);
 });
 
+test("advanced settings preserve dots inside dynamic label keys", async () => {
+  const { settings } = await fixture();
+  settings.policy.labels["area:api.v2"] = {
+    name: "area:api.v2",
+    color: "123456",
+    description: "Versioned API area"
+  };
+  const color = row(settings, "policy:labels.area:api.v2.color", true);
+  assert.equal(color.value, "123456");
+  const edited = setSetting(settings, color, "abcdef");
+  assert.equal(edited.policy.labels["area:api.v2"].color, "abcdef");
+});
+
 test("one settings object keeps coordinator and workspace models independent", async () => {
   const { policy, settings } = await fixture(["review"]);
   const workspaceModel = settings.policy.ai.agents.review.workspace.model;

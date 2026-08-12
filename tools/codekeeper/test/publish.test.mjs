@@ -8,7 +8,7 @@ import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/li
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
 import { deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, sha256 } from "../src/lib/markers.mjs";
-import { frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
+import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
 import { completeReviewFeedback } from "../src/lib/prepare.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import {
@@ -298,11 +298,107 @@ ${marker}`,
     automationIdentity: identity
   });
 
-  assert.deepEqual(updates, [{
-    number: 51,
-    changes: { state: "closed", state_reason: "completed" }
-  }]);
+  assert.equal(updates[0].number, 51);
+  assert.equal(updates[0].changes.state, "closed");
+  assert.equal(updates[0].changes.state_reason, "completed");
+  assert.match(updates[0].changes.body, /deferred-reconciled/);
+  assert.ok(updates[0].changes.body.endsWith(marker));
   assert.deepEqual(published, [{ fingerprint, state: "closed", issueNumber: 51 }]);
+});
+
+test("owner-requested deferral does not reconcile unrelated deferred issues", async () => {
+  const updates = [];
+  const github = {
+    async listMaintenanceIssues() {
+      return [{
+        number: 51,
+        state: "open",
+        body: `## Origin
+
+- Pull request: [#7](https://github.com/owner/repository/pull/7)
+
+${deferredReviewMarker("f".repeat(64))}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }];
+    },
+    async updateIssue(number, changes) { updates.push({ number, changes }); }
+  };
+
+  assert.deepEqual(await upsertDeferredReviewFeedback({
+    github,
+    context: {
+      repository: "owner/repository",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/owner/repository/pull/7",
+        reviewFeedback: []
+      }
+    },
+    result: { reviewFeedback: [] },
+    config,
+    automationIdentity: identity,
+    ownerRequested: true
+  }), []);
+  assert.deepEqual(updates, []);
+});
+
+test("automatically reconciled deferred issues reopen when the source is deferred again", async () => {
+  const sourceKeys = ["review_comment:41"];
+  const fingerprint = deferredReviewFingerprint("owner/repository", 7, sourceKeys);
+  const marker = deferredReviewMarker(fingerprint);
+  const updates = [];
+  const github = {
+    async listMaintenanceIssues() {
+      return [{
+        number: 51,
+        state: "closed",
+        body: `## Origin
+
+- Pull request: [#7](https://github.com/owner/repository/pull/7)
+
+<!-- codekeeper:deferred-reconciled -->
+${marker}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }];
+    },
+    async ensureLabels() {},
+    async updateIssue(number, changes) {
+      updates.push({ number, changes });
+      return { number, html_url: "https://github.com/owner/repository/issues/51", ...changes };
+    },
+    async replaceManagedLabels() {},
+    async upsertReviewReply() {}
+  };
+  const feedback = {
+    problemKey: "defer-again",
+    disposition: "defer",
+    type: "testing",
+    explanation: "The current source needs deferred work again.",
+    validation: "The source is actionable again.",
+    sourceKeys,
+    threadIds: ["PRRT_thread"]
+  };
+
+  const published = await upsertDeferredReviewFeedback({
+    github,
+    context: {
+      repository: "owner/repository",
+      runUrl: "https://github.com/owner/repository/actions/runs/9",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/owner/repository/pull/7",
+        reviewFeedback: [{ sourceKey: "review_comment:41", rootCommentId: 41, author: "reviewer", url: "https://github.com/owner/repository/pull/7#discussion_r41" }]
+      }
+    },
+    result: { reviewFeedback: [feedback] },
+    config,
+    automationIdentity: identity
+  });
+
+  assert.equal(updates[0].changes.state, "open");
+  assert.equal(updates[0].changes.state_reason, null);
+  assert.doesNotMatch(updates[0].changes.body, /deferred-reconciled/);
+  assert.deepEqual(published, [{ fingerprint, state: "reopened", issueNumber: 51 }]);
 });
 
 test("maintenance issue fingerprints require the configured App author", () => {
@@ -1345,6 +1441,7 @@ function frozenRepairReviewThread(body = "Please preserve this review evidence."
       databaseId: 41,
       author: "reviewer",
       body,
+      bodySha256: sha256(body),
       url: "https://example.test/pull/42#discussion_r41",
       path: "README.md",
       line: 1,
@@ -1352,6 +1449,14 @@ function frozenRepairReviewThread(body = "Please preserve this review evidence."
     }]
   };
 }
+
+test("frozen PR repair threads hash complete bodies beyond the prompt limit", () => {
+  const prefix = "x".repeat(7000);
+  const first = frozenPullRepairReviewThreads([liveRepairReviewThread(`${prefix}a`)], ["PRRT_thread"]);
+  const second = frozenPullRepairReviewThreads([liveRepairReviewThread(`${prefix}b`)], ["PRRT_thread"]);
+  assert.equal(first[0].comments[0].body, second[0].comments[0].body);
+  assert.notEqual(first[0].comments[0].bodySha256, second[0].comments[0].bodySha256);
+});
 
 function liveRepairReviewThread(body, isResolved = false) {
   const frozen = frozenRepairReviewThread(body, isResolved);
