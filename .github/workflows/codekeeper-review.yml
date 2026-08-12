@@ -51,7 +51,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: db70b70295c226a4ba1d10832aaebe5778740c88a1c891efaf3e089812b2c321
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 51377b2cc48f2dcc7591c3891a57f10b233af6bc02a4bdc1e13ca1387b72ffd4
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
@@ -68,6 +68,8 @@ jobs:
        (((inputs.auto_review && github.event_name == 'pull_request_target') ||
          (inputs.feedback_triage &&
           github.actor != inputs.automation_bot_login &&
+          !(github.event_name == 'pull_request_review_comment' &&
+            startsWith(github.event.comment.body, '/codekeeper ')) &&
           (github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment'))) &&
         !github.event.pull_request.draft &&
         github.event.pull_request.head.repo.full_name == github.repository &&

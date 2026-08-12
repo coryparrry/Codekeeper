@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "db70b70295c226a4ba1d10832aaebe5778740c88a1c891efaf3e089812b2c321";
+const toolingManifestSha256 = "51377b2cc48f2dcc7591c3891a57f10b233af6bc02a4bdc1e13ca1387b72ffd4";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -404,6 +404,10 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(
     jobSection(source, "workspace", "analyze"),
     /feedback_triage[\s\S]*github\.actor != inputs\.automation_bot_login/
+  );
+  assert.match(
+    jobSection(source, "workspace", "analyze"),
+    /!\(github\.event_name == 'pull_request_review_comment' &&\s+startsWith\(github\.event\.comment\.body, '\/codekeeper '\)\)/
   );
   assert.match(
     publisher,

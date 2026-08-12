@@ -198,6 +198,61 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
   }
 });
 
+test("a direct issue triage command relies on the issue workflow without redispatching", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-direct-issue-triage-command-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "/codekeeper triage",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    createRepositoryDispatch: GitHubClient.prototype.createRepositoryDispatch,
+    upsertMarkerComment: GitHubClient.prototype.upsertMarkerComment,
+  };
+  const dispatches = [];
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    labels: [],
+  });
+  GitHubClient.prototype.createRepositoryDispatch = async (
+    eventType,
+    payload,
+  ) => dispatches.push({ eventType, payload });
+  GitHubClient.prototype.upsertMarkerComment = async () => {};
+  try {
+    const result = await runOwnerCommand({
+      eventPath,
+      config: {
+        automation: { ownerRequests: true },
+        repository: { ownerLogins: ["repository-owner"] },
+      },
+      token: "app-token",
+      automationIdentity: { login: "codekeeper[bot]", id: "123" },
+    });
+    assert.equal(result.command, "triage");
+    assert.equal(
+      result.outcome,
+      "The issue triage workflow is handling this direct command.",
+    );
+    assert.deepEqual(dispatches, []);
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("an owner mention queues issue triage through the trusted assistant dispatch", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "codekeeper-owner-triage-command-"),

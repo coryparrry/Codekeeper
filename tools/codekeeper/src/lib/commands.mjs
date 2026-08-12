@@ -78,8 +78,9 @@ export async function runOwnerCommand({
   automationIdentity,
 }) {
   const event = await readJson(eventPath);
+  const directCommand = parseCommand(event.comment?.body);
   const command =
-    parseCommand(event.comment?.body) ??
+    directCommand ??
     parseMentionIntent(event.comment?.body, automationIdentity?.login);
   const targetNumber = event.issue?.number ?? event.pull_request?.number;
   if (!COMMANDS.has(command)) {
@@ -150,11 +151,15 @@ export async function runOwnerCommand({
       outcome =
         "The complete current pull request review surface was queued for triage.";
     } else {
-      await github.createRepositoryDispatch("codekeeper_issue", {
-        number,
-        requested_by: actor,
-      });
-      outcome = "The issue was queued for owner-requested triage.";
+      if (directCommand === "triage") {
+        outcome = "The issue triage workflow is handling this direct command.";
+      } else {
+        await github.createRepositoryDispatch("codekeeper_issue", {
+          number,
+          requested_by: actor,
+        });
+        outcome = "The issue was queued for owner-requested triage.";
+      }
     }
   } else if (command === "defer") {
     if (!issue.pull_request)
