@@ -22,14 +22,42 @@ function setEnvironment(name, value) {
 test("validation commands cannot inherit Codekeeper provider credentials", async () => {
   const restoreModel = setEnvironment("CODEKEEPER_MODEL_API_KEY", "audit-canary-model");
   const restoreTrace = setEnvironment("CODEKEEPER_TRACE_API_KEY", "audit-canary-trace");
+  const restoreAws = setEnvironment("AWS_SECRET_ACCESS_KEY", "audit-canary-aws");
+  const restoreDatabase = setEnvironment("DATABASE_URL", "postgres://user:audit-canary@db.example/app");
   try {
     const results = await runValidationCommands([
-      "test -z \"$CODEKEEPER_MODEL_API_KEY\" && test -z \"$CODEKEEPER_TRACE_API_KEY\""
+      "test -n \"$PATH\" && test -z \"$CODEKEEPER_MODEL_API_KEY\" && test -z \"$CODEKEEPER_TRACE_API_KEY\" && test -z \"$AWS_SECRET_ACCESS_KEY\" && test -z \"$DATABASE_URL\""
     ]);
     assert.equal(results[0].success, true);
   } finally {
+    restoreDatabase();
+    restoreAws();
     restoreTrace();
     restoreModel();
+  }
+});
+
+test("successful validation launchers clean up detached descendants", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-successful-validation-descendant-"));
+  const fixturePath = path.join(directory, "successful-background.mjs");
+  const sentinelPath = path.join(directory, "survived.txt");
+  await writeFile(fixturePath, `
+    import { spawn } from "node:child_process";
+    const child = spawn(process.execPath, ["-e", ${JSON.stringify(`setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(sentinelPath)}, "survived"), 400)`).replaceAll("`", "\\`")}], {
+      detached: true,
+      stdio: "ignore"
+    });
+    child.unref();
+  `);
+  try {
+    const results = await runValidationCommands([
+      `${JSON.stringify(process.execPath)} ${JSON.stringify(fixturePath)}`
+    ], repositoryRoot, { timeoutMs: 1_000 });
+    assert.equal(results[0].success, true);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await assert.rejects(readFile(sentinelPath), { code: "ENOENT" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

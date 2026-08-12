@@ -298,24 +298,49 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
   };
   let dispatchAttempts = 0;
   let markerPresentAfterFirstAttempt = false;
-  let injectConcurrentMarker = false;
-  let markerInjected = false;
-  let publicationWritten = false;
+  let concurrentMode = false;
+  let concurrentAdds = 0;
+  let releaseConcurrentAdd;
   let removalAttempts = 0;
+  let nextLeaseCommentId = 1;
+  const leaseComments = [];
   const restoreGitHub = replaceGitHubMethods({
     async getPull() {
-      if (injectConcurrentMarker && publicationWritten && !markerInjected) {
-        pull.labels.push({ name: "codekeeper:auto-repaired" });
-        markerInjected = true;
-      }
       return structuredClone(pull);
     },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
     async listMaintenanceIssues() { return []; },
+    async createComment(_number, body) {
+      const comment = {
+        id: nextLeaseCommentId,
+        body,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      };
+      nextLeaseCommentId += 1;
+      leaseComments.push(comment);
+      return structuredClone(comment);
+    },
+    async listIssueComments() { return structuredClone(leaseComments); },
+    async updateComment(id, body) {
+      const comment = leaseComments.find((candidate) => candidate.id === id);
+      comment.body = body;
+      return structuredClone(comment);
+    },
     async ensureLabels() {},
     async replaceManagedLabels() {},
-    async upsertMarkerComment() { publicationWritten = true; },
+    async upsertMarkerComment() {},
     async addLabels(_number, labelsToAdd) {
+      if (concurrentMode) {
+        concurrentAdds += 1;
+        if (concurrentAdds === 1) {
+          await Promise.race([
+            new Promise((resolve) => { releaseConcurrentAdd = resolve; }),
+            new Promise((resolve) => setTimeout(resolve, 25))
+          ]);
+        } else {
+          releaseConcurrentAdd?.();
+        }
+      }
       pull.labels = [...pull.labels, ...labelsToAdd.map((name) => ({ name }))];
     },
     async removeLabel(_number, label) {
@@ -324,7 +349,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     },
     async createRepositoryDispatch() {
       dispatchAttempts += 1;
-      if (injectConcurrentMarker) throw new Error("concurrent dispatch failed");
+      if (concurrentMode && dispatchAttempts > 3) throw new Error("concurrent dispatch failed");
       if (dispatchAttempts === 1) throw new Error("dispatch unavailable");
     }
   });
@@ -354,22 +379,24 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     });
 
     pull.labels = [];
-    injectConcurrentMarker = true;
-    markerInjected = false;
-    publicationWritten = false;
+    concurrentMode = true;
+    concurrentAdds = 0;
     const dispatchesBeforeConcurrentRun = dispatchAttempts;
     const removalsBeforeConcurrentRun = removalAttempts;
-    const concurrent = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" });
+    const concurrent = await Promise.allSettled([
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" }),
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" })
+    ]);
     assert.deepEqual({
       markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
       dispatches: dispatchAttempts - dispatchesBeforeConcurrentRun,
       removals: removalAttempts - removalsBeforeConcurrentRun,
-      dispatched: concurrent.automaticRepair.dispatched
+      fulfilled: concurrent.filter((outcome) => outcome.status === "fulfilled").length
     }, {
       markerPresent: true,
-      dispatches: 0,
+      dispatches: 1,
       removals: 0,
-      dispatched: false
+      fulfilled: 2
     });
   } finally {
     restoreEnvironment();

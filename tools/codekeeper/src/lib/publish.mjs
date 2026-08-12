@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
-import { GitHubClient } from "./github.mjs";
+import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
@@ -13,6 +13,52 @@ import { renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderR
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
 const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
+
+function automaticRepairLeaseBody(state, scope, marker) {
+  return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${marker}`;
+}
+
+export async function acquireAutomaticRepairLease({ github, context, pull, automationIdentity }) {
+  const scope = sha256(JSON.stringify({
+    repository: context.repository,
+    pullNumber: pull.number,
+    headSha: pull.head.sha
+  }));
+  const fingerprint = sha256(JSON.stringify({ scope, runId: context.runId }));
+  const marker = `<!-- codekeeper:repair-lease=${fingerprint} -->`;
+  const activeBody = automaticRepairLeaseBody("active", scope, marker);
+  const created = await github.createComment(pull.number, activeBody);
+  const comments = await github.listIssueComments(pull.number);
+  const active = comments.filter((comment) => {
+    const match = typeof comment.body === "string"
+      ? comment.body.match(/<!-- codekeeper:repair-lease=([a-f0-9]{64}) -->$/)
+      : null;
+    return match
+      && comment.body.startsWith(`<!-- codekeeper:repair-lease-active=${scope} -->\n`)
+      && isOwnedMarkerComment(comment, match[0], automationIdentity)
+      && /^[1-9][0-9]*$/.test(String(comment.id ?? ""));
+  }).sort((left, right) => {
+    const leftId = BigInt(left.id);
+    const rightId = BigInt(right.id);
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
+  if (!active.some((comment) => String(comment.id) === String(created.id))) {
+    throw new Error("Automatic repair lease was not visible after creation");
+  }
+  const acquired = String(active[0]?.id) === String(created.id);
+  const lease = { acquired, commentId: created.id, marker, scope };
+  if (!acquired) {
+    await github.updateComment(created.id, automaticRepairLeaseBody("released", scope, marker));
+  }
+  return lease;
+}
+
+async function releaseAutomaticRepairLease(github, lease, state) {
+  await github.updateComment(
+    lease.commentId,
+    automaticRepairLeaseBody(state, lease.scope, lease.marker)
+  );
+}
 
 function singleLine(value, maximum = 256) {
   return String(value ?? "")
@@ -543,29 +589,54 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     if (issueLabelNames(authorizationPull).includes("codekeeper:auto-repaired")) {
       automaticRepair.eligible = false;
     } else {
-      await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
-      await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
-      try {
-        await currentReviewPull(github, context, config);
-        await github.createRepositoryDispatch("codekeeper_fix", {
-          number: pull.number,
-          head_sha: pull.head.sha,
-          authorization_mode: "policy",
-          requested_by: automationIdentity.login,
-          review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
-        });
-      } catch (error) {
+      const lease = await acquireAutomaticRepairLease({ github, context, pull, automationIdentity });
+      if (!lease.acquired) {
+        automaticRepair.eligible = false;
+      } else {
+        let markerAdded = false;
         try {
-          await github.removeLabel(pull.number, "codekeeper:auto-repaired");
-        } catch (rollbackError) {
-          throw new Error(
-            `${error.message}; codekeeper:auto-repaired could not be rolled back: ${rollbackError.message}`,
-            { cause: error }
-          );
+          const leasedPull = await currentReviewPull(github, context, config);
+          if (issueLabelNames(leasedPull).includes("codekeeper:auto-repaired")) {
+            automaticRepair.eligible = false;
+            await releaseAutomaticRepairLease(github, lease, "released");
+          } else {
+            await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+            await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
+            markerAdded = true;
+            await currentReviewPull(github, context, config);
+            await github.createRepositoryDispatch("codekeeper_fix", {
+              number: pull.number,
+              head_sha: pull.head.sha,
+              authorization_mode: "policy",
+              requested_by: automationIdentity.login,
+              review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
+            });
+            automaticRepair.dispatched = true;
+            await releaseAutomaticRepairLease(github, lease, "completed");
+          }
+        } catch (error) {
+          let rollbackError = null;
+          if (markerAdded) {
+            try {
+              await github.removeLabel(pull.number, "codekeeper:auto-repaired");
+            } catch (cause) {
+              rollbackError = cause;
+            }
+          }
+          try {
+            await releaseAutomaticRepairLease(github, lease, "failed");
+          } catch (cause) {
+            rollbackError ??= cause;
+          }
+          if (rollbackError) {
+            throw new Error(
+              `${error.message}; automatic repair lease rollback failed: ${rollbackError.message}`,
+              { cause: error }
+            );
+          }
+          throw error;
         }
-        throw error;
       }
-      automaticRepair.dispatched = true;
     }
   }
 

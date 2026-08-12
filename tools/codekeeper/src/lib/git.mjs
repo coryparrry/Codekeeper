@@ -10,6 +10,11 @@ const CAPTURE_GIT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_VALIDATION_TIMEOUT_MS = 5 * 60 * 1000;
 const VALIDATION_KILL_GRACE_MS = 100;
 const MAX_VALIDATION_OUTPUT_BYTES = 12000;
+const VALIDATION_ENVIRONMENT_KEYS = Object.freeze([
+  "PATH", "Path", "PATHEXT", "HOME", "TMPDIR", "TMP", "TEMP",
+  "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "CI",
+  "SystemRoot", "ComSpec"
+]);
 
 function commandError(command, args, result) {
   const stderr = result.stderr?.toString("utf8").trim();
@@ -407,6 +412,29 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
         settle(() => reject(error));
       }
     }, timeoutMs);
+    const settleAfterSuccessfulDescendantCleanup = (status, signal) => {
+      if (settled || timedOut || killTimer) return;
+      clearTimeout(timeoutTimer);
+      try {
+        descendants = validationDescendantProcessIds(child.pid, runId);
+        if (descendants.length === 0) {
+          settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
+          return;
+        }
+        signalValidationProcess(child, descendants, "SIGTERM", true);
+        killTimer = setTimeout(() => {
+          try {
+            descendants = [...new Set([...descendants, ...validationDescendantProcessIds(child.pid, runId)])];
+            signalValidationProcess(child, descendants, "SIGKILL", true);
+            settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
+          } catch (error) {
+            settle(() => reject(error));
+          }
+        }, VALIDATION_KILL_GRACE_MS);
+      } catch (error) {
+        settle(() => reject(error));
+      }
+    };
     child.stdout.on("data", (chunk) => { stdout = appendOutputTail(stdout, chunk); });
     child.stderr.on("data", (chunk) => { stderr = appendOutputTail(stderr, chunk); });
     child.once("error", (error) => {
@@ -424,6 +452,10 @@ function runValidationProcess(command, { cwd, environment, timeoutMs }) {
     });
     child.once("close", (status, signal) => {
       if (timedOut && killTimer) return;
+      if (!timedOut) {
+        settleAfterSuccessfulDescendantCleanup(status, signal);
+        return;
+      }
       settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
     });
   });
@@ -437,26 +469,9 @@ export async function runValidationCommands(
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new Error("Validation timeout must be a positive integer");
   }
-  const environment = { ...process.env };
-  for (const key of [
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "GITHUB_PAT",
-    "OPENAI_API_KEY",
-    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-    "ACTIONS_ID_TOKEN_REQUEST_URL",
-    "ACTIONS_RUNTIME_TOKEN",
-    "ACTIONS_RUNTIME_URL",
-    "ACTIONS_RESULTS_URL",
-    "ACTIONS_CACHE_URL"
-  ]) {
-    delete environment[key];
-  }
-  for (const key of Object.keys(environment)) {
-    if (/(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY)$/i.test(key)) {
-      delete environment[key];
-    }
-  }
+  const environment = Object.fromEntries(VALIDATION_ENVIRONMENT_KEYS
+    .filter((key) => typeof process.env[key] === "string")
+    .map((key) => [key, process.env[key]]));
   const results = [];
   for (const command of commands) {
     let result;
