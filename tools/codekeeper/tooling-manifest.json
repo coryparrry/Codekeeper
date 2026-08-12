@@ -35,7 +35,7 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "db7edea08ef78fde2b3fc02613f9ac9ffa746adf0f9622dae19bbc2e59ec3106"
+      "sha256": "f90fb8dc30a3e5d3a9488464f0c93c734006a3cfd9ca58624b9862cdcb2bdf13"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
@@ -43,23 +43,23 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "780d321b99ba983cf0a106e2bca956a4743935d020ba28e9468d5663886ef020"
+      "sha256": "1b9eede7a036eef3c7910c93f95e68ea2af5e0e36c5d1a6e2fa5577589f9557a"
     },
     {
       "path": "src/lib/commands.mjs",
-      "sha256": "074a4495b1068507d56702c3bc7eb72bb426051bf371e9f7c7ba10a074423ed2"
+      "sha256": "ebecd3ed422db1453af5a599ba3c82f30df386aebf92f2ca3595f163e6e280d8"
     },
     {
       "path": "src/lib/config.mjs",
-      "sha256": "84658e56f4cf35e474368bb5a5ea7f03513fb2692ec7a6ac504c0aa7eb64eddb"
+      "sha256": "f838c9eb97b089efb4e73d53f4799d91450f8e99852296750d6597a8d72c388b"
     },
     {
       "path": "src/lib/git.mjs",
-      "sha256": "649d6be85b3803a26cc871f681ae0c5e5ae9679380e81f30825415d59959b6a7"
+      "sha256": "d0787668543784c57da905f7b09acc9b8d871d38263462c21203167c77debba1"
     },
     {
       "path": "src/lib/github.mjs",
-      "sha256": "33e49b84e35263c3b6539da835167f47792c5145e3429ef07ae7caa1ab3194d0"
+      "sha256": "d524b23f45addf718668a48767fd528ac49572bf71324646bd3ed1b95202340c"
     },
     {
       "path": "src/lib/glob.mjs",
@@ -87,11 +87,11 @@
     },
     {
       "path": "src/lib/pr-repair.mjs",
-      "sha256": "a9c6901e41e687963b5716727091845a66fe8caed2d19d11cdcb61a602991a63"
+      "sha256": "be398360e08ffe7b162ded1164e4352ffcc07aa8fd08aa8312f8db6f30f1eed1"
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "2207320c8a667e48c33c6606f23d144a89a0c1287cf698c360f1f4e91d4dfb21"
+      "sha256": "e6dce63df59b21612bb5d380da5ec1b378428928b903c5448b433d4c26c34ac4"
     },
     {
       "path": "src/lib/process-supervisor.mjs",
@@ -99,15 +99,15 @@
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "cb16f717bef9593526dbc4c406f7f956f86dedbeec1667244e5646fd5b9317f7"
+      "sha256": "0712fca74d0b6f64bca977dbd54e8dbb315a516e8f069a22dc490141d5891709"
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "f214d1cf12752dbaba1836049bd3e4b0b520eba1871253d01b0e8400f43e1fd8"
+      "sha256": "387f5b50b825b9ea11f2333533ea54156ac39ec0f05e045bcaddd94224b977c3"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",
-      "sha256": "7b5703fc3665ed72c31be802f22d9a8e21098210ce2b149662b8310756dff00b"
+      "sha256": "afd9227a96a6758fd2935a7fa5c03437cba741af3a72758e122b5a9aa15529ba"
     },
     {
       "path": "src/lib/render.mjs",
@@ -119,11 +119,11 @@
     },
     {
       "path": "src/lib/schemas.mjs",
-      "sha256": "13987ef5d9abe3df57f95eadd7b6d1a758da89f09d594f19b21bbb57f4ccb020"
+      "sha256": "f7911d14cc81b2db4ef8afd0bec41fea57a0f4aa77d4f0b55a790bac265d0d11"
     },
     {
       "path": "src/lib/validate.mjs",
-      "sha256": "615296d5a36d3b919cf80bf04edfd92f24d50e464abf83b3fcb5300ba81219cd"
+      "sha256": "f88cf5a9738f65f41add30da47f1d4c4a83647308d36995895a227dd04093772"
     },
     {
       "path": "src/lib/workspace.mjs",

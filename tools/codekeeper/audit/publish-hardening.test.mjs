@@ -174,6 +174,7 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
     duplicateOf: 9,
     duplicateConfidence: "high",
     implementationRecommendation: "manual",
+    decision: { required: false, question: "", rationale: "", options: [] },
     comment: "Thanks for the report."
   };
   let updatedAt = context.issue.updatedAt;
@@ -295,7 +296,7 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
       }),
       /comments changed|changed while Codekeeper reconciled comments/
     );
-    assert.deepEqual(calls, ["marker", "duplicate-comment"]);
+    assert.deepEqual(calls, ["marker"]);
 
     updatedAt = context.issue.updatedAt;
     labels = [];
@@ -488,16 +489,25 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       repairMarkerCalls: [
         {
           marker: automaticRepairMarker(context.pullRequest.headSha),
-          body: `Automatic repair is pending for head ${context.pullRequest.headSha}.`
+          body: `Automatic repair dispatch is pending for head ${context.pullRequest.headSha}.`
         },
         {
           marker: automaticRepairMarker(context.pullRequest.headSha),
-          body: `Automatic repair is pending for head ${context.pullRequest.headSha}.`
+          body: `Automatic repair dispatch failed for head ${context.pullRequest.headSha}.`
+        },
+        {
+          marker: automaticRepairMarker(context.pullRequest.headSha),
+          body: `Automatic repair dispatch is pending for head ${context.pullRequest.headSha}.`
+        },
+        {
+          marker: automaticRepairMarker(context.pullRequest.headSha),
+          body: `Automatic repair was dispatched for head ${context.pullRequest.headSha}.`
         }
       ]
     });
 
     pull.labels = [];
+    leaseComments.length = 0;
     concurrentMode = true;
     concurrentAdds = 0;
     const dispatchesBeforeConcurrentRun = dispatchAttempts;
@@ -519,6 +529,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     });
 
     pull.labels = [];
+    leaseComments.length = 0;
     concurrentMode = false;
     failLeaseCompletion = true;
     const removalsBeforeCompletionFailure = removalAttempts;
@@ -534,8 +545,8 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       removals: 0
     });
 
-    leaseComments.at(-1).created_at = new Date(Date.now() - 16 * 60 * 1000).toISOString();
     pull.labels = [];
+    leaseComments.length = 0;
     failLeaseCompletion = false;
     failAddAfterMutation = true;
     const dispatchesBeforeAmbiguousAdd = dispatchAttempts;
@@ -557,6 +568,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     assert.equal(recoveredAdd.automaticRepair.dispatched, true);
 
     pull.labels = [];
+    leaseComments.length = 0;
     failAddAfterMutation = false;
     failDispatchAfterMutation = true;
     const removalsBeforeAmbiguousDispatch = removalAttempts;
@@ -568,9 +580,13 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
       removals: removalAttempts - removalsBeforeAmbiguousDispatch
     }, {
-      markerPresent: true,
+      markerPresent: false,
       removals: 0
     });
+    assert.equal(
+      repairMarkerCalls.at(-1).body,
+      `Automatic repair dispatch is ambiguous for head ${context.pullRequest.headSha}.`
+    );
   } finally {
     restoreEnvironment();
     restoreGitHub();

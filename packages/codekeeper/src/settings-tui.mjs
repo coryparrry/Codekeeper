@@ -2,9 +2,14 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, usePaste, useStdout } from "ink";
 import { InstallerError } from "./errors.mjs";
+import {
+  containsPrivateKeyPemEnvelope,
+  inspectPrivateKeyTextInput,
+  PRIVATE_KEY_INPUT_ERROR
+} from "./input-safety.mjs";
 import { parseSettingValue, setSetting, settingsRows, validateEditableSettings } from "./settings.mjs";
 
 const h = React.createElement;
@@ -86,6 +91,8 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const pendingPemMarkerRef = useRef("");
+  const pemInputBlockedRef = useRef(false);
   const { stdout } = useStdout();
   const lineWidth = Math.max(16, (stdout?.columns ?? 80) - 2);
   const rows = useMemo(() => [
@@ -107,8 +114,24 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     }
   };
 
+  const resetPemInput = () => {
+    pendingPemMarkerRef.current = "";
+    pemInputBlockedRef.current = false;
+  };
+  const appendEditingText = (text) => {
+    if (pemInputBlockedRef.current) return;
+    const inspected = inspectPrivateKeyTextInput(pendingPemMarkerRef.current, text);
+    pendingPemMarkerRef.current = inspected.pending;
+    if (inspected.blocked) {
+      pemInputBlockedRef.current = true;
+      setError(PRIVATE_KEY_INPUT_ERROR);
+      return;
+    }
+    if (inspected.visible) setEditing((current) => ({ ...current, text: `${current.text}${inspected.visible}`.slice(0, 64 * 1024) }));
+  };
+
   usePaste((text) => {
-    if (editing) setEditing((current) => ({ ...current, text: `${current.text}${text}`.slice(0, 64 * 1024) }));
+    if (editing) appendEditingText(text);
   });
   useInput((input, key) => {
     if (busy) return;
@@ -116,12 +139,17 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       if (key.ctrl && input.toLowerCase() === "c") return onCancel(cancelled());
       if (key.escape) {
         setEditing(null);
+        resetPemInput();
         setError("");
         return;
       }
       if (key.return) {
+        if (pemInputBlockedRef.current) {
+          setError(PRIVATE_KEY_INPUT_ERROR);
+          return;
+        }
         try {
-          const value = parseSettingValue(editing.row, editing.text);
+          const value = parseSettingValue(editing.row, `${editing.text}${pendingPemMarkerRef.current}`);
           if (applyValue(editing.row, value)) setEditing(null);
         } catch (cause) {
           setError(cause.message);
@@ -129,14 +157,17 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         return;
       }
       if (key.backspace || key.delete) {
-        setEditing((current) => ({ ...current, text: current.text.slice(0, -1) }));
+        if (pendingPemMarkerRef.current) pendingPemMarkerRef.current = pendingPemMarkerRef.current.slice(0, -1);
+        else setEditing((current) => ({ ...current, text: current.text.slice(0, -1) }));
         return;
       }
       if (key.ctrl && input.toLowerCase() === "u") {
+        resetPemInput();
         setEditing((current) => ({ ...current, text: "" }));
+        setError("");
         return;
       }
-      if (!key.ctrl && !key.meta && input) setEditing((current) => ({ ...current, text: `${current.text}${input}`.slice(0, 64 * 1024) }));
+      if (!key.ctrl && !key.meta && input) appendEditingText(input);
       return;
     }
     if (key.escape || (key.ctrl && input.toLowerCase() === "c")) return onCancel(cancelled());
@@ -179,6 +210,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         .catch((cause) => setError(cause.message))
         .finally(() => setBusy(false));
     } else if (["string", "number", "json"].includes(row.kind)) {
+      resetPemInput();
       setEditing({ row, text: settingInputText(row) });
       setError("");
     } else if (row.kind === "readonly") {
@@ -241,7 +273,7 @@ export async function editProfileWithEditor({ profile, source, environment = pro
       }));
     if (status !== 0) throw new InstallerError("The profile editor exited without saving successfully.", { code: "EDITOR_FAILED" });
     const edited = await readFile(file, "utf8");
-    if (!edited.trim() || Buffer.byteLength(edited) > 64 * 1024 || edited.includes("\0")) throw new InstallerError("The edited agent profile is empty or invalid.", { code: "PROFILE_INVALID" });
+    if (!edited.trim() || Buffer.byteLength(edited) > 64 * 1024 || edited.includes("\0") || containsPrivateKeyPemEnvelope(edited)) throw new InstallerError("The edited agent profile is empty or invalid.", { code: "PROFILE_INVALID" });
     return edited;
   } finally {
     await rm(directory, { recursive: true, force: true });

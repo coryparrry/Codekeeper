@@ -18,8 +18,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "check": "node ../../scripts/sync-policy-validator.mjs --check && bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs audit/*.test.mjs",
+    "check": "node ../../scripts/sync-policy-validator.mjs --check && bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs audit/*.test.mjs"
   },
   "keywords": [
     "github",

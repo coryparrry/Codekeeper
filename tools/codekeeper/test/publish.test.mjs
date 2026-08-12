@@ -730,7 +730,8 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
   };
   let resolved = false;
   let dispatches = 0;
-  let leaseComment = null;
+  let dispatchAttempts = 0;
+  const issueComments = [];
   const restoreGitHub = replaceGitHubMethods({
     async getPull() { return structuredClone(pull); },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
@@ -746,30 +747,37 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
       }];
     },
     async listMaintenanceIssues() { return []; },
-    async listIssueComments() { return leaseComment ? [leaseComment] : []; },
+    async listIssueComments() { return structuredClone(issueComments); },
     async createComment(_number, body) {
       await this.assertPullMutationCurrent();
-      leaseComment = {
-        id: 99,
+      const comment = {
+        id: 99 + issueComments.length,
         body,
         created_at: new Date().toISOString(),
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
       };
-      return leaseComment;
+      issueComments.push(comment);
+      return structuredClone(comment);
+    },
+    async updateComment(commentId, body) {
+      const comment = issueComments.find((item) => item.id === commentId);
+      comment.body = body;
+      comment.updated_at = new Date().toISOString();
+      return structuredClone(comment);
     },
     async ensureLabels() {},
     async replaceManagedLabels() {},
-    async upsertMarkerComment() {},
     async upsertReviewReply() {},
     async addLabels(number, labels) {
       pull.labels.push(...labels.map((name) => ({ name })));
       this.advancePullMutationState("POST", this.repoPath(`/issues/${number}/labels`), { labels });
-      resolved = true;
     },
     async removeLabel(_number, label) {
       pull.labels = pull.labels.filter((item) => item.name !== label);
     },
     async createRepositoryDispatch() {
+      dispatchAttempts += 1;
+      if (dispatchAttempts === 1) resolved = true;
       await this.assertPullMutationCurrent();
       dispatches += 1;
     },
@@ -791,6 +799,14 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
     );
     assert.equal(dispatches, 0);
     assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
+
+    resolved = false;
+    const retried = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused"
+    });
+    assert.equal(retried.automaticRepair.dispatched, true);
+    assert.equal(dispatches, 1);
+    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), true);
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -851,7 +867,7 @@ test("fix-now feedback blocks auto-merge even when repair dispatch is disabled",
   assert.ok(!reviewLabels(result).includes("codekeeper:auto-merge"));
 });
 
-test("fix-if-cheap feedback suspends auto-merge while automatic repair is pending", async () => {
+test("a completed automatic repair consumes the pass after the pull request head changes", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-review-cheap-repair-test-"));
   const configSha256 = "e".repeat(64);
   const reviewConfig = structuredClone(config);
@@ -891,6 +907,9 @@ test("fix-if-cheap feedback suspends auto-merge while automatic repair is pendin
     head: { sha: headSha, ref: "automation/codekeeper/cheap-repair", repo: { full_name: context.repository } },
     base: { sha: baseSha, ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
   };
+  let repairState = "Automatic repair was dispatched.";
+  let repairHead = "0".repeat(40);
+  let extraRepairComments = [];
   const restoreGitHub = replaceGitHubMethods({
     async getPull() { return structuredClone(pull); },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
@@ -907,9 +926,9 @@ test("fix-if-cheap feedback suspends auto-merge while automatic repair is pendin
     },
     async listIssueComments() {
       return [{
-        body: `Automatic repair is pending.\n${automaticRepairMarker(headSha)}`,
+        body: `${repairState}\n${automaticRepairMarker(repairHead)}`,
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
-      }];
+      }, ...extraRepairComments];
     }
   });
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -924,14 +943,86 @@ test("fix-if-cheap feedback suspends auto-merge while automatic repair is pendin
       artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
     });
     assert.equal(publication.autoMerge.eligible, false);
-    assert.match(publication.autoMerge.reasons.join("\n"), /automatic repair is pending/i);
+    assert.match(publication.autoMerge.reasons.join("\n"), /repair pass is already consumed/i);
+    assert.equal(publication.automaticRepair.consumed, true);
+    assert.equal(publication.automaticRepair.pending, false);
 
     pull.labels = [{ name: "codekeeper:auto-repaired" }];
     const repeated = await publishReview({
       artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
     });
     assert.equal(repeated.autoMerge.eligible, false);
-    assert.match(repeated.autoMerge.reasons.join("\n"), /automatic repair is pending/i);
+    assert.match(repeated.autoMerge.reasons.join("\n"), /repair pass is already consumed/i);
+    assert.equal(repeated.automaticRepair.consumed, true);
+    assert.equal(repeated.automaticRepair.pending, false);
+
+    pull.labels = [];
+    repairState = "Automatic repair dispatch is ambiguous.";
+    const ambiguous = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(ambiguous.automaticRepair.consumed, true);
+    assert.equal(ambiguous.automaticRepair.pending, false);
+    assert.equal(ambiguous.automaticRepair.eligible, false);
+
+    repairState = "Automatic repair dispatch is pending.";
+    repairHead = headSha;
+    const pending = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(pending.automaticRepair.eligible, true);
+    assert.equal(pending.automaticRepair.pending, true);
+
+    extraRepairComments = [{
+      body: `<!-- codekeeper:repair-lease-expired=${"a".repeat(64)} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`,
+      user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+    }];
+    const crashed = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(crashed.automaticRepair.consumed, true);
+    assert.equal(crashed.automaticRepair.eligible, false);
+
+    repairHead = "0".repeat(40);
+    const crashedRepairScope = sha256(JSON.stringify({
+      repository: context.repository, pullNumber: pull.number, headSha: repairHead
+    }));
+    extraRepairComments = [{
+      body: `<!-- codekeeper:repair-lease-active=${crashedRepairScope} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`,
+      user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+    }];
+    const crashedAfterDispatch = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(crashedAfterDispatch.automaticRepair.consumed, true);
+    assert.equal(crashedAfterDispatch.automaticRepair.eligible, false);
+    assert.equal(crashedAfterDispatch.automaticRepair.pending, false);
+
+    extraRepairComments[0].body = `<!-- codekeeper:repair-lease-active=${"a".repeat(64)} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`;
+    const unrelatedActiveLease = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(unrelatedActiveLease.automaticRepair.consumed, false);
+    assert.equal(unrelatedActiveLease.automaticRepair.eligible, true);
+    assert.equal(unrelatedActiveLease.automaticRepair.pending, false);
+
+    repairState = "Automatic repair dispatch failed.";
+    const retryable = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(retryable.automaticRepair.consumed, false);
+    assert.equal(retryable.automaticRepair.eligible, true);
+    assert.equal(retryable.automaticRepair.pending, false);
+
+    repairState = "Automatic repair was dispatched.";
+    repairHead = "0".repeat(40);
+    const cleanIntegrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "review", context, result: { ...result, reviewFeedback: [] }, configSha256, artifactConfig: reviewConfig
+    });
+    const cleanReview = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...cleanIntegrity, token: "unused", dryRun: true
+    });
+    assert.equal(cleanReview.autoMerge.eligible, true);
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -1001,9 +1092,45 @@ test("label management preserves existing metadata and unrelated labels", async 
 });
 
 test("publication fails if stale auto-merge cannot be disabled", async () => {
+  let refetches = 0;
   await assert.rejects(
     reconcileAutoMerge(
-      { disableAutoMerge: async () => { throw new Error("forbidden"); } },
+      {
+        disableAutoMerge: async () => { throw new Error("forbidden"); },
+        getPull: async () => { refetches += 1; }
+      },
+      { number: 7, node_id: "PR_7", auto_merge: { enabled_at: "now" } },
+      config,
+      { eligible: false, reasons: ["review is blocked"] }
+    ),
+    /Could not disable stale auto-merge/
+  );
+  assert.equal(refetches, 0);
+});
+
+test("ambiguous stale auto-merge disablement is accepted only after an inactive refetch", async () => {
+  const ambiguous = Object.assign(new Error("response lost"), { githubMutationOutcome: "ambiguous" });
+  const result = await reconcileAutoMerge(
+    {
+      disableAutoMerge: async () => { throw ambiguous; },
+      getPull: async (number) => ({ number, auto_merge: null })
+    },
+    { number: 7, node_id: "PR_7", auto_merge: { enabled_at: "now" } },
+    config,
+    { eligible: false, reasons: ["review is blocked"] }
+  );
+  assert.deepEqual(result, {
+    enabled: false,
+    disabled: true,
+    reason: "confirmed disabled after ambiguous disable request"
+  });
+
+  await assert.rejects(
+    reconcileAutoMerge(
+      {
+        disableAutoMerge: async () => { throw ambiguous; },
+        getPull: async (number) => ({ number, auto_merge: { enabled_at: "now" } })
+      },
       { number: 7, node_id: "PR_7", auto_merge: { enabled_at: "now" } },
       config,
       { eligible: false, reasons: ["review is blocked"] }
@@ -1268,7 +1395,8 @@ test("issue publication does not close a duplicate after a concurrent user comme
   const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7002", runUrl: "https://github.com/owner/repository/actions/runs/7002", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
   const result = {
     mode: "issue", summary: "Exact duplicate.", type: "bug", priority: "p3", labels: [], actionable: true,
-    missingInformation: [], duplicateOf: 9, duplicateConfidence: "high", implementationRecommendation: "manual", comment: "Thanks for the report."
+    missingInformation: [], duplicateOf: 9, duplicateConfidence: "high", implementationRecommendation: "manual",
+    decision: { required: false, question: "", rationale: "", options: [] }, comment: "Thanks for the report."
   };
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
@@ -1300,7 +1428,16 @@ test("issue publication does not close a duplicate after a concurrent user comme
         updated_at: ownedUpdatedAt,
         user: { id: Number(identity.id), login: identity.login, type: "Bot" }
       };
-      comments = [mutation];
+      comments = [
+        mutation,
+        {
+          id: 71,
+          body: "One more detail from the reporter.",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          user: { id: 1, login: "reporter", type: "User" }
+        }
+      ];
       return mutation;
     },
     async createComment(_number, body) { duplicateCommentPublished ||= body.includes("Closing as a duplicate"); },
@@ -1314,7 +1451,7 @@ test("issue publication does not close a duplicate after a concurrent user comme
     });
     await assert.rejects(
       publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
-      /changed while Codekeeper reconciled comments/
+      /comments changed while Codekeeper published/
     );
     assert.equal(triageCommentPublished, true);
     assert.equal(duplicateCommentPublished, false);
@@ -1337,7 +1474,8 @@ test("issue publication rejects a concurrent comment sharing its mutation timest
   const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7006", runUrl: "https://github.com/owner/repository/actions/runs/7006", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
   const result = {
     mode: "issue", summary: "Exact duplicate.", type: "bug", priority: "p3", labels: [], actionable: true,
-    missingInformation: [], duplicateOf: 9, duplicateConfidence: "high", implementationRecommendation: "manual", comment: "Thanks for the report."
+    missingInformation: [], duplicateOf: 9, duplicateConfidence: "high", implementationRecommendation: "manual",
+    decision: { required: false, question: "", rationale: "", options: [] }, comment: "Thanks for the report."
   };
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
@@ -1411,7 +1549,8 @@ test("issue publication accepts its exact managed-label mutation and preserves a
   const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7003", runUrl: "https://github.com/owner/repository/actions/runs/7003", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
   const result = {
     mode: "issue", summary: "Ready for triage.", type: "bug", priority: "p3", labels: [], actionable: true,
-    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "ai-ready", comment: "Thanks for the report."
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "ai-ready",
+    decision: { required: false, question: "", rationale: "", options: [] }, comment: "Thanks for the report."
   };
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
@@ -1455,7 +1594,8 @@ test("issue publication rejects subject drift during its managed-label mutation"
   const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7004", runUrl: "https://github.com/owner/repository/actions/runs/7004", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
   const result = {
     mode: "issue", summary: "Manual triage.", type: "bug", priority: "p3", labels: [], actionable: true,
-    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual",
+    decision: { required: false, question: "", rationale: "", options: [] }, comment: "Thanks."
   };
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
@@ -1498,7 +1638,8 @@ test("issue publication rejects same-timestamp subject drift after verified labe
   const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7005", runUrl: "https://github.com/owner/repository/actions/runs/7005", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
   const result = {
     mode: "issue", summary: "Manual triage.", type: "bug", priority: "p3", labels: [], actionable: true,
-    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual",
+    decision: { required: false, question: "", rationale: "", options: [] }, comment: "Thanks."
   };
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
@@ -1572,7 +1713,8 @@ test("issue publication rejects malformed post-label timestamps and label metada
       const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7006", runUrl: "https://github.com/owner/repository/actions/runs/7006", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
       const result = {
         mode: "issue", summary: "Manual triage.", type: "bug", priority: "p3", labels: [], actionable: true,
-        missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+        missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual",
+        decision: { required: false, question: "", rationale: "", options: [] }, comment: "Thanks."
       };
       const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
       const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
@@ -1683,17 +1825,28 @@ function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), ru
     user: { login: "pull-author" },
     html_url: "https://example.test/pull/42"
   };
+  const actor = authorizationMode === "policy" ? identity.login : "repository-owner";
+  const evidencePolicy = { authorizationMode, actor, ownerLogins: [...config.repository.ownerLogins] };
   const comments = [{
     body: "Please repair this safely.",
     created_at: "2026-08-10T09:00:00Z",
     user: { login: "repository-owner" }
-  }];
+  }, ...(authorizationMode === "policy" ? [{
+    body: "Repair this review.\n<!-- codekeeper:review -->",
+    created_at: "2026-08-10T09:01:00Z",
+    user: { login: actor, type: "Bot", id: Number(identity.id) }
+  }, {
+    body: `Automatic repair was dispatched.\n${automaticRepairMarker(headSha)}`,
+    created_at: "2026-08-10T09:02:00Z",
+    user: { login: actor, type: "Bot", id: Number(identity.id) }
+  }] : [])];
   return {
     mode: "fix",
     repository: "owner/repository",
     configSha256,
     runId,
     authorizationMode,
+    requestedBy: actor,
     baseSha: headSha,
     defaultBranch: config.repository.defaultBranch,
     target: {
@@ -1706,10 +1859,10 @@ function pullRepairContext({ configSha256, headSha, baseSha = "b".repeat(40), ru
       baseSha,
       baseRepository: "owner/repository",
       reviewThreadIds: reviewThreads.map((thread) => thread.id),
-      subjectSha256: frozenPullRepairSubjectSha256(pull, comments, reviewThreads)
+      subjectSha256: frozenPullRepairSubjectSha256(pull, comments, reviewThreads, evidencePolicy)
     },
     pullRequest: {
-      ...frozenPullRepairSubject(pull, comments, reviewThreads),
+      ...frozenPullRepairSubject(pull, comments, reviewThreads, evidencePolicy),
       reviewThreads
     }
   };
@@ -1766,11 +1919,22 @@ function liveRepairPull(context, overrides = {}) {
 
 function liveRepairComments(context, overrides = undefined) {
   if (overrides !== undefined) return overrides;
-  return context.pullRequest.comments.map((comment) => ({
+  const comments = context.pullRequest.comments.map((comment) => ({
     body: comment.body,
     created_at: comment.createdAt,
-    user: { login: comment.author }
+    user: {
+      login: comment.author,
+      type: comment.author === context.requestedBy && context.authorizationMode === "policy" ? "Bot" : "User"
+    }
   }));
+  if (context.authorizationMode === "policy") {
+    comments.push({
+      body: `Automatic repair was dispatched.\n${automaticRepairMarker(context.target.headSha)}`,
+      created_at: "2026-08-10T09:02:00Z",
+      user: { login: context.requestedBy, type: "Bot" }
+    });
+  }
+  return comments;
 }
 
 function pullRepairResult() {
@@ -1799,6 +1963,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
   let createPullCalls = 0;
   let rejectPush = false;
   let rejectThreadResolution = false;
+  let ambiguousThreadResolution = false;
   let reviewThreadBody = "Please preserve this review evidence.";
   let reviewThreadResolved = false;
   const failureComments = [];
@@ -1837,8 +2002,13 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       async enableAutoMerge() { throw new Error("must not enable auto-merge"); },
       async resolveReviewThread(threadId) {
         assert.equal(threadId, "PRRT_thread");
-        if (rejectThreadResolution) throw new Error("thread resolution unavailable");
         reviewThreadResolved = true;
+        if (rejectThreadResolution) {
+          const error = new Error("thread resolution unavailable");
+          if (ambiguousThreadResolution) error.githubMutationOutcome = "ambiguous";
+          else reviewThreadResolved = false;
+          throw error;
+        }
       },
       async listPullReviewThreads() { return [liveRepairReviewThread(reviewThreadBody, reviewThreadResolved)]; },
       async upsertMarkerComment(number, marker, body, authorIdentity) {
@@ -1907,6 +2077,32 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       liveHead = headSha;
       reviewThreadResolved = false;
       rejectThreadResolution = true;
+      ambiguousThreadResolution = true;
+      const reconciledRepair = await publishFix({
+        artifactDirectory,
+        config,
+        configSha256,
+        ...integrity,
+        token: "token",
+        prRepairGit: {
+          configureAutomationIdentity() {},
+          createCommitOnCurrentHead,
+          pushHeadToBranch() {
+            pushes += 1;
+            liveHead = git(repository, ["rev-parse", "HEAD"]);
+            return liveHead;
+          }
+        }
+      });
+      assert.deepEqual(reconciledRepair.resolvedReviewThreadIds, ["PRRT_thread"]);
+      assert.equal(reconciledRepair.reviewThreadWarning, undefined);
+      assert.equal(pushes, 2);
+
+      git(repository, ["reset", "--hard", headSha]);
+      liveHead = headSha;
+      reviewThreadResolved = false;
+      rejectThreadResolution = true;
+      ambiguousThreadResolution = false;
       const partialRepair = await publishFix({
         artifactDirectory,
         config,
@@ -1926,7 +2122,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       assert.equal(partialRepair.updated, true);
       assert.deepEqual(partialRepair.resolvedReviewThreadIds, []);
       assert.match(partialRepair.reviewThreadWarning, /thread resolution unavailable/);
-      assert.equal(pushes, 2);
+      assert.equal(pushes, 3);
       assert.equal(failureComments.length, 0);
 
       git(repository, ["reset", "--hard", headSha]);
@@ -1949,7 +2145,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
         }),
         /non-fast-forward update rejected/
       );
-      assert.equal(pushes, 2);
+      assert.equal(pushes, 3);
       assert.equal(createPullCalls, 0);
       assert.equal(failureComments.length, 1);
       assert.equal(failureComments[0].number, context.target.number);
@@ -2530,7 +2726,8 @@ test("publication rejects a changed trusted-default agent profile before GitHub 
     };
     const result = {
       mode: "issue", summary: "Ready for triage.", type: "bug", priority: "p3", labels: [], actionable: true,
-      missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+      missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual",
+      decision: { required: false, question: "", rationale: "", options: [] }, comment: "Thanks."
     };
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
     const liveProfile = path.join(liveRoot, AGENT_PROFILE_PATHS.issue);
@@ -2564,7 +2761,8 @@ test("publication rejects a result changed after sealing before GitHub access", 
   };
   const result = {
     mode: "issue", summary: "Ready for triage.", type: "bug", priority: "p3", labels: [], actionable: true,
-    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual", comment: "Thanks."
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual",
+    decision: { required: false, question: "", rationale: "", options: [] }, comment: "Thanks."
   };
   const originalFetch = globalThis.fetch;
   let githubAccessed = false;

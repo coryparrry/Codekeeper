@@ -29,6 +29,60 @@ function isOwner(config, actor) {
   );
 }
 
+function parseOwnerRequestIntent(body) {
+  const direct = parseDirectOwnerCommand(body);
+  if (direct) return direct;
+  const mention = String(body ?? "")
+    .trim()
+    .match(new RegExp(`^@\\S+\\s+(${[...COMMANDS].join("|")})$`, "i"));
+  return mention?.[1].toLowerCase() ?? null;
+}
+
+function authorizeOwnerIntent({ event, config, command }) {
+  const targetNumber = event.issue?.number ?? event.pull_request?.number;
+  if (!COMMANDS.has(command)) {
+    return {
+      number:
+        Number.isSafeInteger(targetNumber) && targetNumber > 0
+          ? targetNumber
+          : null,
+      command: null,
+      skipped: true,
+      outcome: "No supported Codekeeper command was found.",
+    };
+  }
+  if (config.automation?.ownerRequests === false)
+    throw new Error("Owner requests are off in the Codekeeper policy");
+  const actor = event.comment?.user?.login ?? event.sender?.login;
+  if (
+    !ASSOCIATIONS.has(event.comment?.author_association) ||
+    !isOwner(config, actor)
+  ) {
+    throw new Error(
+      `Actor ${actor || "unknown"} is not authorised to run Codekeeper commands`,
+    );
+  }
+  if (!Number.isSafeInteger(targetNumber) || targetNumber <= 0)
+    throw new Error("The command target is invalid");
+  return { actor, command, number: targetNumber, skipped: false };
+}
+
+export function authorizeOwnerRequest({ event, config }) {
+  return authorizeOwnerIntent({
+    event,
+    config,
+    command: parseOwnerRequestIntent(event.comment?.body),
+  });
+}
+
+export function authorizeOwnerCommand({ event, config, automationLogin }) {
+  return authorizeOwnerIntent({
+    event,
+    config,
+    command: parseOwnerCommand(event.comment?.body, automationLogin),
+  });
+}
+
 function requireInstalledMode(command, issue, installedModes) {
   const selected = new Set(installedModes);
   if (
@@ -139,38 +193,15 @@ export async function runOwnerCommand({
   installedModes = ALL_MODES,
 }) {
   const event = await readJson(eventPath);
-  const command = parseOwnerCommand(
-    event.comment?.body,
-    automationIdentity?.login,
-  );
-  const targetNumber = event.issue?.number ?? event.pull_request?.number;
-  if (!COMMANDS.has(command)) {
-    return {
-      number:
-        Number.isSafeInteger(targetNumber) && targetNumber > 0
-          ? targetNumber
-          : null,
-      command: null,
-      skipped: true,
-      outcome: "No supported Codekeeper command was found.",
-    };
-  }
-  if (config.automation?.ownerRequests === false)
-    throw new Error("Owner requests are off in the Codekeeper policy");
-  const actor = event.comment?.user?.login ?? event.sender?.login;
-  if (
-    !ASSOCIATIONS.has(event.comment?.author_association) ||
-    !isOwner(config, actor)
-  ) {
-    throw new Error(
-      `Actor ${actor || "unknown"} is not authorised to run Codekeeper commands`,
-    );
-  }
+  const authorization = authorizeOwnerCommand({
+    event,
+    config,
+    automationLogin: automationIdentity?.login,
+  });
+  if (authorization.skipped) return authorization;
+  const { actor, command, number } = authorization;
   const repository =
     event.repository?.full_name ?? process.env.GITHUB_REPOSITORY;
-  const number = targetNumber;
-  if (!Number.isSafeInteger(number) || number <= 0)
-    throw new Error("The command target is invalid");
   const github = new GitHubClient({ token, repository });
   let issue = await github.getIssue(number);
   if (issue.state !== "open") throw new Error(`#${number} is not open`);
@@ -326,7 +357,19 @@ export async function runOwnerCommand({
     await github.removeLabel(number, "codekeeper:ready");
     if (issue.pull_request) {
       const pull = await github.getPull(number);
-      if (pull.auto_merge) await github.disableAutoMerge(pull.node_id);
+      if (pull.auto_merge) {
+        try {
+          await github.disableAutoMerge(pull.node_id);
+        } catch (error) {
+          if (!isAmbiguousGitHubMutationError(error)) throw error;
+          const refreshedPull = await github.getPull(number);
+          if (
+            refreshedPull?.number !== number ||
+            refreshedPull.auto_merge !== null
+          )
+            throw error;
+        }
+      }
     }
     outcome =
       "Automatic implementation, repair, and merge are paused for this item.";

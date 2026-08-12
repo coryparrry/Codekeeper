@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  authorizeOwnerCommand,
+  authorizeOwnerRequest,
   runOwnerCommand,
   parseCommand,
   parseMentionIntent,
@@ -56,6 +58,98 @@ test("owner commands require an exact supported command", () => {
       "codekeeper-acme[bot]",
     ),
     null,
+  );
+});
+
+test("token-free owner authorization rejects associated users outside policy", () => {
+  const event = {
+    issue: { number: 42 },
+    comment: {
+      body: "/codekeeper fix",
+      author_association: "COLLABORATOR",
+      user: { login: "associated-collaborator" },
+    },
+  };
+  assert.throws(
+    () =>
+      authorizeOwnerCommand({
+        event,
+        config: {
+          automation: { ownerRequests: true },
+          repository: { ownerLogins: ["repository-owner"] },
+        },
+        automationLogin: "codekeeper[bot]",
+      }),
+    /not authorised/,
+  );
+});
+
+test("token-free owner authorization accepts an exact configured-owner command", () => {
+  assert.deepEqual(
+    authorizeOwnerCommand({
+      event: {
+        issue: { number: 42 },
+        comment: {
+          body: "@codekeeper fix",
+          author_association: "COLLABORATOR",
+          user: { login: "Repository-Owner" },
+        },
+      },
+      config: {
+        automation: { ownerRequests: true },
+        repository: { ownerLogins: ["repository-owner"] },
+      },
+      automationLogin: "codekeeper[bot]",
+    }),
+    {
+      actor: "Repository-Owner",
+      command: "fix",
+      number: 42,
+      skipped: false,
+    },
+  );
+});
+
+test("token-free owner authorization does not trust a configured bot login", () => {
+  assert.deepEqual(
+    authorizeOwnerRequest({
+      event: {
+        issue: { number: 42 },
+        comment: {
+          body: "@unverified-login fix",
+          author_association: "OWNER",
+          user: { login: "repository-owner" },
+        },
+      },
+      config: {
+        automation: { ownerRequests: true },
+        repository: { ownerLogins: ["repository-owner"] },
+      },
+    }),
+    {
+      actor: "repository-owner",
+      command: "fix",
+      number: 42,
+      skipped: false,
+    },
+  );
+  assert.equal(
+    authorizeOwnerCommand({
+      event: {
+        issue: { number: 42 },
+        comment: {
+          body: "@unverified-login fix",
+          author_association: "OWNER",
+          user: { login: "repository-owner" },
+        },
+      },
+      config: {
+        automation: { ownerRequests: true },
+        repository: { ownerLogins: ["repository-owner"] },
+      },
+      automationLogin: "real-codekeeper[bot]",
+    }).skipped,
+    true,
   );
 });
 
@@ -575,6 +669,80 @@ test("a root mention-based defer command cannot become its own feedback source",
       }),
       /must reply to the review comment/,
     );
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("owner stop confirms ambiguous auto-merge disablement without accepting deterministic errors", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-stop-command-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "/codekeeper stop",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    ensureLabels: GitHubClient.prototype.ensureLabels,
+    addLabels: GitHubClient.prototype.addLabels,
+    removeLabel: GitHubClient.prototype.removeLabel,
+    getPull: GitHubClient.prototype.getPull,
+    disableAutoMerge: GitHubClient.prototype.disableAutoMerge,
+    upsertMarkerComment: GitHubClient.prototype.upsertMarkerComment,
+  };
+  let ambiguous = true;
+  let pullReads = 0;
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    pull_request: {},
+    labels: [],
+  });
+  GitHubClient.prototype.ensureLabels = async () => {};
+  GitHubClient.prototype.addLabels = async () => {};
+  GitHubClient.prototype.removeLabel = async () => {};
+  GitHubClient.prototype.getPull = async () => {
+    pullReads += 1;
+    return pullReads === 1
+      ? { number: 42, node_id: "PR_42", auto_merge: { enabled_at: "now" } }
+      : { number: 42, node_id: "PR_42", auto_merge: null };
+  };
+  GitHubClient.prototype.disableAutoMerge = async () => {
+    const error = new Error(ambiguous ? "response lost" : "not permitted");
+    if (ambiguous) error.githubMutationOutcome = "ambiguous";
+    throw error;
+  };
+  GitHubClient.prototype.upsertMarkerComment = async () => {};
+  try {
+    const options = {
+      eventPath,
+      config: {
+        automation: { ownerRequests: true },
+        repository: { ownerLogins: ["repository-owner"] },
+        labels: {},
+      },
+      token: "app-token",
+      automationIdentity: { login: "codekeeper[bot]", id: "123" },
+    };
+    const result = await runOwnerCommand(options);
+    assert.equal(result.command, "stop");
+    assert.equal(pullReads, 2);
+
+    ambiguous = false;
+    pullReads = 0;
+    await assert.rejects(runOwnerCommand(options), /not permitted/);
+    assert.equal(pullReads, 1);
   } finally {
     Object.assign(GitHubClient.prototype, originals);
     await rm(directory, { recursive: true, force: true });

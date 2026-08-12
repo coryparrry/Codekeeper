@@ -7,9 +7,12 @@ import { render as inkRender } from "ink";
 import { loadVerifiedAssets } from "../src/assets.mjs";
 import { runCli } from "../src/cli.mjs";
 import { STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
+import { AGENT_PROFILE_IDS, AGENT_PROFILES } from "../src/constants.mjs";
 import { buildInstallPlan, collectAppAnswers, collectSetupAnswers, completionGuidance } from "../src/plan.mjs";
+import { upgradePolicy } from "../src/policy.mjs";
 import { createPrivateKeyPickerController, defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
 import { settingInputText } from "../src/settings-tui.mjs";
+import { createEditableSettings, settingsAnswers } from "../src/settings.mjs";
 import {
   DEFAULT_PROGRESS_STEPS,
   containsPrivateKeyPemEnvelope,
@@ -709,6 +712,49 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
   });
 });
 
+test("settings JSON fields reject PEM pastes without rendering or submitting them", async (t) => {
+  const header = "-----BEGIN PRIVATE KEY-----";
+  const middle = "c2V0dGluZ3MtcGVtLWNhbmFyeQ==";
+  const footer = "-----END PRIVATE KEY-----";
+  const pem = `${header}\n${middle}\n${footer}`;
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  const settings = createEditableSettings({ policy, modes: ["review", "maintain"], enabled: true, profiles });
+  const tui = await createTuiHarness(t);
+  const edited = tui.prompt.editSettings({
+    settings,
+    baselinePolicy: policy,
+    repository: "acme/widget"
+  });
+  await tui.waitForText("CODEKEEPER  SETTINGS");
+  await tui.send("A");
+  for (let index = 0; index < 49; index += 1) await tui.send("j");
+  await tui.send("\r");
+  await tui.waitForText("repository.ownerLogins");
+  await tui.send(`\u001b[200~${pem}\u001b[201~`);
+  await tui.waitForText("Private keys cannot be pasted here");
+  for (const canary of [header, middle, footer]) assert.doesNotMatch(tui.output.transcript(), new RegExp(canary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  await tui.send("\u0015");
+  await tui.send('["safe-owner"]');
+  await tui.send("\r");
+  await tui.send("G");
+  await tui.send("\r");
+  const answers = settingsAnswers(await edited);
+  assert.deepEqual(answers.ownerLogins, ["safe-owner"]);
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: repositorySnapshot(),
+    answers: {
+      ...answers,
+      preset: "openai",
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]"
+    }
+  });
+  assert.doesNotMatch(JSON.stringify(plan), /PRIVATE KEY|c2V0dGluZ3MtcGVtLWNhbmFyeQ==/);
+});
+
 test("the Settings command centre stays bounded in a narrow terminal", async (t) => {
   const bundle = await loadVerifiedAssets();
   const dimensions = { columns: 34, rows: 24 };
@@ -1003,6 +1049,71 @@ test("private-key TUI shows safe folders and keys while redacting paths and byte
   await tui.flush();
   assert.doesNotMatch(tui.output.transcript(), new RegExp(keyPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(tui.output.transcript(), new RegExp(keyBytes));
+});
+
+test("private-key TUI ignores an older activation after a newer selection", { timeout: 5000 }, async (t) => {
+  const home = "/virtual/codekeeper-home";
+  const downloads = `${home}/Downloads`;
+  const firstPath = `${downloads}/first.pem`;
+  const secondPath = `${downloads}/second.pem`;
+  let holdActivations = false;
+  const firstActivation = Promise.withResolvers();
+  const secondActivation = Promise.withResolvers();
+  const firstStarted = Promise.withResolvers();
+  const secondStarted = Promise.withResolvers();
+  const fsImpl = {
+    async lstat(target) {
+      if (target === home || target === downloads) return fakeStat("directory");
+      if (target === firstPath) {
+        if (holdActivations) {
+          firstStarted.resolve();
+          await firstActivation.promise;
+        }
+        return fakeStat("file", 1024);
+      }
+      if (target === secondPath) {
+        if (holdActivations) {
+          secondStarted.resolve();
+          await secondActivation.promise;
+        }
+        return fakeStat("file", 1024);
+      }
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    async readdir(target) {
+      if (target === downloads) return [
+        fakeDirent("first.pem", "file"),
+        fakeDirent("second.pem", "file")
+      ];
+      if (target === home) return [fakeDirent("Downloads", "directory")];
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    }
+  };
+  const tui = await createTuiHarness(t, { fsImpl, homeDirectory: home });
+  const selection = tui.prompt.selectPrivateKey();
+  let settled = false;
+  selection.then(
+    () => { settled = true; },
+    () => { settled = true; }
+  );
+  await tui.waitForText("second.pem");
+
+  holdActivations = true;
+  await tui.send("\u001b[B");
+  await tui.send("\r");
+  await firstStarted.promise;
+  await tui.send("\u001b[B");
+  await tui.send("\r");
+  await secondStarted.promise;
+
+  firstActivation.resolve();
+  await tui.flush();
+  const olderActivationSettledPrompt = settled;
+  secondActivation.resolve();
+  const selectedPath = await selection;
+
+  assert.equal(olderActivationSettledPrompt, false, "the older activation settled the prompt after a newer selection");
+  assert.equal(selectedPath, secondPath);
 });
 
 test("NO_COLOR and narrow terminals retain visible selection semantics without overflow", async (t) => {

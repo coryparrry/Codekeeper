@@ -35,8 +35,8 @@ test("automatic review repair dispatch carries policy authorization", () => {
 test("conditional PR repair mutation retains the one-shot authorization boundary", () => {
   const beginRepair = section(githubSource, "  async beginPullRepairMutation", "\n  async beginBranchMutation");
   const assertCurrent = section(githubSource, "  async assertPullMutationCurrent", "\n  assertPullMutationIdentity");
-  assertContains(beginRepair, /requireAutomaticRepairMarker/u, "repair mutation omits policy authorization state");
-  assertContains(assertCurrent, /codekeeper:auto-repaired/u, "repair mutation omits the one-shot authorization label");
+  assertContains(beginRepair, /repairEvidencePolicy/u, "repair mutation omits frozen policy authorization state");
+  assertContains(assertCurrent, /automaticRepairMarker\(expected\.headSha\)/u, "repair mutation omits the current-head authorization marker");
   assertContains(repairSource, /beginPullRepairMutation/u, "PR repair does not enter the conditional mutation seam");
 });
 

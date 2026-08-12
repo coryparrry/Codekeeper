@@ -12,6 +12,7 @@ import {
   pushHeadToBranch
 } from "./git.mjs";
 import { readRegularFile } from "./io.mjs";
+import { isAmbiguousGitHubMutationError } from "./github.mjs";
 import { fixRunMarker, sha256 } from "./markers.mjs";
 import { validatePatch } from "./policy.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
@@ -56,6 +57,18 @@ export function frozenPullRepairTarget(context, config) {
   if (frozen.headRef === frozen.baseRef) throw new Error(`PR #${frozen.number} uses the default branch as its head`);
   if (context.baseSha !== frozen.headSha) throw new Error(`PR #${frozen.number} checkout is not frozen to its head SHA`);
   return frozen;
+}
+
+function repairEvidencePolicy(context, config) {
+  const authorizationMode = requiredText(context.authorizationMode, "repair authorization mode");
+  if (!["owner", "policy"].includes(authorizationMode)) {
+    throw new Error("Frozen PR target has invalid repair authorization mode");
+  }
+  return {
+    authorizationMode,
+    actor: requiredText(context.requestedBy, "repair actor"),
+    ownerLogins: config.repository.ownerLogins.map((login) => requiredText(login, "repository owner login"))
+  };
 }
 
 export function assertLivePullRepairTarget(pull, target, { expectedHeadSha = target.headSha } = {}) {
@@ -139,12 +152,13 @@ export async function publishPullRequestRepair({
   gitOperations = defaultGitOperations
 }) {
   const target = frozenPullRepairTarget(context, config);
+  const evidencePolicy = repairEvidencePolicy(context, config);
   const pull = await github.beginPullRepairMutation({
     repository: context.repository,
     target,
     policy: config,
-    rejectPaused: true,
-    requireAutomaticRepairMarker: context.authorizationMode === "policy"
+    repairEvidencePolicy: evidencePolicy,
+    rejectPaused: true
   });
   if (!String(context.runId ?? "").trim()) throw new Error("Frozen PR repair context is missing its workflow run ID");
   try {
@@ -180,7 +194,11 @@ export async function publishPullRequestRepair({
     let reviewThreadWarning = null;
     try {
       for (const threadId of result.resolvedReviewThreadIds ?? []) {
-        await github.resolveReviewThread(threadId);
+        try {
+          await github.resolveReviewThread(threadId);
+        } catch (error) {
+          if (!isAmbiguousGitHubMutationError(error)) throw error;
+        }
       }
       if ((result.resolvedReviewThreadIds?.length ?? 0) > 0) {
         const threads = await github.listPullReviewThreads(target.number);

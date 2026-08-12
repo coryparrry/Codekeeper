@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "84be0ac91f63b99a5cc53bde53e6cc817688403bdae7dbdc2b4dca280e6bc706";
+const toolingManifestSha256 = "bc24a5367565e541e03c25c26d1422de635b0561a6feff45d1e3db8dbbd19a1f";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -522,11 +522,14 @@ test("documentation uses the live feedback input and owner-authorized defer cont
 
 test("Fixer repository dispatches retain their target and explicit policy authorization", async () => {
   const fix = await workflow("fix");
+  const workspace = jobSection(fix, "workspace", "analyze");
   const analyze = jobSection(fix, "analyze", "verify");
   const publisher = await repositoryFile("tools/codekeeper/src/lib/publish.mjs");
   assert.match(analyze, /EVENT_ISSUE: \$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}/);
+  assert.match(workspace, /prepare-fix[\s\S]*agent-settings[\s\S]*--mode fix \\\n\s+--mutation-authorized true/);
   assert.match(publisher, /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*authorization_mode: "policy"/);
   assert.match(publisher, /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*requested_by: automationIdentity\.login/);
+  assert.match(publisher, /Automatic repair dispatch is pending[\s\S]*?createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*?dispatchSucceeded = true;[\s\S]*?Automatic repair was dispatched[\s\S]*?addLabels\(pull\.number, \["codekeeper:auto-repaired"\]\)/);
 });
 
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {

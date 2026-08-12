@@ -989,7 +989,7 @@ async function configuredFixPolicy({ repo, revision, snapshot, expectedSource, g
 async function listOpenPulls({ repo, gh }) {
   const { stdout } = await callGh(gh, ["pr", "list", "--repo", repo, "--state", "open", "--limit", "100", "--json", "number,url,headRefName,createdAt"]);
   const pulls = parseJson(stdout, "Open pull requests");
-  assert(Array.isArray(pulls) && pulls.length <= 100, "Open pull requests returned invalid metadata");
+  assert(Array.isArray(pulls) && pulls.length < 100, "Open pull request inventory is invalid or incomplete");
   return pulls;
 }
 

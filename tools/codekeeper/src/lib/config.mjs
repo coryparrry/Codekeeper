@@ -15,12 +15,12 @@ export function getAgentConfig(config, mode) {
   };
 }
 
-export function getAgentRuntimeSettings(config, mode, { mutationAuthorized = true } = {}) {
+export function getAgentRuntimeSettings(config, mode, { mutationAuthorized = false } = {}) {
   const { agent, provider } = getAgentConfig(config, mode);
   const mutationEnabled = mode === "audit"
     ? config.audit.repair.enabled && mutationAuthorized
     : mode === "fix"
-      ? config.issues.allowAiImplementation
+      ? mutationAuthorized
       : false;
   const workspaceEnabled = agent.workspace.enabled;
   return {

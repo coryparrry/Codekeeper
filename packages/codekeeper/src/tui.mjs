@@ -11,15 +11,17 @@ import {
 } from "ink";
 import { InstallerError } from "./errors.mjs";
 import { CONSERVATIVE_BOUNDARIES, MODES, SECRET_PURPOSES } from "./constants.mjs";
+import {
+  containsPrivateKeyPemEnvelope,
+  inspectPrivateKeyTextInput,
+  PRIVATE_KEY_INPUT_ERROR,
+  sanitizeTextInput
+} from "./input-safety.mjs";
 import { capabilitySummary, completionGuidance, documentMap, modelAssignments, workflowMap } from "./plan.mjs";
 import { createPrivateKeyPickerController } from "./private-key-input.mjs";
 import { editProfileWithEditor, SettingsScreen } from "./settings-tui.mjs";
 
 const h = React.createElement;
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
-const PRIVATE_KEY_PEM_ENVELOPE = /-----(?:BEGIN|END) (?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY-----/i;
-const PEM_MARKER_STARTS = Object.freeze(["-----BEGIN", "-----END"]);
-const PRIVATE_KEY_INPUT_ERROR = "Private keys cannot be pasted here. Press Ctrl-U, then select the downloaded .pem file at the private-key step.";
 const DEFAULT_PROGRESS_STEPS = Object.freeze([
   Object.freeze({ id: "repository:verify", label: "Recheck the confirmed repository" }),
   Object.freeze({ id: "settings:disable", label: "Set the startup choice" }),
@@ -35,26 +37,6 @@ const NOTICE_SINK = Object.freeze({ write: () => true });
 
 function installerCancelled() {
   return new InstallerError("Interactive setup was cancelled.", { code: "PROMPT_ABORTED" });
-}
-
-export function sanitizeTextInput(value) {
-  return String(value ?? "").replace(CONTROL_CHARACTERS, "");
-}
-
-export function containsPrivateKeyPemEnvelope(value) {
-  return PRIVATE_KEY_PEM_ENVELOPE.test(String(value ?? ""));
-}
-
-function pendingPemMarkerLength(value) {
-  const upper = value.toUpperCase();
-  let pendingLength = 0;
-  for (const marker of PEM_MARKER_STARTS) {
-    const limit = Math.min(upper.length, marker.length - 1);
-    for (let length = 1; length <= limit; length += 1) {
-      if (upper.endsWith(marker.slice(0, length))) pendingLength = Math.max(pendingLength, length);
-    }
-  }
-  return pendingLength;
 }
 
 export function shouldUseInkTui({
@@ -255,20 +237,14 @@ function TextInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const cancel = useCancel(onCancel);
   const append = useCallback((text) => {
     if (pemInputBlockedRef.current) return false;
-    const safe = sanitizeTextInput(text);
-    if (!safe) return true;
-    const combined = `${pendingPemMarkerRef.current}${safe}`;
-    pendingPemMarkerRef.current = "";
-    const upper = combined.toUpperCase();
-    if (containsPrivateKeyPemEnvelope(combined) || PEM_MARKER_STARTS.some((marker) => upper.includes(marker))) {
+    const inspected = inspectPrivateKeyTextInput(pendingPemMarkerRef.current, text);
+    pendingPemMarkerRef.current = inspected.pending;
+    if (inspected.blocked) {
       pemInputBlockedRef.current = true;
       setError(PRIVATE_KEY_INPUT_ERROR);
       return false;
     }
-    const pendingLength = pendingPemMarkerLength(combined);
-    const visible = pendingLength ? combined.slice(0, -pendingLength) : combined;
-    pendingPemMarkerRef.current = pendingLength ? combined.slice(-pendingLength) : "";
-    if (visible) setValue((current) => `${current}${visible}`.slice(0, spec.maxLength ?? 256));
+    if (inspected.visible) setValue((current) => `${current}${inspected.visible}`.slice(0, spec.maxLength ?? 256));
     return true;
   }, [spec.maxLength]);
   const paste = useCallback((text) => {
@@ -386,6 +362,7 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [listing, setListing] = useState(null);
   const [index, setIndex] = useState(0);
   const [error, setError] = useState("");
+  const activationRef = useRef(0);
   const cancel = useCancel(onCancel);
   usePaste(() => {});
   useEffect(() => {
@@ -413,7 +390,9 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.return) {
       const choice = choices[index];
       if (!choice) return;
+      const activation = ++activationRef.current;
       spec.picker.activate(choice.id).then((result) => {
+        if (activation !== activationRef.current) return;
         if (result.selected) onSubmit(result.value);
         else if (result.listing) {
           setListing(result.listing);
@@ -421,6 +400,7 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
           setError("");
         }
       }).catch(() => {
+        if (activation !== activationRef.current) return;
         setError("The picker failed to open that item safely.");
       });
     }
@@ -892,6 +872,7 @@ export async function createInkPrompter({
 }
 
 export { DEFAULT_PROGRESS_STEPS };
+export { containsPrivateKeyPemEnvelope, sanitizeTextInput };
 export {
   createPrivateKeyPickerController,
   defaultPrivateKeyDirectory,

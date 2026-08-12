@@ -430,10 +430,6 @@ export function validateAuditResult(result, config) {
 }
 
 export function validateIssueResult(result, config) {
-  const hadDecision = result && typeof result === "object" && Object.hasOwn(result, "decision");
-  if (!hadDecision) {
-    result.decision = { required: false, question: "", rationale: "", options: [] };
-  }
   assertExactKeys(result, [
     "mode", "summary", "type", "priority", "labels", "actionable", "missingInformation",
     "duplicateOf", "duplicateConfidence", "implementationRecommendation", "decision", "comment"
@@ -482,7 +478,6 @@ export function validateIssueResult(result, config) {
     assert(result.missingInformation.length === 0, "ai-ready cannot have missing information");
     assert(result.duplicateOf === null, "ai-ready cannot be a duplicate");
   }
-  if (!hadDecision) delete result.decision;
   return result;
 }
 

@@ -254,6 +254,10 @@ function isMorePermissive(value, specialistValue, order) {
   return order.indexOf(value) > order.indexOf(specialistValue);
 }
 
+function isSameReviewFeedbackEvidence(value, specialistValue) {
+  return isDeepStrictEqual(value, { ...specialistValue, disposition: value.disposition });
+}
+
 export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResult) {
   if (specialistResult === null) {
     if (mode === "review" && (
@@ -298,12 +302,18 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
       }
     }
     for (const feedback of output.reviewFeedback ?? []) {
-      if (!exactMember(feedback, specialistResult.reviewFeedback ?? [])) {
+      const specialistFeedback = (specialistResult.reviewFeedback ?? [])
+        .find((candidate) => isSameReviewFeedbackEvidence(feedback, candidate));
+      if (!specialistFeedback) {
         throw new Error("Coordinator introduced review feedback triage not present in workspace evidence");
+      }
+      const dispositions = ["fix_now", "fix_if_cheap", "defer", "ignore"];
+      if (dispositions.indexOf(feedback.disposition) < dispositions.indexOf(specialistFeedback.disposition)) {
+        throw new Error("Coordinator upgraded review feedback disposition beyond workspace evidence");
       }
     }
     for (const feedback of specialistResult.reviewFeedback ?? []) {
-      if (!exactMember(feedback, output.reviewFeedback ?? [])) {
+      if (!(output.reviewFeedback ?? []).some((candidate) => isSameReviewFeedbackEvidence(candidate, feedback))) {
         throw new Error("Coordinator omitted review feedback triage from workspace evidence");
       }
     }
@@ -330,6 +340,9 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
     assertEvidenceField(output, specialistResult, "noActionReason", "Coordinator audit no-action reason differs from workspace evidence", { allowNull: true });
     for (const finding of output.findings ?? []) {
       if (!exactMember(finding, specialistResult.findings ?? [])) throw new Error("Coordinator introduced an audit finding not present in workspace evidence");
+    }
+    if (specialistResult.repair?.requested === true && output.repair?.requested !== true) {
+      throw new Error("Coordinator cannot clear a specialist audit repair request");
     }
     for (const field of ["title", "body", "risk", "validationSummary"]) {
       assertEvidenceField(

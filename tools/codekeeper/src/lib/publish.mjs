@@ -18,12 +18,12 @@ function automaticRepairLeaseBody(state, scope, marker) {
   return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${marker}`;
 }
 
+function automaticRepairLeaseScope(repository, pullNumber, headSha) {
+  return sha256(JSON.stringify({ repository, pullNumber, headSha }));
+}
+
 export async function acquireAutomaticRepairLease({ github, context, pull, automationIdentity }) {
-  const scope = sha256(JSON.stringify({
-    repository: context.repository,
-    pullNumber: pull.number,
-    headSha: pull.head.sha
-  }));
+  const scope = automaticRepairLeaseScope(context.repository, pull.number, pull.head.sha);
   const fingerprint = sha256(JSON.stringify({ scope, runId: context.runId }));
   const marker = `<!-- codekeeper:repair-lease=${fingerprint} -->`;
   const activeBody = automaticRepairLeaseBody("active", scope, marker);
@@ -233,6 +233,12 @@ export async function reconcileAutoMerge(github, pullRequest, config, decision) 
       await github.disableAutoMerge(pullRequest.node_id);
       return { enabled: false, disabled: true, reason: decision.reasons.join("; ") || "policy no longer permits auto-merge" };
     } catch (error) {
+      if (isAmbiguousGitHubMutationError(error)) {
+        const refreshedPull = await github.getPull(pullRequest.number);
+        if (refreshedPull?.number === pullRequest.number && refreshedPull.auto_merge === null) {
+          return { enabled: false, disabled: true, reason: "confirmed disabled after ambiguous disable request" };
+        }
+      }
       throw new Error(`Could not disable stale auto-merge for PR #${pullRequest.number}: ${error.message}`, { cause: error });
     }
   }
@@ -263,15 +269,33 @@ async function suspendAutoMerge(github, pullRequest) {
   return { pullRequest: refreshedPull, disabled: true };
 }
 
-function ownedAutomaticRepairHeads(comments, automationIdentity) {
-  const heads = new Set();
+function ownedAutomaticRepairState(comments, automationIdentity, repository, pullNumber, currentHead) {
+  let consumed = false;
+  let pending = false;
+  let expiredLease = false;
+  const pendingScopes = new Set();
+  const activeLeaseScopes = new Set();
   for (const comment of comments) {
-    const match = String(comment?.body ?? "").match(/<!-- codekeeper:auto-repair-head=([0-9a-f]{40}) -->$/i);
+    const body = String(comment?.body ?? "");
+    const lease = body.match(/^<!-- codekeeper:repair-lease-(active|completed|ambiguous|expired)=([a-f0-9]{64}) -->\n[\s\S]*?(<!-- codekeeper:repair-lease=[a-f0-9]{64} -->)$/);
+    if (lease && isOwnedMarkerComment(comment, lease[3], automationIdentity)) {
+      if (lease[1] === "active") activeLeaseScopes.add(lease[2]);
+      else if (lease[1] === "expired") expiredLease = true;
+      else consumed = true;
+      continue;
+    }
+    const match = body.match(/<!-- codekeeper:auto-repair-head=([0-9a-f]{40}) -->$/i);
     if (!match) continue;
     const marker = automaticRepairMarker(match[1]);
-    if (isOwnedMarkerComment(comment, marker, automationIdentity)) heads.add(match[1].toLowerCase());
+    if (!isOwnedMarkerComment(comment, marker, automationIdentity)) continue;
+    if (/^(Automatic repair was dispatched|Automatic repair dispatch is ambiguous)/.test(body)) consumed = true;
+    if (body.startsWith("Automatic repair dispatch is pending")) {
+      pendingScopes.add(automaticRepairLeaseScope(repository, pullNumber, match[1]));
+      if (match[1].toLowerCase() === currentHead.toLowerCase()) pending = true;
+    }
   }
-  return heads;
+  const unresolvedActiveLease = [...pendingScopes].some((scope) => activeLeaseScopes.has(scope));
+  return { consumed: consumed || unresolvedActiveLease || (expiredLease && pending), pending };
 }
 
 async function disableFailedAutoMergePostcondition(github, pullRequest, cause) {
@@ -353,23 +377,32 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   );
   const repairRequested = (blocking || repairFeedback.length > 0) && config.review.autoRepair && !existingLabels.has("codekeeper:paused");
   const repairMarked = existingLabels.has("codekeeper:auto-repaired");
-  let repairHeads = new Set();
-  if (repairMarked) {
-    repairHeads = ownedAutomaticRepairHeads(
+  let repairState = { consumed: false, pending: false };
+  if (repairRequested || repairMarked) {
+    repairState = ownedAutomaticRepairState(
       await github.listIssueComments(pull.number),
-      expectedAutomationIdentity()
+      expectedAutomationIdentity(),
+      context.repository,
+      pull.number,
+      pull.head.sha
     );
   }
-  const repairPending = repairMarked && (repairHeads.size === 0 || repairHeads.has(pull.head.sha.toLowerCase()));
   const automaticRepair = {
-    eligible: repairRequested && !repairPending,
-    pending: repairPending,
-    staleMarker: repairMarked && !repairPending,
+    eligible: repairRequested && !repairState.consumed,
+    consumed: repairState.consumed,
+    pending: repairRequested && repairState.pending,
+    staleMarker: repairMarked && !repairState.consumed,
     dispatched: false
   };
-  const suspendAutoMergeForRepair = (decision) => automaticRepair.eligible || automaticRepair.pending
-    ? { ...decision, eligible: false, reasons: [...decision.reasons, "Automatic repair is pending"] }
-    : decision;
+  const suspendAutoMergeForRepair = (decision) => {
+    if (automaticRepair.eligible || automaticRepair.pending) {
+      return { ...decision, eligible: false, reasons: [...decision.reasons, "Automatic repair is pending"] };
+    }
+    if (repairRequested && automaticRepair.consumed) {
+      return { ...decision, eligible: false, reasons: [...decision.reasons, "Automatic repair pass is already consumed"] };
+    }
+    return decision;
+  };
   const publicationState = (autoMerge) => {
     const desiredSet = new Set(reviewLabels(result));
     desiredSet.delete("codekeeper:auto-merge");
@@ -392,7 +425,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
 
   if (dryRun) {
     log(`DRY RUN review PR #${pull.number}`, { ...initialState, autoMerge, blocking });
-    return { pullRequest: pull.number, ...initialState, autoMerge, blocking, dryRun: true };
+    return { pullRequest: pull.number, ...initialState, autoMerge, automaticRepair, blocking, dryRun: true };
   }
 
   const automationIdentity = expectedAutomationIdentity();
@@ -488,18 +521,16 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
       if (!lease.acquired) {
         automaticRepair.eligible = false;
       } else {
-        let markerAdded = false;
         let dispatchAttempted = false;
+        let dispatchSucceeded = false;
         try {
           await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
           await github.upsertMarkerComment(
             pull.number,
             automaticRepairMarker(pull.head.sha),
-            `Automatic repair is pending for head ${pull.head.sha}.`,
+            `Automatic repair dispatch is pending for head ${pull.head.sha}.`,
             automationIdentity
           );
-          await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
-          markerAdded = true;
           dispatchAttempted = true;
           await github.createRepositoryDispatch("codekeeper_fix", {
             number: pull.number,
@@ -508,31 +539,44 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
             requested_by: automationIdentity.login,
             review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
           });
+          dispatchSucceeded = true;
           automaticRepair.dispatched = true;
+          await github.upsertMarkerComment(
+            pull.number,
+            automaticRepairMarker(pull.head.sha),
+            `Automatic repair was dispatched for head ${pull.head.sha}.`,
+            automationIdentity
+          );
+          await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
           await releaseAutomaticRepairLease(github, lease, "completed");
         } catch (error) {
           let rollbackError = null;
-          const ambiguousDispatch = dispatchAttempted && isAmbiguousGitHubMutationError(error);
-          if (!automaticRepair.dispatched && !ambiguousDispatch && markerAdded) {
+          const ambiguousDispatch = !dispatchSucceeded && dispatchAttempted && isAmbiguousGitHubMutationError(error);
+          if (!dispatchSucceeded) {
             try {
-              await github.rollbackPullLabel(pull.number, "codekeeper:auto-repaired");
-            } catch (cause) {
-              rollbackError ??= cause;
-            }
-          }
-          if (!automaticRepair.dispatched) {
-            try {
-              await releaseAutomaticRepairLease(
-                github,
-                lease,
-                ambiguousDispatch ? "ambiguous" : "failed"
+              await github.upsertMarkerComment(
+                pull.number,
+                automaticRepairMarker(pull.head.sha),
+                ambiguousDispatch
+                  ? `Automatic repair dispatch is ambiguous for head ${pull.head.sha}.`
+                  : `Automatic repair dispatch failed for head ${pull.head.sha}.`,
+                automationIdentity
               );
             } catch (cause) {
-              if (ambiguousDispatch) {
-                warn(`Could not record ambiguous automatic repair dispatch for PR #${pull.number}: ${cause.message}`);
-              } else {
-                rollbackError ??= cause;
-              }
+              warn(`Could not record automatic repair dispatch state for PR #${pull.number}: ${cause.message}`);
+            }
+          }
+          try {
+            await releaseAutomaticRepairLease(
+              github,
+              lease,
+              ambiguousDispatch ? "ambiguous" : dispatchSucceeded ? "completed" : "failed"
+            );
+          } catch (cause) {
+            if (ambiguousDispatch) {
+              warn(`Could not record ambiguous automatic repair dispatch for PR #${pull.number}: ${cause.message}`);
+            } else {
+              rollbackError ??= cause;
             }
           }
           if (rollbackError) {

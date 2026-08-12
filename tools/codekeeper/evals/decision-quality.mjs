@@ -41,6 +41,7 @@ function issueResult({ summary, actionable, priority = "p3", missingInformation 
     duplicateOf,
     duplicateConfidence: duplicateOf === null ? "none" : "high",
     implementationRecommendation,
+    decision: { required: false, question: "", rationale: "", options: [] },
     comment: "Thanks. The triage decision is limited to the supplied evidence."
   };
 }

@@ -166,9 +166,9 @@ async function main() {
       {
         const mode = args.require("mode");
         result = getAgentRuntimeSettings(config, mode, {
-          mutationAuthorized: mode === "audit"
+          mutationAuthorized: ["audit", "fix"].includes(mode)
             ? strictBoolean(args.get("mutation-authorized", "false"), "mutation-authorized")
-            : true
+            : false
         });
       }
       break;

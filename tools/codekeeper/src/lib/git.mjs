@@ -495,7 +495,7 @@ export function pushHeadToBranch(branch, token, cwd = process.cwd()) {
 
 export function changedFilesBetween(base, head, cwd = process.cwd()) {
   const tokens = splitNul(
-    git(["diff", "--name-only", "-z", `${base}...${head}`], { cwd, encoding: null }).stdout
+    git(["diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", `${base}...${head}`], { cwd, encoding: null }).stdout
   );
   return tokens;
 }
@@ -574,7 +574,7 @@ export function boundedChangedFilesBetween(base, head, maximumFiles, cwd = proce
     throw new Error("maximumFiles must be a positive integer");
   }
   return new Promise((resolve, reject) => {
-    const child = spawn("git", ["diff", "--name-only", "-z", `${base}...${head}`], {
+    const child = spawn("git", ["diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", `${base}...${head}`], {
       cwd,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"]
