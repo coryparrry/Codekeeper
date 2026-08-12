@@ -537,30 +537,34 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   }
 
   if (automaticRepair.eligible) {
-    await currentReviewPull(github, context, config);
-    await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
-    await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
-    try {
-      await currentReviewPull(github, context, config);
-      await github.createRepositoryDispatch("codekeeper_fix", {
-        number: pull.number,
-        head_sha: pull.head.sha,
-        authorization_mode: "policy",
-        requested_by: automationIdentity.login,
-        review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
-      });
-    } catch (error) {
+    const authorizationPull = await currentReviewPull(github, context, config);
+    if (issueLabelNames(authorizationPull).includes("codekeeper:auto-repaired")) {
+      automaticRepair.eligible = false;
+    } else {
+      await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+      await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
       try {
-        await github.removeLabel(pull.number, "codekeeper:auto-repaired");
-      } catch (rollbackError) {
-        throw new Error(
-          `${error.message}; codekeeper:auto-repaired could not be rolled back: ${rollbackError.message}`,
-          { cause: error }
-        );
+        await currentReviewPull(github, context, config);
+        await github.createRepositoryDispatch("codekeeper_fix", {
+          number: pull.number,
+          head_sha: pull.head.sha,
+          authorization_mode: "policy",
+          requested_by: automationIdentity.login,
+          review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
+        });
+      } catch (error) {
+        try {
+          await github.removeLabel(pull.number, "codekeeper:auto-repaired");
+        } catch (rollbackError) {
+          throw new Error(
+            `${error.message}; codekeeper:auto-repaired could not be rolled back: ${rollbackError.message}`,
+            { cause: error }
+          );
+        }
+        throw error;
       }
-      throw error;
+      automaticRepair.dispatched = true;
     }
-    automaticRepair.dispatched = true;
   }
 
   return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, deferredIssues, feedbackReplies, blocking };

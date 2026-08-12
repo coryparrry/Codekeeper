@@ -75,7 +75,7 @@
     },
     {
       "path": "src/lib/policy.mjs",
-      "sha256": "b1a19044baf080b06a5e240b0b3dda4741ff6113013021bb3bf0a6be6e4cc31c"
+      "sha256": "03c43a8ab8ae136adcd1f3c9eb7c339e0626e25037949a5a784b34ec0a4f6413"
     },
     {
       "path": "src/lib/pr-repair.mjs",
@@ -91,7 +91,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "ce34a3846897aee6f955eec5a9133e25d35bf572da05f8ad43cf3b7b4a59733b"
+      "sha256": "718ebae53d3080afa5a9ef5338fe243b4833afcd44e22e64502116cde0edf929"
     },
     {
       "path": "src/lib/render.mjs",

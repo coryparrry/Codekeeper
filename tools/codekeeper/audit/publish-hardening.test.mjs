@@ -298,20 +298,32 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
   };
   let dispatchAttempts = 0;
   let markerPresentAfterFirstAttempt = false;
+  let injectConcurrentMarker = false;
+  let markerInjected = false;
+  let publicationWritten = false;
+  let removalAttempts = 0;
   const restoreGitHub = replaceGitHubMethods({
-    async getPull() { return structuredClone(pull); },
+    async getPull() {
+      if (injectConcurrentMarker && publicationWritten && !markerInjected) {
+        pull.labels.push({ name: "codekeeper:auto-repaired" });
+        markerInjected = true;
+      }
+      return structuredClone(pull);
+    },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
     async ensureLabels() {},
     async replaceManagedLabels() {},
-    async upsertMarkerComment() {},
+    async upsertMarkerComment() { publicationWritten = true; },
     async addLabels(_number, labelsToAdd) {
       pull.labels = [...pull.labels, ...labelsToAdd.map((name) => ({ name }))];
     },
     async removeLabel(_number, label) {
+      removalAttempts += 1;
       pull.labels = pull.labels.filter((item) => item.name !== label);
     },
     async createRepositoryDispatch() {
       dispatchAttempts += 1;
+      if (injectConcurrentMarker) throw new Error("concurrent dispatch failed");
       if (dispatchAttempts === 1) throw new Error("dispatch unavailable");
     }
   });
@@ -338,6 +350,25 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       markerPresentAfterFirstAttempt: false,
       dispatchAttempts: 2,
       retryDispatched: true
+    });
+
+    pull.labels = [];
+    injectConcurrentMarker = true;
+    markerInjected = false;
+    publicationWritten = false;
+    const dispatchesBeforeConcurrentRun = dispatchAttempts;
+    const removalsBeforeConcurrentRun = removalAttempts;
+    const concurrent = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" });
+    assert.deepEqual({
+      markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
+      dispatches: dispatchAttempts - dispatchesBeforeConcurrentRun,
+      removals: removalAttempts - removalsBeforeConcurrentRun,
+      dispatched: concurrent.automaticRepair.dispatched
+    }, {
+      markerPresent: true,
+      dispatches: 0,
+      removals: 0,
+      dispatched: false
     });
   } finally {
     restoreEnvironment();

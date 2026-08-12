@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -86,4 +86,30 @@ test("workspace capture rejects an oversized pre-change blob before materializin
   assert.equal(changes.files[0].captureSkipped, true);
   assert.equal(changes.captureSkipped, true);
   assert.equal((await readFile(patchPath)).length, 0);
+});
+
+test("patch policy rejects a shrink when oversized source capture was skipped", async (t) => {
+  const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-old-blob-shrink-audit-"));
+  t.after(() => rm(repository, { recursive: true, force: true }));
+  git(repository, ["init", "--quiet"]);
+  git(repository, ["config", "user.name", "Audit"]);
+  git(repository, ["config", "user.email", "audit@example.invalid"]);
+  await mkdir(path.join(repository, "src"));
+  const trackedPath = path.join(repository, "src", "tracked.mjs");
+  await writeFile(trackedPath, Buffer.alloc(2_048, "x"));
+  git(repository, ["add", "src/tracked.mjs"]);
+  git(repository, ["commit", "--quiet", "-m", "baseline"]);
+
+  await writeFile(trackedPath, "small\n");
+  const patchPath = path.join(repository, "captured.patch");
+  const changes = await createPatch(patchPath, repository, {
+    maximumFileBytes: 1_000,
+    maximumPatchBytes: 10_000
+  });
+  const policy = validatePatch(changes, config);
+
+  assert.equal(changes.files[0].bytes, 6);
+  assert.equal(changes.captureSkipped, true);
+  assert.equal(policy.valid, false);
+  assert.match(policy.reasons.join("\n"), /capture.*incomplete/i);
 });

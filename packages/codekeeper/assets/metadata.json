@@ -68,7 +68,7 @@
       "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
     },
     "toolingManifest": {
-      "sha256": "4645ea4b148fc57901eb1fa495a6342e0601f76e4f7bcc0426c251a0b1dba894",
+      "sha256": "545ec358ec7a2daf53040eaaad6dabfaa1529f189e484742c76e5766b1be8257",
       "bytes": 3643,
       "sourcePath": "tools/codekeeper/tooling-manifest.json"
     }
