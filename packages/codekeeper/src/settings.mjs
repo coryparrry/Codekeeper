@@ -119,7 +119,7 @@ function policyRow(policy, path, label = path) {
       : choices ? "enum"
         : typeof value === "boolean" ? "boolean"
           : typeof value === "number" ? "number"
-            : typeof value === "string" ? "string"
+            : typeof value === "string" || /^ai\.agents\.[^.]+\.workspace\.model$/.test(path) ? "string"
               : "json",
     ...(choices ? { choices } : {})
   };
@@ -209,12 +209,15 @@ export function setSetting(settings, row, value) {
     setPath(next.policy, row.path, value);
     if (/^ai\.agents\.[^.]+\.provider$/.test(row.path)) {
       const agent = row.path.split(".")[2];
-      next.policy.ai.agents[agent].model = MODEL_OPTIONS[value][0].model;
-      next.policy.ai.agents[agent].modelSettings = value === "openai"
-        ? { text: { verbosity: "low" } }
-        : value === "deepseek"
-          ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
-          : {};
+      const bundledModels = Object.hasOwn(MODEL_OPTIONS, value) ? MODEL_OPTIONS[value] : null;
+      if (bundledModels) {
+        next.policy.ai.agents[agent].model = bundledModels[0].model;
+        next.policy.ai.agents[agent].modelSettings = value === "openai"
+          ? { text: { verbosity: "low" } }
+          : value === "deepseek"
+            ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
+            : {};
+      }
       if (!next.policy.ai.providers[value]?.supportsReasoningEffort) next.policy.ai.agents[agent].effort = "none";
     }
     if (row.path === "repository.ownerLogins") next.policy.merge.allowedUserAuthors = [...value];
