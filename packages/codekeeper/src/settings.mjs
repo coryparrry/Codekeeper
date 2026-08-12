@@ -358,6 +358,7 @@ export function validateEditableSettings(settings, baselinePolicy) {
     if (agent.maxTurns !== 1 || !Number.isSafeInteger(agent.maximumAttempts) || agent.maximumAttempts < 1 || agent.maximumAttempts > 5) {
       throw new InstallerError(`${agentId} turn and retry limits are invalid.`, { code: "SETTING_INVALID" });
     }
+    if (agent.modelSettings === undefined) agent.modelSettings = {};
     if (!agent.modelSettings || typeof agent.modelSettings !== "object" || Array.isArray(agent.modelSettings)) throw new InstallerError(`${agentId}.modelSettings must be a JSON object.`, { code: "SETTING_INVALID" });
     validateJson(agent.modelSettings, `${agentId}.modelSettings`);
     if (agent.modelSettings.reasoning && typeof agent.modelSettings.reasoning === "object"

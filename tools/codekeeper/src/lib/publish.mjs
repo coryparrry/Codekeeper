@@ -346,7 +346,7 @@ async function currentReviewPull(github, context, config) {
 
 async function assertCurrentReviewFeedback(github, context) {
   const frozen = context.pullRequest.reviewFeedback ?? [];
-  if (frozen.length === 0) return;
+  if (context.pullRequest.reviewFeedbackFrozen !== true && frozen.length === 0) return;
   const current = await completeReviewFeedback(github, context.pullRequest.number);
   if (JSON.stringify(current) !== JSON.stringify(frozen)) {
     throw new Error(`PR #${context.pullRequest.number} review feedback changed after preparation; stale feedback disposition will not publish`);
