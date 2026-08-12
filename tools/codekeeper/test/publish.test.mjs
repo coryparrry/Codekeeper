@@ -262,6 +262,49 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
   })).map((item) => item.state), ["would-update"]);
 });
 
+test("deferred review issues close when their source is no longer deferred", async () => {
+  const sourceKeys = ["review_comment:41"];
+  const fingerprint = deferredReviewFingerprint("owner/repository", 7, sourceKeys);
+  const marker = deferredReviewMarker(fingerprint);
+  const updates = [];
+  const github = {
+    async listMaintenanceIssues() {
+      return [{
+        number: 51,
+        state: "open",
+        body: `## Origin
+
+- Pull request: [#7](https://github.com/owner/repository/pull/7)
+
+${marker}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }];
+    },
+    async updateIssue(number, changes) { updates.push({ number, changes }); }
+  };
+
+  const published = await upsertDeferredReviewFeedback({
+    github,
+    context: {
+      repository: "owner/repository",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/owner/repository/pull/7",
+        reviewFeedback: []
+      }
+    },
+    result: { reviewFeedback: [] },
+    config,
+    automationIdentity: identity
+  });
+
+  assert.deepEqual(updates, [{
+    number: 51,
+    changes: { state: "closed", state_reason: "completed" }
+  }]);
+  assert.deepEqual(published, [{ fingerprint, state: "closed", issueNumber: 51 }]);
+});
+
 test("maintenance issue fingerprints require the configured App author", () => {
   const marker = findingMarker("b".repeat(64));
   const issue = {
@@ -720,6 +763,7 @@ test("review publication activates auto-merge last and falls back safely", async
       return structuredClone(pull);
     },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listMaintenanceIssues() { return []; },
     async enableAutoMerge() {
       calls.push({ type: "enable" });
       if (rejectEnable) throw new Error("GitHub rejected enablement");
