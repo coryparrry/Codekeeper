@@ -145,8 +145,10 @@ function flattenPolicy(policy, value = policy, prefix = "", rows = [], parentKey
 }
 
 export function createEditableSettings({ policy, modes, enabled, profiles = {} }) {
+  const editablePolicy = clone(policy);
+  if (!modes.includes("issues")) editablePolicy.review.createDeferredIssues = false;
   return {
-    policy: clone(policy),
+    policy: editablePolicy,
     modes: [...modes],
     enabled: enabled !== false,
     profiles: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, profiles[id] ?? profiles[AGENT_PROFILES[id].target] ?? ""]))
