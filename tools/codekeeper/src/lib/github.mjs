@@ -108,6 +108,10 @@ export function isOwnedMarkerComment(comment, marker, authorIdentity) {
   );
 }
 
+export function isAmbiguousGitHubMutationError(error) {
+  return error?.githubMutationOutcome === "ambiguous";
+}
+
 export function resolveGraphqlUrl(apiUrl, configuredUrl = process.env.GITHUB_GRAPHQL_URL ?? "") {
   if (configuredUrl) return new URL(configuredUrl).toString().replace(/\/$/, "");
   const rest = new URL(apiUrl);
@@ -193,32 +197,41 @@ export class GitHubClient {
   async request(method, endpoint, { body, headers = {}, retries } = {}) {
     const url = endpoint.startsWith("http") ? endpoint : `${this.apiUrl}${endpoint}`;
     const retryBudget = retries ?? (isRetrySafeMethod(method) ? this.retryAttempts : 0);
-    const { response, text, payload } = await this.fetchWithRetry(url, {
-      method,
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.token}`,
-        "X-GitHub-Api-Version": API_VERSION,
-        "User-Agent": "codekeeper",
-        "Content-Type": "application/json",
-        ...headers
-      },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    }, {
-      retries: retryBudget,
-      consume: async (response, signal) => {
-        const text = await awaitWithSignal(response.text(), signal);
-        let payload = null;
-        if (text) {
-          try {
-            payload = JSON.parse(text);
-          } catch {
-            payload = text;
+    let requestResult;
+    try {
+      requestResult = await this.fetchWithRetry(url, {
+        method,
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${this.token}`,
+          "X-GitHub-Api-Version": API_VERSION,
+          "User-Agent": "codekeeper",
+          "Content-Type": "application/json",
+          ...headers
+        },
+        body: body === undefined ? undefined : JSON.stringify(body)
+      }, {
+        retries: retryBudget,
+        consume: async (response, signal) => {
+          const text = await awaitWithSignal(response.text(), signal);
+          let payload = null;
+          if (text) {
+            try {
+              payload = JSON.parse(text);
+            } catch {
+              payload = text;
+            }
           }
+          return { response, text, payload };
         }
-        return { response, text, payload };
+      });
+    } catch (error) {
+      if (!isRetrySafeMethod(method) && error && typeof error === "object") {
+        error.githubMutationOutcome = "ambiguous";
       }
-    });
+      throw error;
+    }
+    const { response, text, payload } = requestResult;
     if (!response.ok) {
       const message = typeof payload === "object" && payload?.message ? payload.message : text || response.statusText;
       const error = new Error(`GitHub ${method} ${endpoint} failed (${response.status}): ${message}`);

@@ -75,7 +75,11 @@ export async function collectWorkingTreeChanges(
     throw new Error("Workspace capture file limit must be a positive integer");
   }
   const trackedTokens = splitNul(
-    git(["diff", "--name-status", "-z", "HEAD"], { cwd, encoding: null }).stdout
+    git(["diff", "--no-ext-diff", "--name-status", "-z", "HEAD"], {
+      cwd,
+      encoding: null,
+      timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+    }).stdout
   );
   const tracked = [];
   for (let index = 0; index < trackedTokens.length;) {
@@ -91,7 +95,11 @@ export async function collectWorkingTreeChanges(
     git(["ls-files", "--others", "--exclude-standard", "-z"], { cwd, encoding: null }).stdout
   );
   const rawTokens = splitNul(
-    git(["diff", "--raw", "--full-index", "-z", "HEAD"], { cwd, encoding: null }).stdout
+    git(["diff", "--no-ext-diff", "--raw", "--full-index", "-z", "HEAD"], {
+      cwd,
+      encoding: null,
+      timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+    }).stdout
   );
   const rawByPath = new Map();
   for (let index = 0; index < rawTokens.length;) {
@@ -122,7 +130,11 @@ export async function collectWorkingTreeChanges(
   }
 
   const numstatTokens = splitNul(
-    git(["diff", "--numstat", "-z", "HEAD"], { cwd, encoding: null }).stdout
+    git(["diff", "--no-ext-diff", "--numstat", "-z", "HEAD"], {
+      cwd,
+      encoding: null,
+      timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+    }).stdout
   );
   for (let index = 0; index < numstatTokens.length; index += 1) {
     const token = numstatTokens[index];
@@ -273,11 +285,12 @@ export async function createPatch(
     const environment = { GIT_INDEX_FILE: temporaryIndex };
     if (untracked.length > 0) git(["add", "-N", "--", ...untracked], { cwd, env: environment });
     try {
-      const patch = git(["diff", "--binary", "--full-index", "HEAD"], {
+      const patch = git(["diff", "--no-ext-diff", "--binary", "--full-index", "HEAD"], {
         cwd,
         env: environment,
         encoding: null,
-        maxBuffer: maximumPatchBytes + 1
+        maxBuffer: maximumPatchBytes + 1,
+        timeoutMs: CAPTURE_GIT_TIMEOUT_MS
       }).stdout;
       patchBytes = patch.length;
       await writeFile(patchPath, patch);

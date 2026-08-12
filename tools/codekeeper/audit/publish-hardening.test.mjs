@@ -340,6 +340,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
   let concurrentAdds = 0;
   let releaseConcurrentAdd;
   let failAddAfterMutation = false;
+  let failDispatchAfterMutation = false;
   let failLeaseCompletion = false;
   let removalAttempts = 0;
   let nextLeaseCommentId = 1;
@@ -394,6 +395,11 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     },
     async createRepositoryDispatch() {
       dispatchAttempts += 1;
+      if (failDispatchAfterMutation) {
+        const error = new Error("dispatch response lost");
+        error.githubMutationOutcome = "ambiguous";
+        throw error;
+      }
       if (concurrentMode && dispatchAttempts > 3) throw new Error("concurrent dispatch failed");
       if (dispatchAttempts === 1) throw new Error("dispatch unavailable");
     }
@@ -475,6 +481,22 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     }, {
       markerPresent: false,
       dispatches: 0
+    });
+
+    pull.labels = [];
+    failAddAfterMutation = false;
+    failDispatchAfterMutation = true;
+    const removalsBeforeAmbiguousDispatch = removalAttempts;
+    await assert.rejects(
+      publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" }),
+      /dispatch response lost/
+    );
+    assert.deepEqual({
+      markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
+      removals: removalAttempts - removalsBeforeAmbiguousDispatch
+    }, {
+      markerPresent: true,
+      removals: 0
     });
   } finally {
     restoreEnvironment();

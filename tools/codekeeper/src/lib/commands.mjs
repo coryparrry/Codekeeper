@@ -1,4 +1,4 @@
-import { GitHubClient } from "./github.mjs";
+import { GitHubClient, isAmbiguousGitHubMutationError } from "./github.mjs";
 import { readJson } from "./io.mjs";
 import { COMMAND_STATUS_MARKER } from "./markers.mjs";
 import { upsertDeferredReviewFeedback } from "./publish.mjs";
@@ -127,7 +127,7 @@ async function dispatchAfterUnpausing(
   try {
     await github.createRepositoryDispatch(eventType, payload);
   } catch (error) {
-    if (wasPaused) {
+    if (wasPaused && !isAmbiguousGitHubMutationError(error)) {
       try {
         await github.addLabels(number, ["codekeeper:paused"]);
       } catch (rollbackError) {

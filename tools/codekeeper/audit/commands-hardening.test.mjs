@@ -53,6 +53,29 @@ test("failed owner repair dispatch does not leave a target unpaused", async (t) 
   assert.equal(labels.has("codekeeper:paused"), true, "dispatch failure removed the only pause guard");
 });
 
+test("ambiguous owner repair dispatch keeps a target unpaused", async (t) => {
+  const eventPath = await eventFile(t, "/codekeeper fix");
+  const labels = new Set(["codekeeper:paused"]);
+  const restore = patchGitHub({
+    async getIssue() { return { number: 42, state: "open", labels: [...labels], pull_request: {} }; },
+    async removeLabel(_number, label) { labels.delete(label); },
+    async addLabels(_number, labelsToAdd) { labelsToAdd.forEach((label) => labels.add(label)); },
+    async getPull() { return { head: { sha: "a".repeat(40) } }; },
+    async createRepositoryDispatch() {
+      const error = new Error("dispatch response lost");
+      error.githubMutationOutcome = "ambiguous";
+      throw error;
+    }
+  });
+  t.after(restore);
+
+  await assert.rejects(
+    runOwnerCommand({ eventPath, config: ownerConfig, token: "audit-token", automationIdentity: identity }),
+    /dispatch response lost/
+  );
+  assert.equal(labels.has("codekeeper:paused"), false, "ambiguous dispatch restored the pause guard");
+});
+
 test("owner PR triage rejects a draft or retargeted pull request before dispatch", async (t) => {
   const eventPath = await eventFile(t, "/codekeeper triage");
   let dispatches = 0;

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
-import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
+import { GitHubClient, isAmbiguousGitHubMutationError, isOwnedMarkerComment } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
@@ -618,6 +618,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
       } else {
         let markerAddAttempted = false;
         let markerAdded = false;
+        let dispatchAttempted = false;
         try {
           const leasedPull = await currentReviewPull(github, context, config);
           if (issueLabelNames(leasedPull).includes("codekeeper:auto-repaired")) {
@@ -629,6 +630,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
             await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
             markerAdded = true;
             await currentReviewPull(github, context, config);
+            dispatchAttempted = true;
             await github.createRepositoryDispatch("codekeeper_fix", {
               number: pull.number,
               head_sha: pull.head.sha,
@@ -641,6 +643,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
           }
         } catch (error) {
           let rollbackError = null;
+          const ambiguousDispatch = dispatchAttempted && isAmbiguousGitHubMutationError(error);
           let markerPresent = markerAdded;
           if (!automaticRepair.dispatched && markerAddAttempted && !markerPresent) {
             try {
@@ -650,7 +653,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
               rollbackError = cause;
             }
           }
-          if (!automaticRepair.dispatched && markerPresent) {
+          if (!automaticRepair.dispatched && !ambiguousDispatch && markerPresent) {
             try {
               await github.removeLabel(pull.number, "codekeeper:auto-repaired");
             } catch (cause) {
@@ -659,9 +662,17 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
           }
           if (!automaticRepair.dispatched) {
             try {
-              await releaseAutomaticRepairLease(github, lease, "failed");
+              await releaseAutomaticRepairLease(
+                github,
+                lease,
+                ambiguousDispatch ? "ambiguous" : "failed"
+              );
             } catch (cause) {
-              rollbackError ??= cause;
+              if (ambiguousDispatch) {
+                warn(`Could not record ambiguous automatic repair dispatch for PR #${pull.number}: ${cause.message}`);
+              } else {
+                rollbackError ??= cause;
+              }
             }
           }
           if (rollbackError) {

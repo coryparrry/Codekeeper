@@ -62,7 +62,11 @@ test("GitHub does not retry an ambiguous mutation response-body timeout", async 
 
   await assert.rejects(
     github.createIssue({ title: "Finding", body: "Details" }),
-    /timed out after 5ms/
+    (error) => {
+      assert.match(error.message, /timed out after 5ms/);
+      assert.equal(error.githubMutationOutcome, "ambiguous");
+      return true;
+    }
   );
   assert.equal(attempts, 1);
 });

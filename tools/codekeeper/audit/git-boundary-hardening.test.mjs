@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -14,6 +14,32 @@ const config = JSON.parse(
 function git(cwd, args) {
   execFileSync("git", args, { cwd, stdio: "ignore" });
 }
+
+test("workspace capture never invokes a configured external diff helper", async (t) => {
+  const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-external-diff-audit-"));
+  t.after(() => rm(repository, { recursive: true, force: true }));
+  git(repository, ["init", "--quiet"]);
+  git(repository, ["config", "user.name", "Audit"]);
+  git(repository, ["config", "user.email", "audit@example.invalid"]);
+  await writeFile(path.join(repository, "README.md"), "baseline\n", "utf8");
+  git(repository, ["add", "README.md"]);
+  git(repository, ["commit", "--quiet", "-m", "baseline"]);
+  await writeFile(path.join(repository, "README.md"), "changed\n", "utf8");
+  const sentinel = path.join(repository, "external-diff-ran");
+  const helper = path.join(repository, "external-diff.mjs");
+  await writeFile(helper, `#!/usr/bin/env node\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(sentinel)}, "ran");\nprocess.exit(1);\n`);
+  await chmod(helper, 0o700);
+  git(repository, ["config", "diff.external", helper]);
+
+  const patchPath = path.join(repository, "captured.patch");
+  const changes = await createPatch(patchPath, repository, {
+    maximumFileBytes: 10_000,
+    maximumPatchBytes: 10_000
+  });
+
+  assert.equal(changes.captureSkipped, false);
+  await assert.rejects(readFile(sentinel), { code: "ENOENT" });
+});
 
 test("workspace capture bounds oversized content before materializing the patch", async (t) => {
   const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-git-boundary-audit-"));
