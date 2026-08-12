@@ -340,19 +340,23 @@ function validationDescendantProcessIds(rootPid, runId) {
 }
 
 function signalValidationProcess(child, descendants, signal, launcherExited = false) {
+  const processIds = [...descendants];
   if (!launcherExited) {
     try {
       if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
       else child.kill(signal);
     } catch (error) {
-      if (error.code !== "ESRCH") throw error;
+      if (error.code !== "ESRCH" && error.code !== "EPERM") {
+        throw new Error(`Could not signal validation process group ${child.pid}: ${error.message}`, { cause: error });
+      }
+      if (child.pid) processIds.push(child.pid);
     }
   }
-  for (const pid of descendants) {
+  for (const pid of new Set(processIds)) {
     try {
       process.kill(pid, signal);
     } catch (error) {
-      if (error.code !== "ESRCH") throw error;
+      if (error.code !== "ESRCH") throw new Error(`Could not signal validation descendant ${pid}: ${error.message}`, { cause: error });
     }
   }
 }
