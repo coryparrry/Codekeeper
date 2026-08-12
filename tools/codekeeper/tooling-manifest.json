@@ -59,7 +59,7 @@
     },
     {
       "path": "src/lib/github.mjs",
-      "sha256": "fad8d6681c49119a7e0874fc3c2d086edfaf97f4a71938c3cdb778ed7d57bb25"
+      "sha256": "b6eea5f1b99deb0e016ab4f5d1e39f6e7a16a2c57eb937373a101b3daae65f32"
     },
     {
       "path": "src/lib/glob.mjs",
@@ -91,7 +91,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "718ebae53d3080afa5a9ef5338fe243b4833afcd44e22e64502116cde0edf929"
+      "sha256": "b1c9a988360f82ac26b573ea9fb40640ee0543305310a28e7d33600a30eb3f89"
     },
     {
       "path": "src/lib/render.mjs",

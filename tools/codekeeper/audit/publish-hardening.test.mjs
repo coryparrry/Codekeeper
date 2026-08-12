@@ -311,6 +311,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       return structuredClone(pull);
     },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listMaintenanceIssues() { return []; },
     async ensureLabels() {},
     async replaceManagedLabels() {},
     async upsertMarkerComment() { publicationWritten = true; },

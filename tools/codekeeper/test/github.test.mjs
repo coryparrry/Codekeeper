@@ -67,6 +67,32 @@ test("GitHub does not retry an ambiguous mutation response-body timeout", async 
   assert.equal(attempts, 1);
 });
 
+test("GHES pagination preserves the REST API path prefix", async () => {
+  const urls = [];
+  const github = new GitHubClient({
+    token: "token",
+    repository: "owner/repository",
+    apiUrl: "https://ghe.example/api/v3",
+    transport: {
+      fetch: async (url) => {
+        urls.push(String(url));
+        const page = urls.length;
+        return new Response(JSON.stringify(page === 1 ? [{ id: 1 }] : [{ id: 2 }]), {
+          headers: page === 1
+            ? { link: '<https://ghe.example/api/v3/repos/owner/repository/issues/7/comments?page=2>; rel="next"' }
+            : {}
+        });
+      }
+    }
+  });
+
+  assert.deepEqual(await github.listIssueComments(7), [{ id: 1 }, { id: 2 }]);
+  assert.deepEqual(urls, [
+    "https://ghe.example/api/v3/repos/owner/repository/issues/7/comments?per_page=100",
+    "https://ghe.example/api/v3/repos/owner/repository/issues/7/comments?page=2"
+  ]);
+});
+
 test("review replies update the App-owned marker in the originating thread", async () => {
   const marker = "<!-- codekeeper:deferred-reply=test -->";
   const requests = [];

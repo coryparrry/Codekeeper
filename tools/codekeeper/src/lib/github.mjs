@@ -239,7 +239,9 @@ export class GitHubClient {
     const apiBase = new URL(`${this.apiUrl}/`);
     let pages = 0;
     while (url && results.length < limit) {
-      const resolved = new URL(url, apiBase);
+      const resolved = url.startsWith("/")
+        ? new URL(`${this.apiUrl}${url}`)
+        : new URL(url, apiBase);
       if (
         resolved.origin !== apiBase.origin ||
         !resolved.pathname.startsWith(apiBase.pathname)
