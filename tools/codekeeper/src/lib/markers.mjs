@@ -41,6 +41,12 @@ export function reviewFeedbackReplyMarker(fingerprint) {
   return `<!-- codekeeper:review-feedback-reply=${fingerprint} -->`;
 }
 
+export function automaticRepairMarker(headSha) {
+  const normalized = String(headSha ?? "").trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(normalized)) throw new Error("Automatic repair marker requires a full head SHA");
+  return `<!-- codekeeper:auto-repair-head=${normalized} -->`;
+}
+
 export function repairMarker(fingerprint) {
   return `<!-- codekeeper:repair=${fingerprint} -->`;
 }

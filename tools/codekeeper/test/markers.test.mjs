@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker } from "../src/lib/markers.mjs";
+import { automaticRepairMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker } from "../src/lib/markers.mjs";
 
 test("finding fingerprints are stable across presentation changes", () => {
   const base = {
@@ -23,6 +23,9 @@ test("finding fingerprints retain full structured identity fields", () => {
 
 test("repair publication markers are canonical and stable", () => {
   const fingerprint = "a".repeat(64);
+  const headSha = "b".repeat(40);
+  assert.equal(automaticRepairMarker(headSha.toUpperCase()), `<!-- codekeeper:auto-repair-head=${headSha} -->`);
+  assert.throws(() => automaticRepairMarker("branch-name"), /full head SHA/);
   assert.equal(repairMarker(fingerprint), `<!-- codekeeper:repair=${fingerprint} -->`);
   assert.equal(repairNotificationMarker(fingerprint), `<!-- codekeeper:repair-notification=${fingerprint} -->`);
   assert.equal(fixRunMarker("12345"), "<!-- codekeeper:fix-run=12345 -->");
