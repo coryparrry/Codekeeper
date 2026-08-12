@@ -364,9 +364,6 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const ownerLogins = normalizeOwnerLogins(answers.policy?.repository.ownerLogins ?? answers.ownerLogins);
   if (!validClientId(answers.appClientId)) throw new InstallerError("GitHub App Client ID is invalid.", { code: "PLAN_INVALID" });
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
-  const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, answers.policy?.automation.ownerRequests ?? true);
-  const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
-  if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models, policySource });
   const tracing = answers.policy ? answers.policy.ai.tracing.enabled : answers.tracing !== false;
   const profileSources = { ...bundle.contents, ...(installation?.contents ?? {}) };
@@ -385,6 +382,16 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     enforceBundledDefaults: !installation,
     policyOverride: answers.policy ?? null
   });
+  const effectivePolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
+  validateEditableSettings({
+    policy: effectivePolicy,
+    modes,
+    enabled: answers.enabled !== false,
+    profiles: answers.profiles ?? profileDefaults
+  }, baselinePolicy);
+  const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, effectivePolicy.automation.ownerRequests);
+  const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
+  if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const changedFiles = installation
     ? files
       .filter((file) => installation.contents[file.path] !== file.contents)
@@ -417,7 +424,6 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (installation && !changedFiles.length && !variables.length) {
     throw new InstallerError("The selected configuration does not change the current installation.", { code: "NO_CHANGES" });
   }
-  const effectivePolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
   const requiredSecrets = requiredSecretNames({ modes, models, tracing, policy: effectivePolicy });
   const secretNames = installation
     ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))

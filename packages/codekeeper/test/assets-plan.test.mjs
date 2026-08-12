@@ -793,7 +793,7 @@ test("fixer can use any supported model without a separate planner credential", 
   const plan = buildInstallPlan({
     bundle,
     snapshot: snapshot(),
-    answers: answers({ modes: ["fix"], preset: "openai", models: { fix: "sol-high" }, tracing: false })
+    answers: answers({ modes: ["fix"], preset: "openai", models: { fix: "sol-high" }, tracing: false, capabilities: [] })
   });
   const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
   const workflow = plan.files.find((file) => file.path === MODES.fix.target).contents;
@@ -979,6 +979,71 @@ test("owner requests require the trusted App bot identity for every workflow sel
     }),
     assertInstallerCode(assert, "PLAN_INVALID")
   );
+});
+
+test("plain-prompt updates validate tracing after applying the tracing answer", async () => {
+  const bundle = await loadVerifiedAssets();
+  const installedPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
+  installedPolicy.ai.tracing.includeSensitiveData = true;
+  const installation = {
+    policy: installedPolicy,
+    policySource: JSON.stringify(installedPolicy),
+    modes: ["review"],
+    contents: {}
+  };
+  assert.throws(
+    () => buildInstallPlan({
+      bundle,
+      snapshot: {
+        ...snapshot(),
+        installation,
+        existingSettings: {
+          enabled: true,
+          appClientId: "Iv123456789012345678",
+          automationBotLogin: "codekeeper-acme[bot]"
+        }
+      },
+      answers: answers({
+        modes: ["review"],
+        preset: "openai",
+        tracing: false,
+        capabilities: []
+      })
+    }),
+    assertInstallerCode(assert, "SETTING_INVALID")
+  );
+});
+
+test("plain-prompt updates derive the bot-login requirement from the effective policy", async () => {
+  const bundle = await loadVerifiedAssets();
+  const installedPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
+  installedPolicy.automation.ownerRequests = false;
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy: installedPolicy,
+        policySource: JSON.stringify(installedPolicy),
+        modes: ["issues"],
+        contents: {}
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: null
+      }
+    },
+    answers: answers({
+      modes: ["issues"],
+      preset: "openai",
+      models: { issues: "terra-medium" },
+      automationBotLogin: null,
+      capabilities: []
+    })
+  });
+  assert.equal(plan.policy.automation.ownerRequests, false);
+  assert.equal(plan.variables.some((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"), false);
 });
 
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {
