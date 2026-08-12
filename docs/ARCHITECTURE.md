@@ -54,6 +54,12 @@ The selected provider’s `model_api_key` is required for analysis and never fal
 
 Labels and sticky comments are owned only when both their marker and configured App bot identity match. Maintenance fingerprints and repair-PR markers use the same identity check, avoiding a separate state store.
 
+### Conditional GitHub mutation seam
+
+Review publication opens one conditional pull mutation in the GitHub adapter. The adapter captures the live label set and binds it to the sealed repository, head SHA, base SHA/ref, and policy-filtered feedback hash. Every REST write and GraphQL mutation then re-reads and compares that state inside the transport seam before sending the write. Successful Codekeeper label mutations advance only the adapter's expected label state; a rollback can remove only a label that the same conditional mutation added.
+
+GitHub does not provide a transaction or compare-and-swap precondition spanning pull metadata, reviews, comments, labels, and repository dispatch. A remote change can therefore still land after the adapter's final comparison and before GitHub accepts the immediately following write. That final request-sized race is an explicit platform limitation, not a defect to address with additional caller-side reads. Codekeeper fails closed for every drift it observes at the mutation seam, and postconditions remain responsible only for proving the result of a mutation such as auto-merge activation.
+
 ## Review gate and auto-merge
 
 The reusable review workflow exposes a PR-native, fail-closed gate after publication. It passes only after analysis, sealing, and publication succeed for the supported PR shape. It is not an external commit-status publisher.
