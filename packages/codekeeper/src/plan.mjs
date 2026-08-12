@@ -347,8 +347,14 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
     installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
-  if (answers.policy) validateEditableSettings({
-    policy: answers.policy,
+  const inputPolicy = answers.policy ?? createEditableSettings({
+    policy: baselinePolicy,
+    modes,
+    enabled: answers.enabled !== false,
+    profiles: answers.profiles ?? profileDefaults
+  }).policy;
+  validateEditableSettings({
+    policy: inputPolicy,
     modes,
     enabled: answers.enabled !== false,
     profiles: answers.profiles ?? profileDefaults
@@ -374,7 +380,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     capabilities,
     models,
     tracing,
-    policySource,
+    policySource: answers.policy ? policySource : JSON.stringify(inputPolicy),
     profileSources,
     enforceBundledDefaults: !installation,
     policyOverride: answers.policy ?? null
