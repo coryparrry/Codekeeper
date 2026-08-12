@@ -114,12 +114,15 @@ export function capabilitySummary(capabilities, modes = null) {
   return ids.map((id) => `${CAPABILITIES[id].label}: ${capabilities[id] ? "on" : "off"}.`);
 }
 
-export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET, tracing = true }) {
+export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET, tracing = true, policy = null }) {
   const selected = normalizeModes(modes);
   const names = [];
   const providers = new Set(modelAssignments(selected).map(({ key }) => models?.[key]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
   for (const mode of selected) {
-    if (MODES[mode].workspaceProvider) providers.add(MODES[mode].workspaceProvider);
+    const agent = policy?.ai?.agents?.[MODES[mode].policyAgent];
+    if (MODES[mode].workspaceProvider && (!policy || agent?.workspace?.enabled === true)) {
+      providers.add(MODES[mode].workspaceProvider);
+    }
   }
   for (const [provider, secret] of Object.entries(MODEL_PROVIDER_SECRETS)) {
     if (providers.has(provider)) names.push(secret);
@@ -166,8 +169,7 @@ export function normalizeModelChoices({ modes, preset, bundle, choices = {}, pol
       || (effort !== "none" && !policy.ai.providers[provider]?.supportsReasoningEffort)) {
       throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
     }
-    const preservesCurrentSettings = typeof requested !== "string"
-      && provider === agent.provider
+    const preservesCurrentSettings = provider === agent.provider
       && model === agent.model
       && effort === agent.effort;
     normalized[key] = Object.freeze({
@@ -374,7 +376,8 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (installation && !changedFiles.length && !variables.length) {
     throw new InstallerError("The selected configuration does not change the current installation.", { code: "NO_CHANGES" });
   }
-  const requiredSecrets = requiredSecretNames({ modes, models, tracing });
+  const renderedPolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
+  const requiredSecrets = requiredSecretNames({ modes, models, tracing, policy: renderedPolicy });
   const secretNames = installation
     ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))
     : requiredSecrets;
@@ -611,7 +614,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     output.write("Setup does not call a model. API keys go directly to GitHub CLI. Codekeeper does not display or store their values.\n");
     output.write("The installer sends the selected App key file directly to GitHub CLI. It does not read or display the key.\n");
     const selectedModels = normalizeModelChoices({ modes, preset, bundle, choices: models, policySource: JSON.stringify(presetPolicy) });
-    for (const name of requiredSecretNames({ modes, models: selectedModels, tracing })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
+    for (const name of requiredSecretNames({ modes, models: selectedModels, tracing, policy: presetPolicy })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
   } else {
     output.write("\nThe current GitHub App settings and existing API keys stay unchanged. If this edit needs a new key, the installer requests it after the final review.\n");
   }

@@ -284,6 +284,38 @@ test("a same-provider model change stays in policy and does not rewrite a workfl
   }
 });
 
+test("retaining a curated model preserves adopter-edited model settings", async () => {
+  const bundle = await loadVerifiedAssets();
+  const custom = JSON.parse(bundle.contents["policies/openai.json"]);
+  custom.ai.agents.review.modelSettings = {
+    text: { verbosity: "high" },
+    providerData: { serviceTier: "flex" }
+  };
+  const currentOption = MODEL_OPTIONS.openai.find((option) =>
+    option.provider === custom.ai.agents.review.provider
+      && option.model === custom.ai.agents.review.model
+      && option.effort === custom.ai.agents.review.effort
+  );
+  assert.ok(currentOption);
+
+  const models = normalizeModelChoices({
+    modes: ["review"],
+    preset: "openai",
+    bundle,
+    policySource: JSON.stringify(custom),
+    choices: { review: currentOption.id }
+  });
+  const renderedPolicy = JSON.parse(renderPolicy(JSON.stringify(custom), {
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    models
+  }));
+
+  assert.deepEqual(models.review.modelSettings, custom.ai.agents.review.modelSettings);
+  assert.deepEqual(renderedPolicy.ai.agents.review.modelSettings, custom.ai.agents.review.modelSettings);
+});
+
 test("policy reruns add newly required labels without replacing adopter customizations", async () => {
   const bundle = await loadVerifiedAssets();
   const bundledPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
@@ -661,6 +693,63 @@ test("rerunning an OpenRouter coordinator with an enabled workspace does not req
       ...snapshot(),
       installation: {
         policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: initial.modes,
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-acme[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      displayName: "Renamed Widget",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+
+  assert.deepEqual(update.secrets, []);
+});
+
+test("rerunning an OpenRouter coordinator with a disabled workspace does not request an unused OpenAI key", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review"],
+      preset: "openai",
+      models: {
+        review: {
+          provider: "openrouter",
+          model: "anthropic/claude-sonnet-4.5",
+          effort: "none"
+        }
+      },
+      tracing: false
+    })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const policy = JSON.parse(contents[".github/codekeeper.json"]);
+  policy.ai.agents.review.workspace.enabled = false;
+  contents[".github/codekeeper.json"] = `${JSON.stringify(policy, null, 2)}\n`;
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy,
         policySource: contents[".github/codekeeper.json"],
         modes: initial.modes,
         contents

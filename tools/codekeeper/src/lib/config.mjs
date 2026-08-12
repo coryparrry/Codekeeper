@@ -4,6 +4,15 @@ import { readJson } from "./io.mjs";
 export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "fix"]);
 const PROVIDER_APIS = new Set(["responses", "chat_completions"]);
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
+const CRON_MONTHS = new Map([["JAN", 1], ["FEB", 2], ["MAR", 3], ["APR", 4], ["MAY", 5], ["JUN", 6], ["JUL", 7], ["AUG", 8], ["SEP", 9], ["OCT", 10], ["NOV", 11], ["DEC", 12]]);
+const CRON_WEEKDAYS = new Map([["SUN", 0], ["MON", 1], ["TUE", 2], ["WED", 3], ["THU", 4], ["FRI", 5], ["SAT", 6]]);
+const CRON_FIELDS = Object.freeze([
+  Object.freeze({ minimum: 0, maximum: 59 }),
+  Object.freeze({ minimum: 0, maximum: 23 }),
+  Object.freeze({ minimum: 1, maximum: 31 }),
+  Object.freeze({ minimum: 1, maximum: 12, names: CRON_MONTHS }),
+  Object.freeze({ minimum: 0, maximum: 6, names: CRON_WEEKDAYS })
+]);
 const LIMITS = Object.freeze({
   stringLength: 16_384,
   listEntries: 128,
@@ -101,6 +110,44 @@ function cappedNonNegativeInteger(value, name, maximum) {
 function boolean(value, name) {
   assert(typeof value === "boolean", `${name} must be a boolean`);
   return value;
+}
+
+function cronValue(value, { minimum, maximum, names }) {
+  const named = names?.get(value.toUpperCase());
+  if (named !== undefined) return named;
+  if (!/^\d+$/.test(value)) return null;
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric >= minimum && numeric <= maximum ? numeric : null;
+}
+
+function validCronBase(value, field) {
+  if (value === "*") return true;
+  const range = value.split("-");
+  if (range.length === 1) return cronValue(range[0], field) !== null;
+  if (range.length !== 2) return false;
+  const start = cronValue(range[0], field);
+  const end = cronValue(range[1], field);
+  return start !== null && end !== null && start <= end;
+}
+
+function validCronField(value, field) {
+  if (!value || value.startsWith(",") || value.endsWith(",")) return false;
+  return value.split(",").every((entry) => {
+    const parts = entry.split("/");
+    if (parts.length > 2 || !validCronBase(parts[0], field)) return false;
+    if (parts.length === 1) return true;
+    const step = Number(parts[1]);
+    return /^\d+$/.test(parts[1])
+      && Number.isSafeInteger(step)
+      && step > 0
+      && step <= field.maximum - field.minimum + 1;
+  });
+}
+
+function validCronSchedule(value) {
+  const fields = value.trim().split(/\s+/);
+  return fields.length === CRON_FIELDS.length
+    && fields.every((field, index) => validCronField(field, CRON_FIELDS[index]));
 }
 
 function isLoopbackHostname(hostname) {
@@ -352,7 +399,7 @@ export async function loadConfig(configPath = ".github/codekeeper.json") {
   boolean(config.automation.issueTriage, "automation.issueTriage");
   boolean(config.automation.ownerRequests, "automation.ownerRequests");
   nonEmptyString(config.automation.maintenanceSchedule, "automation.maintenanceSchedule", 100);
-  assert(/^(?:\S+\s+){4}\S+$/.test(config.automation.maintenanceSchedule), "automation.maintenanceSchedule must contain five cron fields");
+  assert(validCronSchedule(config.automation.maintenanceSchedule), "automation.maintenanceSchedule must use supported GitHub Actions cron syntax");
   validateAi(config);
 
   dynamicObject(config.labels, "labels", LIMITS.labelEntries);

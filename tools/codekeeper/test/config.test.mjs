@@ -144,6 +144,33 @@ test("policy v3 exposes autonomous defaults and OpenRouter without changing work
   assert.equal(config.ai.agents.review.workspace.model, "gpt-5.6-sol");
 });
 
+test("maintenance schedules use supported GitHub Actions cron fields and ranges", async () => {
+  for (const schedule of ["20/15 * * * *", "*/15 0-23/2 1,15 JAN-DEC MON-FRI"]) {
+    const valid = structuredClone(source);
+    valid.automation.maintenanceSchedule = schedule;
+    await assert.doesNotReject(loadConfig(await writeConfig(valid)), schedule);
+  }
+
+  for (const schedule of [
+    "foo bar baz qux quux",
+    "60 * * * *",
+    "* 24 * * *",
+    "* * 0 * *",
+    "* * * 13 *",
+    "* * * * 7",
+    "10-5 * * * *",
+    "*/0 * * * *"
+  ]) {
+    const invalid = structuredClone(source);
+    invalid.automation.maintenanceSchedule = schedule;
+    await assert.rejects(
+      loadConfig(await writeConfig(invalid)),
+      /automation\.maintenanceSchedule must use supported GitHub Actions cron syntax/,
+      schedule
+    );
+  }
+});
+
 test("configuration bounds policy list cardinality", async () => {
   const excessiveCommands = structuredClone(source);
   excessiveCommands.audit.repair.validationCommands = Array.from({ length: 17 }, (_, index) => `echo ${index}`);
