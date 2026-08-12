@@ -47,7 +47,7 @@
     },
     {
       "path": "src/lib/commands.mjs",
-      "sha256": "79c84f96314a7d9078048bab2d8298ba17d4821b074d47154eff284db0aa3c52"
+      "sha256": "36881f2dcbb724e852ed165f1e8e2441b586b84b00b2a711cff0a403e38b018a"
     },
     {
       "path": "src/lib/config.mjs",
@@ -74,6 +74,10 @@
       "sha256": "83b57791cdf0cee6e3788c27aded8daa2ab5cf9a9c9be05c570c9c3bcab105a2"
     },
     {
+      "path": "src/lib/owner-commands.mjs",
+      "sha256": "55767a57f41b2d8650307a30bdb8fa216a838ed7dc710c91e55c0db89b4eee41"
+    },
+    {
       "path": "src/lib/policy.mjs",
       "sha256": "b1a19044baf080b06a5e240b0b3dda4741ff6113013021bb3bf0a6be6e4cc31c"
     },
@@ -83,7 +87,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "507433bda88836e7593eda01c24be0e5ce47925ab8a4d0b148b21c5bf5fe911c"
+      "sha256": "087c9ad9f28879403e4fe665620809825f3f53fd5c12fc6d48c2c172d228f3b6"
     },
     {
       "path": "src/lib/prompts.mjs",
@@ -91,7 +95,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "9eb57de5989755293245afc908928c490baf1c731708ab0150d9bfbd259752ad"
+      "sha256": "0ce61e2b70f6409bd6aaf884be9d4ae63040e21ad90c3819a5337596d708e9e4"
     },
     {
       "path": "src/lib/render.mjs",
