@@ -198,7 +198,7 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
   }
 });
 
-test("a direct issue triage command relies on the issue workflow without redispatching", async () => {
+test("a direct issue triage command queues the issue workflow through the assistant", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "codekeeper-direct-issue-triage-command-"),
   );
@@ -244,9 +244,14 @@ test("a direct issue triage command relies on the issue workflow without redispa
     assert.equal(result.command, "triage");
     assert.equal(
       result.outcome,
-      "The issue triage workflow is handling this direct command.",
+      "The issue was queued for owner-requested triage.",
     );
-    assert.deepEqual(dispatches, []);
+    assert.deepEqual(dispatches, [
+      {
+        eventType: "codekeeper_issue",
+        payload: { number: 42, requested_by: "repository-owner" },
+      },
+    ]);
   } finally {
     Object.assign(GitHubClient.prototype, originals);
     await rm(directory, { recursive: true, force: true });

@@ -151,15 +151,11 @@ export async function runOwnerCommand({
       outcome =
         "The complete current pull request review surface was queued for triage.";
     } else {
-      if (directCommand === "triage") {
-        outcome = "The issue triage workflow is handling this direct command.";
-      } else {
-        await github.createRepositoryDispatch("codekeeper_issue", {
-          number,
-          requested_by: actor,
-        });
-        outcome = "The issue was queued for owner-requested triage.";
-      }
+      await github.createRepositoryDispatch("codekeeper_issue", {
+        number,
+        requested_by: actor,
+      });
+      outcome = "The issue was queued for owner-requested triage.";
     }
   } else if (command === "defer") {
     if (!issue.pull_request)

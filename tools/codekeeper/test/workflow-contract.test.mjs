@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "4b2d6f1b50352356c838c80440d45fd655cda78d667e5025c6090ae7c774c44c";
+const toolingManifestSha256 = "1ab721b0ac79a15f50ef4d464999894385058d04d3e67375fe36db0267956d5b";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -68,11 +68,7 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.doesNotMatch(reviewCaller, /on:\n\s+pull_request:/);
   assert.match(reviewCaller, /pull-requests: read/);
   assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\}"/);
-  const reviewBootstrap = jobSection(reviewCaller, "bootstrap", "review");
-  assert.match(
-    reviewBootstrap,
-    /if: >-\n\s+github\.event_name != 'pull_request_review_comment' \|\|\n\s+github\.actor != vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN/
-  );
+  assert.match(reviewCaller, /const route = !commandIntent && !automationReply/);
   const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
@@ -86,8 +82,8 @@ test("caller bootstrap fetches the same immutable private action release as its 
     const pins = [...generated.matchAll(/uses:\s+octo\/private-codekeeper\/(?:tools\/codekeeper|\.github\/workflows\/codekeeper-[a-z-]+\.yml)@([0-9a-f]{40})/g)]
       .map((match) => match[1]);
     assert.deepEqual(pins, [releaseSha, releaseSha], `${mode} caller must pin bootstrap and reusable workflow identically`);
-    assert.match(template, /bootstrap:\n\s+name: Codekeeper pinned tooling bootstrap[\s\S]*?\n\s+runs-on: ubuntu-latest/);
-    assert.match(template, new RegExp(`(?:maintain|fix|triage|review):\\n\\s+needs: bootstrap\\n\\s+uses: OWNER/REPOSITORY/\\.github/workflows/codekeeper-${mode}\\.yml@FULL_COMMIT_SHA`));
+    assert.match(template, /bootstrap:\n(?:\s+(?:needs|if): [^\n]+\n)*\s+name: Codekeeper pinned tooling bootstrap\n(?:\s+(?:needs|if): [^\n]+\n)*\s+runs-on: ubuntu-latest/);
+    assert.match(template, new RegExp(`(?:maintain|fix|triage|review):\\n\\s+needs: (?:bootstrap|\\[[^\\n]*bootstrap[^\\n]*\\])\\n(?:\\s+if: [^\\n]+\\n)?\\s+uses: OWNER/REPOSITORY/\\.github/workflows/codekeeper-${mode}\\.yml@FULL_COMMIT_SHA`));
     const bootstrap = template.slice(template.indexOf("  bootstrap:\n"), template.indexOf(`  ${mode === "issues" ? "triage" : mode === "maintain" ? "maintain" : mode}:\n`));
     const bootstrapArtifactNames = [...bootstrap.matchAll(/^ {10}artifact-name: ([^\n]+)$/gm)].map((match) => match[1]);
     assert.deepEqual(
@@ -396,6 +392,7 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(gate, /exit 1/);
   assert.match(source, /auto_review:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(source, /feedback_triage:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
+  assert.match(source, /owner_command:\n\s+description:[^\n]*\n\s+required: false\n\s+default: false\n\s+type: boolean/);
   assert.match(jobSection(source, "workspace", "analyze"), /inputs\.auto_review/);
   assert.match(
     jobSection(source, "workspace", "analyze"),
@@ -411,7 +408,7 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   );
   assert.doesNotMatch(jobSection(source, "workspace", "analyze"), /inputs\.auto_review &&\s*\(\(github\.event_name/);
   assert.match(gate, /IS_COMMAND_REVIEW/);
-  assert.match(gate, /IS_OWNER_COMMAND_REVIEW/);
+  assert.match(gate, /IS_OWNER_COMMAND_REVIEW: \$\{\{ inputs\.owner_command \}\}/);
   assert.match(gate, /Owner review command is intentionally routed by the repository assistant/);
   assert.match(
     jobSection(source, "workspace", "analyze"),
@@ -420,6 +417,9 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(gate, /Codekeeper-authored review feedback is intentionally ignored/);
   assert.match(caller, /auto_review: true/);
   assert.match(caller, /feedback_triage: true/);
+  assert.match(caller, /const mentioned = mentionBot && new RegExp\(`/);
+  assert.match(caller, /appendFileSync\(process\.env\.GITHUB_OUTPUT, `owner_command=\$\{commandIntent\}\\nroute=\$\{route\}\\n`\)/);
+  assert.match(caller, /owner_command: \$\{\{ needs\.intent\.outputs\.owner_command == 'true' \}\}/);
   assert.doesNotMatch(source, /publish-review-status|on:\n\s+pull_request_target|state="success"/);
 });
 

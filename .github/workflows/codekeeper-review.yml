@@ -22,6 +22,11 @@ on:
         required: false
         default: true
         type: boolean
+      owner_command:
+        description: The trusted caller classified this review comment as an owner command.
+        required: false
+        default: false
+        type: boolean
       automation_bot_login:
         description: Installed GitHub App bot login, used only to admit its own PRs.
         required: false
@@ -51,7 +56,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 4b2d6f1b50352356c838c80440d45fd655cda78d667e5025c6090ae7c774c44c
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 1ab721b0ac79a15f50ef4d464999894385058d04d3e67375fe36db0267956d5b
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
@@ -62,6 +67,7 @@ jobs:
     name: Codekeeper review workspace specialist
     if: >-
       inputs.enabled &&
+      !inputs.owner_command &&
       ((github.event_name == 'repository_dispatch' &&
         github.event.action == 'codekeeper_review' &&
         github.actor == inputs.automation_bot_login) ||
@@ -620,7 +626,7 @@ jobs:
           AUTO_REVIEW_FEEDBACK: ${{ inputs.feedback_triage }}
           IS_REVIEW_FEEDBACK: ${{ github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment' || (github.event_name == 'repository_dispatch' && github.event.client_payload.review_feedback) }}
           IS_COMMAND_REVIEW: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review' }}
-          IS_OWNER_COMMAND_REVIEW: ${{ github.event_name == 'pull_request_review_comment' && (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') && contains(fromJSON('["/codekeeper status","/codekeeper review","/codekeeper rerun","/codekeeper triage","/codekeeper defer","/codekeeper implement","/codekeeper fix","/codekeeper stop"]'), github.event.comment.body) }}
+          IS_OWNER_COMMAND_REVIEW: ${{ inputs.owner_command }}
           IS_DRAFT: ${{ github.event.pull_request.draft || github.event.client_payload.draft }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.event.client_payload.head_repository }}
           REPOSITORY: ${{ github.repository }}
