@@ -47,7 +47,7 @@
     },
     {
       "path": "src/lib/commands.mjs",
-      "sha256": "6e636461784b2f3ab12a2bd4353d86caf6c2c4f38ce151e043317ebb0643bc9f"
+      "sha256": "79c84f96314a7d9078048bab2d8298ba17d4821b074d47154eff284db0aa3c52"
     },
     {
       "path": "src/lib/config.mjs",

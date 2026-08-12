@@ -363,6 +363,59 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
   }
 });
 
+test("an owner fix rejects an ordinary issue before changing its state", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-fix-issue-command-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "/codekeeper fix",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    removeLabel: GitHubClient.prototype.removeLabel,
+    getPull: GitHubClient.prototype.getPull,
+    createRepositoryDispatch: GitHubClient.prototype.createRepositoryDispatch,
+  };
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    labels: [],
+  });
+  GitHubClient.prototype.removeLabel = async () => {
+    throw new Error("ordinary issue state must not change");
+  };
+  GitHubClient.prototype.getPull = async () => {
+    throw new Error("ordinary issue must not be read as a pull request");
+  };
+  GitHubClient.prototype.createRepositoryDispatch = async () => {
+    throw new Error("ordinary issue repair must not be dispatched");
+  };
+  try {
+    await assert.rejects(
+      runOwnerCommand({
+        eventPath,
+        config: { repository: { ownerLogins: ["repository-owner"] } },
+        token: "app-token",
+        automationIdentity: { login: "codekeeper[bot]", id: "123" },
+      }),
+      /\/codekeeper fix requires a pull request/,
+    );
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("a direct issue triage command queues the issue workflow through the assistant", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "codekeeper-direct-issue-triage-command-"),
