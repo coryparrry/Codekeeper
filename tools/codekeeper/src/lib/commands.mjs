@@ -123,7 +123,26 @@ async function dispatchAfterUnpausing(
   payload,
 ) {
   const wasPaused = labels(issue).includes("codekeeper:paused");
-  if (wasPaused) await github.removeLabel(number, "codekeeper:paused");
+  if (wasPaused) {
+    try {
+      await github.removeLabel(number, "codekeeper:paused");
+    } catch (error) {
+      if (isAmbiguousGitHubMutationError(error)) {
+        try {
+          const currentIssue = await github.getIssue(number);
+          if (!labels(currentIssue).includes("codekeeper:paused")) {
+            await github.addLabels(number, ["codekeeper:paused"]);
+          }
+        } catch (rollbackError) {
+          throw new Error(
+            `${error.message}; codekeeper:paused could not be restored: ${rollbackError.message}`,
+            { cause: error },
+          );
+        }
+      }
+      throw error;
+    }
+  }
   try {
     await github.createRepositoryDispatch(eventType, payload);
   } catch (error) {
