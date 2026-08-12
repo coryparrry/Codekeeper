@@ -40,6 +40,7 @@ export function frozenPullRepairReviewThreads(threads, reviewThreadIds) {
         databaseId: comment.databaseId,
         author: boundedText(comment.author?.login ?? comment.author, 256, "…"),
         body: boundedText(comment.body, 6000),
+        bodySha256: sha256(String(comment.body ?? "")),
         url: boundedText(comment.url, 2048, "…"),
         path: boundedText(comment.path, 4096, "…"),
         line: comment.line ?? null,

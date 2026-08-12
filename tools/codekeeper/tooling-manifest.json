@@ -79,7 +79,7 @@
     },
     {
       "path": "src/lib/pr-repair.mjs",
-      "sha256": "f27ea202dcf810736bf532689c07cea9679e603e9e920326159f8063cf5c51fc"
+      "sha256": "16a0b44f6ce8f69a538f6515403fd351ef2353e9e18b6578164dbc5198b022b2"
     },
     {
       "path": "src/lib/prepare.mjs",
@@ -91,7 +91,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "e190ce9bb4bb1ab888c3eb6222892d35fde2db6b535cdf9a2b1a16b1a6463a41"
+      "sha256": "51d61d5324c91467d4236e08659b66bedfa85fc18c8a67aa89df33aa13bfdff2"
     },
     {
       "path": "src/lib/render.mjs",

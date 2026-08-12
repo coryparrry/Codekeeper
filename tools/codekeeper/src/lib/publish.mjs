@@ -12,6 +12,8 @@ import { publishPullRequestRepair } from "./pr-repair.mjs";
 import { renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
+const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
+
 function singleLine(value, maximum = 256) {
   return String(value ?? "")
     .replace(/[\r\n\t]+/g, " ")
@@ -520,7 +522,7 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
     deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.sourceKeys)
   ));
   const origin = `- Pull request: [#${context.pullRequest.number}](${context.pullRequest.url})`;
-  for (const issue of existing) {
+  for (const issue of ownerRequested ? [] : existing) {
     const markerMatch = typeof issue.body === "string"
       ? issue.body.match(/<!-- codekeeper:deferred=([a-f0-9]{64}) -->$/)
       : null;
@@ -539,7 +541,11 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
       published.push({ fingerprint: markerMatch[1], state: "would-close", issueNumber: issue.number });
       continue;
     }
-    await github.updateIssue(issue.number, { state: "closed", state_reason: "completed" });
+    await github.updateIssue(issue.number, {
+      body: issue.body.replace(markerMatch[0], `${DEFERRED_RECONCILED_MARKER}\n${markerMatch[0]}`),
+      state: "closed",
+      state_reason: "completed"
+    });
     published.push({ fingerprint: markerMatch[1], state: "closed", issueNumber: issue.number });
   }
   for (const feedback of deferred) {
@@ -560,18 +566,27 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
       marker,
       runUrl: context.runUrl
     });
-    if (match?.state === "closed") {
+    const automaticallyReconciled = match?.state === "closed" && match.body.includes(DEFERRED_RECONCILED_MARKER);
+    if (match?.state === "closed" && !automaticallyReconciled) {
       published.push({ fingerprint, state: "acknowledged", issueNumber: match.number });
       continue;
     }
     if (dryRun) {
-      published.push({ fingerprint, state: match ? "would-update" : "would-create", issueNumber: match?.number ?? null });
+      published.push({
+        fingerprint,
+        state: automaticallyReconciled ? "would-reopen" : match ? "would-update" : "would-create",
+        issueNumber: match?.number ?? null
+      });
       continue;
     }
     await github.ensureLabels(config.labels, labels);
     let issue;
     if (match) {
-      issue = await github.updateIssue(match.number, { title, body });
+      issue = await github.updateIssue(match.number, {
+        title,
+        body,
+        ...(automaticallyReconciled ? { state: "open", state_reason: null } : {})
+      });
       await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
     } else {
       issue = await github.createIssue({ title, body, labels });
@@ -587,7 +602,11 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
     } else {
       await github.upsertMarkerComment(context.pullRequest.number, reviewFeedbackReplyMarker(fingerprint), reply, automationIdentity);
     }
-    published.push({ fingerprint, state: match ? "updated" : "created", issueNumber: issue.number });
+    published.push({
+      fingerprint,
+      state: automaticallyReconciled ? "reopened" : match ? "updated" : "created",
+      issueNumber: issue.number
+    });
   }
   return published;
 }
