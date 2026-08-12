@@ -9,7 +9,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent
 import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
 import { automaticRepairMarker, deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "../src/lib/markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
-import { completeReviewFeedback } from "../src/lib/prepare.mjs";
+import { completeReviewFeedback } from "../src/lib/review-feedback.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import {
   isTrustedMaintenanceIssue,
@@ -671,7 +671,7 @@ test("frozen review feedback detects edits past the prompt body limit", async ()
         }] }
       }];
     }
-  }, 7);
+  }, 7, config);
 
   const frozen = await feedbackFor(`${prefix}a`);
   const edited = await feedbackFor(`${prefix}b`);
@@ -679,7 +679,17 @@ test("frozen review feedback detects edits past the prompt body limit", async ()
   assert.notDeepEqual(frozen, edited);
 });
 
-test("review publication revalidates frozen feedback immediately before repair dispatch", async () => {
+test("review feedback inventory cannot be built without repository policy", async () => {
+  await assert.rejects(
+    completeReviewFeedback({
+      async listPullReviews() { throw new Error("must reject before GitHub reads"); },
+      async listPullReviewThreads() { throw new Error("must reject before GitHub reads"); }
+    }, 7),
+    /requires repository owner policy/
+  );
+});
+
+test("conditional GitHub mutation blocks repair dispatch after feedback changes", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-repair-feedback-race-test-"));
   const configSha256 = "9".repeat(64);
   const reviewConfig = structuredClone(config);
@@ -737,14 +747,21 @@ test("review publication revalidates frozen feedback immediately before repair d
     async replaceManagedLabels() {},
     async upsertMarkerComment() {},
     async upsertReviewReply() {},
-    async addLabels(_number, labels) {
+    async addLabels(number, labels) {
       pull.labels.push(...labels.map((name) => ({ name })));
+      this.advancePullMutationState("POST", this.repoPath(`/issues/${number}/labels`), { labels });
       resolved = true;
     },
     async removeLabel(_number, label) {
       pull.labels = pull.labels.filter((item) => item.name !== label);
     },
-    async createRepositoryDispatch() { dispatches += 1; }
+    async createRepositoryDispatch() {
+      await this.assertPullMutationCurrent();
+      dispatches += 1;
+    },
+    async rollbackPullLabel(_number, label) {
+      pull.labels = pull.labels.filter((item) => item.name !== label);
+    }
   });
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
@@ -786,7 +803,7 @@ test("human-authored automation markers remain review feedback", async () => {
           ] }
         }];
       }
-    }, 7);
+    }, 7, config);
     assert.deepEqual(feedback.map((item) => item.sourceKey), ["review_comment:41"]);
   } finally {
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
