@@ -9,6 +9,7 @@ import { runCli } from "../src/cli.mjs";
 import { STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
 import { buildInstallPlan, collectAppAnswers, collectSetupAnswers, completionGuidance } from "../src/plan.mjs";
 import { createPrivateKeyPickerController, defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
+import { settingInputText } from "../src/settings-tui.mjs";
 import {
   DEFAULT_PROGRESS_STEPS,
   containsPrivateKeyPemEnvelope,
@@ -21,6 +22,11 @@ import { HEAD_SHA, temporaryDirectory } from "./helpers.mjs";
 
 const ESCAPE_SEQUENCE = /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\)?)/g;
 const COLOR_SGR_SEQUENCE = /\u001B\[(?:[0-9;]*;)?(?:3[0-9]|4[0-9]|9[0-7]|10[0-7])(?:;[0-9;]*)?m/;
+
+test("an omitted optional workspace model starts as empty input", () => {
+  assert.equal(settingInputText({ kind: "string", value: undefined }), "");
+  assert.equal(`${settingInputText({ kind: "string", value: undefined })}gpt-5.6-sol`, "gpt-5.6-sol");
+});
 
 class TestInput extends EventEmitter {
   constructor() {
