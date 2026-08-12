@@ -165,8 +165,8 @@ test("feedback-triggered review preparation freezes the complete current review 
   run("git", ["add", "README.md"], root);
   run("git", ["commit", "-qm", "feedback target"], root);
   const revision = run("git", ["rev-parse", "HEAD"], root).trim();
-  const comparisonBase = run("git", ["rev-parse", "HEAD^"], projectRoot).trim();
   const comparisonHead = run("git", ["rev-parse", "HEAD"], projectRoot).trim();
+  const comparisonBase = comparisonHead;
   const eventPath = bundle(root, "review-feedback-event.json");
   await writeFile(eventPath, JSON.stringify({
     action: "created",
