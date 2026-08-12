@@ -96,8 +96,8 @@
         "workspace": {
           "enabled": false,
           "allowWrites": false,
-          "model": "gpt-5.6-terra",
-          "effort": "medium"
+          "model": "gpt-5.6-sol",
+          "effort": "low"
         }
       },
       "fix": {
@@ -220,7 +220,7 @@
   },
   "review": {
     "autoRepair": false,
-    "createDeferredIssues": false,
+    "createDeferredIssues": true,
     "maximumBlockingFindings": 8,
     "maximumNonBlockingFindings": 8,
     "allowedLabels": [

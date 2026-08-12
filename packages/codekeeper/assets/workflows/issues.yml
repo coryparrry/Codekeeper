@@ -1,13 +1,13 @@
 # Copy to .github/workflows/codekeeper-issues.yml, then replace OWNER/REPOSITORY
 # and FULL_COMMIT_SHA with the published maintainer repository and release commit.
 name: Codekeeper issue triage
-run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"
+run-name: "Codekeeper issue triage #${{ github.event.issue.number || github.event.client_payload.number }}"
 
 on:
   issues:
     types: [opened, reopened, edited]
-  issue_comment:
-    types: [created]
+  repository_dispatch:
+    types: [codekeeper_issue]
 
 permissions:
   contents: read
@@ -27,11 +27,13 @@ jobs:
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       auto_triage: true
-      owner_requests: true
+      automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
     secrets:
       # Match this secret to ai.agents.issue.provider in .github/codekeeper.json.
       model_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+      # Required while this mode keeps workspace.enabled=true.
+      workspace_api_key: ${{ secrets.OPENAI_API_KEY }}
       # Traces still export to OpenAI, so this must not be the DeepSeek key.
       trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
       app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}

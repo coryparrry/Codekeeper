@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "0725c35024fb4da927624106645fa819b72399df79b2c9b6e8534d4cc9ca4f14";
+const toolingManifestSha256 = "9ba351638cedce3c03e9221f99a8460ed94009e797066a7a78411e8f2a624de9";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -68,7 +68,13 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.doesNotMatch(reviewCaller, /on:\n\s+pull_request:/);
   assert.match(reviewCaller, /pull-requests: read/);
   assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\}"/);
-  assert.match(reviewCaller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply/);
+  assert.match(reviewCaller, /const botMention = mentionBot && new RegExp\(`\^@\$\{escapedMention\}\(\?:\\\\s\|\$\)`/);
+  assert.match(reviewCaller, /const mentioned = mentionBot && new RegExp\(`\^@\$\{escapedMention\}\\\\s\+\(\$\{actions\.join\("\|"\)\}\)\$`/);
+  assert.match(reviewCaller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply && !botMention/);
+  assert.match(reviewCaller, /const automationReply = eventName === "pull_request_review_comment" && automationBot && author === automationBot/);
+  const assistantCaller = await repositoryFile("examples/workflows/codekeeper-assistant.yml.example");
+  assert.match(assistantCaller, /const mentioned = bot && new RegExp\(`\^@\$\{escapedBot\}\\\\s\+\(\$\{actions\.join\("\|"\)\}\)\$`/);
+  assert.doesNotMatch(assistantCaller, /body\.includes\(`/);
   const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
@@ -419,9 +425,14 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(caller, /feedback_triage: true/);
   assert.match(caller, /const mentioned = mentionBot && new RegExp\(`/);
   assert.match(caller, /const feedbackEvent = eventName === "pull_request_review" \|\| eventName === "pull_request_review_comment";/);
-  assert.match(caller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply;/);
+  assert.match(caller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply && !botMention;/);
   assert.match(caller, /appendFileSync\(process\.env\.GITHUB_OUTPUT, `owner_command=\$\{commandIntent\}\\nroute=\$\{route\}\\n`\)/);
   assert.match(caller, /owner_command: \$\{\{ needs\.intent\.outputs\.owner_command == 'true' \}\}/);
+  assert.match(caller, /intent:\n\s+name: Detect Codekeeper review feedback/);
+  assert.match(caller, /const commandIntent = eventName === "pull_request_review_comment" && trustedAssociation && \(slash \|\| mentioned\)/);
+  assert.match(caller, /bootstrap:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/);
+  assert.match(caller, /review:\n\s+needs: \[intent, bootstrap\]\n\s+if: needs\.intent\.outputs\.route == 'true' && needs\.bootstrap\.result == 'success'/);
+  assert.match(source, /!\(github\.event_name == 'pull_request_review_comment'[\s\S]*github\.event\.comment\.user\.login == inputs\.automation_bot_login\)/);
   assert.doesNotMatch(source, /publish-review-status|on:\n\s+pull_request_target|state="success"/);
 });
 
@@ -438,6 +449,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(issue, /prepare-issue[\s\S]*--actor "\$REQUESTED_BY"/);
   assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
   assert.match(caller, /issues:\n\s+types: \[opened, reopened, edited\]/);
+  assert.doesNotMatch(caller, /issue_comment:/);
   assert.match(caller, /auto_triage: true/);
   assert.match(caller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
 
@@ -473,8 +485,13 @@ test("owner-commanded pull request repair can update only the frozen existing he
   const assistantCaller = await repositoryFile("examples/workflows/codekeeper-assistant.yml.example");
   const publisher = await repositoryFile("tools/codekeeper/src/lib/pr-repair.mjs");
   assert.match(assistant, /owner_requests:/);
+  assert.match(assistant, /installed_modes:/);
   assert.match(assistant, /owner-command/);
+  assert.match(assistant, /--installed-modes "\$INSTALLED_MODES"/);
   assert.match(assistantCaller, /issue_comment:[\s\S]*pull_request_review_comment:/);
+  assert.match(assistantCaller, /intent:\n[\s\S]*route=/);
+  assert.match(assistantCaller, /bootstrap:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/);
+  assert.match(assistantCaller, /installed_modes: review,maintain,issues,fix/);
   assert.match(assistantCaller, /codekeeper-assistant\.yml@FULL_COMMIT_SHA/);
   assert.doesNotMatch(fix, /\n  command:|github\.event\.comment\.body/);
   assert.doesNotMatch(fix, /!github\.event\.issue\.pull_request/);
@@ -486,6 +503,24 @@ test("owner-commanded pull request repair can update only the frozen existing he
   assert.match(publisher, /resolveReviewThread/);
   assert.match(publisher, /listPullReviewThreads/);
   assert.doesNotMatch(publisher, /createPull|createBranchAndCommit|pushBranch|enableAutoMerge|updateIssue|deleteBranch/);
+});
+
+test("documentation uses the live feedback input and owner-authorized defer contract", async () => {
+  const configuration = await repositoryFile("docs/CONFIGURATION.md");
+  const install = await repositoryFile("INSTALL.md");
+  assert.match(configuration, /`feedback_triage` defaults to `true`/);
+  assert.doesNotMatch(configuration, /auto_review_feedback/);
+  assert.match(install, /owner-authorized deferral/i);
+  assert.doesNotMatch(install, /asks the assistant to verify the claim/);
+});
+
+test("Fixer repository dispatches retain their target and explicit policy authorization", async () => {
+  const fix = await workflow("fix");
+  const analyze = jobSection(fix, "analyze", "verify");
+  const publisher = await repositoryFile("tools/codekeeper/src/lib/publish.mjs");
+  assert.match(analyze, /EVENT_ISSUE: \$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}/);
+  assert.match(publisher, /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*authorization_mode: "policy"/);
+  assert.match(publisher, /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*requested_by: automationIdentity\.login/);
 });
 
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {

@@ -432,6 +432,56 @@ test("an existing installation rerun skips App setup and secret prompts", async 
   assert.equal(reviewedPlan.models.review.model, "gpt-5.6-luna");
 });
 
+test("a plain-prompt rerun preserves disabled owner requests without asking for a bot login", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = JSON.parse(bundle.contents["policies/openai.json"]);
+  policy.automation.ownerRequests = false;
+  const snapshot = Object.freeze({
+    ...repositorySnapshot("/tmp/widget", HEAD_SHA),
+    installation: Object.freeze({
+      policy,
+      policySource: JSON.stringify(policy),
+      modes: Object.freeze(["issues"]),
+      contents: Object.freeze({})
+    }),
+    existingSettings: Object.freeze({
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: null
+    }),
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  });
+  let reviewedPlan = null;
+  const prompt = {
+    async confirm(options) {
+      if (options.message === "Enable OpenAI traces?") return false;
+      return true;
+    },
+    async select(options) { return options.defaultValue; },
+    async multiselect(options) { return options.defaultValues; },
+    async inputText(options) {
+      if (options.message.startsWith("GitHub App bot")) throw new Error("owner requests are disabled");
+      return options.defaultValue;
+    },
+    async reviewInstallPlan(plan) {
+      reviewedPlan = plan;
+      return false;
+    }
+  };
+  const status = await runCli({
+    argv: ["init"],
+    prompt,
+    output: textSink(),
+    errorOutput: textSink(),
+    runner: createRecordingRunner(() => { throw new Error("no mutation before review"); }),
+    inspect: async () => snapshot,
+    loadAssets: async () => bundle
+  });
+  assert.equal(status, 1);
+  assert.equal(reviewedPlan.policy.automation.ownerRequests, false);
+  assert.equal(reviewedPlan.variables.some((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"), false);
+});
+
 test("resume command formatting is executable on POSIX and PowerShell", () => {
   assert.equal(
     currentResumeCommand("/opt/Node JS/node", "/tmp/Cory's CLI/codekeeper.mjs", "darwin"),
@@ -596,6 +646,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
       ".github/codekeeper/agents/issue-triager.md",
       ".github/codekeeper/agents/pr-reviewer.md",
       ".github/codekeeper/agents/repository-auditor.md",
+      ".github/workflows/codekeeper-assistant.yml",
       ".github/workflows/codekeeper-maintain.yml",
       ".github/workflows/codekeeper-review.yml"
     ]

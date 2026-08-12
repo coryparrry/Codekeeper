@@ -4,7 +4,9 @@ The adopter-owned `.github/codekeeper.json` is the runtime policy file. Four sep
 
 ## Validation and resource bounds
 
-Version 2 treats every named policy object as closed: unknown keys fail validation. The intentional extension points are the provider names in `ai.providers`, label names in `labels`, and provider-specific JSON in `modelSettings`; these dynamic maps remain supported but have bounded entry counts, nesting, strings, arrays, and numeric values. `modelSettings` numbers may be negative or fractional when a provider supports them, but their absolute magnitude may not exceed 1,000,000. Lists, strings, provider and label counts, and validation-command count are also bounded before a coordinator can consume them.
+Version 3 treats every named policy object as closed: unknown keys fail validation. Its `automation` section controls automatic PR review, review-feedback triage, issue triage, owner requests, and the maintenance schedule. The intentional extension points are the provider names in `ai.providers`, label names in `labels`, and provider-specific JSON in `modelSettings`; these dynamic maps remain supported but have bounded entry counts, nesting, strings, arrays, and numeric values. `modelSettings` numbers may be negative or fractional when a provider supports them, but their absolute magnitude may not exceed 1,000,000. Lists, strings, provider and label counts, and validation-command count are also bounded before a coordinator can consume them.
+
+Run `codekeeper init` again to use the Settings command centre. Standard mode covers workflows, autonomy, schedules, each role's provider/model/effort, workspace specialists, tracing, and profiles. Advanced mode exposes every editable policy field and shows protected paths, validation commands, credential boundaries, turn limits, and release provenance as read-only. The final review is the only mutation boundary.
 
 Every operation limit has a global ceiling. Review context is limited to 20 findings of each kind, 5 MiB of diff, and 1,000 files. Audit publication is limited to 20 issues and issue triage to 200 open-issue summaries. A repair can be at most 100 files, 10,000 changed lines, 5 MiB total, and 1 MiB per file. Auto-merge is limited to 50 files and 5,000 changed lines. These ceilings are intentionally above the starter policy while preventing a trusted-policy mistake from turning into unbounded work.
 
@@ -35,6 +37,12 @@ The installer lists every supported provider and model for every role. The start
         "api": "chat_completions",
         "structuredOutputs": false,
         "supportsReasoningEffort": false
+      },
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "api": "chat_completions",
+        "structuredOutputs": false,
+        "supportsReasoningEffort": false
       }
     },
     "agents": {
@@ -56,7 +64,7 @@ The installer lists every supported provider and model for every role. The start
 }
 ```
 
-Provider base URLs must use HTTPS. Explicit loopback HTTP is accepted only for local self-hosted development (`localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`); embedded credentials and URL fragments are rejected. OpenAI-compatible Responses and Chat Completions APIs need no source changes. Non-compatible protocols need a deliberately scoped `ModelProvider` implementation in `agents-runtime.mjs`.
+Provider base URLs must use HTTPS. Explicit loopback HTTP is accepted only for local self-hosted development (`localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`); embedded credentials and URL fragments are rejected. OpenRouter uses Chat Completions with local JSON parsing and schema validation because structured outputs are disabled. Incompatible output exhausts only the bounded retry policy and then fails closed. Non-compatible protocols need a deliberately scoped `ModelProvider` implementation in `agents-runtime.mjs`.
 
 `model_api_key` maps the selected mode’s provider credential. It is required in every reusable workflow and never falls back to an OpenAI key. The optional Codex specialist uses `workspace_api_key`; `openai_api_key` remains only as a compatibility fallback for that OpenAI-only workspace action.
 
@@ -89,12 +97,15 @@ The currently pinned earlier installer checkpoint does not gain this behavior me
 Reusable workflow callers expose explicit controls alongside `enabled`:
 
 - `auto_review` defaults to `true` and permits eligible pull-request events to run the review workflow. Setting it to `false` skips automatic review; the supplied required review gate then fails closed.
+- `feedback_triage` defaults to `true` and permits review and review-comment events to inventory and triage the complete current review surface.
 - `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/codekeeper triage` comments from configured owners remain available.
 - `dry_run=true` makes maintenance report-only. A live run can repair only when `audit.repair.enabled=true` and every patch limit passes.
 
 `review.autoRepair=true` permits one automatic repair pass after a blocking review. A second blocking review stops for a maintainer.
 
-Configured owners can use `/codekeeper status`, `/codekeeper review`, `/codekeeper rerun`, `/codekeeper implement`, `/codekeeper fix`, and `/codekeeper stop`. The command must be the complete comment. The issue implementation and pull request repair caller supplies the command router.
+Configured owners can use `/codekeeper status`, `/codekeeper review`, `/codekeeper rerun`, `/codekeeper triage`, `/codekeeper defer`, `/codekeeper implement`, `/codekeeper fix`, and `/codekeeper stop`. Slash commands must be the complete comment. The always-installed assistant caller also accepts the exact mention form `@<app-slug> <action>` for one supported action. It ignores extra prose and ambiguous actions; non-owner content cannot authorize writes.
+
+Automated feedback-triage `defer` results create or update one issue using a hidden root-cause fingerprint, add `codekeeper:deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue through that automated path. A direct owner `/codekeeper defer` reply is an unconditional owner-authorized deferral and does not ask the reviewer or model to verify the claim. Deferred and ignored threads are not automatically resolved.
 
 Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
 
@@ -130,7 +141,7 @@ Upgrades from the former five-role flow remove the inert `ai.agents.plan` policy
 
 Auto-merge additionally fails closed when frozen diff context is truncated. It never relies on model compliance or the presence of a workspace specialist.
 
-Version 2 auto-merge is intentionally limited to a same-repository pull request opened by the configured GitHub App bot from the configured automation branch prefix. `merge.allowUserPullRequests` must remain `false`; user pull-request auto-merge needs byte- and binary-aware metadata that this version does not transport.
+Version 3 auto-merge is intentionally limited to a same-repository pull request opened by the configured GitHub App bot from the configured automation branch prefix. `merge.allowUserPullRequests` must remain `false`; user pull-request auto-merge needs byte- and binary-aware metadata that this version does not transport.
 
 ## Tracing
 

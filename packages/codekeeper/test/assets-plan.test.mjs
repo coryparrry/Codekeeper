@@ -51,14 +51,15 @@ import {
 const EXPECTED_ASSETS = Object.freeze({
   "agents/fixer.md": "6770753275c0df9a6546cfe0453b82e6bae985819ddb57998eeb94b14c6ae38a",
   "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
-  "agents/pr-reviewer.md": "6b89c645090e0684a677f57d8d08c87db4b823f1f5a2c271710a7c8a061ae283",
+  "agents/pr-reviewer.md": "2432af8cca474962d50a764af894639716ad5ae1076bc60ae811d34e4e2a4a1f",
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
-  "policies/mixed.json": "86bc5f0661627a493e8a65a38f46d7ebd4e68b41e9216d9b61242f762f6db7c1",
-  "policies/openai.json": "a6aee81b4167b9c656fc3d8b1a9034d110f27f9fdbeca1427b98376ba1d84b8b",
-  "workflows/fix.yml": "2ffb386e66d41beaf42f3e5f1c8a38415596098cbd2a047b73a574d9aec3ae8e",
-  "workflows/issues.yml": "77309242f348d75ed1bf8cf82ecef99e65bcf2f5fd19f54b0974fd168650dbb6",
+  "policies/mixed.json": "c53612a50a6af7b3f6f00171160d333fc4ddefdcd7dbed1d925def56c53f94d7",
+  "policies/openai.json": "9c7c5665d8471f474b83380b71cbc3cc528308258029dfbcc8d3786462283501",
+  "workflows/assistant.yml": "4c02233c71945860ea792b07fe408a4b911aa13cd8b0f739d88559a25e66c545",
+  "workflows/fix.yml": "72c50767a21b45213b250d40b191548da68675442a61ceeb6ac5f9eeea7edc1d",
+  "workflows/issues.yml": "1d3d5f452a94ecf14533dbb4d80cd64134e4d30959897963a4e9e2b6add058f8",
   "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
-  "workflows/review.yml": "1f706efb117d6dbdb8a4569c13578c40db8a603ce033ac6107864a4a2624d5a3"
+  "workflows/review.yml": "6043d9a64829d2e2df7630620c2b2653652a6b02bd251f644a1e07cc6a56aa3e"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
@@ -67,6 +68,7 @@ const CHECKPOINT_PATHS = Object.freeze({
   "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
   "agents/repository-auditor.md": "tools/codekeeper/agents/repository-auditor.md",
   "policies/mixed.json": ".github/codekeeper.json",
+  "workflows/assistant.yml": "examples/workflows/codekeeper-assistant.yml.example",
   "workflows/fix.yml": "examples/workflows/codekeeper-fix.yml.example",
   "workflows/issues.yml": "examples/workflows/codekeeper-issues.yml.example",
   "workflows/maintain.yml": "examples/workflows/codekeeper-maintain.yml.example",
@@ -111,7 +113,7 @@ function answers(overrides = {}) {
   return value;
 }
 
-test("the ten bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
+test("the bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
   const bundle = await loadVerifiedAssets();
   assert.equal(bundle.metadata.source.repository, SOURCE_REPOSITORY);
   assert.equal(bundle.metadata.source.commit, SOURCE_COMMIT);
@@ -149,12 +151,12 @@ test("the pinned runtime accepts the policy version emitted by this installer", 
     defaultBranch: "main",
     ownerLogins: ["coryparrry"]
   })).version;
-  const pinnedConfig = execFileSync("git", ["show", `${SOURCE_COMMIT}:tools/codekeeper/src/lib/config.mjs`], {
+  const pinnedValidator = execFileSync("git", ["show", `${SOURCE_COMMIT}:tools/codekeeper/src/lib/policy-validator.mjs`], {
     cwd: REPOSITORY_ROOT,
     encoding: "utf8"
   });
   assert.equal(emittedVersion, 3);
-  assert.match(pinnedConfig, /config\.version === 3/);
+  assert.match(pinnedValidator, /config\.version === 3/);
 });
 
 test("bundled provenance is byte-for-byte metadata from the pinned source release", async () => {
@@ -352,8 +354,7 @@ test("openai preset changes only issue-triage model policy from the mixed preset
   assert.equal(openaiIssue.effort, "medium");
   assert.equal(openaiIssue.workspace.enabled, false);
   assert.equal(openaiIssue.workspace.allowWrites, false);
-  assert.equal(openaiIssue.workspace.model, "gpt-5.6-terra");
-  assert.equal(openaiIssue.workspace.effort, "medium");
+  assert.deepEqual(openaiIssue.workspace, mixedIssue.workspace);
 });
 
 test("each rendered workflow contains exactly the paired immutable bootstrap and reusable-workflow pins", async () => {
@@ -413,8 +414,9 @@ test("generated callers honor the rendered policy automation controls", async ()
   assert.match(contents[MODES.review.target], /auto_review: false/);
   assert.match(contents[MODES.review.target], /feedback_triage: false/);
   assert.match(contents[MODES.issues.target], /auto_triage: false/);
-  assert.match(contents[MODES.issues.target], /owner_requests: false/);
-  assert.match(contents[MODES.fix.target], /owner_requests: false/);
+  assert.doesNotMatch(contents[MODES.issues.target], /owner_requests:/);
+  assert.doesNotMatch(contents[MODES.fix.target], /owner_requests:/);
+  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /owner_requests: false/);
   assert.match(contents[MODES.maintain.target], /cron: "5 4 \* \* 1"/);
 });
 
@@ -433,6 +435,7 @@ test("renderInstallFiles emits policy, every profile, and only selected callers 
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
     ".github/codekeeper/agents/fixer.md",
+    ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml"
   ]);
@@ -554,6 +557,7 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/codekeeper/agents/repository-auditor.md",
     ".github/codekeeper/agents/issue-triager.md",
     ".github/codekeeper/agents/fixer.md",
+    ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml"
   ]);
@@ -789,7 +793,7 @@ test("fixer can use any supported model without a separate planner credential", 
   const plan = buildInstallPlan({
     bundle,
     snapshot: snapshot(),
-    answers: answers({ modes: ["fix"], preset: "openai", models: { fix: "sol-high" }, tracing: false })
+    answers: answers({ modes: ["fix"], preset: "openai", models: { fix: "sol-high" }, tracing: false, capabilities: [] })
   });
   const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
   const workflow = plan.files.find((file) => file.path === MODES.fix.target).contents;
@@ -945,6 +949,141 @@ test("fix-only issue implementation configures the trusted App bot identity", as
     }),
     assertInstallerCode(assert, "PLAN_INVALID")
   );
+});
+
+test("owner requests require the trusted App bot identity for every workflow selection", async () => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["issues"],
+      capabilities: [],
+      models: { issues: "terra-medium" }
+    })
+  });
+  assert.deepEqual(
+    plan.variables.find((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"),
+    { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
+  );
+  assert.throws(
+    () => buildInstallPlan({
+      bundle,
+      snapshot: snapshot(),
+      answers: answers({
+        modes: ["issues"],
+        capabilities: [],
+        models: { issues: "terra-medium" },
+        automationBotLogin: null
+      })
+    }),
+    assertInstallerCode(assert, "PLAN_INVALID")
+  );
+});
+
+test("plain-prompt updates validate tracing after applying the tracing answer", async () => {
+  const bundle = await loadVerifiedAssets();
+  const installedPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
+  installedPolicy.ai.tracing.includeSensitiveData = true;
+  const installation = {
+    policy: installedPolicy,
+    policySource: JSON.stringify(installedPolicy),
+    modes: ["review"],
+    contents: {}
+  };
+  assert.throws(
+    () => buildInstallPlan({
+      bundle,
+      snapshot: {
+        ...snapshot(),
+        installation,
+        existingSettings: {
+          enabled: true,
+          appClientId: "Iv123456789012345678",
+          automationBotLogin: "codekeeper-acme[bot]"
+        }
+      },
+      answers: answers({
+        modes: ["review"],
+        preset: "openai",
+        tracing: false,
+        capabilities: []
+      })
+    }),
+    assertInstallerCode(assert, "SETTING_INVALID")
+  );
+});
+
+test("plain-prompt updates derive the bot-login requirement from the effective policy", async () => {
+  const bundle = await loadVerifiedAssets();
+  const installedPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
+  installedPolicy.automation.ownerRequests = false;
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy: installedPolicy,
+        policySource: JSON.stringify(installedPolicy),
+        modes: ["issues"],
+        contents: {}
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: null
+      }
+    },
+    answers: answers({
+      modes: ["issues"],
+      preset: "openai",
+      models: { issues: "terra-medium" },
+      automationBotLogin: null,
+      capabilities: []
+    })
+  });
+  assert.equal(plan.policy.automation.ownerRequests, false);
+  assert.equal(plan.variables.some((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"), false);
+});
+
+test("plain-prompt updates validate capabilities after rendering the selected workflows", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({
+      modes: ["review", "fix"],
+      capabilities: ["reviewRepair"]
+    })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  assert.equal(JSON.parse(contents[".github/codekeeper.json"]).review.autoRepair, true);
+
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: initial.modes,
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-acme[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: answers({
+      modes: ["review"],
+      capabilities: []
+    })
+  });
+
+  assert.equal(update.policy.review.autoRepair, false);
+  assert.equal(update.files.some((file) => file.path === MODES.fix.target && file.delete), true);
 });
 
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {

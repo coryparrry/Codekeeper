@@ -410,7 +410,7 @@ test("real Git integration creates one exact generated-only commit without broad
   assert.ok(calls.every((call) => !call.args.includes("-A") && !call.args.includes("--all") && !call.args.includes("--force")));
 });
 
-test("real Git integration reruns against an existing installation and commits only changed configuration", async (t) => {
+test("real Git integration reruns can change configuration and remove a workflow exactly", async (t) => {
   const { root, head } = await committedRepository(t);
   const bundle = await loadVerifiedAssets();
   const initial = buildInstallPlan({
@@ -458,22 +458,31 @@ test("real Git integration reruns against an existing installation and commits o
       updateBranch: `codekeeper/update-${installedHead.slice(0, 12)}`
     },
     answers: {
-      modes: ["review", "maintain"],
+      modes: ["review"],
       preset: "openai",
-      models: { review: "luna-max", maintain: "sol-high" },
+      models: { review: "luna-max" },
       tracing: true,
       displayName: "Widget",
       ownerLogins: ["cory"],
       appClientId: "Iv123456789012345678",
       automationBotLogin: "codekeeper-widget[bot]",
       enabled: true,
-      capabilities: ["repair", "autoMerge"]
+      capabilities: []
     }
   });
   const commit = await createSetupCommit(update, { runner: isolatedCommandRunner(root) });
   assert.match(commit, /^[0-9a-f]{40}$/);
   assert.equal(git(root, ["branch", "--show-current"]).trim(), `codekeeper/update-${installedHead.slice(0, 12)}`);
-  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n"), [".github/codekeeper.json"]);
+  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [
+    ".github/codekeeper.json",
+    ".github/workflows/codekeeper-assistant.yml",
+    ".github/workflows/codekeeper-maintain.yml"
+  ]);
+  assert.match(
+    await readFile(path.join(root, ".github/workflows/codekeeper-assistant.yml"), "utf8"),
+    /installed_modes: review/
+  );
+  await assert.rejects(readFile(path.join(root, ".github/workflows/codekeeper-maintain.yml"), "utf8"), /ENOENT/);
   assert.match(await readFile(path.join(root, ".github/codekeeper/agents/pr-reviewer.md"), "utf8"), /Team preference/);
   const policy = JSON.parse(await readFile(path.join(root, ".github/codekeeper.json"), "utf8"));
   assert.equal(policy.ai.agents.review.model, "gpt-5.6-luna");

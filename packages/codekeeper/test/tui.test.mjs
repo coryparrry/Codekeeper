@@ -9,6 +9,7 @@ import { runCli } from "../src/cli.mjs";
 import { STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
 import { buildInstallPlan, collectAppAnswers, collectSetupAnswers, completionGuidance } from "../src/plan.mjs";
 import { createPrivateKeyPickerController, defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
+import { settingInputText } from "../src/settings-tui.mjs";
 import {
   DEFAULT_PROGRESS_STEPS,
   containsPrivateKeyPemEnvelope,
@@ -21,6 +22,11 @@ import { HEAD_SHA, temporaryDirectory } from "./helpers.mjs";
 
 const ESCAPE_SEQUENCE = /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\)?)/g;
 const COLOR_SGR_SEQUENCE = /\u001B\[(?:[0-9;]*;)?(?:3[0-9]|4[0-9]|9[0-7]|10[0-7])(?:;[0-9;]*)?m/;
+
+test("an omitted optional workspace model starts as empty input", () => {
+  assert.equal(settingInputText({ kind: "string", value: undefined }), "");
+  assert.equal(`${settingInputText({ kind: "string", value: undefined })}gpt-5.6-sol`, "gpt-5.6-sol");
+});
 
 class TestInput extends EventEmitter {
   constructor() {
@@ -154,7 +160,7 @@ async function createTuiHarness(t, {
 
 function assertFrameFits(frame, { columns, rows }) {
   const lines = frame.split("\n");
-  assert.ok(lines.length <= rows, `frame exceeds ${rows} rows: ${lines.length}`);
+  assert.ok(lines.length <= rows, `frame exceeds ${rows} rows: ${lines.length}\n${frame}`);
   for (const line of lines) assert.ok([...line].length <= columns, `line exceeds ${columns} columns: ${line}`);
 }
 
@@ -635,72 +641,44 @@ test("Ink controls support arrows, j/k, checkboxes, text editing, Escape, and Ct
   assert.equal(tui.input.rawModeChanges.at(-1), false);
 });
 
-test("recommended and custom setup paths produce the same semantic answers as the fallback prompts", async (t) => {
+test("the Settings command centre returns defaults and arbitrary model edits", async (t) => {
   const bundle = await loadVerifiedAssets();
 
-  await t.test("recommended", async (t) => {
+  await t.test("default settings", async (t) => {
     const tui = await createTuiHarness(t);
     const answers = collectSetupAnswers({ prompt: tui.prompt, snapshot: repositorySnapshot(), bundle, output: tui.prompt.notices });
     await tui.waitForText("Install into acme/widget");
     assertNamedPhase(tui, "repository");
     await tui.send("y");
     await tui.send("\r");
-    await tui.waitForText("Choose a starting setup");
-    assertNamedPhase(tui, "setup");
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /OpenAI models/);
+    await tui.waitForText("CODEKEEPER  SETTINGS");
+    assert.match(tui.output.lastSemanticFrame(), /STANDARD/);
+    assert.match(tui.output.lastSemanticFrame(), /no changes applied yet/);
+    await tui.send("G");
     await tui.send("\r");
-    await tui.waitForText("Assign a model to the Pull request reviewer");
-    assertNamedPhase(tui, "models");
-    await tui.send("j");
-    await tui.send("\r");
-    await tui.waitForText("Assign a model to the Repository auditor");
-    await tui.send("\r");
-    await tui.waitForText("Enable OpenAI traces");
-    assertNamedPhase(tui, "tracing");
-    await tui.send("\r");
-    await tui.waitForText("Start Codekeeper after the setup pull request merges");
-    assertNamedPhase(tui, "startup");
-    await tui.send("\r");
-    await tui.waitForText("Choose capabilities to turn on");
-    assertNamedPhase(tui, "capabilities");
-    assert.match(tui.output.lastSemanticFrame(), /Repository repair/);
-    assert.match(tui.output.lastSemanticFrame(), /Automatic merge/);
-    await tui.send("\r");
-    await tui.waitForText("Name to show in Codekeeper comments");
-    assertNamedPhase(tui, "identity");
-    await tui.send("\r");
-    await tui.waitForText("GitHub users who can run");
-    assertNamedPhase(tui, "identity");
-    await tui.send("\r");
-    await tui.waitForText("Continue with these safety settings");
-    assertNamedPhase(tui, "safety");
-    await tui.send("y");
-    await tui.send("\r");
-    assert.deepEqual(await answers, {
-      modes: ["review", "maintain"],
-      preset: "openai",
-      models: { review: "terra-high", maintain: "sol-high" },
-      tracing: true,
-      displayName: "widget",
-      ownerLogins: ["cory"],
-      enabled: true,
-      capabilities: ["repair", "autoMerge"]
+    const result = await answers;
+    assert.deepEqual(result.modes, ["review", "maintain"]);
+    assert.equal(result.preset, "openai");
+    assert.deepEqual(result.models, {
+      review: { provider: "openai", model: "gpt-5.6-sol", effort: "high" },
+      maintain: { provider: "openai", model: "gpt-5.6-sol", effort: "high" }
     });
+    assert.equal(result.displayName, "widget");
+    assert.deepEqual(result.ownerLogins, ["cory"]);
+    assert.equal(result.enabled, true);
+    assert.equal(result.policy.version, 3);
+    assert.deepEqual(result.capabilities, []);
+    assert.equal(Object.keys(result.profiles).length, 4);
   });
 
-  await t.test("custom", async (t) => {
+  await t.test("workflow and arbitrary OpenRouter model edits", async (t) => {
     const tui = await createTuiHarness(t);
     const answers = collectSetupAnswers({ prompt: tui.prompt, snapshot: repositorySnapshot(), bundle, output: tui.prompt.notices });
     await tui.waitForText("Install into acme/widget");
     assertNamedPhase(tui, "repository");
     await tui.send("y");
     await tui.send("\r");
-    await tui.waitForText("Choose a starting setup");
-    assertNamedPhase(tui, "setup");
-    await tui.send("j");
-    await tui.send("\r");
-    await tui.waitForText("Choose workflows");
-    assertNamedPhase(tui, "workflows");
+    await tui.waitForText("CODEKEEPER  SETTINGS");
     await tui.send(" ");
     await tui.send("j");
     await tui.send(" ");
@@ -708,52 +686,45 @@ test("recommended and custom setup paths produce the same semantic answers as th
     await tui.send(" ");
     await tui.send("j");
     await tui.send(" ");
-    await tui.send("\r");
-    await tui.waitForText("Choose the starting model set");
-    assertNamedPhase(tui, "models");
-    assert.match(tui.output.lastSemanticFrame(), /change every role on the next screens/);
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /use OpenAI for every selected workflow/);
-    assert.match(semanticText(tui.output.lastSemanticFrame()), /use DeepSeek for issue triage/);
+    for (let index = 0; index < 27; index += 1) await tui.send("j");
+    await tui.send("\u001b[C");
+    await tui.send("\u001b[C");
     await tui.send("j");
     await tui.send("\r");
-    await tui.waitForText("Assign a model to the Issue triager");
+    await tui.waitForText("issue triager model ID");
+    await tui.send("\u0015");
+    await tui.send("anthropic/claude-sonnet-4.5");
     await tui.send("\r");
-    await tui.waitForText("Assign a model to the Fixer");
+    await tui.send("G");
     await tui.send("\r");
-    await tui.waitForText("Enable OpenAI traces");
-    await tui.send("\r");
-    await tui.waitForText("Start Codekeeper after the setup pull request merges");
-    assertNamedPhase(tui, "startup");
-    await tui.send("\r");
-    await tui.waitForText("Choose capabilities to turn on");
-    assertNamedPhase(tui, "capabilities");
-    assert.match(tui.output.lastSemanticFrame(), /Issue implementation/);
-    assert.match(tui.output.lastSemanticFrame(), /Automatic duplicate closure/);
-    assert.match(tui.output.lastSemanticFrame(), /Automatic merge/);
-    await tui.send("\r");
-    await tui.waitForText("Name to show in Codekeeper comments");
-    assertNamedPhase(tui, "identity");
-    await tui.send("Custom");
-    await tui.send("\r");
-    await tui.waitForText("GitHub users who can run");
-    assertNamedPhase(tui, "identity");
-    await tui.send("alice");
-    await tui.send("\r");
-    await tui.waitForText("Continue with these safety settings");
-    assertNamedPhase(tui, "safety");
-    await tui.send("y");
-    await tui.send("\r");
-    assert.deepEqual(await answers, {
-      modes: ["issues", "fix"],
-      preset: "mixed",
-      models: { issues: "deepseek-v4-flash", fix: "terra-high" },
-      tracing: true,
-      displayName: "Custom",
-      ownerLogins: ["alice"],
-      enabled: true,
-      capabilities: ["issueImplementation", "duplicateClosure", "autoMerge"]
+    const result = await answers;
+    assert.deepEqual(result.modes, ["issues", "fix"]);
+    assert.deepEqual(result.models.issues, {
+      provider: "openrouter",
+      model: "anthropic/claude-sonnet-4.5",
+      effort: "none"
     });
+    assert.equal(result.models.fix.provider, "openai");
+    assert.equal(result.policy.ai.agents.issue.workspace.model, "gpt-5.6-sol");
   });
+});
+
+test("the Settings command centre stays bounded in a narrow terminal", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const dimensions = { columns: 34, rows: 24 };
+  const tui = await createTuiHarness(t, dimensions);
+  const answers = collectSetupAnswers({ prompt: tui.prompt, snapshot: repositorySnapshot(), bundle, output: tui.prompt.notices });
+  const cancellation = assert.rejects(answers, (error) => error.code === "PROMPT_ABORTED");
+  await tui.waitForText("Install into acme/widget");
+  await tui.send("y");
+  await tui.send("\r");
+  await tui.waitForText("CODEKEEPER  SETTINGS");
+  assertFrameFits(tui.output.lastSemanticFrame(), dimensions);
+  await tui.send("A");
+  await tui.waitForText("ADVANCED");
+  assertFrameFits(tui.output.lastSemanticFrame(), dimensions);
+  await tui.send("\u001b");
+  await cancellation;
 });
 
 test("GitHub App TUI explains the App name and derives the bot login", async (t) => {
@@ -925,8 +896,10 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     ["Models (editable", "gpt-5.6"],
     ["Policy and caller documents", ".github/codekeeper.json"],
     ["Editable agent profiles"],
+    ["Repository variables", "CODEKEEPER_ENABLED"],
     ["Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
     ["Settings", "Codekeeper starts after merge"],
+    ["Capabilities", "Repository repair"],
     ["Fixed boundaries"],
     [guidance.reviewGateWarning, "Create setup", "› Cancel"]
   ];
@@ -1076,9 +1049,9 @@ test("NO_COLOR and narrow terminals retain visible selection semantics without o
   });
   const review = tui.prompt.reviewInstallPlan(plan);
   const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  for (let page = 1; page <= 8; page += 1) {
-    await tui.waitForText(`Review the setup · ${page} of 8`);
-    if (page < 8) await tui.send("\r");
+  for (let page = 1; page <= 10; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 10`);
+    if (page < 10) await tui.send("\r");
   }
   assert.match(tui.output.lastSemanticFrame(), /› Cancel/);
   await tui.send("\u001b[D");

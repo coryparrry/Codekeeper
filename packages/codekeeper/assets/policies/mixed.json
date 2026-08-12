@@ -226,7 +226,7 @@
   },
   "review": {
     "autoRepair": false,
-    "createDeferredIssues": false,
+    "createDeferredIssues": true,
     "maximumBlockingFindings": 8,
     "maximumNonBlockingFindings": 8,
     "allowedLabels": [

@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "c5dce91476ed75c8c1338307567fb12502c6a5ae";
+export const SOURCE_COMMIT = "5db8209217f9cf35149c3c1cc03dd97d5d0d9c0b";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -55,6 +55,13 @@ export const MODES = Object.freeze({
 });
 
 export const MODE_IDS = Object.freeze(Object.keys(MODES));
+export const ASSISTANT_WORKFLOW = Object.freeze({
+  id: "assistant",
+  label: "Repository assistant",
+  target: ".github/workflows/codekeeper-assistant.yml",
+  asset: "workflows/assistant.yml",
+  description: "Routes configured-owner requests to the installed role workflows."
+});
 export const AGENT_PROFILES = Object.freeze({
   "pr-reviewer": Object.freeze({
     id: "pr-reviewer",
@@ -127,18 +134,23 @@ export const MODEL_OPTIONS = Object.freeze({
   ]),
   deepseek: Object.freeze([
     Object.freeze({ id: "deepseek-v4-flash", provider: "deepseek", model: "deepseek-v4-flash", effort: "none", label: "DeepSeek · V4 Flash" })
+  ]),
+  openrouter: Object.freeze([
+    Object.freeze({ id: "openrouter-sol", provider: "openrouter", model: "openai/gpt-5.6-sol", effort: "none", label: "OpenRouter · OpenAI GPT-5.6 Sol" })
   ])
 });
 export const ALL_MODEL_OPTIONS = Object.freeze(Object.values(MODEL_OPTIONS).flat());
 export const POLICY_TARGET = ".github/codekeeper.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
+  ASSISTANT_WORKFLOW.target,
   ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].target),
   ...MODE_IDS.map((mode) => MODES[mode].target)
 ]);
 export const ASSET_KEYS = Object.freeze([
   "policies/mixed.json",
   "policies/openai.json",
+  ASSISTANT_WORKFLOW.asset,
   ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].asset),
   ...MODE_IDS.map((mode) => MODES[mode].asset)
 ].sort());

@@ -309,6 +309,10 @@ export async function createSetupCommit(plan, {
           throw new InstallerError(`The current file changed before the update: ${file.path}`, { code: "EXISTING_INSTALLATION_CHANGED" });
         }
       }
+      if (file.delete === true) {
+        await fsImpl.unlink(target);
+        continue;
+      }
       await fsImpl.writeFile(target, file.contents, { flag: !plan.update || file.previousSha256 === null ? "wx" : "w", mode: 0o644 });
       const written = await fsImpl.readFile(target);
       if (written.byteLength !== file.bytes || sha256(written) !== file.sha256) {
@@ -369,6 +373,10 @@ export async function createSetupCommit(plan, {
     exactPathSet(committed.split("\0").filter(Boolean), paths, "Setup commit");
     for (const file of plan.files) {
       const blob = await runner.run("git", ["show", `HEAD:${file.path}`], { cwd: plan.root });
+      if (file.delete === true) {
+        if (blob.status === 0) throw new InstallerError(`The deleted workflow still exists in the setup commit: ${file.path}`, { code: "COMMITTED_FILE_MISMATCH" });
+        continue;
+      }
       if (blob.status !== 0 || blob.timedOut || blob.truncated) {
         throw new InstallerError(`The installer failed to verify the committed bytes for ${file.path}. Nothing was pushed.`, {
           code: "COMMITTED_FILE_READ_FAILED",

@@ -1,0 +1,490 @@
+import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
+import test from "node:test";
+import { loadVerifiedAssets } from "../src/assets.mjs";
+import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODES } from "../src/constants.mjs";
+import { buildInstallPlan } from "../src/plan.mjs";
+import { upgradePolicy } from "../src/policy.mjs";
+import { editProfileWithEditor } from "../src/settings-tui.mjs";
+import {
+  createEditableSettings,
+  parseSettingValue,
+  setSetting,
+  settingsAnswers,
+  settingsRows,
+  validateEditableSettings
+} from "../src/settings.mjs";
+import { HEAD_SHA } from "./helpers.mjs";
+
+async function fixture(modes = ["review", "maintain"]) {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  return { bundle, policy, profiles, settings: createEditableSettings({ policy, modes, enabled: true, profiles }) };
+}
+
+function row(settings, id, advanced = false) {
+  const match = settingsRows(settings, { advanced }).find((candidate) => candidate.id === id);
+  assert.ok(match, `missing settings row ${id}`);
+  return match;
+}
+
+test("standard and advanced settings expose behavior, arbitrary models, profiles, and read-only boundaries", async () => {
+  const { settings } = await fixture();
+  const standard = settingsRows(settings);
+  const advanced = settingsRows(settings, { advanced: true });
+  assert.ok(advanced.length > standard.length);
+  assert.equal(row(settings, "workflow:assistant").readOnly, true);
+  assert.equal(row(settings, "policy:automation.reviewFeedbackTriage").kind, "boolean");
+  assert.deepEqual(row(settings, "policy:ai.agents.review.provider").choices, ["openai", "deepseek", "openrouter"]);
+  assert.deepEqual(row(settings, "policy:ai.agents.review.effort").choices, ["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
+  assert.equal(row(settings, "policy:ai.agents.review.model").kind, "string");
+  assert.equal(row(settings, "policy:ai.agents.review.modelSettings", true).kind, "json");
+  const providers = row(settings, "policy:ai.providers", true);
+  assert.equal(providers.readOnly, true);
+  assert.throws(() => setSetting(settings, providers, {}), /read-only/);
+  assert.equal(row(settings, "policy:ai.agents.review.maxTurns", true).readOnly, true);
+  assert.equal(row(settings, "policy:audit.repair.protectedPaths", true).readOnly, true);
+  assert.equal(standard.filter((candidate) => candidate.kind === "profile").length, 4);
+  assert.equal(advanced.filter((candidate) => candidate.id.startsWith("release:")).every((candidate) => candidate.readOnly), true);
+});
+
+test("advanced settings preserve dots inside dynamic label keys", async () => {
+  const { settings } = await fixture();
+  settings.policy.labels["area:api.v2"] = {
+    name: "area:api.v2",
+    color: "123456",
+    description: "Versioned API area"
+  };
+  const color = row(settings, "policy:labels.area:api.v2.color", true);
+  assert.equal(color.value, "123456");
+  const edited = setSetting(settings, color, "abcdef");
+  assert.equal(edited.policy.labels["area:api.v2"].color, "abcdef");
+});
+
+test("one settings object keeps coordinator and workspace models independent", async () => {
+  const { policy, settings } = await fixture(["review"]);
+  const workspaceModel = settings.policy.ai.agents.review.workspace.model;
+  let edited = setSetting(settings, row(settings, "policy:ai.agents.review.provider"), "openrouter");
+  edited = setSetting(edited, row(edited, "policy:ai.agents.review.model"), "anthropic/claude-sonnet-4.5");
+  assert.equal(edited.policy.ai.agents.review.effort, "none");
+  assert.deepEqual(edited.policy.ai.agents.review.modelSettings, {});
+  assert.equal(edited.policy.ai.agents.review.workspace.model, workspaceModel);
+  validateEditableSettings(edited, policy);
+  assert.deepEqual(settingsAnswers(edited).models.review, {
+    provider: "openrouter",
+    model: "anthropic/claude-sonnet-4.5",
+    effort: "none"
+  });
+
+  const unsafe = structuredClone(edited);
+  unsafe.policy.audit.repair.protectedPaths = ["src/**"];
+  assert.throws(() => validateEditableSettings(unsafe, policy), /read-only safety boundary/);
+  const incompatible = structuredClone(edited);
+  incompatible.policy.ai.agents.review.effort = "high";
+  assert.throws(() => validateEditableSettings(incompatible, policy), /supportsReasoningEffort/);
+  const unsafeSchedule = structuredClone(edited);
+  unsafeSchedule.policy.automation.maintenanceSchedule = "17 7 * * *\"";
+  assert.throws(() => validateEditableSettings(unsafeSchedule, policy), /supported GitHub Actions cron syntax/);
+  const outOfRangeSchedule = structuredClone(edited);
+  outOfRangeSchedule.policy.automation.maintenanceSchedule = "99 99 99 99 99";
+  assert.throws(() => validateEditableSettings(outOfRangeSchedule, policy), /supported GitHub Actions cron syntax/);
+  const boundedSchedule = structuredClone(edited);
+  boundedSchedule.policy.automation.maintenanceSchedule = "*/15 0-23/2 1,15 * 1-5";
+  validateEditableSettings(boundedSchedule, policy);
+  const namedSchedule = structuredClone(edited);
+  namedSchedule.policy.automation.maintenanceSchedule = "*/15 0-23/2 1,15 JAN-DEC MON-FRI";
+  validateEditableSettings(namedSchedule, policy);
+});
+
+test("changing a provider selects a compatible default model", async () => {
+  const { policy, settings } = await fixture(["review"]);
+  const provider = row(settings, "policy:ai.agents.review.provider");
+
+  const deepseek = setSetting(settings, provider, "deepseek");
+  assert.equal(deepseek.policy.ai.agents.review.model, "deepseek-v4-flash");
+  assert.deepEqual(row(deepseek, "policy:ai.agents.review.effort").choices, ["none"]);
+  assert.deepEqual(row(deepseek, "policy:ai.agents.review.workspace.effort").choices, ["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
+
+  const openrouter = setSetting(settings, provider, "openrouter");
+  assert.equal(openrouter.policy.ai.agents.review.model, "openai/gpt-5.6-sol");
+  assert.deepEqual(row(openrouter, "policy:ai.agents.review.effort").choices, ["none"]);
+
+  const customProviderDefinition = {
+    baseUrl: "https://models.example/v1",
+    api: "responses",
+    structuredOutputs: true,
+    supportsReasoningEffort: false
+  };
+  policy.ai.providers.custom = structuredClone(customProviderDefinition);
+  const customSettings = structuredClone(settings);
+  customSettings.policy.ai.providers.custom = structuredClone(customProviderDefinition);
+  const customProvider = row(customSettings, "policy:ai.agents.review.provider");
+  assert.deepEqual(customProvider.choices, ["openai", "deepseek", "openrouter"]);
+  const currentModel = customSettings.policy.ai.agents.review.model;
+  const custom = setSetting(customSettings, customProvider, "custom");
+  assert.equal(custom.policy.ai.agents.review.model, currentModel);
+  assert.equal(custom.policy.ai.agents.review.effort, "none");
+  assert.throws(() => validateEditableSettings(custom, policy), /installable provider/);
+});
+
+test("settings preserve runtime-valid empty model-setting strings", async () => {
+  const { policy, settings } = await fixture(["review"]);
+  settings.policy.ai.agents.review.modelSettings = {
+    providerData: { optional: "" }
+  };
+
+  validateEditableSettings(settings, policy);
+  assert.equal(settings.policy.ai.agents.review.modelSettings.providerData.optional, "");
+});
+
+test("settings reject runtime-incompatible model settings and managed-label removal", async () => {
+  const { policy, settings } = await fixture(["review", "issues"]);
+  const nestedEffort = structuredClone(settings);
+  nestedEffort.policy.ai.agents.review.modelSettings.reasoning = { effort: "high" };
+  assert.throws(
+    () => validateEditableSettings(nestedEffort, policy),
+    /modelSettings\.reasoning\.effort.*ai\.agents\.review\.effort/
+  );
+
+  const overlongKey = structuredClone(settings);
+  overlongKey.policy.ai.agents.review.modelSettings = { ["x".repeat(16_385)]: true };
+  assert.throws(
+    () => validateEditableSettings(overlongKey, policy),
+    /modelSettings.*overlong key/
+  );
+
+  const missingReviewLabel = structuredClone(settings);
+  missingReviewLabel.policy.review.managedLabels = missingReviewLabel.policy.review.managedLabels
+    .filter((label) => label !== "codekeeper:reviewed");
+  assert.throws(
+    () => validateEditableSettings(missingReviewLabel, policy),
+    /review must explicitly manage emitted label codekeeper:reviewed/
+  );
+
+  const missingIssueLabel = structuredClone(settings);
+  missingIssueLabel.policy.issues.managedLabels = missingIssueLabel.policy.issues.managedLabels
+    .filter((label) => label !== "codekeeper:ready");
+  assert.throws(
+    () => validateEditableSettings(missingIssueLabel, policy),
+    /issues must explicitly manage emitted label codekeeper:ready/
+  );
+});
+
+test("settings reject every policy shape the runtime validator rejects", async () => {
+  const { policy, settings } = await fixture();
+  settings.policy.review.unexpected = true;
+  assert.throws(
+    () => validateEditableSettings(settings, policy),
+    /review contains an unknown key unexpected/
+  );
+});
+
+test("settings keep unusable owner lists inside the editor", async () => {
+  const { policy, settings } = await fixture(["review"]);
+  for (const ownerLogins of [[], ["Repository-Owner", "repository-owner"]]) {
+    const invalid = structuredClone(settings);
+    invalid.policy.repository.ownerLogins = ownerLogins;
+    invalid.policy.merge.allowedUserAuthors = [...ownerLogins];
+    assert.throws(
+      () => validateEditableSettings(invalid, policy),
+      /repository\.ownerLogins must not be empty|must not contain duplicates/,
+    );
+  }
+});
+
+test("settings canonicalize runtime-valid owner logins before enforcing identity invariants", async () => {
+  const { policy, settings } = await fixture(["review"]);
+  settings.policy.repository.ownerLogins = [" Repository-Owner "];
+  settings.policy.merge.allowedUserAuthors = ["repository-owner"];
+
+  validateEditableSettings(settings, policy);
+
+  assert.deepEqual(settings.policy.repository.ownerLogins, ["repository-owner"]);
+  assert.deepEqual(settings.policy.merge.allowedUserAuthors, ["repository-owner"]);
+});
+
+test("Advanced owner edits synchronize canonical merge authors", async () => {
+  const { settings } = await fixture(["review"]);
+  const edited = setSetting(
+    settings,
+    row(settings, "policy:repository.ownerLogins", true),
+    [" NewOwner "]
+  );
+
+  assert.deepEqual(edited.policy.repository.ownerLogins, ["newowner"]);
+  assert.deepEqual(edited.policy.merge.allowedUserAuthors, ["newowner"]);
+});
+
+test("settings cannot disable tracing while sensitive trace export is required", async () => {
+  const { policy, profiles } = await fixture(["review"]);
+  const baseline = structuredClone(policy);
+  baseline.ai.tracing.enabled = true;
+  baseline.ai.tracing.includeSensitiveData = true;
+  const settings = createEditableSettings({
+    policy: baseline,
+    modes: ["review"],
+    enabled: true,
+    profiles
+  });
+  settings.policy.ai.tracing.enabled = false;
+
+  assert.throws(
+    () => validateEditableSettings(settings, baseline),
+    /ai\.tracing\.includeSensitiveData requires ai\.tracing\.enabled=true/
+  );
+});
+
+test("an enabled issue workspace receives the OpenAI workspace key", async () => {
+  const { bundle, policy, settings } = await fixture(["issues"]);
+  settings.policy.ai.agents.issue.workspace.enabled = true;
+  validateEditableSettings(settings, policy);
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      root: "/tmp/widget",
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: HEAD_SHA,
+      viewerLogin: "coryparrry"
+    },
+    answers: {
+      ...settingsAnswers(settings),
+      preset: "openai",
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    }
+  });
+  const workflow = plan.files.find((file) => file.path === MODES.issues.target).contents;
+
+  assert.ok(plan.secrets.some((secret) => secret.name === "OPENAI_API_KEY"));
+  assert.match(workflow, /workspace_api_key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+});
+
+test("settings require each enabled capability to have its executing workflow", async () => {
+  const { policy, settings } = await fixture(["review", "maintain"]);
+  const automaticRepairWithoutFixer = structuredClone(settings);
+  automaticRepairWithoutFixer.policy.review.autoRepair = true;
+  assert.throws(
+    () => validateEditableSettings(automaticRepairWithoutFixer, policy),
+    /Automatic PR repair requires.*Fixer workflow/
+  );
+
+  const issueImplementationWithoutFixer = structuredClone(settings);
+  issueImplementationWithoutFixer.modes = ["issues"];
+  issueImplementationWithoutFixer.policy.issues.allowAiImplementation = true;
+  assert.throws(
+    () => validateEditableSettings(issueImplementationWithoutFixer, policy),
+    /Issue implementation requires both.*Issue triage.*Fixer workflows/
+  );
+
+  const issueImplementationWithoutTriage = structuredClone(settings);
+  issueImplementationWithoutTriage.modes = ["fix"];
+  issueImplementationWithoutTriage.policy.issues.allowAiImplementation = true;
+  assert.throws(
+    () => validateEditableSettings(issueImplementationWithoutTriage, policy),
+    /Issue implementation requires both.*Issue triage.*Fixer workflows/
+  );
+
+  const automaticMergeWithoutReview = structuredClone(settings);
+  automaticMergeWithoutReview.modes = ["fix"];
+  automaticMergeWithoutReview.policy.merge.enabled = true;
+  assert.throws(
+    () => validateEditableSettings(automaticMergeWithoutReview, policy),
+    /Automatic merge requires the Review workflow.*repair workflow/
+  );
+
+  const omittedModelSettings = structuredClone(settings);
+  delete omittedModelSettings.policy.ai.agents.review.modelSettings;
+  validateEditableSettings(omittedModelSettings, policy);
+  assert.deepEqual(omittedModelSettings.policy.ai.agents.review.modelSettings, {});
+});
+
+test("settings preserve runtime-valid optional fields and display-name limits", async () => {
+  const { policy, settings } = await fixture(["review"]);
+
+  for (const displayName of [" Widget", "Widget ", "x".repeat(101)]) {
+    const invalid = structuredClone(settings);
+    invalid.policy.repository.displayName = displayName;
+    assert.throws(
+      () => validateEditableSettings(invalid, policy),
+      /repository\.displayName is invalid/
+    );
+  }
+  const bounded = structuredClone(settings);
+  bounded.policy.repository.displayName = "x".repeat(100);
+  validateEditableSettings(bounded, policy);
+
+  const optional = structuredClone(settings);
+  delete optional.policy.projectInvariants;
+  for (const agent of Object.values(optional.policy.ai.agents)) {
+    agent.workspace.enabled = false;
+    delete agent.workspace.model;
+    delete agent.workspace.effort;
+  }
+  validateEditableSettings(optional, policy);
+  assert.deepEqual(optional.policy.projectInvariants, []);
+  const workspaceModel = row(optional, "policy:ai.agents.review.workspace.model");
+  assert.equal(workspaceModel.kind, "string");
+  assert.equal(parseSettingValue(workspaceModel, "gpt-5.6-sol"), "gpt-5.6-sol");
+});
+
+test("fresh settings can enable capabilities after bundled defaults are verified", async () => {
+  const { bundle, settings } = await fixture(["review", "fix"]);
+  const edited = structuredClone(settings);
+  edited.policy.review.autoRepair = true;
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      root: "/tmp/widget",
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: HEAD_SHA,
+      viewerLogin: "coryparrry"
+    },
+    answers: {
+      ...settingsAnswers(edited),
+      preset: "openai",
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    }
+  });
+  assert.equal(plan.policy.review.autoRepair, true);
+  assert.ok(plan.files.some((file) => file.path === MODES.fix.target));
+});
+
+test("profile editing uses a temporary copy and returns only validated Markdown", async () => {
+  let editorPath;
+  const edited = await editProfileWithEditor({
+    profile: "pr-reviewer",
+    source: "# Reviewer\n",
+    environment: { EDITOR: "test-editor" },
+    suspendTerminal: (callback) => callback(),
+    runEditor: async (editor, file) => {
+      assert.equal(editor, "test-editor");
+      editorPath = file;
+      await writeFile(file, "# Reviewer\n\nPrioritise API regressions.\n", "utf8");
+      return 0;
+    }
+  });
+  assert.match(edited, /Prioritise API regressions/);
+  await assert.rejects(readFile(editorPath, "utf8"), /ENOENT/);
+});
+
+test("profile editor receives the generated path without a command shell", async () => {
+  let invocation;
+  const edited = await editProfileWithEditor({
+    profile: "pr-reviewer",
+    source: "# Reviewer\n",
+    environment: { EDITOR: "test-editor --wait --reuse-window" },
+    suspendTerminal: (callback) => callback(),
+    spawnEditor(editor, args, options) {
+      invocation = { editor, args, options };
+      const child = {
+        once(event, callback) {
+          if (event === "exit") queueMicrotask(() => callback(0, null));
+          return child;
+        }
+      };
+      return child;
+    }
+  });
+
+  assert.equal(edited, "# Reviewer\n");
+  assert.equal(invocation.editor, "test-editor");
+  assert.deepEqual(invocation.args.slice(0, -1), ["--wait", "--reuse-window"]);
+  assert.equal(invocation.args.length, 3);
+  assert.equal(invocation.options.shell, false);
+});
+
+test("one validated settings object renders matching caller controls and schedule", async () => {
+  const { bundle, settings } = await fixture(["review", "maintain", "issues", "fix"]);
+  let edited = setSetting(settings, row(settings, "policy:automation.automaticPrReview"), false);
+  edited = setSetting(edited, row(edited, "policy:automation.reviewFeedbackTriage"), false);
+  edited = setSetting(edited, row(edited, "policy:automation.issueTriage"), false);
+  edited = setSetting(edited, row(edited, "policy:automation.ownerRequests"), false);
+  edited = setSetting(edited, row(edited, "policy:automation.maintenanceSchedule"), "23 4 * * 2");
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      root: "/tmp/widget",
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: HEAD_SHA,
+      viewerLogin: "coryparrry"
+    },
+    answers: {
+      ...settingsAnswers(edited),
+      preset: "openai",
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    }
+  });
+  const contents = Object.fromEntries(plan.files.map((file) => [file.path, file.contents]));
+  assert.match(contents[MODES.review.target], /auto_review: false/);
+  assert.match(contents[MODES.review.target], /feedback_triage: false/);
+  assert.match(contents[MODES.issues.target], /auto_triage: false/);
+  assert.match(contents[MODES.maintain.target], /cron: "23 4 \* \* 2"/);
+  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /owner_requests: false/);
+});
+
+test("existing installations can remove a workflow and change a profile in one configuration PR", async () => {
+  const { bundle, policy, profiles, settings } = await fixture();
+  const baseSnapshot = {
+    root: "/tmp/widget",
+    repository: "acme/widget",
+    defaultBranch: "main",
+    headSha: HEAD_SHA,
+    viewerLogin: "coryparrry"
+  };
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: baseSnapshot,
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["coryparrry"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]",
+      enabled: true,
+      capabilities: [],
+      models: { review: "sol-high", maintain: "sol-high" }
+    }
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const installedPolicy = JSON.parse(contents[".github/codekeeper.json"]);
+  let edited = createEditableSettings({ policy: installedPolicy, modes: ["review", "maintain"], enabled: true, profiles });
+  edited = setSetting(edited, row(edited, "workflow:maintain"), false);
+  edited = setSetting(edited, row(edited, "profile:pr-reviewer"), `${profiles["pr-reviewer"]}\nPrioritise API regressions.\n`);
+  edited = setSetting(edited, row(edited, "policy:automation.ownerRequests"), false);
+  const updateAnswers = settingsAnswers(edited);
+  const update = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...baseSnapshot,
+      installation: {
+        policy: installedPolicy,
+        policySource: contents[".github/codekeeper.json"],
+        modes: ["review", "maintain"],
+        contents
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-acme[bot]"
+      },
+      updateBranch: "codekeeper/update"
+    },
+    answers: {
+      ...updateAnswers,
+      preset: "openai",
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    }
+  });
+  assert.deepEqual(update.modes, ["review"]);
+  assert.equal(update.files.find((file) => file.path === MODES.maintain.target).delete, true);
+  assert.match(update.files.find((file) => file.path === AGENT_PROFILES["pr-reviewer"].target).contents, /Prioritise API regressions/);
+  assert.match(update.files.find((file) => file.path.endsWith("codekeeper-assistant.yml")).contents, /owner_requests: false/);
+});

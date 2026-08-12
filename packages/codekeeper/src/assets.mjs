@@ -3,6 +3,7 @@ import { readFile, lstat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ASSISTANT_WORKFLOW,
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
   ASSET_KEYS,
@@ -114,15 +115,17 @@ export function renderPolicy(policySource, {
   models = {},
   tracing = true,
   enforceBundledDefaults = true,
-  requiredPolicySource = policySource
+  requiredPolicySource = policySource,
+  policyOverride = null
 }) {
   let policy;
   try {
-    policy = upgradePolicy(JSON.parse(policySource));
+    const bundledPolicy = upgradePolicy(JSON.parse(policySource));
+    if (enforceBundledDefaults) assertDisabledPolicy(bundledPolicy);
+    policy = policyOverride ? upgradePolicy(structuredClone(policyOverride)) : bundledPolicy;
   } catch (cause) {
     throw new InstallerError("Bundled policy is invalid or unsupported.", { code: "ASSET_POLICY_INVALID", cause });
   }
-  if (enforceBundledDefaults) assertDisabledPolicy(policy);
   let requiredPolicy;
   try {
     requiredPolicy = upgradePolicy(JSON.parse(requiredPolicySource));
@@ -140,25 +143,27 @@ export function renderPolicy(policySource, {
   for (const [name, definition] of Object.entries(requiredPolicy.labels ?? {})) {
     if (!Object.hasOwn(policy.labels, name)) policy.labels[name] = structuredClone(definition);
   }
-  policy.audit.repair.enabled = capabilities.repair === true;
-  policy.review.autoRepair = capabilities.reviewRepair === true;
-  policy.issues.allowAiImplementation = capabilities.issueImplementation === true;
-  policy.issues.closeExactDuplicates = capabilities.duplicateClosure === true;
-  policy.merge.enabled = capabilities.autoMerge === true;
-  policy.ai.tracing.enabled = tracing;
-  for (const [mode, selection] of Object.entries(models)) {
-    const agent = policy.ai.agents[MODES[mode]?.policyAgent ?? mode];
-    if (!agent) throw new InstallerError(`The ${mode} workflow has no model configuration.`, { code: "PLAN_INVALID" });
-    agent.provider = selection.provider;
-    agent.model = selection.model;
-    agent.effort = selection.effort;
-    agent.modelSettings = Object.hasOwn(selection, "modelSettings")
-      ? structuredClone(selection.modelSettings)
-      : selection.provider === "openai"
-        ? { text: { verbosity: "low" } }
-        : selection.provider === "deepseek"
-          ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
-          : {};
+  if (!policyOverride) {
+    policy.audit.repair.enabled = capabilities.repair === true;
+    policy.review.autoRepair = capabilities.reviewRepair === true;
+    policy.issues.allowAiImplementation = capabilities.issueImplementation === true;
+    policy.issues.closeExactDuplicates = capabilities.duplicateClosure === true;
+    policy.merge.enabled = capabilities.autoMerge === true;
+    policy.ai.tracing.enabled = tracing;
+    for (const [mode, selection] of Object.entries(models)) {
+      const agent = policy.ai.agents[MODES[mode]?.policyAgent ?? mode];
+      if (!agent) throw new InstallerError(`The ${mode} workflow has no model configuration.`, { code: "PLAN_INVALID" });
+      agent.provider = selection.provider;
+      agent.model = selection.model;
+      agent.effort = selection.effort;
+      agent.modelSettings = Object.hasOwn(selection, "modelSettings")
+        ? structuredClone(selection.modelSettings)
+        : selection.provider === "openai"
+          ? { text: { verbosity: "low" } }
+          : selection.provider === "deepseek"
+            ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
+            : {};
+    }
   }
   if (!Array.isArray(policy.audit.repair.protectedPaths) || !policy.audit.repair.protectedPaths.length) {
     throw new InstallerError("Rendered policy has no protected paths.", { code: "UNSAFE_POLICY" });
@@ -185,7 +190,7 @@ function assertPinnedWorkflow(source, sourceRepository, sourceCommit) {
   }
 }
 
-export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, preset, automation = null }) {
+export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, preset, policy = null }) {
   if (!MODE_IDS.includes(mode)) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   if (count(template, "OWNER/REPOSITORY") !== 3 || count(template, "FULL_COMMIT_SHA") !== 3) {
     throw new InstallerError(`Bundled ${mode} workflow has unexpected placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
@@ -207,7 +212,8 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
     throw new InstallerError(`Bundled ${mode} workflow has no model API key placeholder.`, { code: "WORKFLOW_RENDER_INVALID" });
   }
   rendered = rendered.replace(modelSecretPattern, `model_api_key: \${{ secrets.${desiredSecret} }}`);
-  if (automation) {
+  if (policy) {
+    const automation = policy.automation;
     if (mode === "review") {
       if (typeof automation.automaticPrReview !== "boolean" || typeof automation.reviewFeedbackTriage !== "boolean"
         || count(rendered, "auto_review: true") !== 1 || count(rendered, "feedback_triage: true") !== 1) {
@@ -217,18 +223,10 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
         .replace("auto_review: true", `auto_review: ${automation.automaticPrReview}`)
         .replace("feedback_triage: true", `feedback_triage: ${automation.reviewFeedbackTriage}`);
     } else if (mode === "issues") {
-      if (typeof automation.issueTriage !== "boolean" || typeof automation.ownerRequests !== "boolean"
-        || count(rendered, "auto_triage: true") !== 1 || count(rendered, "owner_requests: true") !== 1) {
+      if (typeof automation.issueTriage !== "boolean" || count(rendered, "auto_triage: true") !== 1) {
         throw new InstallerError("Issue automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
       }
-      rendered = rendered
-        .replace("auto_triage: true", `auto_triage: ${automation.issueTriage}`)
-        .replace("owner_requests: true", `owner_requests: ${automation.ownerRequests}`);
-    } else if (mode === "fix") {
-      if (typeof automation.ownerRequests !== "boolean" || count(rendered, "owner_requests: true") !== 1) {
-        throw new InstallerError("Owner-request automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
-      }
-      rendered = rendered.replace("owner_requests: true", `owner_requests: ${automation.ownerRequests}`);
+      rendered = rendered.replace("auto_triage: true", `auto_triage: ${automation.issueTriage}`);
     } else if (mode === "maintain") {
       if (typeof automation.maintenanceSchedule !== "string" || !automation.maintenanceSchedule.trim()
         || count(rendered, 'cron: "17 7 * * *"') !== 1) {
@@ -239,6 +237,27 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
   }
   if (rendered.includes("OWNER/REPOSITORY") || rendered.includes("FULL_COMMIT_SHA")) {
     throw new InstallerError(`Rendered ${mode} workflow contains unresolved placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  assertPinnedWorkflow(rendered, sourceRepository, sourceCommit);
+  return rendered;
+}
+
+export function renderAssistantWorkflow(template, { sourceRepository, sourceCommit, ownerRequests, modes }) {
+  if (count(template, "OWNER/REPOSITORY") !== 3 || count(template, "FULL_COMMIT_SHA") !== 3) {
+    throw new InstallerError("Bundled assistant workflow has unexpected placeholders.", { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  const manualHeader = "# Copy to .github/workflows/codekeeper-assistant.yml, then replace OWNER/REPOSITORY\n# and FULL_COMMIT_SHA with the published maintainer repository and release commit.";
+  if (!/owner_requests: (?:true|false)/.test(template) || !/installed_modes: [a-z,]+/.test(template)) {
+    throw new InstallerError("Bundled assistant workflow has incomplete routing controls.", { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  const rendered = template
+    .replace(manualHeader, `# Generated by codekeeper from ${sourceRepository}@${sourceCommit}.`)
+    .replaceAll("OWNER/REPOSITORY", sourceRepository)
+    .replaceAll("FULL_COMMIT_SHA", sourceCommit)
+    .replace(/owner_requests: (?:true|false)/, `owner_requests: ${ownerRequests}`)
+    .replace(/installed_modes: [a-z,]+/, `installed_modes: ${modes.join(",")}`);
+  if (rendered.includes("OWNER/REPOSITORY") || rendered.includes("FULL_COMMIT_SHA")) {
+    throw new InstallerError("Rendered assistant workflow contains unresolved placeholders.", { code: "WORKFLOW_RENDER_INVALID" });
   }
   assertPinnedWorkflow(rendered, sourceRepository, sourceCommit);
   return rendered;
@@ -255,7 +274,8 @@ export function renderInstallFiles(bundle, {
   tracing = true,
   policySource = bundle.contents[`policies/${preset}.json`],
   profileSources = bundle.contents,
-  enforceBundledDefaults = true
+  enforceBundledDefaults = true,
+  policyOverride = null
 }) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
   const policyContents = renderPolicy(policySource, {
@@ -266,7 +286,8 @@ export function renderInstallFiles(bundle, {
     models,
     tracing,
     enforceBundledDefaults,
-    requiredPolicySource: bundle.contents[`policies/${preset}.json`]
+    requiredPolicySource: bundle.contents[`policies/${preset}.json`],
+    policyOverride
   });
   const renderedPolicy = JSON.parse(policyContents);
   const rendered = [{
@@ -279,6 +300,15 @@ export function renderInstallFiles(bundle, {
       contents: profileSources[AGENT_PROFILES[profile].target] ?? profileSources[AGENT_PROFILES[profile].asset]
     });
   }
+  rendered.push({
+    path: ASSISTANT_WORKFLOW.target,
+    contents: renderAssistantWorkflow(bundle.contents[ASSISTANT_WORKFLOW.asset], {
+      sourceRepository,
+      sourceCommit,
+      ownerRequests: renderedPolicy.automation.ownerRequests,
+      modes
+    })
+  });
   for (const mode of modes) {
     rendered.push({
       path: MODES[mode].target,
@@ -288,7 +318,7 @@ export function renderInstallFiles(bundle, {
         mode,
         provider: models[mode]?.provider,
         preset,
-        automation: renderedPolicy.automation
+        policy: renderedPolicy
       })
     });
   }

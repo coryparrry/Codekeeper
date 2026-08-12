@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { getAgentRuntimeSettings, loadConfig } from "../src/lib/config.mjs";
+import { getAgentRuntimeSettings, loadConfig, validatePolicy } from "../src/lib/config.mjs";
 
 const source = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -15,6 +15,17 @@ async function writeConfig(value) {
   await writeFile(file, JSON.stringify(value), "utf8");
   return file;
 }
+
+test("policy validation is a shared boundary independent of file loading", () => {
+  const config = structuredClone(source);
+  config.repository.ownerLogins = ["Repository-Owner"];
+  assert.equal(validatePolicy(config), config);
+  assert.deepEqual(config.repository.ownerLogins, ["repository-owner"]);
+
+  const invalid = structuredClone(source);
+  invalid.review.unexpected = true;
+  assert.throws(() => validatePolicy(invalid), /review contains an unknown key unexpected/);
+});
 
 test("configuration validator rejects unsafe or incomplete policy values", async () => {
   await assert.rejects(

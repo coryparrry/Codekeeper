@@ -4,6 +4,7 @@ import {
   AGENT_PROFILES,
   ALL_MODEL_OPTIONS,
   APP_SECRET,
+  ASSISTANT_WORKFLOW,
   BOT_LOGIN_VARIABLE,
   CAPABILITIES,
   CAPABILITY_IDS,
@@ -13,6 +14,7 @@ import {
   MODE_IDS,
   MODES,
   MODEL_PROVIDER_SECRETS,
+  OPENAI_SECRET,
   PRESET_IDS,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
@@ -25,6 +27,7 @@ import {
 import { renderInstallFiles, sha256 } from "./assets.mjs";
 import { InstallerError } from "./errors.mjs";
 import { upgradePolicy } from "./policy.mjs";
+import { createEditableSettings, settingsAnswers, validateEditableSettings } from "./settings.mjs";
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const BOT_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,99})\[bot\]$/;
@@ -102,11 +105,11 @@ export function normalizeCapabilities(modes, selected = []) {
   return Object.freeze(Object.fromEntries(CAPABILITY_IDS.map((id) => [id, selected.includes(id)])));
 }
 
-export function requiresAutomationBotLogin(modes, capabilities = []) {
+export function requiresAutomationBotLogin(modes, capabilities = [], ownerRequests = true) {
   const issueImplementation = Array.isArray(capabilities)
     ? capabilities.includes("issueImplementation")
     : capabilities?.issueImplementation === true;
-  return modes.includes("review") || (modes.includes("fix") && issueImplementation);
+  return ownerRequests || modes.includes("review") || (modes.includes("fix") && issueImplementation);
 }
 
 export function capabilitySummary(capabilities, modes = null) {
@@ -127,9 +130,10 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
   for (const [provider, secret] of Object.entries(MODEL_PROVIDER_SECRETS)) {
     if (providers.has(provider)) names.push(secret);
   }
+  if (policy && modelAssignments(selected).some(({ agent }) => policy.ai.agents[agent]?.workspace?.enabled)) names.push(OPENAI_SECRET);
   if (tracing) names.push(TRACE_SECRET);
   names.push(APP_SECRET);
-  return Object.freeze(names);
+  return Object.freeze([...new Set(names)]);
 }
 
 function existingSecretNames(installation) {
@@ -142,6 +146,7 @@ function existingSecretNames(installation) {
     ...Object.entries(MODEL_PROVIDER_SECRETS)
       .filter(([provider]) => providers.has(provider))
       .map(([, secret]) => secret),
+    ...(modelAssignments(installation.modes).some(({ agent }) => installation.policy.ai.agents[agent]?.workspace?.enabled) ? [OPENAI_SECRET] : []),
     ...(installation.policy.ai.tracing.enabled ? [TRACE_SECRET] : []),
     APP_SECRET
   ]);
@@ -213,9 +218,12 @@ export function appRegistrationUrl({ repository, displayName, ownerType = "User"
 export function documentMap(files) {
   return files.map((file) => Object.freeze({
     path: file.path,
-    purpose: file.path.endsWith("codekeeper.json")
+    purpose: file.delete === true
+      ? "Remove this installed workflow"
+      : file.path.endsWith("codekeeper.json")
       ? "Policy, model choices, protected paths, and startup controls"
       : AGENT_PROFILES[AGENT_PROFILE_IDS.find((profile) => AGENT_PROFILES[profile].target === file.path)]?.purpose
+        ?? (file.path === ASSISTANT_WORKFLOW.target ? ASSISTANT_WORKFLOW.description : null)
         ?? MODES[MODE_IDS.find((mode) => MODES[mode].target === file.path)]?.label
         ?? "Codekeeper setup"
   }));
@@ -335,33 +343,67 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const installation = snapshot.installation ?? null;
   const policySource = installation?.policySource ?? bundle.contents[`policies/${answers.preset}.json`];
   if (!PRESET_IDS.includes(answers.preset)) throw new InstallerError(`Unsupported preset: ${answers.preset}`, { code: "PLAN_INVALID" });
-  if (!validDisplayName(answers.displayName)) throw new InstallerError("Repository display name is invalid.", { code: "PLAN_INVALID" });
-  const ownerLogins = normalizeOwnerLogins(answers.ownerLogins);
+  const baselinePolicy = upgradePolicy(JSON.parse(policySource));
+  const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
+    installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
+  ]));
+  const inputPolicy = answers.policy ?? createEditableSettings({
+    policy: baselinePolicy,
+    modes,
+    enabled: answers.enabled !== false,
+    profiles: answers.profiles ?? profileDefaults
+  }).policy;
+  const displayName = answers.policy?.repository.displayName ?? answers.displayName;
+  if (!validDisplayName(displayName)) throw new InstallerError("Repository display name is invalid.", { code: "PLAN_INVALID" });
+  const ownerLogins = normalizeOwnerLogins(answers.policy?.repository.ownerLogins ?? answers.ownerLogins);
   if (!validClientId(answers.appClientId)) throw new InstallerError("GitHub App Client ID is invalid.", { code: "PLAN_INVALID" });
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
-  const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities);
-  const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
-  if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models, policySource });
-  const tracing = answers.tracing !== false;
+  const tracing = answers.policy ? answers.policy.ai.tracing.enabled : answers.tracing !== false;
+  const profileSources = { ...bundle.contents, ...(installation?.contents ?? {}) };
+  for (const id of AGENT_PROFILE_IDS) profileSources[AGENT_PROFILES[id].target] = answers.profiles?.[id] ?? profileDefaults[id];
   const files = renderInstallFiles(bundle, {
     modes,
     preset: answers.preset,
-    displayName: answers.displayName,
+    displayName,
     defaultBranch: snapshot.defaultBranch,
     ownerLogins,
     capabilities,
     models,
     tracing,
-    policySource,
-    profileSources: installation ? { ...bundle.contents, ...installation.contents } : bundle.contents,
-    enforceBundledDefaults: !installation
+    policySource: answers.policy ? policySource : JSON.stringify(inputPolicy),
+    profileSources,
+    enforceBundledDefaults: !installation,
+    policyOverride: answers.policy ?? null
   });
+  const effectivePolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
+  validateEditableSettings({
+    policy: effectivePolicy,
+    modes,
+    enabled: answers.enabled !== false,
+    profiles: answers.profiles ?? profileDefaults
+  }, baselinePolicy);
+  const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, effectivePolicy.automation.ownerRequests);
+  const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
+  if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
   const changedFiles = installation
     ? files
       .filter((file) => installation.contents[file.path] !== file.contents)
       .map((file) => ({ ...file, previousSha256: installation.contents[file.path] === undefined ? null : sha256(installation.contents[file.path]) }))
     : files;
+  if (installation) {
+    for (const mode of installation.modes.filter((mode) => !modes.includes(mode))) {
+      const target = MODES[mode].target;
+      changedFiles.push({
+        path: target,
+        contents: null,
+        bytes: 0,
+        sha256: null,
+        previousSha256: sha256(installation.contents[target]),
+        delete: true
+      });
+    }
+  }
   const enabled = answers.enabled !== false;
   const variables = installation
     ? (enabled === snapshot.existingSettings.enabled ? [] : [{ name: ENABLED_VARIABLE, value: String(enabled) }])
@@ -376,8 +418,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (installation && !changedFiles.length && !variables.length) {
     throw new InstallerError("The selected configuration does not change the current installation.", { code: "NO_CHANGES" });
   }
-  const renderedPolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
-  const requiredSecrets = requiredSecretNames({ modes, models, tracing, policy: renderedPolicy });
+  const requiredSecrets = requiredSecretNames({ modes, models, tracing, policy: effectivePolicy });
   const secretNames = installation
     ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))
     : requiredSecrets;
@@ -392,12 +433,13 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     originalHead: snapshot.headSha,
     modes,
     preset: answers.preset,
-    displayName: answers.displayName,
+    displayName,
     ownerLogins,
     enabled,
     capabilities,
     models,
     tracing,
+    policy: effectivePolicy,
     files: changedFiles,
     variables,
     secrets: secretNames.map((name) => ({ name })),
@@ -431,6 +473,34 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     } : {})
   });
   if (!repositoryConfirmed) throw new InstallerError("Setup was cancelled before any mutation.", { code: "USER_CANCELLED" });
+  if (prompt?.kind === "ink" && typeof prompt.editSettings === "function") {
+    const preset = installation?.policy.ai.agents.issue?.provider === "deepseek" ? "mixed" : "openai";
+    const policy = installation?.policy
+      ? structuredClone(installation.policy)
+      : upgradePolicy(JSON.parse(bundle.contents[`policies/${preset}.json`]));
+    if (!installation) {
+      policy.repository.displayName = snapshot.displayName;
+      policy.repository.ownerLogins = [snapshot.viewerLogin.toLowerCase()];
+      policy.merge.allowedUserAuthors = [...policy.repository.ownerLogins];
+    }
+    const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
+      installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
+    ]));
+    const settings = createEditableSettings({
+      policy,
+      modes: installation?.modes ?? RECOMMENDED_MODES,
+      enabled: installation ? snapshot.existingSettings.enabled : true,
+      profiles
+    });
+    const edited = await prompt.editSettings({
+      settings,
+      baselinePolicy: policy,
+      repository: snapshot.repository,
+      update: Boolean(installation)
+    });
+    validateEditableSettings(edited, policy);
+    return Object.freeze({ ...settingsAnswers(edited), preset });
+  }
   if (!installation) output.write("Recommended starter setup\n");
   if (!installation) {
     output.write("  - Pull request review: your GitHub App posts comments, labels, and a blocking result on controlled same-repository PRs\n");
@@ -606,7 +676,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
           duplicateClosure: installation.policy.issues.closeExactDuplicates,
           autoMerge: installation.policy.merge.enabled
         })[id])
-        : applicableCapabilities,
+        : [],
       choices: applicableCapabilities.map((id) => ({
         value: id,
         label: `${CAPABILITIES[id].label} — ${CAPABILITIES[id].description}`
@@ -614,8 +684,8 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     }, {
       step: "capabilities",
       description: [
-        "All capabilities that match your workflows are selected by default.",
-        "Clear any capability that you do not want Codekeeper to use."
+        "Automatic code changes and merge start off.",
+        "Select only the capabilities that you want Codekeeper to use."
       ]
     }))
     : [];
@@ -706,7 +776,7 @@ export async function collectAutomationBotLogin({ prompt, output }) {
   return automationBotLogin.toLowerCase();
 }
 
-export async function collectAppAnswers({ prompt, modes, capabilities = [], output }) {
+export async function collectAppAnswers({ prompt, modes, capabilities = [], ownerRequests = true, output }) {
   output.write("\nGitHub App identifiers\n");
   output.write("  - Client ID: find the value that starts with Iv in the App settings\n");
   const appClientId = await prompt.inputText(tuiOptions(prompt, {
@@ -719,7 +789,7 @@ export async function collectAppAnswers({ prompt, modes, capabilities = [], outp
       "Do not enter the numeric App ID."
     ]
   }));
-  const automationBotLogin = requiresAutomationBotLogin(modes, capabilities)
+  const automationBotLogin = requiresAutomationBotLogin(modes, capabilities, ownerRequests)
     ? await collectAutomationBotLogin({ prompt, output })
     : null;
   return Object.freeze({ appClientId, automationBotLogin: automationBotLogin?.toLowerCase() ?? null });

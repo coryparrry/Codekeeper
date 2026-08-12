@@ -11,7 +11,7 @@
     },
     {
       "path": "agents/pr-reviewer.md",
-      "sha256": "6b89c645090e0684a677f57d8d08c87db4b823f1f5a2c271710a7c8a061ae283"
+      "sha256": "2432af8cca474962d50a764af894639716ad5ae1076bc60ae811d34e4e2a4a1f"
     },
     {
       "path": "agents/repository-auditor.md",
@@ -35,7 +35,7 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "bbea51f90a2d721e9413d3076454ab1e1d9e306273930d4ddda20dcf2a077c9a"
+      "sha256": "10c52f0a5e602a7987349f0bc87caaf01acc722e2e7d57ef4b4bf7d8c655c7b0"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
@@ -47,11 +47,11 @@
     },
     {
       "path": "src/lib/commands.mjs",
-      "sha256": "6635afba020df150c2fff8bd41670d293e35434cbdb60b0ad58a8034db4eaff9"
+      "sha256": "36881f2dcbb724e852ed165f1e8e2441b586b84b00b2a711cff0a403e38b018a"
     },
     {
       "path": "src/lib/config.mjs",
-      "sha256": "8de1a5119cb61d9064ce816e41b1282f6820ae9d74df32a629c7da120a0a4ed1"
+      "sha256": "84658e56f4cf35e474368bb5a5ea7f03513fb2692ec7a6ac504c0aa7eb64eddb"
     },
     {
       "path": "src/lib/git.mjs",
@@ -78,6 +78,10 @@
       "sha256": "55767a57f41b2d8650307a30bdb8fa216a838ed7dc710c91e55c0db89b4eee41"
     },
     {
+      "path": "src/lib/policy-validator.mjs",
+      "sha256": "ac0d9787892ff05ddc8e7f521be839ce6edf1aa00a4fe90fc43d3633446fbfb9"
+    },
+    {
       "path": "src/lib/policy.mjs",
       "sha256": "b1a19044baf080b06a5e240b0b3dda4741ff6113013021bb3bf0a6be6e4cc31c"
     },
@@ -95,7 +99,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "2224cf9daaa6299517c33045c020dca89e557b6a1f966bab9cbbc0618f1844b0"
+      "sha256": "ff2a2e1684609b3d4b910b856df6e3390b643fdb17a6f81fe3855dfa1131cee3"
     },
     {
       "path": "src/lib/render.mjs",
