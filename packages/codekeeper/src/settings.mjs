@@ -401,9 +401,13 @@ export function validateEditableSettings(settings, baselinePolicy) {
     throw new InstallerError("Automatic PR repair requires both the Review and Fixer workflows.", { code: "SETTING_INVALID" });
   }
   if (policy.audit.repair.enabled && !settings.modes.includes("maintain")) throw new InstallerError("Repository repair requires the Maintenance workflow.", { code: "SETTING_INVALID" });
-  if (policy.issues.allowAiImplementation && !settings.modes.includes("fix")) throw new InstallerError("Issue implementation requires the Fixer workflow.", { code: "SETTING_INVALID" });
+  if (policy.issues.allowAiImplementation && !(settings.modes.includes("issues") && settings.modes.includes("fix"))) {
+    throw new InstallerError("Issue implementation requires both the Issue triage and Fixer workflows.", { code: "SETTING_INVALID" });
+  }
   if (policy.issues.closeExactDuplicates && !settings.modes.includes("issues")) throw new InstallerError("Duplicate closure requires the Issue triage workflow.", { code: "SETTING_INVALID" });
-  if (policy.merge.enabled && !settings.modes.some((mode) => mode === "maintain" || mode === "fix")) throw new InstallerError("Automatic merge requires a repair workflow.", { code: "SETTING_INVALID" });
+  if (policy.merge.enabled && !(settings.modes.includes("review") && settings.modes.some((mode) => mode === "maintain" || mode === "fix"))) {
+    throw new InstallerError("Automatic merge requires the Review workflow and a repair workflow.", { code: "SETTING_INVALID" });
+  }
   for (const profile of AGENT_PROFILE_IDS) {
     const source = settings.profiles[profile];
     if (typeof source !== "string" || !source.trim() || Buffer.byteLength(source) > 64 * 1024 || source.includes("\0")) throw new InstallerError(`${profile} profile is invalid.`, { code: "SETTING_INVALID" });
@@ -424,9 +428,9 @@ export function settingsAnswers(settings) {
     capabilities: [
       ...(settings.modes.includes("review") && settings.modes.includes("fix") && policy.review.autoRepair ? ["reviewRepair"] : []),
       ...(settings.modes.includes("maintain") && policy.audit.repair.enabled ? ["repair"] : []),
-      ...(settings.modes.includes("fix") && policy.issues.allowAiImplementation ? ["issueImplementation"] : []),
+      ...(settings.modes.includes("issues") && settings.modes.includes("fix") && policy.issues.allowAiImplementation ? ["issueImplementation"] : []),
       ...(settings.modes.includes("issues") && policy.issues.closeExactDuplicates ? ["duplicateClosure"] : []),
-      ...(settings.modes.some((mode) => mode === "maintain" || mode === "fix") && policy.merge.enabled ? ["autoMerge"] : [])
+      ...(settings.modes.includes("review") && settings.modes.some((mode) => mode === "maintain" || mode === "fix") && policy.merge.enabled ? ["autoMerge"] : [])
     ],
     models: Object.fromEntries(settings.modes.map((mode) => {
       const agent = policy.ai.agents[MODES[mode].policyAgent];

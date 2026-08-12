@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadVerifiedAssets } from "../src/assets.mjs";
 import {
@@ -300,6 +300,17 @@ test("existing generated files are recognized as a rerunnable installation", asy
   assert.deepEqual(issuesOnly.installation.modes, ["issues"]);
   assert.equal(issuesOnly.installation.policy.automation.ownerRequests, true);
   assert.equal(issuesOnly.existingSettings.automationBotLogin, "codekeeper-widget[bot]");
+
+  await rm(path.join(issuesRoot, ".github", "workflows", "codekeeper-assistant.yml"));
+  await writeFile(
+    path.join(issuesRoot, ".github", "workflows", "codekeeper-issues.yml"),
+    bundle.contents["workflows/issues.yml"].replace(
+      "enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}",
+      "enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}\n      owner_requests: false"
+    )
+  );
+  const legacyIssuesOnly = await inspectRepository({ runner: preflightRunner(issuesRoot), cwd: issuesRoot });
+  assert.equal(legacyIssuesOnly.installation.policy.automation.ownerRequests, false);
 });
 
 test("setup branch collision detection covers local refs, remote refs, and prior pull requests", async () => {
