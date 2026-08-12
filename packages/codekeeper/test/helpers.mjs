@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const REPOSITORY_ROOT = path.resolve(PACKAGE_ROOT, "../..");
-export const PINNED_COMMIT = "7e8a2be7a7a7c85ec6ba5e7ac598400e4ecf5604";
+export const PINNED_COMMIT = "60a0d839cc1765c9686a46d2ffcb8b8a39dbb94f";
 export const HEAD_SHA = "a".repeat(40);
 
 export function result(stdout = "", overrides = {}) {
