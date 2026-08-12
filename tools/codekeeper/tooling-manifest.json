@@ -71,7 +71,7 @@
     },
     {
       "path": "src/lib/markers.mjs",
-      "sha256": "65a7438f9306219f5aedff2b6b954d5b6745377c2c2d0b4a6a1094f5d03fe006"
+      "sha256": "ccf5b28edb31ce84578f4d95f74b329e271b860767ea40f46727a2b09008676a"
     },
     {
       "path": "src/lib/policy.mjs",
@@ -91,7 +91,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "c418dea4842e2cd4e84c7a249e394c704e67e42942d96c45de6fa90f8d4736a2"
+      "sha256": "f9ae0c15f9a06c2ee0869ed3f6265fc360062e4cfbd308dddbc493b01a50e18c"
     },
     {
       "path": "src/lib/render.mjs",
