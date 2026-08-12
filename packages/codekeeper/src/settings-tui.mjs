@@ -17,11 +17,11 @@ function valueText(row) {
   if (row.kind === "profile") return "edit in $EDITOR";
   if (row.kind === "boolean") return row.value ? "on" : "off";
   if (row.kind === "json") return JSON.stringify(row.value);
-  return String(row.value);
+  return String(row.value ?? "");
 }
 
-function inputText(row) {
-  return row.kind === "json" ? JSON.stringify(row.value, null, 2) : String(row.value);
+export function settingInputText(row) {
+  return row.kind === "json" ? JSON.stringify(row.value, null, 2) : String(row.value ?? "");
 }
 
 function color(enabled, name) {
@@ -134,7 +134,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         .catch((cause) => setError(cause.message))
         .finally(() => setBusy(false));
     } else if (["string", "number", "json"].includes(row.kind)) {
-      setEditing({ row, text: inputText(row) });
+      setEditing({ row, text: settingInputText(row) });
       setError("");
     } else if (row.kind === "readonly") {
       setError("This safety or release setting is read-only.");
