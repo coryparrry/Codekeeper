@@ -213,8 +213,78 @@ test("model-provider cleanup cannot exceed the provider deadline", async () => {
       profile: "Issue triager profile",
       turnTimeoutMs: 25
     }),
-    /provider cleanup timed out after 25ms/
+    (error) => {
+      assert.match(error.message, /provider cleanup timed out after 25ms/);
+      assert.equal(error.code, "CODEKEEPER_PROVIDER_CLEANUP_TIMEOUT");
+      return true;
+    }
   );
+});
+
+test("provider cleanup timeout forces the CLI boundary to exit despite retained handles", async () => {
+  const runtimeModuleUrl = new URL("../src/lib/agents-runtime.mjs", import.meta.url).href;
+  const configPath = path.join(repositoryRoot, ".github/codekeeper.json");
+  const script = `
+    import { readFile } from "node:fs/promises";
+    import { isProviderCleanupTimeout, runConfiguredAgent } from ${JSON.stringify(runtimeModuleUrl)};
+    const config = JSON.parse(await readFile(${JSON.stringify(configPath)}, "utf8"));
+    config.ai.tracing.enabled = false;
+    config.ai.agents.issue.maximumAttempts = 1;
+    const sdkLoader = async () => ({
+      Agent: class Agent {},
+      OpenAIProvider: class OpenAIProvider {
+        constructor() { process.stdout.write("provider-started\\n"); }
+        close() {
+          setInterval(() => {}, 1000);
+          return new Promise(() => {});
+        }
+      },
+      Runner: class Runner {
+        async run() { return { finalOutput: JSON.stringify({ mode: "issue", summary: "No action." }) }; }
+      }
+    });
+    try {
+      await runConfiguredAgent({
+        mode: "issue",
+        config,
+        prompt: "audit",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { mode: { type: "string" }, summary: { type: "string" } },
+          required: ["mode", "summary"]
+        },
+        apiKey: "audit-model-key",
+        sdkLoader,
+        profile: "Issue triager profile",
+        turnTimeoutMs: 25
+      });
+    } catch (error) {
+      if (isProviderCleanupTimeout(error)) process.exit(1);
+      process.exitCode = 1;
+    }
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: repositoryRoot,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+  const outcome = await new Promise((resolve) => {
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, 750);
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal, timedOut });
+    });
+  });
+  assert.match(stdout, /provider-started/, "the provider fixture did not reach cleanup");
+  assert.equal(outcome.timedOut, false, "provider-owned handles kept the CLI boundary alive");
+  assert.equal(outcome.signal, null, "the cleanup fixture required an external kill");
+  assert.equal(outcome.code, 1);
 });
 
 test("CLI errors cannot inject additional GitHub workflow commands", async () => {

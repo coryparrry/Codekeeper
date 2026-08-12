@@ -17,7 +17,7 @@ import { publishAudit, publishFix, publishIssue, publishReview } from "./lib/pub
 import { sealAudit, sealFix, sealIssue, sealReview, validateAudit, validateFix, validateIssue, validateReview, verifyAudit, verifyFix } from "./lib/validate.mjs";
 import { assertRunnerOwnedDirectory } from "./lib/workspace.mjs";
 import { sha256 } from "./lib/markers.mjs";
-import { runAgentFromBundle } from "./lib/agents-runtime.mjs";
+import { isProviderCleanupTimeout, runAgentFromBundle } from "./lib/agents-runtime.mjs";
 import { runOwnerCommand } from "./lib/commands.mjs";
 
 function integer(value, name) {
@@ -316,5 +316,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(`::error::${workflowCommandValue(error.stack || error.message)}`);
+  if (isProviderCleanupTimeout(error)) process.exit(1);
   process.exitCode = 1;
 });

@@ -10,9 +10,15 @@ import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, v
 export { providerCompatibleJsonSchema } from "./schemas.mjs";
 
 const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 5 * 60 * 1000;
+export const PROVIDER_CLEANUP_TIMEOUT_CODE = "CODEKEEPER_PROVIDER_CLEANUP_TIMEOUT";
+
+export function isProviderCleanupTimeout(error) {
+  return error?.code === PROVIDER_CLEANUP_TIMEOUT_CODE;
+}
 
 async function closeProviderWithDeadline(modelProvider, timeoutMs) {
   const timeoutError = new Error(`Codekeeper provider cleanup timed out after ${timeoutMs}ms`);
+  timeoutError.code = PROVIDER_CLEANUP_TIMEOUT_CODE;
   let timer;
   try {
     await Promise.race([
