@@ -59,6 +59,10 @@ function conditionalMutationClient(state, requests) {
       }
       if (method === "POST" && /\/issues\/7\/labels$/.test(href)) {
         state.labels = [...new Set([...(state.labels ?? []), ...JSON.parse(options.body).labels])];
+        if (state.loseLabelResponseOnce) {
+          state.loseLabelResponseOnce = false;
+          throw new TypeError("label response lost");
+        }
         return new Response(JSON.stringify(state.labels.map((name) => ({ name }))), { status: 200 });
       }
       return new Response(null, { status: 204 });
@@ -86,7 +90,7 @@ test("conditional pull mutations reject stale heads inside the GitHub adapter", 
   state.headSha = "c".repeat(40);
   await assert.rejects(
     github.createRepositoryDispatch("codekeeper_fix", { number: 7 }),
-    /moved from/
+    /head SHA changed/
   );
   assert.equal(requests.some(({ href, method }) => method === "POST" && href.endsWith("/dispatches")), false);
 });
@@ -134,6 +138,29 @@ test("conditional pull mutations advance their own expected label state", async 
   await github.addLabels(7, ["codekeeper:reviewed"]);
   await github.createRepositoryDispatch("codekeeper_review", { number: 7 });
   assert.equal(requests.some(({ href, method }) => method === "POST" && href.endsWith("/dispatches")), true);
+});
+
+test("conditional pull labels reconcile an applied mutation after response loss", async () => {
+  const state = { loseLabelResponseOnce: true };
+  const requests = [];
+  const github = conditionalMutationClient(state, requests);
+  await github.beginPullMutation({
+    repository: "owner/repository",
+    pullRequest: {
+      number: 7,
+      headSha: "a".repeat(40),
+      baseSha: "b".repeat(40),
+      baseRef: "main",
+      reviewFeedbackFrozen: true,
+      reviewFeedback: []
+    },
+    policy: reviewPolicy
+  });
+
+  await github.addLabels(7, ["codekeeper:auto-repaired"]);
+  await github.createRepositoryDispatch("codekeeper_fix", { number: 7 });
+  assert.deepEqual(state.labels, ["codekeeper:auto-repaired"]);
+  assert.equal(requests.filter(({ method, href }) => method === "POST" && href.endsWith("/labels")).length, 1);
 });
 
 test("GitHub requests carry a finite abort deadline", async () => {
@@ -192,9 +219,39 @@ test("GitHub does not retry an ambiguous mutation response-body timeout", async 
 
   await assert.rejects(
     github.createIssue({ title: "Finding", body: "Details" }),
-    /timed out after 5ms/
+    (error) => {
+      assert.match(error.message, /timed out after 5ms/);
+      assert.equal(error.githubMutationOutcome, "ambiguous");
+      return true;
+    }
   );
   assert.equal(attempts, 1);
+});
+
+test("GHES pagination preserves the REST API path prefix", async () => {
+  const urls = [];
+  const github = new GitHubClient({
+    token: "token",
+    repository: "owner/repository",
+    apiUrl: "https://ghe.example/api/v3",
+    transport: {
+      fetch: async (url) => {
+        urls.push(String(url));
+        const page = urls.length;
+        return new Response(JSON.stringify(page === 1 ? [{ id: 1 }] : [{ id: 2 }]), {
+          headers: page === 1
+            ? { link: '<https://ghe.example/api/v3/repos/owner/repository/issues/7/comments?page=2>; rel="next"' }
+            : {}
+        });
+      }
+    }
+  });
+
+  assert.deepEqual(await github.listIssueComments(7), [{ id: 1 }, { id: 2 }]);
+  assert.deepEqual(urls, [
+    "https://ghe.example/api/v3/repos/owner/repository/issues/7/comments?per_page=100",
+    "https://ghe.example/api/v3/repos/owner/repository/issues/7/comments?page=2"
+  ]);
 });
 
 test("review replies update the App-owned marker in the originating thread", async () => {

@@ -77,3 +77,9 @@ Auto-merge is separately evaluated from the model recommendation. It requires an
 This design is GitHub.com-only because it depends on reusable-workflow identity fields not available on GitHub Enterprise Server. The review gate supports only non-draft, same-repository PRs aimed at the repository default branch. Forks, drafts, disabled runs, and non-default targets fail closed. The supplied caller does not trigger `merge_group`, so its gate must not be required for merge queues.
 
 Automatic issue triage is restricted to caller-enabled `issues` events for `opened`, `reopened`, and `edited` actions. The workflow records trusted automatic/manual mode in frozen context instead of inferring it from issue text. Automatic publication may add labels, a sticky triage comment, and a duplicate-candidate label; closing an exact duplicate remains separately controlled by default-false `issues.closeExactDuplicates`. Exact owner triage comments and all fixes require an eligible caller association plus a login in `repository.ownerLogins`; manual fixes use the same policy check.
+
+## Validation process boundary
+
+Repair validation runs only on the supplied ephemeral GitHub-hosted Ubuntu runner. One process supervisor owns the command deadline, bounded output tails, launch process group, observable descendants, and `SIGTERM`-then-`SIGKILL` escalation; validation callers do not implement their own timeout or kill sequence.
+
+The supervisor identifies owned processes through the launch ancestry and a per-run environment marker. A repository command that deliberately starts a new session and removes that marker can escape local process discovery. Supporting adversarial self-hosted runners or treating that deliberate double escape as an in-process isolation boundary is out of scope; the supported containment boundary is GitHub-hosted runner teardown. Strengthening that boundary requires a sandbox or container boundary, not another caller-side process scan.

@@ -64,3 +64,45 @@ test("documented relative output directory resolves outside the checkout", async
     }
   );
 });
+
+test("failed verification leaves no final archive and a corrected retry succeeds", async (context) => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "codekeeper-release-failure-test-"));
+  context.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+
+  const checkout = path.join(fixtureRoot, "checkout");
+  const output = path.join(fixtureRoot, "artifacts");
+  const scripts = path.join(checkout, "scripts");
+  await mkdir(scripts, { recursive: true });
+  await mkdir(output);
+  await copyFile(releaseScript, path.join(scripts, "release-source.sh"));
+
+  const readme = "# Release fixture\n";
+  await writeFile(path.join(checkout, "README.md"), readme, "utf8");
+  const script = await readFile(path.join(scripts, "release-source.sh"));
+  await writeFile(
+    path.join(checkout, "MANIFEST.sha256"),
+    `${"0".repeat(64)}  README.md\n${digest(script)}  scripts/release-source.sh\n`,
+    "utf8"
+  );
+
+  run("git", ["init", "-q"], checkout);
+  run("git", ["config", "user.name", "Test"], checkout);
+  run("git", ["config", "user.email", "test@example.com"], checkout);
+  run("git", ["add", "."], checkout);
+  run("git", ["commit", "-qm", "broken fixture"], checkout);
+
+  assert.throws(() => run("bash", ["scripts/release-source.sh", "--output", "../artifacts"], checkout));
+  assert.deepEqual(await readdir(output), []);
+
+  await writeFile(
+    path.join(checkout, "MANIFEST.sha256"),
+    `${digest(readme)}  README.md\n${digest(script)}  scripts/release-source.sh\n`,
+    "utf8"
+  );
+  run("git", ["add", "MANIFEST.sha256"], checkout);
+  run("git", ["commit", "-qm", "fix fixture"], checkout);
+
+  const stdout = run("bash", ["scripts/release-source.sh", "--output", "../artifacts"], checkout);
+  assert.match(stdout, /verified source archive/);
+  assert.equal((await readdir(output)).filter((name) => name.endsWith(".tar.gz")).length, 1);
+});

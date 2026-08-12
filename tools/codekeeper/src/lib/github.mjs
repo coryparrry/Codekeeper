@@ -1,4 +1,5 @@
 import { sha256 } from "./markers.mjs";
+import { frozenPullRepairReviewThreads, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
 import { completeReviewFeedback } from "./review-feedback.mjs";
 
 const API_VERSION = "2022-11-28";
@@ -6,9 +7,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRY_ATTEMPTS = 2;
 const MAX_RETRY_ATTEMPTS = 2;
 const MAX_RETRY_DELAY_MS = 5_000;
+const MAX_PAGINATION_PAGES = 1_000;
 const RETRYABLE_STATUS = new Set([408, 429]);
 const TRANSIENT_GRAPHQL_ERROR_TYPES = new Set(["INTERNAL", "INTERNAL_ERROR", "RATE_LIMITED", "SERVICE_UNAVAILABLE"]);
 const PULL_MUTATION_COMPENSATION = Symbol("pull-mutation-compensation");
+const ISSUE_MUTATION_INTERNAL = Symbol("issue-mutation-internal");
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -96,6 +99,77 @@ function sameStrings(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function issueLabelNames(issue) {
+  if (!Array.isArray(issue?.labels)) throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid label metadata`);
+  const names = issue.labels.map((label) => typeof label === "string" ? label : label?.name);
+  if (names.some((label) => typeof label !== "string" || label.length === 0) || new Set(names).size !== names.length) {
+    throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid or duplicate label metadata`);
+  }
+  return [...names].sort();
+}
+
+function issueMutationSubject(issue) {
+  return {
+    number: issue?.number,
+    title: issue?.title ?? null,
+    body: issue?.body ?? null,
+    state: issue?.state ?? null,
+    stateReason: issue?.state_reason ?? null,
+    locked: issue?.locked ?? null,
+    activeLockReason: issue?.active_lock_reason ?? null,
+    htmlUrl: issue?.html_url ?? null,
+    author: {
+      id: issue?.user?.id ?? null,
+      login: issue?.user?.login ?? null,
+      type: issue?.user?.type ?? null
+    },
+    assignees: (issue?.assignees ?? [])
+      .map((assignee) => ({ id: assignee?.id ?? null, login: assignee?.login ?? null, type: assignee?.type ?? null }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    milestone: issue?.milestone?.number ?? null
+  };
+}
+
+function issueMutationComment(comment, issueNumber) {
+  const id = Number(comment?.id);
+  const createdAt = comment?.created_at;
+  const updatedAt = comment?.updated_at;
+  if (
+    !Number.isSafeInteger(id) || id <= 0 ||
+    typeof comment?.body !== "string" ||
+    typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt)) ||
+    typeof updatedAt !== "string" || !Number.isFinite(Date.parse(updatedAt))
+  ) {
+    throw new Error(`Issue #${issueNumber} has invalid comment metadata`);
+  }
+  return {
+    id,
+    body: comment.body,
+    createdAt,
+    updatedAt,
+    author: {
+      id: comment?.user?.id ?? null,
+      login: comment?.user?.login ?? null,
+      type: comment?.user?.type ?? null
+    }
+  };
+}
+
+function issueCommentInventory(comments, issueNumber) {
+  if (!Array.isArray(comments)) throw new Error(`Issue #${issueNumber} has invalid comment inventory`);
+  const inventory = comments
+    .map((comment) => issueMutationComment(comment, issueNumber))
+    .sort((left, right) => left.id - right.id);
+  if (new Set(inventory.map((comment) => comment.id)).size !== inventory.length) {
+    throw new Error(`Issue #${issueNumber} has duplicate comment metadata`);
+  }
+  return inventory;
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 
 function normalizeLogin(value) {
   return String(value ?? "").trim().toLowerCase();
@@ -119,6 +193,10 @@ export function isOwnedMarkerComment(comment, marker, authorIdentity) {
     typeof comment?.body === "string" &&
     comment.body.endsWith(marker)
   );
+}
+
+export function isAmbiguousGitHubMutationError(error) {
+  return error?.githubMutationOutcome === "ambiguous";
 }
 
 export function resolveGraphqlUrl(apiUrl, configuredUrl = process.env.GITHUB_GRAPHQL_URL ?? "") {
@@ -165,10 +243,18 @@ export class GitHubClient {
     this.sleep = typeof transport.sleep === "function" ? transport.sleep : sleep;
     this.now = typeof transport.now === "function" ? transport.now : Date.now;
     this.pullMutation = null;
+    this.branchMutation = null;
+    this.issueMutation = null;
+  }
+
+  assertNoMutationGuard() {
+    if (this.pullMutation || this.branchMutation || this.issueMutation) {
+      throw new Error("A conditional GitHub mutation is already active");
+    }
   }
 
   async beginPullMutation({ repository, pullRequest, policy }) {
-    if (this.pullMutation) throw new Error("A conditional pull mutation is already active");
+    this.assertNoMutationGuard();
     if (repository !== this.repository) throw new Error("Conditional pull mutation repository does not match the GitHub client");
     if (!pullRequest || !Number.isSafeInteger(pullRequest.number) || pullRequest.number <= 0) {
       throw new Error("Conditional pull mutation requires a pull request number");
@@ -206,19 +292,274 @@ export class GitHubClient {
     }
   }
 
+  async beginPullRepairMutation({
+    repository,
+    target,
+    policy,
+    rejectPaused = false,
+    requireAutomaticRepairMarker = false
+  }) {
+    this.assertNoMutationGuard();
+    if (repository !== this.repository) throw new Error("Conditional pull repair repository does not match the GitHub client");
+    if (!target || !Number.isSafeInteger(target.number) || target.number <= 0) {
+      throw new Error("Conditional pull repair requires a pull request target");
+    }
+    if (!policy?.repository || target.baseRef !== policy.repository.defaultBranch) {
+      throw new Error("Conditional pull repair requires matching repository policy");
+    }
+    this.pullMutation = {
+      number: target.number,
+      repository,
+      headSha: target.headSha,
+      headRef: target.headRef,
+      baseSha: target.baseSha,
+      baseRef: target.baseRef,
+      feedbackFrozen: false,
+      feedbackSha256: null,
+      labels: null,
+      addedLabels: new Set(),
+      policy: {
+        repository: {
+          defaultBranch: policy.repository.defaultBranch,
+          ownerLogins: (policy.repository.ownerLogins ?? []).map(String)
+        }
+      },
+      repair: {
+        subjectSha256: target.subjectSha256,
+        reviewThreadIds: [...target.reviewThreadIds],
+        rejectPaused: rejectPaused === true,
+        requireAutomaticRepairMarker: requireAutomaticRepairMarker === true
+      }
+    };
+    try {
+      return await this.assertPullMutationCurrent({ captureLabels: true });
+    } catch (error) {
+      this.pullMutation = null;
+      throw error;
+    }
+  }
+
+  async beginBranchMutation({ branch, headSha }) {
+    this.assertNoMutationGuard();
+    if (typeof branch !== "string" || !branch || !/^[0-9a-f]{40}$/i.test(String(headSha ?? ""))) {
+      throw new Error("Conditional branch mutation requires a branch and full head SHA");
+    }
+    this.branchMutation = { branch, headSha: String(headSha).toLowerCase() };
+    try {
+      await this.assertMutationCurrent();
+    } catch (error) {
+      this.branchMutation = null;
+      throw error;
+    }
+  }
+
+  async beginIssueMutation({ issue, rejectPaused = false, trackSubject = false, trackComments = false }) {
+    this.assertNoMutationGuard();
+    if (!issue || !Number.isSafeInteger(issue.number) || issue.number <= 0 || typeof issue.updatedAt !== "string") {
+      throw new Error("Conditional issue mutation requires a frozen issue number and timestamp");
+    }
+    this.issueMutation = {
+      number: issue.number,
+      updatedAt: issue.updatedAt,
+      rejectPaused: rejectPaused === true,
+      subject: null,
+      labels: null,
+      comments: null,
+      prerequisites: [],
+      trackSubject: trackSubject === true,
+      trackComments: trackComments === true
+    };
+    try {
+      const live = await this.assertMutationCurrent();
+      this.issueMutation.subject = issueMutationSubject(live);
+      this.issueMutation.labels = this.issueMutation.trackSubject ? issueLabelNames(live) : null;
+      if (this.issueMutation.trackComments) {
+        this.issueMutation.comments = issueCommentInventory(
+          await this.listIssueComments(issue.number),
+          issue.number
+        );
+      }
+      return live;
+    } catch (error) {
+      this.issueMutation = null;
+      throw error;
+    }
+  }
+
+  async assertMutationCurrent() {
+    if (this.pullMutation) return this.assertPullMutationCurrent();
+    if (this.branchMutation) {
+      const branch = await this.getBranch(this.branchMutation.branch);
+      const current = String(branch?.commit?.sha ?? "").toLowerCase();
+      if (current !== this.branchMutation.headSha) {
+        throw new Error(
+          `Remote branch ${this.branchMutation.branch} moved from ${this.branchMutation.headSha} to ${current || "missing"}; stale publication will not mutate GitHub`
+        );
+      }
+      return branch;
+    }
+    if (this.issueMutation) {
+      const [issue, ...prerequisites] = await Promise.all([
+        this.getIssue(this.issueMutation.number),
+        ...this.issueMutation.prerequisites.map((item) => this.getIssue(item.number))
+      ]);
+      if (issue.pull_request || issue.state !== "open") {
+        throw new Error(`Issue #${this.issueMutation.number} is no longer eligible`);
+      }
+      if (this.issueMutation.rejectPaused && issueLabelNames(issue).includes("codekeeper:paused")) {
+        throw new Error(`Issue #${issue.number} is paused; automatic publication stopped`);
+      }
+      if (this.issueMutation.trackSubject && this.issueMutation.subject !== null &&
+          !sameJson(issueMutationSubject(issue), this.issueMutation.subject)) {
+        throw new Error(`Issue #${issue.number} changed while Codekeeper published; stale action will not mutate GitHub`);
+      }
+      if (this.issueMutation.labels !== null && !sameStrings(issueLabelNames(issue), this.issueMutation.labels)) {
+        throw new Error(`Issue #${issue.number} labels changed while Codekeeper published`);
+      }
+      if (this.issueMutation.trackComments && this.issueMutation.comments !== null) {
+        const comments = issueCommentInventory(await this.listIssueComments(issue.number), issue.number);
+        if (!sameJson(comments, this.issueMutation.comments)) {
+          throw new Error(`Issue #${issue.number} comments changed while Codekeeper published`);
+        }
+      }
+      if (issue.updated_at !== this.issueMutation.updatedAt) {
+        const phase = this.issueMutation.trackComments ? "while Codekeeper reconciled comments" : "after implementation started";
+        throw new Error(`Issue #${issue.number} changed ${phase}; stale action will not publish`);
+      }
+      for (let index = 0; index < prerequisites.length; index += 1) {
+        const expected = this.issueMutation.prerequisites[index];
+        const current = prerequisites[index];
+        if (current?.pull_request || current?.state !== "open" ||
+            current.updated_at !== expected.updatedAt ||
+            !sameJson(issueMutationSubject(current), expected.subject)) {
+          throw new Error(`Issue #${expected.number} changed after duplicate assessment; stale action will not publish`);
+        }
+      }
+      return issue;
+    }
+    return null;
+  }
+
+  advanceIssueMutationLabels(labels, updatedAt) {
+    const expected = this.issueMutation;
+    if (!expected) return;
+    expected.labels = [...new Set(labels.map(String))].sort();
+    expected.updatedAt = updatedAt;
+  }
+
+  advanceIssueMutationComment(comment, expectedBody, authorIdentity, updatedAt) {
+    const expected = this.issueMutation;
+    if (!expected?.trackComments) return;
+    const identity = normalizeAutomationIdentity(authorIdentity);
+    const mutation = issueMutationComment(comment, expected.number);
+    if (!identity || !isOwnedMarkerComment(comment, expectedBody.slice(expectedBody.lastIndexOf("\n") + 1), identity) || mutation.body !== expectedBody) {
+      throw new Error(`Issue #${expected.number} changed while Codekeeper reconciled comments`);
+    }
+    const comments = new Map(expected.comments.map((item) => [item.id, item]));
+    comments.set(mutation.id, mutation);
+    expected.comments = [...comments.values()].sort((left, right) => left.id - right.id);
+    expected.updatedAt = updatedAt;
+  }
+
+  async verifyIssueMutation() {
+    return this.assertMutationCurrent();
+  }
+
+  async replaceManagedIssueLabels(number, desired, managed) {
+    const expected = this.issueMutation;
+    if (!expected || expected.number !== number || !expected.trackSubject) {
+      throw new Error("Managed issue-label publication requires an active subject guard");
+    }
+    await this.replaceManagedLabels(number, desired, managed);
+    const after = await this.getIssue(number);
+    if (!sameJson(issueMutationSubject(after), expected.subject)) {
+      throw new Error(`Issue #${number} changed while Codekeeper reconciled labels`);
+    }
+    const managedSet = new Set(managed);
+    const labels = [...new Set([
+      ...expected.labels.filter((label) => !managedSet.has(label)),
+      ...desired
+    ])].sort();
+    if (!sameStrings(issueLabelNames(after), labels)) {
+      throw new Error(`Issue #${number} labels changed while Codekeeper reconciled labels`);
+    }
+    if (typeof after.updated_at !== "string" || !Number.isFinite(Date.parse(after.updated_at))) {
+      throw new Error(`Issue #${number} has no updated timestamp after label reconciliation`);
+    }
+    this.advanceIssueMutationLabels(labels, after.updated_at);
+    return after;
+  }
+
+  async upsertOwnedIssueMarker(number, marker, body, authorIdentity) {
+    const expected = this.issueMutation;
+    if (!expected || expected.number !== number || !expected.trackComments) {
+      throw new Error("Issue marker publication requires an active comment-inventory guard");
+    }
+    const content = `${body}\n${marker}`;
+    const mutation = await this.upsertMarkerComment(number, marker, body, authorIdentity);
+    this.advanceIssueMutationComment(
+      mutation,
+      content,
+      authorIdentity,
+      mutation?.updated_at ?? mutation?.created_at
+    );
+    return mutation;
+  }
+
+  async requireOpenIssueMutationPrerequisite(number) {
+    if (!this.issueMutation || !Number.isSafeInteger(number) || number <= 0) {
+      throw new Error("An active issue mutation and related issue number are required");
+    }
+    const issue = await this.getIssue(number);
+    if (issue.pull_request || issue.state !== "open") throw new Error(`Issue #${number} is no longer eligible`);
+    if (typeof issue.updated_at !== "string" || !Number.isFinite(Date.parse(issue.updated_at))) {
+      throw new Error(`Issue #${number} has no valid update timestamp`);
+    }
+    this.issueMutation.prerequisites.push({
+      number,
+      updatedAt: issue.updated_at,
+      subject: issueMutationSubject(issue)
+    });
+    return issue;
+  }
+
+  async mutateIfCurrent(operation) {
+    if (typeof operation !== "function") throw new TypeError("Conditional mutation operation must be a function");
+    await this.assertMutationCurrent();
+    return operation();
+  }
+
+  async mutatePullHeadIfCurrent(headSha, operation) {
+    if (!this.pullMutation?.repair || !/^[0-9a-f]{40}$/i.test(String(headSha ?? ""))) {
+      throw new Error("Conditional pull-head mutation requires an active repair and full commit SHA");
+    }
+    const result = await this.mutateIfCurrent(operation);
+    if (result !== headSha) throw new Error(`PR repair pushed ${result}; expected ${headSha}`);
+    this.pullMutation.headSha = headSha;
+    this.pullMutation.repair = null;
+    return result;
+  }
+
   async assertPullMutationCurrent({ captureLabels = false } = {}) {
     const expected = this.pullMutation;
     if (!expected) return null;
-    const [pull, feedback] = await Promise.all([
+    const [pull, feedback, comments, liveReviewThreads, branch] = await Promise.all([
       this.getPull(expected.number),
       expected.feedbackFrozen
         ? completeReviewFeedback(this, expected.number, expected.policy)
-        : Promise.resolve([])
+        : Promise.resolve([]),
+      expected.repair ? this.listIssueComments(expected.number) : Promise.resolve([]),
+      expected.repair?.reviewThreadIds.length > 0
+        ? this.listPullReviewThreads(expected.number)
+        : Promise.resolve([]),
+      expected.repair ? this.getBranch(expected.headRef) : Promise.resolve(null)
     ]);
     this.assertPullMutationIdentity(pull);
     const currentLabels = labelNames(pull);
     if (currentLabels.includes("codekeeper:paused")) {
-      throw new Error(`PR #${pull.number} is paused; publication will not mutate GitHub`);
+      const error = new Error(`PR #${pull.number} is paused; publication will not mutate GitHub`);
+      if (expected.repair?.rejectPaused) error.code = "CODEKEEPER_PAUSED";
+      throw error;
     }
     if (captureLabels || expected.labels === null) {
       expected.labels = currentLabels;
@@ -228,6 +569,20 @@ export class GitHubClient {
     if (expected.feedbackFrozen && sha256(JSON.stringify(feedback)) !== expected.feedbackSha256) {
       throw new Error(`PR #${pull.number} review feedback changed after preparation; stale publication will not mutate GitHub`);
     }
+    if (expected.repair?.requireAutomaticRepairMarker && !currentLabels.includes("codekeeper:auto-repaired")) {
+      throw new Error(`PR #${pull.number} no longer has policy repair authorization`);
+    }
+    if (expected.repair) {
+      const reviewThreads = frozenPullRepairReviewThreads(liveReviewThreads, expected.repair.reviewThreadIds);
+      if (frozenPullRepairSubjectSha256(pull, comments, reviewThreads) !== expected.repair.subjectSha256) {
+        throw new Error(`PR #${pull.number} repair evidence changed after implementation started`);
+      }
+      if (!branch) throw new Error(`PR #${pull.number} head branch ${expected.headRef} no longer exists`);
+      if (branch.protected) throw new Error(`PR #${pull.number} head branch ${expected.headRef} is protected`);
+      if (branch.commit?.sha !== expected.headSha) {
+        throw new Error(`PR #${pull.number} head branch moved from ${expected.headSha} to ${branch.commit?.sha ?? "missing"}`);
+      }
+    }
     return pull;
   }
 
@@ -235,18 +590,21 @@ export class GitHubClient {
     const expected = this.pullMutation;
     if (!expected) throw new Error("No conditional pull mutation is active");
     if (pull.state !== "open") throw new Error(`PR #${pull.number} is not open`);
-    if (pull.draft) throw new Error(`PR #${pull.number} became a draft; stale publication will not mutate GitHub`);
+    if (pull.draft) throw new Error(`PR #${pull.number} is a draft; stale publication will not mutate GitHub`);
     if (pull.head?.sha !== expected.headSha) {
-      throw new Error(`PR #${pull.number} moved from ${expected.headSha} to ${pull.head?.sha}; stale publication will not mutate GitHub`);
+      throw new Error(`PR #${pull.number} head SHA changed from ${expected.headSha} to ${pull.head?.sha}; stale publication will not mutate GitHub`);
+    }
+    if (expected.headRef && pull.head?.ref !== expected.headRef) {
+      throw new Error(`PR #${pull.number} head branch changed from ${expected.headRef} to ${pull.head?.ref ?? "missing"}`);
     }
     if (pull.base?.sha !== expected.baseSha) {
-      throw new Error(`PR #${pull.number} base moved from ${expected.baseSha} to ${pull.base?.sha}; stale publication will not mutate GitHub`);
+      throw new Error(`PR #${pull.number} base SHA changed from ${expected.baseSha} to ${pull.base?.sha}; stale publication will not mutate GitHub`);
     }
     if (pull.base?.ref !== expected.baseRef || pull.base?.ref !== expected.policy.repository.defaultBranch) {
       throw new Error(`PR #${pull.number} base branch changed; stale publication will not mutate GitHub`);
     }
     if (pull.head?.repo?.full_name !== expected.repository || pull.base?.repo?.full_name !== expected.repository) {
-      throw new Error(`PR #${pull.number} repository changed; stale publication will not mutate GitHub`);
+      throw new Error(`PR #${pull.number} head repository changed; stale publication will not mutate GitHub`);
     }
   }
 
@@ -330,37 +688,47 @@ export class GitHubClient {
 
   async request(method, endpoint, { body, headers = {}, retries, guardToken } = {}) {
     const normalizedMethod = String(method).toUpperCase();
-    if (!isRetrySafeMethod(normalizedMethod) && this.pullMutation && guardToken !== PULL_MUTATION_COMPENSATION) {
-      await this.assertPullMutationCurrent();
+    if (!isRetrySafeMethod(normalizedMethod) &&
+        guardToken !== PULL_MUTATION_COMPENSATION && guardToken !== ISSUE_MUTATION_INTERNAL) {
+      await this.assertMutationCurrent();
     }
     const url = endpoint.startsWith("http") ? endpoint : `${this.apiUrl}${endpoint}`;
     const retryBudget = retries ?? (isRetrySafeMethod(normalizedMethod) ? this.retryAttempts : 0);
-    const { response, text, payload } = await this.fetchWithRetry(url, {
-      method,
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.token}`,
-        "X-GitHub-Api-Version": API_VERSION,
-        "User-Agent": "codekeeper",
-        "Content-Type": "application/json",
-        ...headers
-      },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    }, {
-      retries: retryBudget,
-      consume: async (response, signal) => {
-        const text = await awaitWithSignal(response.text(), signal);
-        let payload = null;
-        if (text) {
-          try {
-            payload = JSON.parse(text);
-          } catch {
-            payload = text;
+    let requestResult;
+    try {
+      requestResult = await this.fetchWithRetry(url, {
+        method,
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${this.token}`,
+          "X-GitHub-Api-Version": API_VERSION,
+          "User-Agent": "codekeeper",
+          "Content-Type": "application/json",
+          ...headers
+        },
+        body: body === undefined ? undefined : JSON.stringify(body)
+      }, {
+        retries: retryBudget,
+        consume: async (response, signal) => {
+          const text = await awaitWithSignal(response.text(), signal);
+          let payload = null;
+          if (text) {
+            try {
+              payload = JSON.parse(text);
+            } catch {
+              payload = text;
+            }
           }
+          return { response, text, payload };
         }
-        return { response, text, payload };
+      });
+    } catch (error) {
+      if (!isRetrySafeMethod(normalizedMethod) && error && typeof error === "object") {
+        error.githubMutationOutcome = "ambiguous";
       }
-    });
+      throw error;
+    }
+    const { response, text, payload } = requestResult;
     if (!response.ok) {
       const message = typeof payload === "object" && payload?.message ? payload.message : text || response.statusText;
       const error = new Error(`GitHub ${method} ${endpoint} failed (${response.status}): ${message}`);
@@ -378,7 +746,28 @@ export class GitHubClient {
     }
     const results = [];
     let url = endpoint.includes("?") ? `${endpoint}&per_page=100` : `${endpoint}?per_page=100`;
+    const visited = new Set();
+    const apiBase = new URL(`${this.apiUrl}/`);
+    let pages = 0;
     while (url && results.length < limit) {
+      const resolved = url.startsWith("/")
+        ? new URL(`${this.apiUrl}${url}`)
+        : new URL(url, apiBase);
+      if (
+        resolved.origin !== apiBase.origin ||
+        !resolved.pathname.startsWith(apiBase.pathname)
+      ) {
+        throw new Error("GitHub pagination returned an untrusted next URL");
+      }
+      const normalized = resolved.toString();
+      if (visited.has(normalized)) {
+        throw new Error("GitHub pagination returned a repeated next URL");
+      }
+      if (pages >= MAX_PAGINATION_PAGES) {
+        throw new Error(`GitHub pagination exceeded ${MAX_PAGINATION_PAGES} pages`);
+      }
+      visited.add(normalized);
+      pages += 1;
       const response = await this.request("GET", url);
       if (!Array.isArray(response.data)) throw new Error(`Expected array from ${url}`);
       for (const item of response.data) {
@@ -530,7 +919,33 @@ export class GitHubClient {
       isOwnedMarkerComment(comment, marker, expectedAuthor)
     );
     const content = `${body}\n${marker}`;
-    return existing ? this.updateComment(existing.id, content) : this.createComment(number, content);
+    const mutation = existing ? await this.updateComment(existing.id, content) : await this.createComment(number, content);
+    if (this.issueMutation?.number === number) {
+      this.advanceIssueMutationComment(mutation, content, expectedAuthor, mutation.updated_at ?? mutation.created_at);
+    }
+    return mutation;
+  }
+
+  async createOwnedIssueComment(number, body, authorIdentity) {
+    const expectedAuthor = normalizeAutomationIdentity(authorIdentity);
+    if (!expectedAuthor) throw new Error("A configured GitHub App bot identity is required for issue comments");
+    const mutation = await this.createComment(number, body);
+    if (this.issueMutation?.number === number) {
+      const normalized = issueMutationComment(mutation, number);
+      if (
+        mutation?.user?.type !== "Bot" ||
+        normalizeLogin(mutation.user?.login) !== expectedAuthor.login ||
+        String(mutation.user?.id ?? "") !== expectedAuthor.id ||
+        normalized.body !== body
+      ) {
+        throw new Error(`Issue #${number} changed while Codekeeper reconciled comments`);
+      }
+      const comments = new Map(this.issueMutation.comments.map((item) => [item.id, item]));
+      comments.set(normalized.id, normalized);
+      this.issueMutation.comments = [...comments.values()].sort((left, right) => left.id - right.id);
+      this.issueMutation.updatedAt = mutation.updated_at ?? mutation.created_at;
+    }
+    return mutation;
   }
 
   async retireReviewFeedbackReply(number, marker, body, authorIdentity) {
@@ -587,26 +1002,61 @@ export class GitHubClient {
     if (unmanaged.length > 0) {
       throw new Error(`Attempted to mutate labels outside configured ownership: ${unmanaged.join(", ")}`);
     }
+    const conditional = this.issueMutation?.number === number ? this.issueMutation : null;
+    if (conditional) await this.assertMutationCurrent();
     const issue = await this.getIssue(number);
     const existing = (issue.labels ?? []).map((label) => (typeof label === "string" ? label : label.name));
     const additions = [...desiredSet].filter((label) => !existing.includes(label));
     if (additions.length > 0) {
-      await this.request("POST", this.repoPath(`/issues/${number}/labels`), { body: { labels: additions } });
+      await this.request("POST", this.repoPath(`/issues/${number}/labels`), {
+        body: { labels: additions },
+        ...(conditional ? { guardToken: ISSUE_MUTATION_INTERNAL } : {})
+      });
     }
     for (const label of existing) {
       if (!managedSet.has(label) || desiredSet.has(label)) continue;
       try {
-        await this.request("DELETE", this.repoPath(`/issues/${number}/labels/${encodeURIComponent(label)}`));
+        await this.request("DELETE", this.repoPath(`/issues/${number}/labels/${encodeURIComponent(label)}`), {
+          ...(conditional ? { guardToken: ISSUE_MUTATION_INTERNAL } : {})
+        });
       } catch (error) {
         if (error.status !== 404) throw error;
       }
+    }
+    if (conditional) {
+      const after = await this.getIssue(number);
+      if (!sameJson(issueMutationSubject(after), conditional.subject)) {
+        throw new Error(`Issue #${number} changed while Codekeeper reconciled labels`);
+      }
+      const expectedLabels = [...new Set([
+        ...issueLabelNames(issue).filter((label) => !managedSet.has(label)),
+        ...desiredSet
+      ])].sort();
+      if (!sameStrings(issueLabelNames(after), expectedLabels)) {
+        throw new Error(`Issue #${number} labels changed while Codekeeper reconciled labels`);
+      }
+      if (typeof after.updated_at !== "string" || !Number.isFinite(Date.parse(after.updated_at))) {
+        throw new Error(`Issue #${number} has no updated timestamp after label reconciliation`);
+      }
+      this.advanceIssueMutationLabels(expectedLabels, after.updated_at);
     }
   }
 
   async addLabels(number, labels) {
     const unique = [...new Set(labels)];
     if (unique.length === 0) return;
-    await this.request("POST", this.repoPath(`/issues/${number}/labels`), { body: { labels: unique } });
+    const endpoint = this.repoPath(`/issues/${number}/labels`);
+    try {
+      await this.request("POST", endpoint, { body: { labels: unique } });
+    } catch (error) {
+      const expected = this.pullMutation;
+      if (!isAmbiguousGitHubMutationError(error) || !expected || expected.number !== number) throw error;
+      const pull = await this.getPull(number);
+      this.assertPullMutationIdentity(pull);
+      const reconciled = [...new Set([...expected.labels, ...unique])].sort();
+      if (!sameStrings(labelNames(pull), reconciled)) throw error;
+      this.advancePullMutationState("POST", endpoint, { labels: unique });
+    }
   }
 
   async removeLabel(number, label) {
@@ -696,7 +1146,7 @@ export class GitHubClient {
 
   async graphql(query, variables = {}) {
     const mutation = isGraphqlMutation(query);
-    if (mutation && this.pullMutation) await this.assertPullMutationCurrent();
+    if (mutation) await this.assertMutationCurrent();
     const retries = mutation ? 0 : this.retryAttempts;
     const { response, payload } = await this.fetchWithRetry(this.graphqlUrl, {
       method: "POST",

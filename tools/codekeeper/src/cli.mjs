@@ -3,14 +3,21 @@ import path from "node:path";
 import os from "node:os";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { getAgentRuntimeSettings, loadConfig } from "./lib/config.mjs";
-import { log, parseArgs, readJson, readRegularFile, setGitHubOutput } from "./lib/io.mjs";
+import {
+  log,
+  parseArgs,
+  readJson,
+  readRegularFile,
+  setGitHubOutput,
+  workflowCommandValue
+} from "./lib/io.mjs";
 import { applyPatch, createPatch, currentHead } from "./lib/git.mjs";
 import { prepareAudit, prepareFix, prepareIssue, prepareReview } from "./lib/prepare.mjs";
 import { publishAudit, publishFix, publishIssue, publishReview } from "./lib/publish.mjs";
 import { sealAudit, sealFix, sealIssue, sealReview, validateAudit, validateFix, validateIssue, validateReview, verifyAudit, verifyFix } from "./lib/validate.mjs";
 import { assertRunnerOwnedDirectory } from "./lib/workspace.mjs";
 import { sha256 } from "./lib/markers.mjs";
-import { runAgentFromBundle } from "./lib/agents-runtime.mjs";
+import { isProviderCleanupTimeout, runAgentFromBundle } from "./lib/agents-runtime.mjs";
 import { runOwnerCommand } from "./lib/commands.mjs";
 
 function integer(value, name) {
@@ -62,6 +69,38 @@ function agentProfileInputs(args) {
   };
 }
 
+const KNOWN_FLAGS = new Set([
+  "actor",
+  "agent-profile",
+  "agent-profile-source-sha",
+  "artifact",
+  "authorization-mode",
+  "automation-bot-id",
+  "automation-bot-login",
+  "candidate",
+  "config",
+  "context",
+  "directory",
+  "dry-run",
+  "event",
+  "expected-candidate-sha",
+  "expected-context-sha",
+  "expected-head",
+  "expected-manifest-sha",
+  "installed-modes",
+  "mode",
+  "mutation-authorized",
+  "patch",
+  "repair-authorized",
+  "result",
+  "review-thread-ids",
+  "target-number",
+  "token",
+  "tooling-sha",
+  "triage-mode",
+  "workspace-result"
+]);
+
 async function applyUntrustedWorkspacePatch(patchPath) {
   const patch = await readRegularFile(patchPath);
   if (patch.length === 0) return;
@@ -79,6 +118,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args.positional[0];
   if (!command) throw new Error("A command is required");
+  args.assertKnown(KNOWN_FLAGS);
   const sealedPublishCommands = new Set(["publish-review", "publish-audit", "publish-issue", "publish-fix"]);
   const artifactDirectory = args.get("artifact")
     ? assertRunnerOwnedDirectory(args.get("artifact"))
@@ -152,7 +192,11 @@ async function main() {
           throw new Error(`Workspace checkout HEAD ${actualHead} does not match frozen context.baseSha ${expectedHead || "missing"}`);
         }
       }
-      result = await createPatch(bundleFile(directory, args.require("patch"), "patch"));
+      result = await createPatch(
+        bundleFile(directory, args.require("patch"), "patch"),
+        process.cwd(),
+        config.audit.repair
+      );
       break;
     case "apply-workspace-patch":
       await applyUntrustedWorkspacePatch(runnerFile(args.require("patch"), "patch"));
@@ -271,6 +315,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`::error::${error.stack || error.message}`);
+  console.error(`::error::${workflowCommandValue(error.stack || error.message)}`);
+  if (isProviderCleanupTimeout(error)) process.exit(1);
   process.exitCode = 1;
 });

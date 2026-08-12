@@ -12,6 +12,7 @@ import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepai
 import { completeReviewFeedback } from "../src/lib/review-feedback.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import {
+  isTrustedMaintenanceFindingIssue,
   isTrustedMaintenanceIssue,
   isTrustedRepairPull,
   publishAudit as publishAuditProduction,
@@ -473,18 +474,19 @@ ${marker}`,
   assert.deepEqual(published, [{ fingerprint, state: "reopened", issueNumber: 51 }]);
 });
 
-test("maintenance issue fingerprints require the configured App author", () => {
+test("maintenance issue fingerprints require the configured App author and marker comment", () => {
   const marker = findingMarker("b".repeat(64));
   const issue = {
     body: `Trusted maintenance finding\n${marker}`,
     user: { login: identity.login, id: Number(identity.id), type: "Bot" }
   };
   const options = { marker, botLogin: identity.login, botId: identity.id };
-  assert.equal(isTrustedMaintenanceIssue(issue, options), true);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { login: "person", id: 123456, type: "User" } }, options), false);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { login: "other-app[bot]", id: 123456, type: "Bot" } }, options), false);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, user: { ...issue.user, id: 999 } }, options), false);
-  assert.equal(isTrustedMaintenanceIssue({ ...issue, body: `${issue.body}\nuntrusted suffix` }, options), false);
+  const comments = [{ body: marker, user: issue.user }];
+  assert.equal(isTrustedMaintenanceFindingIssue(issue, comments, options), true);
+  assert.equal(isTrustedMaintenanceFindingIssue(issue, [], options), false);
+  assert.equal(isTrustedMaintenanceFindingIssue(issue, [{ ...comments[0], user: { login: "person", id: 123456, type: "User" } }], options), false);
+  assert.equal(isTrustedMaintenanceFindingIssue({ ...issue, user: { login: "person", id: 123456, type: "User" } }, comments, options), false);
+  assert.equal(isTrustedMaintenanceFindingIssue({ ...issue, body: `${issue.body}\nuntrusted suffix` }, comments, options), false);
 });
 
 test("ignored and repairable inline feedback receive idempotent replies without resolving threads", async () => {
@@ -728,6 +730,7 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
   };
   let resolved = false;
   let dispatches = 0;
+  let leaseComment = null;
   const restoreGitHub = replaceGitHubMethods({
     async getPull() { return structuredClone(pull); },
     async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
@@ -743,6 +746,17 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
       }];
     },
     async listMaintenanceIssues() { return []; },
+    async listIssueComments() { return leaseComment ? [leaseComment] : []; },
+    async createComment(_number, body) {
+      await this.assertPullMutationCurrent();
+      leaseComment = {
+        id: 99,
+        body,
+        created_at: new Date().toISOString(),
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      };
+      return leaseComment;
+    },
     async ensureLabels() {},
     async replaceManagedLabels() {},
     async upsertMarkerComment() {},
@@ -1246,7 +1260,7 @@ test("review publication activates auto-merge last and falls back safely", async
   }
 });
 
-test("issue publication does not close a duplicate after the triaged issue changes", async () => {
+test("issue publication does not close a duplicate after a concurrent user comment", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-stale-test-"));
   const configSha256 = "a".repeat(64);
   const issueConfig = structuredClone(config);
@@ -1263,19 +1277,31 @@ test("issue publication does not close a duplicate after the triaged issue chang
   let issueClosed = false;
   let updatedAt = context.issue.updatedAt;
   let labels = [];
+  let comments = [];
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
-      if (number === 9) return { number, state: "open" };
-      return { number, state: "open", updated_at: updatedAt, labels };
+      if (number === 9) return { number, state: "open", updated_at: "2026-08-05T09:00:00Z" };
+      return { number, title: "Report", state: "open", updated_at: updatedAt, labels };
     },
+    async listIssueComments() { return structuredClone(comments); },
     async ensureLabels() {},
     async replaceManagedLabels(_number, desiredLabels) {
       labels = desiredLabels.map((name) => ({ name }));
       updatedAt = "2026-08-05T10:00:30Z";
     },
-    async upsertMarkerComment() {
+    async upsertMarkerComment(_number, marker, body) {
       triageCommentPublished = true;
-      updatedAt = "2026-08-05T10:01:00Z";
+      const ownedUpdatedAt = "2026-08-05T10:01:00Z";
+      updatedAt = "2026-08-05T10:01:30Z";
+      const mutation = {
+        id: 70,
+        body: `${body}\n${marker}`,
+        created_at: ownedUpdatedAt,
+        updated_at: ownedUpdatedAt,
+        user: { id: Number(identity.id), login: identity.login, type: "Bot" }
+      };
+      comments = [mutation];
+      return mutation;
     },
     async createComment(_number, body) { duplicateCommentPublished ||= body.includes("Closing as a duplicate"); },
     async updateIssue() { issueClosed = true; }
@@ -1288,9 +1314,83 @@ test("issue publication does not close a duplicate after the triaged issue chang
     });
     await assert.rejects(
       publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
-      /changed after analysis/
+      /changed while Codekeeper reconciled comments/
     );
     assert.equal(triageCommentPublished, true);
+    assert.equal(duplicateCommentPublished, false);
+    assert.equal(issueClosed, false);
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("issue publication rejects a concurrent comment sharing its mutation timestamp", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-comment-collision-test-"));
+  const configSha256 = "b".repeat(64);
+  const issueConfig = structuredClone(config);
+  issueConfig.issues.closeExactDuplicates = true;
+  const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7006", runUrl: "https://github.com/owner/repository/actions/runs/7006", issue: { number: 7, title: "Report", updatedAt: "2026-08-05T10:00:00Z" } };
+  const result = {
+    mode: "issue", summary: "Exact duplicate.", type: "bug", priority: "p3", labels: [], actionable: true,
+    missingInformation: [], duplicateOf: 9, duplicateConfidence: "high", implementationRecommendation: "manual", comment: "Thanks for the report."
+  };
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  let updatedAt = context.issue.updatedAt;
+  let labels = [];
+  let comments = [];
+  let duplicateCommentPublished = false;
+  let issueClosed = false;
+  const restoreGitHub = replaceGitHubMethods({
+    async getIssue(number) {
+      if (number === 9) return { number, state: "open", updated_at: "2026-08-05T09:00:00Z" };
+      return { number, title: "Report", state: "open", updated_at: updatedAt, labels };
+    },
+    async listIssueComments() { return structuredClone(comments); },
+    async ensureLabels() {},
+    async replaceManagedLabels(_number, desiredLabels) {
+      labels = desiredLabels.map((name) => ({ name }));
+      updatedAt = "2026-08-05T10:00:30Z";
+    },
+    async upsertMarkerComment(_number, marker, body) {
+      updatedAt = "2026-08-05T10:01:00Z";
+      const mutation = {
+        id: 70,
+        body: `${body}\n${marker}`,
+        created_at: updatedAt,
+        updated_at: updatedAt,
+        user: { id: Number(identity.id), login: identity.login, type: "Bot" }
+      };
+      comments = [
+        mutation,
+        {
+          id: 71,
+          body: "One more detail from the reporter.",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          user: { id: 1, login: "reporter", type: "User" }
+        }
+      ];
+      return mutation;
+    },
+    async createComment(_number, body) { duplicateCommentPublished ||= body.includes("Closing as a duplicate"); },
+    async updateIssue() { issueClosed = true; }
+  });
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "issue", context, result, configSha256, artifactConfig: issueConfig
+    });
+    await assert.rejects(
+      publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" }),
+      /comments changed while Codekeeper published/
+    );
     assert.equal(duplicateCommentPublished, false);
     assert.equal(issueClosed, false);
   } finally {
@@ -1434,7 +1534,7 @@ test("issue publication rejects same-timestamp subject drift after verified labe
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
     await assert.rejects(
       publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
-      /changed while Codekeeper reconciled labels/
+      /changed while Codekeeper published/
     );
     assert.equal(markerPublished, false);
   } finally {
@@ -1522,6 +1622,7 @@ test("fix publication does not create a repair PR after the issue changes", asyn
       issueReads += 1;
       return { number, state: "open", updated_at: issueReads === 1 ? "2026-08-05T10:00:00Z" : "2026-08-05T10:01:00Z" };
     },
+    async getBranchTip() { return null; },
     async findOpenPullByHead() { return null; },
     async createPull() { pullCreated = true; }
   });
@@ -1887,7 +1988,7 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
     ["protected", (pull) => pull, /is protected/, { protected: true }],
     ["branch moved", (pull) => pull, /head branch moved/, { protected: false, commit: { sha: "e".repeat(40) } }]
   ];
-  for (const [name, mutate, expected, branchOverride, commentsOverride, authorizationMode = "owner", expectedComments = 1] of cases) {
+  for (const [name, mutate, expected, branchOverride, commentsOverride, authorizationMode = "owner"] of cases) {
     await t.test(name, async () => {
       const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-pr-repair-negative-"));
       const configSha256 = "3".repeat(64);
@@ -1933,12 +2034,7 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
           expected
         );
         assert.equal(createPullCalls, 0);
-        assert.equal(comments.length, expectedComments);
-        if (expectedComments > 0) {
-          assert.equal(comments[0].number, context.target.number);
-          assert.equal(comments[0].marker, fixRunMarker(context.runId));
-          assert.deepEqual(comments[0].authorIdentity, identity);
-        }
+        assert.equal(comments.length, 0, "stale or ineligible repair targets must not be mutated");
       } finally {
         restoreGitHub();
         if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -1951,7 +2047,7 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
   }
 });
 
-test("maintenance publication adopts an App-created issue after response loss", async () => {
+test("maintenance publication adopts only the issue whose App marker survived response loss", async () => {
   const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-retry-test-"));
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-audit-retry-artifact-"));
   const configSha256 = "c".repeat(64);
@@ -1959,21 +2055,35 @@ test("maintenance publication adopts an App-created issue after response loss", 
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   const issues = [];
+  const comments = [];
   let creates = 0;
+  let markerAttempts = 0;
+  let remoteBaseSha;
   const restoreGitHub = replaceGitHubMethods({
+    async getBranch() { return { commit: { sha: remoteBaseSha } }; },
     async listMaintenanceIssues() { return issues; },
-    async listIssueComments() { throw new Error("orphan adoption must not require a second write"); },
+    async listIssueComments(number) { return comments.filter((comment) => comment.issueNumber === number); },
     async ensureLabels() {},
     async createIssue(input) {
       creates += 1;
       const issue = {
-        number: 1,
+        number: creates,
         state: "open",
         body: input.body,
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
       };
       issues.push(issue);
-      throw new Error("connection lost after issue creation");
+      if (creates === 1) throw new Error("connection lost after issue creation");
+      return issue;
+    },
+    async createComment(issueNumber, body) {
+      markerAttempts += 1;
+      comments.push({
+        issueNumber,
+        body,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      });
+      if (markerAttempts === 1) throw new Error("connection lost after marker creation");
     },
     async updateIssue(number, changes) {
       Object.assign(issues.find((issue) => issue.number === number), changes);
@@ -1988,6 +2098,7 @@ test("maintenance publication adopts an App-created issue after response loss", 
     git(repository, ["add", "README.md"]);
     git(repository, ["commit", "-qm", "initial"]);
     const baseSha = git(repository, ["rev-parse", "HEAD"]);
+    remoteBaseSha = baseSha;
     const context = { mode: "audit", repository: "owner/repository", configSha256, baseSha, runUrl: "https://example.test/run", repairAuthorized: false };
     const result = {
       mode: "audit",
@@ -2009,11 +2120,16 @@ test("maintenance publication adopts an App-created issue after response loss", 
       publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
       /connection lost after issue creation/
     );
+    await assert.rejects(
+      publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+      /connection lost after marker creation/
+    );
     const retry = await publishAudit({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
-    assert.equal(creates, 1);
-    assert.equal(issues.length, 1);
+    assert.equal(creates, 2);
+    assert.equal(issues.length, 2);
+    assert.equal(comments.length, 1);
     assert.deepEqual(retry.findings.map(({ state, issueNumber }) => ({ state, issueNumber })), [
-      { state: "updated", issueNumber: 1 }
+      { state: "updated", issueNumber: 2 }
     ]);
   } finally {
     process.chdir(originalDirectory);
@@ -2086,7 +2202,14 @@ test("maintenance repair notification remains singular after response loss", asy
       base: { repo: { full_name: context.repository } }
     };
     const restoreGitHub = replaceGitHubMethods({
+      async getBranch() { return { commit: { sha: context.baseSha } }; },
       async listMaintenanceIssues() { return [maintenanceIssue]; },
+      async listIssueComments() {
+        return [{
+          body: findingMarker(repairFingerprint),
+          user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+        }];
+      },
       async ensureLabels() {},
       async updateIssue() {},
       async replaceManagedLabels() {},

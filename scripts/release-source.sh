@@ -62,18 +62,18 @@ if ! $verify_only; then
   case "$output_dir/" in
     "$repo_root"/*) die 'output directory must be outside the checkout' ;;
   esac
-  archive="$output_dir/codekeeper-source-${commit}.tar.gz"
-  [[ ! -e $archive ]] || die "refusing to overwrite existing archive: $archive"
+  final_archive="$output_dir/codekeeper-source-${commit}.tar.gz"
+  [[ ! -e $final_archive ]] || die "refusing to overwrite existing archive: $final_archive"
+  archive=$(mktemp "$output_dir/.codekeeper-source-${short_commit}.XXXXXX.tar.gz")
 else
+  final_archive=''
   archive=$(mktemp "${TMPDIR:-/tmp}/codekeeper-source-${short_commit}.XXXXXX.tar.gz")
 fi
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/codekeeper-source-verify.XXXXXX")
 cleanup() {
   rm -rf "$work_dir"
-  if $verify_only; then
-    rm -f "$archive"
-  fi
+  [[ -z $archive ]] || rm -f "$archive"
 }
 trap cleanup EXIT
 
@@ -132,5 +132,9 @@ cmp -s "$release_inventory" "$manifest_paths" || {
 
 printf 'verified source archive for %s (%s tracked files)\n' "$commit" "$(wc -l < "$expected_inventory" | tr -d ' ')"
 if ! $verify_only; then
-  printf '%s  %s\n' "$(shasum -a 256 "$archive" | awk '{print $1}')" "$archive"
+  archive_sha256=$(shasum -a 256 "$archive" | awk '{print $1}')
+  ln "$archive" "$final_archive" || die "could not publish archive without overwriting: $final_archive"
+  rm -f "$archive"
+  archive=''
+  printf '%s  %s\n' "$archive_sha256" "$final_archive"
 fi

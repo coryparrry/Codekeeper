@@ -110,6 +110,10 @@ async function scenarioOptions(extra = {}) {
   };
 }
 
+async function manualRunOptions(extra = {}) {
+  return scenarioOptions({ "run-created-after": NOW, ...extra });
+}
+
 async function recoveryOptions(extra = {}) {
   return scenarioOptions({
     issue: "14",
@@ -176,6 +180,19 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
     headBranch: runBranch(),
     displayTitle: wrongDisplayTitle ? `${displayTitle} stale` : displayTitle,
     ...overrides
+  });
+  const workflowRunPayload = (runs) => ({
+    total_count: runs.length,
+    workflow_runs: runs.map((run) => ({
+      id: run.databaseId,
+      run_attempt: run.attempt,
+      status: run.status,
+      created_at: run.createdAt,
+      updated_at: run.updatedAt,
+      head_sha: run.headSha,
+      head_branch: run.headBranch,
+      display_title: run.displayTitle
+    }))
   });
   const runner = async (args) => {
     calls.push(args);
@@ -246,17 +263,17 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
       };
       return response({ total_count: duplicateRecoveredRun ? 2 : 1, workflow_runs: duplicateRecoveredRun ? [recovered, { ...recovered, id: 78 }] : [recovered] });
     }
-    if (args[0] === "run" && args[1] === "list") {
+    if (args[0] === "api" && args[3] === `repos/${REPO}/actions/workflows/${detail[0]}/runs?event=${detail[2]}&per_page=100&page=1`) {
       workflowListCount += 1;
       if (scenario === "issue-triage-related") {
         const runs = [runEntry()];
-        return response(runs);
+        return response(workflowRunPayload(runs));
       }
-      if (workflowListCount === 1) return response(baselineRun || baselineRerun ? [runEntry(66, { createdAt: "2026-08-07T23:59:59.000Z", updatedAt: "2026-08-07T23:59:59.001Z", headBranch: "main" })] : []);
+      if (workflowListCount === 1) return response(workflowRunPayload(baselineRun || baselineRerun ? [runEntry(66, { createdAt: "2026-08-07T23:59:59.000Z", updatedAt: "2026-08-07T23:59:59.001Z", headBranch: "main" })] : []));
       const runs = [runEntry()];
       if (baselineRun || baselineRerun) runs.unshift(runEntry(66, { createdAt: "2026-08-07T23:59:59.000Z", updatedAt: baselineRerun ? RUN_UPDATED : "2026-08-07T23:59:59.001Z", headBranch: "main", attempt: baselineRerun ? 2 : 1 }));
       if (concurrentDispatch || (concurrentDispatchAfterCompletion && runViewCount > 0)) runs.push(runEntry(78));
-      return response(runs);
+      return response(workflowRunPayload(runs));
     }
     if (args[0] === "workflow" && args[1] === "run") return response("");
     if (args[0] === "run" && args[1] === "view") {
@@ -466,14 +483,16 @@ test("scenario gates reject acknowledgements, non-SHAs, missing App identity, an
   const never = async () => { throw new Error("gh must not run"); };
   const missingAcknowledgement = await scenarioOptions({ "acknowledge-private-acceptance": false });
   const branchRef = await scenarioOptions({ "source-sha": "main" });
-  const missingAppId = await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login });
-  const nonBotAppLogin = await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.graphqlLogin, "app-id": APP.id });
+  const missingAppId = await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.login });
+  const nonBotAppLogin = await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.graphqlLogin, "app-id": APP.id });
+  const missingRunBoundary = await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id });
   const missingParent = await scenarioOptions({ evidence: path.join(TEMP_ROOT, "not-created-parent", "evidence.json") });
   const oversizedRepository = await scenarioOptions({ repo: `${"o".repeat(40)}/codekeeper-acceptance-fixture` });
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: missingAcknowledgement, gh: never }), /acknowledge/);
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: branchRef, gh: never }), /40-character/);
   await assert.rejects(() => runScenario({ scenario: "review-introduced-defect", options: missingAppId, gh: never }), /--app-id/);
   await assert.rejects(() => runScenario({ scenario: "review-introduced-defect", options: nonBotAppLogin, gh: never }), /ending in \[bot\]/);
+  await assert.rejects(() => runScenario({ scenario: "review-introduced-defect", options: missingRunBoundary, gh: never }), /--run-created-after/);
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: missingParent, gh: never }), /output parent must already exist/);
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: oversizedRepository, gh: never }), /bounded repository limits/);
 });
@@ -542,14 +561,27 @@ test("maintenance dry-run uses a quiescent, actor-bound dispatch boundary and on
   assert.ok(calls.every((args) => !args.join(" ").match(/\b(secret|token|password|api[_-]?key)\b/i)));
 });
 
-test("dispatch revalidates stable baseline runs after every poll and after selected completion", async () => {
+test("maintenance refuses an incomplete bounded workflow-run inventory", async () => {
+  const fake = fakeGh({ scenario: "maintenance-dry-run" });
+  const runner = async (args) => {
+    if (args[0] === "api" && args[3]?.includes("/actions/workflows/codekeeper-maintain.yml/runs?")) {
+      return response({ total_count: 1_001, workflow_runs: [] });
+    }
+    return fake.runner(args);
+  };
+  const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(result.passed, false);
+  assert.equal(fake.calls.some((args) => args[0] === "workflow" && args[1] === "run"), false);
+});
+
+test("dispatch revalidates stable baseline runs from each bounded workflow inventory", async () => {
   const clock = fakeClock();
   const fake = fakeGh({ scenario: "maintenance-dry-run", baselineRun: true, completionAfterRunView: 2 });
   const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: clock.now, sleep: clock.sleep });
   assert.equal(result.passed, true);
   assert.equal(fake.runViewCount, 3);
-  assert.equal(fake.calls.filter((args) => args[3] === `repos/${REPO}/actions/runs/66`).length, fake.workflowListCount - 1);
-  assert.equal(fake.calls.filter((args) => args[3] === `repos/${REPO}/actions/runs/66`).length, fake.runViewCount + 2);
+  assert.equal(fake.calls.filter((args) => args[3] === `repos/${REPO}/actions/runs/66`).length, 0);
+  assert.equal(fake.workflowListCount, fake.runViewCount + 3);
 });
 
 test("maintenance accepts a selected run that completes after the former 60-second wait", async () => {
@@ -593,32 +625,73 @@ test("maintenance rejects a second matching run that appears after completion", 
 
 test("review accepts a pull_request_target base SHA while binding the current PR head through title evidence and the run to the base branch", async () => {
   const good = fakeGh({ scenario: "review-introduced-defect" });
-  const pass = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
+  const pass = await runScenario({ scenario: "review-introduced-defect", options: await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(pass.passed, true);
   assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-review.yml?ref=${HEAD}`));
   const stale = fakeGh({ scenario: "review-introduced-defect", staleMarker: true });
-  const staleResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: stale.runner, now: () => new Date(NOW), sleep: async () => {} });
+  const staleResult = await runScenario({ scenario: "review-introduced-defect", options: await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: stale.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(staleResult.passed, false);
   const foreign = fakeGh({ scenario: "review-introduced-defect", foreignAppMarker: true });
-  const foreignResult = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: foreign.runner, now: () => new Date(NOW), sleep: async () => {} });
+  const foreignResult = await runScenario({ scenario: "review-introduced-defect", options: await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: foreign.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(foreignResult.passed, false);
   for (const option of [{ wrongDisplayTitle: true }, { wrongReviewGateName: true }, { reviewDraft: true }, { reviewRetarget: true }, { reviewHeadChanges: true }, { wrongReviewRunBaseBranch: true }]) {
     const falsePositive = fakeGh({ scenario: "review-introduced-defect", ...option });
-    const result = await runScenario({ scenario: "review-introduced-defect", options: await scenarioOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: falsePositive.runner, now: () => new Date(NOW), sleep: async () => {} });
+    const result = await runScenario({ scenario: "review-introduced-defect", options: await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: falsePositive.runner, now: () => new Date(NOW), sleep: async () => {} });
     assert.equal(result.passed, false);
+  }
+});
+
+test("review rejects an explicitly selected run created before the supplied trigger boundary", async () => {
+  const fake = fakeGh({ scenario: "review-introduced-defect" });
+  const runner = async (args) => {
+    const result = await fake.runner(args);
+    if (args[0] === "run" && args[1] === "view") {
+      const payload = JSON.parse(result.stdout);
+      payload.createdAt = "2026-08-07T23:59:59.999Z";
+      return response(payload);
+    }
+    if (args[3] === `repos/${REPO}/actions/runs/77`) {
+      const payload = JSON.parse(result.stdout);
+      payload.created_at = "2026-08-07T23:59:59.999Z";
+      return response(payload);
+    }
+    return result;
+  };
+  const result = await runScenario({ scenario: "review-introduced-defect", options: await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: runner, now: () => new Date(NOW), sleep: async () => {} });
+  assert.equal(result.passed, false);
+});
+
+test("review requires a complete timezone-qualified trigger instant", async () => {
+  for (const boundary of ["1", "2026-08-08", "2026-08-08T00:00:00"]) {
+    await assert.rejects(
+      runScenario({
+        scenario: "review-introduced-defect",
+        options: await manualRunOptions({
+          pr: "12",
+          "run-id": "77",
+          "run-created-after": boundary,
+          "app-login": APP.login,
+          "app-id": APP.id
+        }),
+        gh: fakeGh({ scenario: "review-introduced-defect" }).runner,
+        now: () => new Date(NOW),
+        sleep: async () => {}
+      }),
+      /--run-created-after must be an ISO-8601 timestamp/
+    );
   }
 });
 
 test("issue triage rejects stale publisher-run evidence and wrong durable titles", async () => {
   const good = fakeGh({ scenario: "issue-triage-related" });
-  const pass = await runScenario({ scenario: "issue-triage-related", options: await scenarioOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
+  const pass = await runScenario({ scenario: "issue-triage-related", options: await manualRunOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(pass.passed, true);
   assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-issues.yml?ref=${HEAD}`));
   const stale = fakeGh({ scenario: "issue-triage-related", staleMarker: true });
-  const staleResult = await runScenario({ scenario: "issue-triage-related", options: await scenarioOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: stale.runner, now: () => new Date(NOW), sleep: async () => {} });
+  const staleResult = await runScenario({ scenario: "issue-triage-related", options: await manualRunOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: stale.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(staleResult.passed, false);
   const wrongTitle = fakeGh({ scenario: "issue-triage-related", wrongDisplayTitle: true });
-  const wrongTitleResult = await runScenario({ scenario: "issue-triage-related", options: await scenarioOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: wrongTitle.runner, now: () => new Date(NOW), sleep: async () => {} });
+  const wrongTitleResult = await runScenario({ scenario: "issue-triage-related", options: await manualRunOptions({ issue: "13", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: wrongTitle.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(wrongTitleResult.passed, false);
 });
 

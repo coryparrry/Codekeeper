@@ -1,11 +1,13 @@
 import path from "node:path";
 import { homedir } from "node:os";
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, opendir, readdir } from "node:fs/promises";
 import { InstallerError } from "./errors.mjs";
 import { STDIN_FILE_LIMIT_BYTES } from "./command-runner.mjs";
 
 const UNSAFE_ENTRY_NAME = /[\u0000-\u001f\u007f]/;
-const DEFAULT_FS = Object.freeze({ lstat, readdir });
+const MAX_DIRECTORY_ENTRIES = 1_000;
+const METADATA_CONCURRENCY = 16;
+const DEFAULT_FS = Object.freeze({ lstat, opendir, readdir });
 
 function visibleEntryName(name) {
   if (typeof name !== "string" || !name || name === "." || name === ".." || UNSAFE_ENTRY_NAME.test(name)) return null;
@@ -20,13 +22,44 @@ async function listDirectoryMetadata(fsImpl, directory) {
   try {
     const stat = await fsImpl.lstat(directory);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("unsafe directory");
-    return await fsImpl.readdir(directory, { withFileTypes: true });
+    let entries;
+    if (typeof fsImpl.opendir === "function") {
+      entries = [];
+      const handle = await fsImpl.opendir(directory);
+      for await (const entry of handle) {
+        entries.push(entry);
+        if (entries.length > MAX_DIRECTORY_ENTRIES) {
+          throw new Error("directory entry limit exceeded");
+        }
+      }
+    } else {
+      entries = await fsImpl.readdir(directory, { withFileTypes: true });
+      if (entries.length > MAX_DIRECTORY_ENTRIES) {
+        throw new Error("directory entry limit exceeded");
+      }
+    }
+    return entries;
   } catch (cause) {
     throw new InstallerError("The private-key picker failed to list that folder safely.", {
       code: "SECRET_INPUT_DIRECTORY_INVALID",
       cause
     });
   }
+}
+
+async function forEachConcurrent(values, operation) {
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(METADATA_CONCURRENCY, values.length) },
+    async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        await operation(values[index]);
+      }
+    }
+  );
+  await Promise.all(workers);
 }
 
 export async function defaultPrivateKeyDirectory({
@@ -75,11 +108,11 @@ export async function listPrivateKeyChoices(directory, {
   }
   const folders = [];
   const candidates = [];
-  for (const entry of directoryEntries) {
+  await forEachConcurrent(directoryEntries, async (entry) => {
     const label = visibleEntryName(entry.name);
-    if (!label || entry.isSymbolicLink()) continue;
+    if (!label || entry.isSymbolicLink()) return;
     const target = path.join(directory, entry.name);
-    if (!containedBy(root, target)) continue;
+    if (!containedBy(root, target)) return;
     if (includeDirectories && entry.isDirectory()) {
       try {
         await listDirectoryMetadata(fsImpl, target);
@@ -87,18 +120,18 @@ export async function listPrivateKeyChoices(directory, {
       } catch {
         // Hide folders that cannot be opened safely.
       }
-      continue;
+      return;
     }
-    if (!(entry.isFile() && label.toLowerCase().endsWith(".pem"))) continue;
+    if (!(entry.isFile() && label.toLowerCase().endsWith(".pem"))) return;
     try {
       const stat = await fsImpl.lstat(target);
-      if (stat.isSymbolicLink()) continue;
-      if (!stat.isFile() || stat.size <= 0 || stat.size > STDIN_FILE_LIMIT_BYTES) continue;
+      if (stat.isSymbolicLink()) return;
+      if (!stat.isFile() || stat.size <= 0 || stat.size > STDIN_FILE_LIMIT_BYTES) return;
       candidates.push({ label, target, type: "file", modifiedTime: Number(stat.mtimeMs) || 0 });
     } catch {
-      continue;
+      return;
     }
-  }
+  });
   candidates.sort((left, right) => {
     if (left.modifiedTime !== right.modifiedTime) return right.modifiedTime - left.modifiedTime;
     return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });

@@ -1,7 +1,19 @@
 import { spawn, spawnSync } from "node:child_process";
-import { copyFile, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { copyFile, lstat, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { superviseProcess } from "./process-supervisor.mjs";
+
+const MAX_CAPTURE_FILE_BYTES = 1024 * 1024;
+const MAX_CAPTURE_PATCH_BYTES = 5 * 1024 * 1024;
+const CAPTURE_GIT_TIMEOUT_MS = 30 * 1000;
+const DEFAULT_VALIDATION_TIMEOUT_MS = 5 * 60 * 1000;
+const VALIDATION_ENVIRONMENT_KEYS = Object.freeze([
+  "PATH", "Path", "PATHEXT", "HOME", "TMPDIR", "TMP", "TEMP",
+  "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "CI",
+  "SystemRoot", "ComSpec"
+]);
 
 function commandError(command, args, result) {
   const stderr = result.stderr?.toString("utf8").trim();
@@ -20,6 +32,7 @@ export function run(command, args, options = {}) {
     encoding: options.encoding ?? "utf8",
     input: options.input,
     maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
+    timeout: options.timeoutMs,
     stdio: options.stdio ?? "pipe"
   });
   if (result.error) throw result.error;
@@ -53,9 +66,93 @@ function splitNul(buffer) {
     .filter((entry) => entry !== "");
 }
 
-export async function collectWorkingTreeChanges(cwd = process.cwd()) {
+export async function inspectUntrackedFile(absolute, maximumFileBytes) {
+  const flags = fsConstants.O_RDONLY
+    | (fsConstants.O_NOFOLLOW ?? 0)
+    | (fsConstants.O_NONBLOCK ?? 0);
+  let handle;
+  try {
+    handle = await open(absolute, flags);
+  } catch (error) {
+    if (error.code === "ELOOP") {
+      return {
+        symlink: true,
+        specialMode: true,
+        oldMode: "000000",
+        newMode: "120000",
+        modeChanged: false,
+        bytes: 0,
+        additions: 0,
+        deletions: 0
+      };
+    }
+    throw error;
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      return { specialMode: true, bytes: 0, additions: 0, deletions: 0 };
+    }
+    const common = {
+      oldMode: "000000",
+      newMode: stat.mode & 0o111 ? "100755" : "100644",
+      modeChanged: false,
+      specialMode: false
+    };
+    if (stat.size > maximumFileBytes) {
+      return {
+        ...common,
+        bytes: stat.size,
+        captureSkipped: true,
+        binary: false,
+        additions: 0,
+        deletions: 0
+      };
+    }
+    const buffer = Buffer.alloc(maximumFileBytes + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > maximumFileBytes) {
+      return {
+        ...common,
+        bytes: total,
+        captureSkipped: true,
+        binary: false,
+        additions: 0,
+        deletions: 0
+      };
+    }
+    const content = buffer.subarray(0, total);
+    const binary = content.includes(0);
+    return {
+      ...common,
+      bytes: total,
+      binary,
+      additions: binary ? 0 : content.toString("utf8").split("\n").length,
+      deletions: 0
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function collectWorkingTreeChanges(
+  cwd = process.cwd(),
+  { maximumFileBytes = MAX_CAPTURE_FILE_BYTES } = {}
+) {
+  if (!Number.isSafeInteger(maximumFileBytes) || maximumFileBytes <= 0) {
+    throw new Error("Workspace capture file limit must be a positive integer");
+  }
   const trackedTokens = splitNul(
-    git(["diff", "--name-status", "-z", "HEAD"], { cwd, encoding: null }).stdout
+    git(["diff", "--no-ext-diff", "--name-status", "-z", "HEAD"], {
+      cwd,
+      encoding: null,
+      timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+    }).stdout
   );
   const tracked = [];
   for (let index = 0; index < trackedTokens.length;) {
@@ -71,14 +168,18 @@ export async function collectWorkingTreeChanges(cwd = process.cwd()) {
     git(["ls-files", "--others", "--exclude-standard", "-z"], { cwd, encoding: null }).stdout
   );
   const rawTokens = splitNul(
-    git(["diff", "--raw", "-z", "HEAD"], { cwd, encoding: null }).stdout
+    git(["diff", "--no-ext-diff", "--raw", "--full-index", "-z", "HEAD"], {
+      cwd,
+      encoding: null,
+      timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+    }).stdout
   );
   const rawByPath = new Map();
   for (let index = 0; index < rawTokens.length;) {
     const metadata = rawTokens[index++];
-    const match = metadata?.match(/^:(\d{6}) (\d{6}) \S+ \S+ ([A-Z][0-9]*)$/);
+    const match = metadata?.match(/^:(\d{6}) (\d{6}) (\S+) \S+ ([A-Z][0-9]*)$/);
     const oldPath = rawTokens[index++];
-    const renamedOrCopied = match?.[3]?.startsWith("R") || match?.[3]?.startsWith("C");
+    const renamedOrCopied = match?.[4]?.startsWith("R") || match?.[4]?.startsWith("C");
     const filePath = renamedOrCopied ? rawTokens[index++] : oldPath;
     if (!match || !filePath) throw new Error("Could not parse git diff --raw output");
     const oldMode = match[1];
@@ -87,6 +188,7 @@ export async function collectWorkingTreeChanges(cwd = process.cwd()) {
     rawByPath.set(filePath, {
       oldMode,
       newMode,
+      oldObject: match[3],
       modeChanged: oldMode !== "000000" && newMode !== "000000" && oldMode !== newMode,
       specialMode: !["100644", "100755"].includes(activeMode)
     });
@@ -101,7 +203,11 @@ export async function collectWorkingTreeChanges(cwd = process.cwd()) {
   }
 
   const numstatTokens = splitNul(
-    git(["diff", "--numstat", "-z", "HEAD"], { cwd, encoding: null }).stdout
+    git(["diff", "--no-ext-diff", "--numstat", "-z", "HEAD"], {
+      cwd,
+      encoding: null,
+      timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+    }).stdout
   );
   for (let index = 0; index < numstatTokens.length; index += 1) {
     const token = numstatTokens[index];
@@ -124,33 +230,8 @@ export async function collectWorkingTreeChanges(cwd = process.cwd()) {
 
   for (const filePath of untrackedPaths) {
     const absolute = path.join(cwd, filePath);
-    const stat = await lstat(absolute);
     const item = byPath.get(filePath);
-    if (stat.isSymbolicLink()) {
-      item.symlink = true;
-      item.specialMode = true;
-      item.oldMode = "000000";
-      item.newMode = "120000";
-      item.modeChanged = false;
-      item.additions = 0;
-      item.deletions = 0;
-      continue;
-    }
-    if (!stat.isFile()) {
-      item.specialMode = true;
-      item.additions = 0;
-      item.deletions = 0;
-      continue;
-    }
-    item.oldMode = "000000";
-    item.newMode = stat.mode & 0o111 ? "100755" : "100644";
-    item.modeChanged = false;
-    item.specialMode = false;
-    item.bytes = stat.size;
-    const content = await readFile(absolute);
-    item.binary = content.includes(0);
-    item.additions = item.binary ? 0 : content.toString("utf8").split("\n").length;
-    item.deletions = 0;
+    Object.assign(item, await inspectUntrackedFile(absolute, maximumFileBytes));
   }
 
   for (const item of byPath.values()) {
@@ -159,11 +240,47 @@ export async function collectWorkingTreeChanges(cwd = process.cwd()) {
       const stat = await lstat(path.join(cwd, item.path));
       item.bytes = stat.isFile() ? stat.size : 0;
       if (stat.isSymbolicLink()) item.symlink = true;
+      if (stat.isFile() && stat.size > maximumFileBytes) {
+        item.captureSkipped = true;
+        item.binary = false;
+        item.additions = 0;
+        item.deletions = 0;
+      }
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       item.bytes = 0;
     }
   }
+
+  const oldObjects = [
+    ...new Set(
+      [...byPath.values()]
+        .map((item) => item.oldObject)
+        .filter((object) => object && !/^0+$/.test(object))
+    )
+  ];
+  if (oldObjects.length > 0) {
+    const oldSizes = git(["cat-file", "--batch-check=%(objectsize)"], {
+      cwd,
+      input: `${oldObjects.join("\n")}\n`,
+      timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+    }).stdout.trim().split("\n");
+    if (oldSizes.length !== oldObjects.length || oldSizes.some((size) => !/^\d+$/.test(size))) {
+      throw new Error("Could not determine pre-change blob sizes");
+    }
+    const sizeByObject = new Map(
+      oldObjects.map((object, index) => [object, Number(oldSizes[index])])
+    );
+    for (const item of byPath.values()) {
+      if (sizeByObject.get(item.oldObject) > maximumFileBytes) {
+        item.captureSkipped = true;
+        item.binary = false;
+        item.additions = 0;
+        item.deletions = 0;
+      }
+    }
+  }
+  for (const item of byPath.values()) delete item.oldObject;
 
   const files = [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
   const additions = files.reduce((sum, item) => sum + (item.additions ?? 0), 0);
@@ -177,11 +294,27 @@ export async function collectWorkingTreeChanges(cwd = process.cwd()) {
   };
 }
 
-export async function createPatch(patchPath, cwd = process.cwd()) {
-  const changes = await collectWorkingTreeChanges(cwd);
+export async function createPatch(
+  patchPath,
+  cwd = process.cwd(),
+  {
+    maximumFileBytes = MAX_CAPTURE_FILE_BYTES,
+    maximumPatchBytes = MAX_CAPTURE_PATCH_BYTES
+  } = {}
+) {
+  if (!Number.isSafeInteger(maximumPatchBytes) || maximumPatchBytes <= 0) {
+    throw new Error("Workspace capture patch limit must be a positive integer");
+  }
+  const changes = await collectWorkingTreeChanges(cwd, { maximumFileBytes });
   const untracked = changes.files.filter((item) => item.untracked).map((item) => item.path);
+  if (changes.files.some((item) => item.captureSkipped)) {
+    await writeFile(patchPath, Buffer.alloc(0));
+    return { ...changes, patchBytes: 0, captureSkipped: true };
+  }
   const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-index-"));
   const temporaryIndex = path.join(temporaryDirectory, "index");
+  let patchBytes = 0;
+  let captureSkipped = false;
   try {
     const indexPath = gitText(["rev-parse", "--git-path", "index"], { cwd });
     try {
@@ -192,43 +325,63 @@ export async function createPatch(patchPath, cwd = process.cwd()) {
     }
     const environment = { GIT_INDEX_FILE: temporaryIndex };
     if (untracked.length > 0) git(["add", "-N", "--", ...untracked], { cwd, env: environment });
-    const patch = git(["diff", "--binary", "--full-index", "HEAD"], { cwd, env: environment, encoding: null }).stdout;
-    await writeFile(patchPath, patch);
+    try {
+      const patch = git(["diff", "--no-ext-diff", "--binary", "--full-index", "HEAD"], {
+        cwd,
+        env: environment,
+        encoding: null,
+        maxBuffer: maximumPatchBytes + 1,
+        timeoutMs: CAPTURE_GIT_TIMEOUT_MS
+      }).stdout;
+      patchBytes = patch.length;
+      await writeFile(patchPath, patch);
+    } catch (error) {
+      if (error.code !== "ENOBUFS") throw error;
+      patchBytes = maximumPatchBytes + 1;
+      captureSkipped = true;
+      await writeFile(patchPath, Buffer.alloc(0));
+    }
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
-  const patch = await readFile(patchPath);
-  return { ...changes, patchBytes: patch.length };
+  return { ...changes, patchBytes, captureSkipped };
 }
 
 export function applyPatch(patchPath, cwd = process.cwd()) {
   git(["apply", "--whitespace=error-all", patchPath], { cwd });
 }
 
-export function runValidationCommands(commands, cwd = process.cwd()) {
-  const environment = { ...process.env };
-  for (const key of [
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "GITHUB_PAT",
-    "OPENAI_API_KEY",
-    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-    "ACTIONS_ID_TOKEN_REQUEST_URL",
-    "ACTIONS_RUNTIME_TOKEN",
-    "ACTIONS_RUNTIME_URL",
-    "ACTIONS_RESULTS_URL",
-    "ACTIONS_CACHE_URL"
-  ]) {
-    delete environment[key];
+export async function runValidationCommands(
+  commands,
+  cwd = process.cwd(),
+  { timeoutMs = DEFAULT_VALIDATION_TIMEOUT_MS } = {}
+) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("Validation timeout must be a positive integer");
   }
+  const environment = Object.fromEntries(VALIDATION_ENVIRONMENT_KEYS
+    .filter((key) => typeof process.env[key] === "string")
+    .map((key) => [key, process.env[key]]));
   const results = [];
   for (const command of commands) {
-    const result = run("bash", ["-c", command], { cwd, allowFailure: true, env: environment, replaceEnv: true });
+    let result;
+    try {
+      result = await superviseProcess("bash", ["-c", command], { cwd, environment, timeoutMs });
+    } catch (error) {
+      const failure = new Error(`Validation command could not run: ${command}: ${error.message}`);
+      failure.validationResults = results;
+      throw failure;
+    }
+    if (result.timedOut) {
+      const failure = new Error(`Validation command timed out after ${timeoutMs}ms: ${command}`);
+      failure.validationResults = results;
+      throw failure;
+    }
     results.push({
       command,
       success: result.status === 0,
-      stdout: result.stdout.toString("utf8").slice(-12000),
-      stderr: result.stderr.toString("utf8").slice(-12000)
+      stdout: result.stdout.toString("utf8"),
+      stderr: result.stderr.toString("utf8")
     });
     if (result.status !== 0) {
       const error = new Error(`Validation command failed: ${command}`);

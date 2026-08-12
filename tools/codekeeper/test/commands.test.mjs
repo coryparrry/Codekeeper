@@ -322,7 +322,7 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
     number: 42,
     state: "open",
     pull_request: {},
-    labels: [],
+    labels: [{ name: "codekeeper:paused" }],
   });
   GitHubClient.prototype.removeLabel = async (number, label) => {
     removed.push({ number, label });

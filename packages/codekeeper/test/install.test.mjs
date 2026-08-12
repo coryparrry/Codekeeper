@@ -7,7 +7,8 @@ import { createCommandRunner } from "../src/command-runner.mjs";
 import {
   configureRepositorySettings,
   createSetupCommit,
-  pushAndOpenSetupPullRequest
+  pushAndOpenSetupPullRequest,
+  SECRET_UPLOAD_TIMEOUT_MS
 } from "../src/install.mjs";
 import { buildInstallPlan } from "../src/plan.mjs";
 import {
@@ -157,7 +158,7 @@ test("repository settings set startup first and pass provider secrets through pr
     assert.deepEqual(call.args.slice(3), ["--app", "actions", "--repo", "acme/widget"]);
     assert.equal(call.options.cwd, "/tmp/widget");
     assert.equal(call.options.stdio, "ignore");
-    assert.equal(call.options.timeoutMs, null);
+    assert.equal(call.options.timeoutMs, SECRET_UPLOAD_TIMEOUT_MS);
     assert.equal(typeof call.options.provideInput, "function");
     assert.ok(!Object.hasOwn(call.options, "env"));
     assert.ok(!Object.hasOwn(call.options, "input"));
@@ -168,7 +169,7 @@ test("repository settings set startup first and pass provider secrets through pr
     cwd: "/tmp/widget",
     stdio: "ignore",
     stdinFd: 37,
-    timeoutMs: null
+    timeoutMs: SECRET_UPLOAD_TIMEOUT_MS
   });
   assert.equal(closed, 1);
   assert.deepEqual(enteredSecrets.map(({ name }) => name), ["OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_TRACE_API_KEY"]);

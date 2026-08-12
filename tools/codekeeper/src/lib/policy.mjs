@@ -16,6 +16,9 @@ function unsafeRepositoryPath(filePath) {
 export function validatePatch(changes, config) {
   const repair = config.audit.repair;
   const reasons = [];
+  if (changes.captureSkipped || changes.files.some((file) => file.captureSkipped)) {
+    reasons.push("Patch capture is incomplete because content exceeded a configured limit");
+  }
   if (changes.files.length > repair.maximumFiles) {
     reasons.push(`Patch changes ${changes.files.length} files; maximum is ${repair.maximumFiles}`);
   }

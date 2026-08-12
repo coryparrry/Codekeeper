@@ -14,67 +14,13 @@ import {
 import { readRegularFile } from "./io.mjs";
 import { fixRunMarker, sha256 } from "./markers.mjs";
 import { validatePatch } from "./policy.mjs";
+import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
 import { sanitizeMarkdown } from "./render.mjs";
+
+export { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
 const SHA256 = /^[0-9a-f]{64}$/i;
-
-function boundedText(value, maximum, suffix = "\n…[truncated]") {
-  const text = String(value ?? "");
-  if (text.length <= maximum) return text;
-  return `${text.slice(0, Math.max(0, maximum - suffix.length))}${suffix}`;
-}
-
-export function frozenPullRepairReviewThreads(threads, reviewThreadIds) {
-  if (reviewThreadIds.length === 0) return [];
-  const byId = new Map(threads.map((thread) => [thread.id, thread]));
-  const selected = reviewThreadIds.map((threadId) => {
-    const thread = byId.get(threadId);
-    if (!thread) throw new Error(`PR repair review thread ${threadId} no longer exists`);
-    return {
-      id: thread.id,
-      isResolved: Boolean(thread.isResolved),
-      isOutdated: Boolean(thread.isOutdated),
-      comments: (thread.comments?.nodes ?? thread.comments ?? []).map((comment) => ({
-        id: boundedText(comment.id, 512, "…"),
-        databaseId: comment.databaseId,
-        author: boundedText(comment.author?.login ?? comment.author, 256, "…"),
-        body: boundedText(comment.body, 6000),
-        bodySha256: sha256(String(comment.body ?? "")),
-        url: boundedText(comment.url, 2048, "…"),
-        path: boundedText(comment.path, 4096, "…"),
-        line: comment.line ?? null,
-        originalLine: comment.originalLine ?? null
-      }))
-    };
-  });
-  if (Buffer.byteLength(JSON.stringify(selected), "utf8") > 262144) {
-    throw new Error("Selected PR repair review thread evidence exceeds 262144 bytes");
-  }
-  return selected;
-}
-
-export function frozenPullRepairSubject(pull, comments, reviewThreads = []) {
-  return {
-    number: pull?.number,
-    title: boundedText(pull?.title, 512, "…"),
-    body: boundedText(pull?.body, 30000),
-    author: boundedText(pull?.user?.login, 256, "…"),
-    url: boundedText(pull?.html_url, 2048, "…"),
-    comments: Array.isArray(comments)
-      ? comments.slice(-20).map((comment) => ({
-        author: boundedText(comment?.user?.login, 256, "…"),
-        body: boundedText(comment?.body, 12000),
-        createdAt: comment?.created_at ?? ""
-      }))
-      : [],
-    reviewThreads: Array.isArray(reviewThreads) ? reviewThreads : []
-  };
-}
-
-export function frozenPullRepairSubjectSha256(pull, comments, reviewThreads = []) {
-  return sha256(JSON.stringify(frozenPullRepairSubject(pull, comments, reviewThreads)));
-}
 
 function requiredText(value, name) {
   const normalized = String(value ?? "").trim();
@@ -129,44 +75,6 @@ export function assertLivePullRepairTarget(pull, target, { expectedHeadSha = tar
       throw new Error(`PR #${target.number} ${label} changed from ${expected} to ${actual ?? "missing"}`);
     }
   }
-  return pull;
-}
-
-async function assertWritableFrozenBranch(github, target) {
-  const branch = await github.getBranch(target.headRef);
-  if (!branch) throw new Error(`PR #${target.number} head branch ${target.headRef} no longer exists`);
-  if (branch.protected) throw new Error(`PR #${target.number} head branch ${target.headRef} is protected`);
-  if (branch.commit?.sha !== target.headSha) {
-    throw new Error(`PR #${target.number} head branch moved from ${target.headSha} to ${branch.commit?.sha ?? "missing"}`);
-  }
-  return branch;
-}
-
-function pullLabelNames(pull) {
-  if (!Array.isArray(pull?.labels)) throw new Error(`PR #${pull?.number ?? "unknown"} has invalid label metadata`);
-  const names = pull.labels.map((label) => typeof label === "string" ? label : label?.name);
-  if (names.some((label) => typeof label !== "string" || label.length === 0) || new Set(names).size !== names.length) {
-    throw new Error(`PR #${pull?.number ?? "unknown"} has invalid or duplicate label metadata`);
-  }
-  return names;
-}
-
-async function currentFrozenPull(github, target, { rejectPaused = false } = {}) {
-  const pull = assertLivePullRepairTarget(await github.getPull(target.number), target);
-  if (rejectPaused && pullLabelNames(pull).includes("codekeeper:paused")) {
-    const error = new Error(`PR #${target.number} is paused; automatic publication stopped`);
-    error.code = "CODEKEEPER_PAUSED";
-    throw error;
-  }
-  const [comments, liveReviewThreads] = await Promise.all([
-    github.listIssueComments(target.number),
-    target.reviewThreadIds.length > 0 ? github.listPullReviewThreads(target.number) : []
-  ]);
-  const reviewThreads = frozenPullRepairReviewThreads(liveReviewThreads, target.reviewThreadIds);
-  if (frozenPullRepairSubjectSha256(pull, comments, reviewThreads) !== target.subjectSha256) {
-    throw new Error(`PR #${target.number} repair evidence changed after implementation started`);
-  }
-  await assertWritableFrozenBranch(github, target);
   return pull;
 }
 
@@ -231,10 +139,15 @@ export async function publishPullRequestRepair({
   gitOperations = defaultGitOperations
 }) {
   const target = frozenPullRepairTarget(context, config);
-  const revalidationOptions = { rejectPaused: true };
+  const pull = await github.beginPullRepairMutation({
+    repository: context.repository,
+    target,
+    policy: config,
+    rejectPaused: true,
+    requireAutomaticRepairMarker: context.authorizationMode === "policy"
+  });
   if (!String(context.runId ?? "").trim()) throw new Error("Frozen PR repair context is missing its workflow run ID");
   try {
-    const pull = await currentFrozenPull(github, target, revalidationOptions);
     if (!manifest.patch?.valid || !manifest.patch.fileName) {
       const reason = result.noChangeReason || manifest.patch?.reasons?.join("; ") || "No valid patch was produced";
       if (!dryRun) {
@@ -253,16 +166,15 @@ export async function publishPullRequestRepair({
       return { updated: false, pullRequest: target.number, dryRun: true, branch: target.headRef, files: patch.files };
     }
 
-    await currentFrozenPull(github, target, revalidationOptions);
     gitOperations.configureAutomationIdentity(automationIdentity);
     const commitSha = gitOperations.createCommitOnCurrentHead({
       expectedParent: target.headSha,
       message: "fix: apply owner-requested pull request repair",
       paths: patch.stagePaths
     });
-    await currentFrozenPull(github, target, revalidationOptions);
-    const pushedSha = gitOperations.pushHeadToBranch(target.headRef, github.token);
-    if (pushedSha !== commitSha) throw new Error(`PR repair pushed ${pushedSha}; expected ${commitSha}`);
+    await github.mutatePullHeadIfCurrent(commitSha, () =>
+      gitOperations.pushHeadToBranch(target.headRef, github.token)
+    );
     const updatedPull = assertLivePullRepairTarget(await github.getPull(target.number), target, { expectedHeadSha: commitSha });
     let resolvedReviewThreadIds = [];
     let reviewThreadWarning = null;

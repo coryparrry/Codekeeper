@@ -361,7 +361,9 @@ function SecretInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       else setError("Paste the credential before continuing.");
       return;
     }
-    if (!key.ctrl && !key.meta && input) accept(input);
+    if (!key.ctrl && !key.meta && input) {
+      setError("Paste the complete credential as one value before continuing.");
+    }
   });
   return h(
     Shell,
@@ -682,13 +684,14 @@ function TuiRoot({ registerController, colorEnabled }) {
       reject(new InstallerError("The installer tried to show two interactive screens at once.", { code: "PROMPT_INVALID" }));
       return;
     }
-    pendingRef.current = { resolve, reject };
     screenIdRef.current += 1;
-    setScreen({ ...spec, screenId: screenIdRef.current });
+    const screenId = screenIdRef.current;
+    pendingRef.current = { resolve, reject, screenId };
+    setScreen({ ...spec, screenId });
   }), []);
-  const settle = useCallback((value, error) => {
+  const settle = useCallback((screenId, value, error) => {
     const pending = pendingRef.current;
-    if (!pending) return;
+    if (!pending || pending.screenId !== screenId) return;
     pendingRef.current = null;
     if (error) pending.reject(error);
     else pending.resolve(value);
@@ -712,8 +715,10 @@ function TuiRoot({ registerController, colorEnabled }) {
   const common = {
     key: screen.screenId,
     spec: screen,
-    onSubmit: (value) => settle(value),
-    onCancel: screen.kind === "completion" ? () => settle(true) : (error) => settle(null, error),
+    onSubmit: (value) => settle(screen.screenId, value),
+    onCancel: screen.kind === "completion"
+      ? () => settle(screen.screenId, true)
+      : (error) => settle(screen.screenId, null, error),
     colorEnabled
   };
   if (screen.kind === "confirm") return h(ConfirmScreen, common);

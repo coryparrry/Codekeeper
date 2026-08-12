@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "./git.mjs";
-import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
+import { GitHubClient, isAmbiguousGitHubMutationError, isOwnedMarkerComment } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
@@ -12,6 +12,66 @@ import { renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderR
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
 const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
+const AUTOMATIC_REPAIR_LEASE_MAX_AGE_MS = 15 * 60 * 1000;
+
+function automaticRepairLeaseBody(state, scope, marker) {
+  return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${marker}`;
+}
+
+export async function acquireAutomaticRepairLease({ github, context, pull, automationIdentity }) {
+  const scope = sha256(JSON.stringify({
+    repository: context.repository,
+    pullNumber: pull.number,
+    headSha: pull.head.sha
+  }));
+  const fingerprint = sha256(JSON.stringify({ scope, runId: context.runId }));
+  const marker = `<!-- codekeeper:repair-lease=${fingerprint} -->`;
+  const activeBody = automaticRepairLeaseBody("active", scope, marker);
+  const created = await github.createComment(pull.number, activeBody);
+  const comments = await github.listIssueComments(pull.number);
+  const active = comments.filter((comment) => {
+    const match = typeof comment.body === "string"
+      ? comment.body.match(/<!-- codekeeper:repair-lease=([a-f0-9]{64}) -->$/)
+      : null;
+    return match
+      && comment.body.startsWith(`<!-- codekeeper:repair-lease-active=${scope} -->\n`)
+      && isOwnedMarkerComment(comment, match[0], automationIdentity)
+      && /^[1-9][0-9]*$/.test(String(comment.id ?? ""));
+  }).sort((left, right) => {
+    const leftId = BigInt(left.id);
+    const rightId = BigInt(right.id);
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
+  if (!active.some((comment) => String(comment.id) === String(created.id))) {
+    throw new Error("Automatic repair lease was not visible after creation");
+  }
+  const expiryBoundary = Date.now() - AUTOMATIC_REPAIR_LEASE_MAX_AGE_MS;
+  const expired = active.filter((comment) => {
+    const createdAt = Date.parse(String(comment.created_at ?? ""));
+    return Number.isFinite(createdAt) && createdAt <= expiryBoundary;
+  });
+  for (const comment of expired) {
+    const match = comment.body.match(/<!-- codekeeper:repair-lease=([a-f0-9]{64}) -->$/);
+    await github.updateComment(
+      comment.id,
+      automaticRepairLeaseBody("expired", scope, match[0])
+    );
+  }
+  const eligible = active.filter((comment) => !expired.includes(comment));
+  const acquired = String(eligible[0]?.id) === String(created.id);
+  const lease = { acquired, commentId: created.id, marker, scope };
+  if (!acquired) {
+    await github.updateComment(created.id, automaticRepairLeaseBody("released", scope, marker));
+  }
+  return lease;
+}
+
+async function releaseAutomaticRepairLease(github, lease, state) {
+  await github.updateComment(
+    lease.commentId,
+    automaticRepairLeaseBody(state, lease.scope, lease.marker)
+  );
+}
 
 function singleLine(value, maximum = 256) {
   return String(value ?? "")
@@ -121,19 +181,6 @@ function managedIssueLabels(config) {
   return config.issues.managedLabels;
 }
 
-async function currentOpenIssue(github, frozenIssue, staleAction, { rejectPaused = false } = {}) {
-  const issue = await github.getIssue(frozenIssue.number);
-  if (issue.pull_request) throw new Error(`Issue #${issue.number} is no longer eligible`);
-  if (issue.state !== "open") throw new Error(`Issue #${issue.number} is not open`);
-  if (rejectPaused && issueLabelNames(issue).includes("codekeeper:paused")) {
-    throw new Error(`Issue #${issue.number} is paused; automatic publication stopped`);
-  }
-  if (frozenIssue.updatedAt && issue.updated_at !== frozenIssue.updatedAt) {
-    throw new Error(`Issue #${issue.number} changed after ${staleAction}; stale action will not publish`);
-  }
-  return issue;
-}
-
 function issueLabelNames(issue) {
   if (!Array.isArray(issue?.labels)) throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid label metadata`);
   const names = issue.labels.map((label) => typeof label === "string" ? label : label?.name);
@@ -141,47 +188,6 @@ function issueLabelNames(issue) {
     throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid or duplicate label metadata`);
   }
   return names;
-}
-
-function issuePublicationSubject(issue) {
-  return {
-    number: issue?.number,
-    title: issue?.title ?? null,
-    body: issue?.body ?? null,
-    state: issue?.state ?? null,
-    stateReason: issue?.state_reason ?? null,
-    locked: issue?.locked ?? null,
-    activeLockReason: issue?.active_lock_reason ?? null,
-    htmlUrl: issue?.html_url ?? null,
-    author: {
-      id: issue?.user?.id ?? null,
-      login: issue?.user?.login ?? null,
-      type: issue?.user?.type ?? null
-    },
-    assignees: (issue?.assignees ?? [])
-      .map((assignee) => ({ id: assignee?.id ?? null, login: assignee?.login ?? null, type: assignee?.type ?? null }))
-      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
-    milestone: issue?.milestone?.number ?? null
-  };
-}
-
-function assertExpectedManagedLabelMutation(before, after, desired, managed) {
-  if (after?.pull_request || after?.state !== "open") throw new Error(`Issue #${before.number} is no longer eligible`);
-  if (JSON.stringify(issuePublicationSubject(after)) !== JSON.stringify(issuePublicationSubject(before))) {
-    throw new Error(`Issue #${before.number} changed while Codekeeper reconciled labels`);
-  }
-  const managedSet = new Set(managed);
-  const expectedLabels = new Set([
-    ...issueLabelNames(before).filter((label) => !managedSet.has(label)),
-    ...desired
-  ]);
-  const actualLabels = new Set(issueLabelNames(after));
-  const exactLabels = actualLabels.size === expectedLabels.size && [...expectedLabels].every((label) => actualLabels.has(label));
-  if (!exactLabels) throw new Error(`Issue #${before.number} labels changed while Codekeeper reconciled labels`);
-  if (typeof after.updated_at !== "string" || !Number.isFinite(Date.parse(after.updated_at))) {
-    throw new Error(`Issue #${before.number} has no updated timestamp after label reconciliation`);
-  }
-  return after;
 }
 
 function branchSlug(value) {
@@ -474,27 +480,71 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   }
 
   if (automaticRepair.eligible) {
-    await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
-    await github.upsertMarkerComment(
-      pull.number,
-      automaticRepairMarker(pull.head.sha),
-      `Automatic repair is pending for head ${pull.head.sha}.`,
-      automationIdentity
-    );
-    await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
-    try {
-      await github.createRepositoryDispatch("codekeeper_fix", {
-        number: pull.number,
-        head_sha: pull.head.sha,
-        authorization_mode: "policy",
-        requested_by: automationIdentity.login,
-        review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
-      });
-    } catch (error) {
-      await github.rollbackPullLabel(pull.number, "codekeeper:auto-repaired");
-      throw error;
+    const authorizationPull = await github.getPull(pull.number);
+    if (issueLabelNames(authorizationPull).includes("codekeeper:auto-repaired")) {
+      automaticRepair.eligible = false;
+    } else {
+      const lease = await acquireAutomaticRepairLease({ github, context, pull, automationIdentity });
+      if (!lease.acquired) {
+        automaticRepair.eligible = false;
+      } else {
+        let markerAdded = false;
+        let dispatchAttempted = false;
+        try {
+          await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+          await github.upsertMarkerComment(
+            pull.number,
+            automaticRepairMarker(pull.head.sha),
+            `Automatic repair is pending for head ${pull.head.sha}.`,
+            automationIdentity
+          );
+          await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
+          markerAdded = true;
+          dispatchAttempted = true;
+          await github.createRepositoryDispatch("codekeeper_fix", {
+            number: pull.number,
+            head_sha: pull.head.sha,
+            authorization_mode: "policy",
+            requested_by: automationIdentity.login,
+            review_thread_ids: [...new Set(repairFeedback.flatMap((feedback) => feedback.threadIds))]
+          });
+          automaticRepair.dispatched = true;
+          await releaseAutomaticRepairLease(github, lease, "completed");
+        } catch (error) {
+          let rollbackError = null;
+          const ambiguousDispatch = dispatchAttempted && isAmbiguousGitHubMutationError(error);
+          if (!automaticRepair.dispatched && !ambiguousDispatch && markerAdded) {
+            try {
+              await github.rollbackPullLabel(pull.number, "codekeeper:auto-repaired");
+            } catch (cause) {
+              rollbackError ??= cause;
+            }
+          }
+          if (!automaticRepair.dispatched) {
+            try {
+              await releaseAutomaticRepairLease(
+                github,
+                lease,
+                ambiguousDispatch ? "ambiguous" : "failed"
+              );
+            } catch (cause) {
+              if (ambiguousDispatch) {
+                warn(`Could not record ambiguous automatic repair dispatch for PR #${pull.number}: ${cause.message}`);
+              } else {
+                rollbackError ??= cause;
+              }
+            }
+          }
+          if (rollbackError) {
+            throw new Error(
+              `${error.message}; automatic repair lease rollback failed: ${rollbackError.message}`,
+              { cause: error }
+            );
+          }
+          throw error;
+        }
+      }
     }
-    automaticRepair.dispatched = true;
   }
 
   return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, deferredIssues, feedbackReplies, blocking };
@@ -658,9 +708,20 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
 export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
   const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256, agentProfilePath);
   const github = new GitHubClient({ token, repository: context.repository });
-  let expectedUpdatedAt = context.issue.updatedAt;
-  const currentIssue = () => currentOpenIssue(github, { ...context.issue, updatedAt: expectedUpdatedAt }, "analysis");
-  const issue = await currentIssue();
+  if (result.duplicateOf === context.issue.number) {
+    throw new Error(`Issue #${context.issue.number} cannot be its own duplicate`);
+  }
+  const closingDuplicate = Boolean(
+    config.issues.closeExactDuplicates && result.duplicateOf && result.duplicateConfidence === "high"
+  );
+  const issue = await github.beginIssueMutation({
+    issue: context.issue,
+    trackSubject: true,
+    trackComments: closingDuplicate
+  });
+  const duplicate = closingDuplicate
+    ? await github.requireOpenIssueMutationPrerequisite(result.duplicateOf)
+    : null;
   const runUrl = trustedPublicationRunUrl(context);
 
   const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
@@ -691,42 +752,29 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     return { issue: issue.number, desiredLabels, dryRun: true };
   }
 
-  // GitHub does not expose an atomic compare-and-mutate for issue updates. These
-  // checks fail closed on observed drift immediately before each mutation boundary.
-  await currentIssue();
   await github.ensureLabels(config.labels, desiredLabels);
-  const beforeLabelMutation = await currentIssue();
-  await github.replaceManagedLabels(issue.number, desiredLabels, managedIssueLabels(config));
-  const afterLabelMutation = assertExpectedManagedLabelMutation(
-    beforeLabelMutation,
-    await github.getIssue(issue.number),
-    desiredLabels,
-    managedIssueLabels(config)
-  );
-  expectedUpdatedAt = afterLabelMutation.updated_at;
-  assertExpectedManagedLabelMutation(
-    afterLabelMutation,
-    await currentIssue(),
-    desiredLabels,
-    managedIssueLabels(config)
-  );
-  await github.upsertMarkerComment(
-    issue.number,
-    ISSUE_TRIAGE_MARKER,
-    comment,
-    automationIdentity
-  );
-
-  if (result.duplicateOf === issue.number) {
-    throw new Error(`Issue #${issue.number} cannot be its own duplicate`);
+  await github.replaceManagedIssueLabels(issue.number, desiredLabels, managedIssueLabels(config));
+  await github.verifyIssueMutation();
+  if (closingDuplicate) {
+    await github.upsertOwnedIssueMarker(
+      issue.number,
+      ISSUE_TRIAGE_MARKER,
+      comment,
+      automationIdentity
+    );
+    await github.verifyIssueMutation();
+  } else {
+    await github.upsertMarkerComment(
+      issue.number,
+      ISSUE_TRIAGE_MARKER,
+      comment,
+      automationIdentity
+    );
   }
-  if (config.issues.closeExactDuplicates && result.duplicateOf && result.duplicateConfidence === "high") {
-    const duplicateContext = { number: result.duplicateOf };
-    await currentIssue();
-    const duplicate = await currentOpenIssue(github, duplicateContext, "duplicate assessment");
-    await github.createComment(issue.number, `Closing as a duplicate of #${duplicate.number}.`);
-    await currentIssue();
-    await currentOpenIssue(github, duplicateContext, "duplicate assessment");
+  if (closingDuplicate) {
+    const duplicateBody = `Closing as a duplicate of #${duplicate.number}.`;
+    await github.createOwnedIssueComment(issue.number, duplicateBody, automationIdentity);
+    await github.verifyIssueMutation();
     await github.updateIssue(issue.number, { state: "closed", state_reason: "not_planned" });
   }
   return { issue: issue.number, desiredLabels };
@@ -740,13 +788,26 @@ function matchesAutomationActor(actor, identity) {
   );
 }
 
-export function isTrustedMaintenanceIssue(issue, { marker, botLogin, botId }) {
-  const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
+function isRecoverableMaintenanceIssue(issue, marker, identity) {
   return Boolean(
     identity &&
     matchesAutomationActor(issue?.user, identity) &&
     typeof issue?.body === "string" &&
     issue.body.endsWith(marker)
+  );
+}
+
+export function isTrustedMaintenanceIssue(issue, { marker, botLogin, botId }) {
+  const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
+  return isRecoverableMaintenanceIssue(issue, marker, identity);
+}
+
+export function isTrustedMaintenanceFindingIssue(issue, comments, { marker, botLogin, botId }) {
+  const identity = normalizeAutomationIdentity({ login: botLogin, id: botId });
+  return Boolean(
+    isRecoverableMaintenanceIssue(issue, marker, identity) &&
+    Array.isArray(comments) &&
+    comments.some((comment) => isOwnedMarkerComment(comment, marker, identity))
   );
 }
 
@@ -759,7 +820,9 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
     const marker = findingMarker(fingerprint);
     let match;
     for (const issue of existing) {
-      if (isTrustedMaintenanceIssue(issue, {
+      if (typeof issue?.body !== "string" || !issue.body.endsWith(marker)) continue;
+      const comments = await github.listIssueComments(issue.number);
+      if (isTrustedMaintenanceFindingIssue(issue, comments, {
         marker,
         botLogin: automationIdentity.login,
         botId: automationIdentity.id
@@ -787,6 +850,7 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
       published.push({ fingerprint, state: "updated", issueNumber: match.number });
     } else {
       const created = await github.createIssue({ title, body, labels });
+      await github.createComment(created.number, marker);
       published.push({ fingerprint, state: "created", issueNumber: created.number });
       existing.push(created);
     }
@@ -883,7 +947,6 @@ async function publishPatchPullRequest({
   fingerprint,
   issueNumber = null,
   finding = null,
-  revalidateBeforeMutation = null,
   dryRun = false
 }) {
   if (!manifest.patch?.valid || !manifest.patch.fileName) {
@@ -955,7 +1018,6 @@ async function publishPatchPullRequest({
     const automationIdentity = expectedAutomationIdentity();
     configureAutomationIdentity(automationIdentity);
     createBranchAndCommit({ branch, message: "chore: apply automated maintenance repair" });
-    if (revalidateBeforeMutation) await revalidateBeforeMutation();
     const remote = await github.getBranchTip(branch);
     let pushedByThisRun = false;
     if (remote) {
@@ -967,11 +1029,10 @@ async function publishPatchPullRequest({
         throw new Error(`Automation branch ${branch} already exists with unexpected content`);
       }
     } else {
-      pushBranch(branch, github.token);
+      await github.mutateIfCurrent(() => pushBranch(branch, github.token));
       pushedByThisRun = true;
     }
     try {
-      if (revalidateBeforeMutation) await revalidateBeforeMutation();
       pull = await github.createPull({
         title: normalizedTitle,
         body: prBody,
@@ -993,9 +1054,7 @@ async function publishPatchPullRequest({
     }
   }
   if (!dryRun) {
-    if (revalidateBeforeMutation) await revalidateBeforeMutation();
     await github.ensureLabels(config.labels, [...labels]);
-    if (revalidateBeforeMutation) await revalidateBeforeMutation();
     await github.replaceManagedLabels(pull.number, [...labels], managedIssueLabels(config));
   }
   return created
@@ -1024,6 +1083,7 @@ export async function publishAudit({ artifactDirectory, config, configSha256, ex
     throw new Error(`Default branch moved from ${context.baseSha} to ${liveHead}; stale audit will not publish`);
   }
   const github = new GitHubClient({ token, repository: context.repository });
+  await github.beginBranchMutation({ branch: config.repository.defaultBranch, headSha: context.baseSha });
   const findings = await upsertMaintenanceFindings({
     github,
     findings: result.findings,
@@ -1087,15 +1147,14 @@ export async function publishFix({ artifactDirectory, config, configSha256, expe
   if (context.issue?.number !== context.target.number) {
     throw new Error("Frozen issue fix context does not match its target");
   }
-  const currentIssue = () => currentOpenIssue(github, context.issue, "implementation started", {
+  const issue = await github.beginIssueMutation({
+    issue: context.issue,
     rejectPaused: context.authorizationMode === "policy"
   });
-  const issue = await currentIssue();
 
   if (!manifest.patch?.valid) {
     const reason = result.noChangeReason || manifest.patch?.reasons?.join("; ") || "No valid patch was produced";
     if (!dryRun) {
-      await currentIssue();
       await github.upsertMarkerComment(
         issue.number,
         fixRunMarker(context.runId),
@@ -1121,11 +1180,9 @@ export async function publishFix({ artifactDirectory, config, configSha256, expe
     fingerprint,
     issueNumber: issue.number,
     finding: null,
-    revalidateBeforeMutation: currentIssue,
     dryRun
   });
   if (!dryRun && repair.url) {
-    await currentIssue();
     await github.upsertMarkerComment(
       issue.number,
       repairNotificationMarker(fingerprint),

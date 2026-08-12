@@ -10,6 +10,7 @@ const REPOSITORY_PATTERN = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
 const SHA = new RegExp(`^${SHA_PATTERN}$`, "i");
 const REPOSITORY = new RegExp(`^${REPOSITORY_PATTERN}$`);
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
+const ISO_8601_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 const SAFE_PREFIX = /^(?!\/)(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)+$/;
 const MAX_REPOSITORY_LENGTH = 140;
 const MAX_GITHUB_URL_LENGTH = 2048;
@@ -18,6 +19,9 @@ const DEFAULT_GH_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_GH_KILL_GRACE_MS = 1_000;
 const DISPATCH_DISCOVERY_POLL_INTERVAL_MS = 3_000;
 const DISPATCH_DISCOVERY_POLL_ATTEMPTS = 20;
+const MAX_WORKFLOW_RUNS = 1_000;
+const WORKFLOW_RUN_PAGE_SIZE = 100;
+const MAX_WORKFLOW_RUN_PAGES = MAX_WORKFLOW_RUNS / WORKFLOW_RUN_PAGE_SIZE;
 export const WORKFLOW_COMPLETION_POLL_INTERVAL_MS = 5_000;
 export const WORKFLOW_COMPLETION_TIMEOUT_MS = 10 * 60_000;
 export const WORKFLOW_COMPLETION_POLL_ATTEMPTS = (WORKFLOW_COMPLETION_TIMEOUT_MS / WORKFLOW_COMPLETION_POLL_INTERVAL_MS) + 1;
@@ -229,7 +233,9 @@ function decodeBase64(text, label) {
 }
 
 function validTimestamp(value) {
-  return typeof value === "string" && Number.isFinite(Date.parse(value));
+  return typeof value === "string"
+    && ISO_8601_INSTANT.test(value)
+    && Number.isFinite(Date.parse(value));
 }
 
 function happensOnOrAfter(value, boundary) {
@@ -265,6 +271,11 @@ function validateSourceSha(sourceSha) {
 function validatePositiveInteger(value, option) {
   assert(typeof value === "string" && POSITIVE_INTEGER.test(value), `${option} must be a positive integer`);
   return Number(value);
+}
+
+function validateTimestamp(value, option) {
+  assert(validTimestamp(value), `${option} must be an ISO-8601 timestamp`);
+  return new Date(value).toISOString();
 }
 
 function validateControlledFixDispatchRef(value) {
@@ -614,13 +625,34 @@ async function assertPinnedSource({ repo, scenario, sourceSha, revision, snapsho
 }
 
 async function listWorkflowRuns({ repo, workflow, event, gh }) {
-  const { stdout } = await callGh(gh, [
-    "run", "list", "--repo", repo, "--workflow", workflow, "--event", event,
-    "--json", "databaseId,attempt,status,createdAt,updatedAt,headSha,headBranch,displayTitle", "--limit", "100"
-  ]);
-  const runs = parseJson(stdout, "Workflow run list");
-  assert(Array.isArray(runs) && runs.length <= 100, "Workflow run list returned invalid metadata");
-  return runs.map((run) => {
+  const runs = [];
+  let totalCount = null;
+  for (let page = 1; page <= MAX_WORKFLOW_RUN_PAGES && runs.length < Math.min(totalCount ?? MAX_WORKFLOW_RUNS, MAX_WORKFLOW_RUNS); page += 1) {
+    const endpoint = `repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=${encodeURIComponent(event)}&per_page=${WORKFLOW_RUN_PAGE_SIZE}&page=${page}`;
+    const { stdout } = await callGh(gh, ["api", "--hostname", "github.com", endpoint]);
+    const payload = parseJson(stdout, "Workflow run list");
+    assert(Number.isSafeInteger(payload?.total_count) && payload.total_count >= 0, "Workflow run list returned invalid metadata");
+    if (totalCount === null) totalCount = payload.total_count;
+    assert(payload.total_count === totalCount, "Workflow run inventory changed during pagination");
+    assert(Array.isArray(payload?.workflow_runs) && payload.workflow_runs.length <= WORKFLOW_RUN_PAGE_SIZE, "Workflow run list returned invalid metadata");
+    if (totalCount > MAX_WORKFLOW_RUNS) {
+      return { runs: [], paginationComplete: false };
+    }
+    for (const entry of payload.workflow_runs) {
+      runs.push({
+        databaseId: entry?.id,
+        attempt: entry?.run_attempt,
+        status: entry?.status,
+        createdAt: entry?.created_at,
+        updatedAt: entry?.updated_at,
+        headSha: entry?.head_sha,
+        headBranch: entry?.head_branch,
+        displayTitle: entry?.display_title
+      });
+    }
+    if (payload.workflow_runs.length === 0) break;
+  }
+  const validated = runs.map((run) => {
     assert(Number.isInteger(run?.databaseId) && run.databaseId > 0, "Workflow run list has an invalid run identifier");
     assert(Number.isInteger(run?.attempt) && run.attempt > 0, "Workflow run list has an invalid attempt");
     assert(typeof run?.status === "string" && run.status.length > 0, "Workflow run list has an invalid status");
@@ -629,6 +661,7 @@ async function listWorkflowRuns({ repo, workflow, event, gh }) {
     assert(typeof run?.displayTitle === "string" && run.displayTitle.length > 0 && run.displayTitle.length <= 180, "Workflow run list has an invalid display title");
     return run;
   });
+  return { runs: validated, paginationComplete: validated.length === totalCount };
 }
 
 async function workflowRunMetadata({ repo, runId, gh }) {
@@ -693,9 +726,11 @@ async function waitForRun({ repo, runId, expectedEvent, expectedWorkflowName, ex
       const run = { ...view, ...metadata, startedAt: view.startedAt || metadata.createdAt };
       assert(validTimestamp(run.startedAt), "Workflow run has no valid start timestamp");
       if (boundary) {
-        assert(run.headSha === boundary.headSha && run.headBranch === boundary.headBranch && run.displayTitle === boundary.displayTitle, "Workflow run did not use the recorded dispatch revision");
+        if (boundary.headSha !== undefined || boundary.headBranch !== undefined || boundary.displayTitle !== undefined) {
+          assert(run.headSha === boundary.headSha && run.headBranch === boundary.headBranch && run.displayTitle === boundary.displayTitle, "Workflow run did not use the recorded dispatch revision");
+        }
         assert(happensOnOrAfter(run.createdAt, boundary.dispatchedAt), "Workflow run predates the recorded dispatch boundary");
-        assert(run.actorLogin === boundary.actorLogin, "Workflow run actor did not match the authenticated dispatcher");
+        if (boundary.actorLogin !== undefined) assert(run.actorLogin === boundary.actorLogin, "Workflow run actor did not match the authenticated dispatcher");
       }
       elapsedWithinDeadline();
       return run;
@@ -713,8 +748,9 @@ async function defaultBranchRevision({ repo, defaultBranch, gh }) {
   return payload.object.sha;
 }
 
-function assertQuiescent(runs) {
-  assert(runs.every((run) => run?.status === "completed"), "Target workflow is not quiescent; refusing a concurrent scenario");
+function assertQuiescent(page) {
+  assert(page.paginationComplete, "Workflow run pagination exceeded the bounded acceptance inventory");
+  assert(page.runs.every((run) => run?.status === "completed"), "Target workflow is not quiescent; refusing a concurrent scenario");
 }
 
 async function acceptanceTagRef({ repo, tag, gh }) {
@@ -744,14 +780,12 @@ async function createImmutableDispatchSnapshot({ repo, scenario, sourceSha, prev
   return snapshot;
 }
 
-async function revalidateBaselineRuns({ repo, baseline, observedRuns, dispatchedAt, gh }) {
+function revalidateBaselineRuns({ baseline, observedRuns, dispatchedAt }) {
   const observedById = new Map(observedRuns.map((run) => [String(run.databaseId), run]));
   for (const prior of baseline) {
     const observed = observedById.get(String(prior.databaseId));
     assert(observed && observed.attempt === prior.attempt && observed.status === prior.status && observed.updatedAt === prior.updatedAt, "A baseline workflow run changed or disappeared after the dispatch boundary");
-    const current = await workflowRunMetadata({ repo, runId: prior.databaseId, gh });
-    assert(current.attempt === prior.attempt && current.status === prior.status && current.updatedAt === prior.updatedAt, "A baseline workflow run changed after the dispatch boundary");
-    assert(!happensOnOrAfter(current.updatedAt, dispatchedAt), "A baseline workflow run overlaps the dispatch boundary");
+    assert(!happensOnOrAfter(observed.updatedAt, dispatchedAt), "A baseline workflow run overlaps the dispatch boundary");
   }
 }
 
@@ -764,8 +798,9 @@ function matchesDispatchBoundary(run, boundary) {
 
 async function dispatchAndWait({ repo, scenario, issue, preflight, snapshot, gh, sleep, now }) {
   const detail = SCENARIO_DETAILS[scenario];
-  const baseline = await listWorkflowRuns({ repo, workflow: detail.workflow, event: detail.event, gh });
-  assertQuiescent(baseline);
+  const baselinePage = await listWorkflowRuns({ repo, workflow: detail.workflow, event: detail.event, gh });
+  assertQuiescent(baselinePage);
+  const baseline = baselinePage.runs;
   const boundary = {
     baselineIds: new Set(baseline.map((run) => String(run.databaseId))),
     dispatchedAt: currentIso(now),
@@ -783,8 +818,10 @@ async function dispatchAndWait({ repo, scenario, issue, preflight, snapshot, gh,
 
   let selectedRunId = null;
   const observeDispatchRuns = async () => {
-    const runs = await listWorkflowRuns({ repo, workflow: detail.workflow, event: detail.event, gh });
-    await revalidateBaselineRuns({ repo, baseline, observedRuns: runs, dispatchedAt: boundary.dispatchedAt, gh });
+    const page = await listWorkflowRuns({ repo, workflow: detail.workflow, event: detail.event, gh });
+    assert(page.paginationComplete, "Workflow run pagination exceeded the bounded acceptance inventory");
+    const runs = page.runs;
+    revalidateBaselineRuns({ baseline, observedRuns: runs, dispatchedAt: boundary.dispatchedAt });
     const candidates = runs.filter((run) => !boundary.baselineIds.has(String(run.databaseId)) && matchesDispatchBoundary(run, boundary));
     assert(candidates.length <= 1, "Concurrent workflow runs made dispatch attribution ambiguous");
     if (selectedRunId === null) {
@@ -961,8 +998,8 @@ function validateScenarioOptions(scenario, options) {
   const commonOptions = new Set(["repo", "source-sha", "acknowledge-private-acceptance", "evidence", "fixture-checkout"]);
   const scenarioOptions = {
     "maintenance-dry-run": commonOptions,
-    "review-introduced-defect": new Set([...commonOptions, "pr", "run-id", "app-login", "app-id"]),
-    "issue-triage-related": new Set([...commonOptions, "issue", "run-id", "app-login", "app-id"]),
+    "review-introduced-defect": new Set([...commonOptions, "pr", "run-id", "run-created-after", "app-login", "app-id"]),
+    "issue-triage-related": new Set([...commonOptions, "issue", "run-id", "run-created-after", "app-login", "app-id"]),
     "controlled-fix": new Set([...commonOptions, "issue", "app-login", "app-id"])
   }[scenario];
   assert(Object.keys(options).every((option) => scenarioOptions.has(option)), "Scenario command received an option that does not apply to this scenario");
@@ -978,11 +1015,13 @@ function validateScenarioOptions(scenario, options) {
   if (scenario === "review-introduced-defect") {
     result.pr = validatePositiveInteger(options.pr, "--pr");
     result.runId = validatePositiveInteger(options["run-id"], "--run-id");
+    result.runCreatedAfter = validateTimestamp(options["run-created-after"], "--run-created-after");
     result.app = validateAppIdentity(options);
   }
   if (scenario === "issue-triage-related") {
     result.issue = validatePositiveInteger(options.issue, "--issue");
     result.runId = validatePositiveInteger(options["run-id"], "--run-id");
+    result.runCreatedAfter = validateTimestamp(options["run-created-after"], "--run-created-after");
     result.app = validateAppIdentity(options);
   }
   if (scenario === "controlled-fix") {
@@ -1052,7 +1091,7 @@ async function verifyReview({ request, preflightResult, gh, sleep }) {
   const initialPull = await pullRequest({ repo: request.repo, number: request.pr, gh });
   assertSupportedReviewShape(initialPull, preflightResult.defaultBranch);
   const initialTitle = reviewRunTitle(request.pr, initialPull.headRefOid);
-  const run = await waitForRun({ repo: request.repo, runId: request.runId, expectedEvent: SCENARIO_DETAILS["review-introduced-defect"].event, expectedWorkflowName: SCENARIO_DETAILS["review-introduced-defect"].workflowName, expectedDisplayTitle: initialTitle, gh, sleep });
+  const run = await waitForRun({ repo: request.repo, runId: request.runId, expectedEvent: SCENARIO_DETAILS["review-introduced-defect"].event, expectedWorkflowName: SCENARIO_DETAILS["review-introduced-defect"].workflowName, expectedDisplayTitle: initialTitle, gh, sleep, boundary: { dispatchedAt: request.runCreatedAfter } });
   await assertPinnedSource({ repo: request.repo, scenario: "review-introduced-defect", sourceSha: request.sourceSha, revision: run.headSha, gh });
   const pull = await pullRequest({ repo: request.repo, number: request.pr, gh });
   assertSupportedReviewShape(pull, preflightResult.defaultBranch);
@@ -1073,7 +1112,7 @@ async function verifyReview({ request, preflightResult, gh, sleep }) {
 
 async function verifyIssue({ request, gh, sleep }) {
   const assertions = [];
-  const run = await waitForRun({ repo: request.repo, runId: request.runId, expectedEvent: SCENARIO_DETAILS["issue-triage-related"].event, expectedWorkflowName: SCENARIO_DETAILS["issue-triage-related"].workflowName, expectedDisplayTitle: issueRunTitle(request.issue), gh, sleep });
+  const run = await waitForRun({ repo: request.repo, runId: request.runId, expectedEvent: SCENARIO_DETAILS["issue-triage-related"].event, expectedWorkflowName: SCENARIO_DETAILS["issue-triage-related"].workflowName, expectedDisplayTitle: issueRunTitle(request.issue), gh, sleep, boundary: { dispatchedAt: request.runCreatedAfter } });
   await assertPinnedSource({ repo: request.repo, scenario: "issue-triage-related", sourceSha: request.sourceSha, revision: run.headSha, gh });
   const targetIssue = await issue({ repo: request.repo, number: request.issue, gh });
   const marker = await currentMarkerComment({ repo: request.repo, kind: "issue", number: request.issue, marker: ISSUE_TRIAGE_MARKER, app: request.app, expectedRunUrl: expectedRunUrl(request.repo, run.databaseId), gh });
@@ -1290,12 +1329,12 @@ export function parseCommandLine(argv) {
     assert(Object.keys(options).length === 1 && typeof options.repo === "string", "preflight requires exactly --repo OWNER/REPOSITORY");
     return { command, options };
   }
-  const permitted = new Set(["repo", "source-sha", "acknowledge-private-acceptance", "evidence", "fixture-checkout", "pr", "issue", "run-id", "dispatch-ref", "app-login", "app-id"]);
+  const permitted = new Set(["repo", "source-sha", "acknowledge-private-acceptance", "evidence", "fixture-checkout", "pr", "issue", "run-id", "run-created-after", "dispatch-ref", "app-login", "app-id"]);
   assert(Object.keys(options).every((option) => permitted.has(option)), "Scenario command received an unsupported option");
   return { command, options };
 }
 
 export function formatUsage() {
   const fixture = path.dirname(fileURLToPath(import.meta.url));
-  return `Codekeeper private acceptance harness (Node >=22)\n\nRead-only GitHub verification:\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} preflight --repo OWNER/codekeeper-acceptance-NAME\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} recover-controlled-fix --repo OWNER/codekeeper-acceptance-NAME --source-sha SHA --acknowledge-private-acceptance --fixture-checkout PATH --evidence PATH --issue NUMBER --run-id NUMBER --pr NUMBER --dispatch-ref TAG --app-login 'APP[bot]' --app-id NUMBER\n\nScenario commands require --repo, --source-sha (40-character commit),\n--acknowledge-private-acceptance, --fixture-checkout, and --evidence PATH.\nReview, issue, and fix verification also require the configured App bot login\nand immutable numeric --app-id.\n\nMaintenance and fix dispatch create one retained unique acceptance tag at the\npreflight default-branch SHA; GitHub workflow_dispatch receives that tag, never\na raw SHA. The evidence records the tag and the harness never deletes it.\nRecovery only reads that retained tag and an explicit completed run and PR.\n\n  maintenance-dry-run\n  review-introduced-defect --pr NUMBER --run-id NUMBER --app-login 'APP[bot]' --app-id NUMBER\n  issue-triage-related --issue NUMBER --run-id NUMBER --app-login 'APP[bot]' --app-id NUMBER\n  controlled-fix --issue NUMBER --app-login 'APP[bot]' --app-id NUMBER`;
+  return `Codekeeper private acceptance harness (Node >=22)\n\nRead-only GitHub verification:\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} preflight --repo OWNER/codekeeper-acceptance-NAME\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} recover-controlled-fix --repo OWNER/codekeeper-acceptance-NAME --source-sha SHA --acknowledge-private-acceptance --fixture-checkout PATH --evidence PATH --issue NUMBER --run-id NUMBER --pr NUMBER --dispatch-ref TAG --app-login 'APP[bot]' --app-id NUMBER\n\nScenario commands require --repo, --source-sha (40-character commit),\n--acknowledge-private-acceptance, --fixture-checkout, and --evidence PATH.\nReview, issue, and fix verification also require the configured App bot login\nand immutable numeric --app-id. Review and issue verification require the\nrecorded event trigger time as --run-created-after ISO-8601.\n\nMaintenance and fix dispatch create one retained unique acceptance tag at the\npreflight default-branch SHA; GitHub workflow_dispatch receives that tag, never\na raw SHA. The evidence records the tag and the harness never deletes it.\nRecovery only reads that retained tag and an explicit completed run and PR.\n\n  maintenance-dry-run\n  review-introduced-defect --pr NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  issue-triage-related --issue NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  controlled-fix --issue NUMBER --app-login 'APP[bot]' --app-id NUMBER`;
 }

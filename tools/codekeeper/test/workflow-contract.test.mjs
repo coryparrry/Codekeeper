@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "9ba351638cedce3c03e9221f99a8460ed94009e797066a7a78411e8f2a624de9";
+const toolingManifestSha256 = "84be0ac91f63b99a5cc53bde53e6cc817688403bdae7dbdc2b4dca280e6bc706";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -475,7 +475,8 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.doesNotMatch(fixCaller, /issue_comment:/);
   assert.match(fixCaller, /automation_bot_login: \$\{\{ vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN \}\}/);
   const commands = await repositoryFile("tools/codekeeper/src/lib/commands.mjs");
-  assert.match(commands, /pull\.base\?\.ref !== config\.repository\.defaultBranch/);
+  assert.match(commands, /pull\.base\?\.ref !== defaultBranch/);
+  assert.match(commands, /config\.repository\.defaultBranch/);
   assert.match(commands, /removeLabel\(number, "codekeeper:paused"\)/);
 });
 

@@ -1,4 +1,4 @@
-import { GitHubClient } from "./github.mjs";
+import { GitHubClient, isAmbiguousGitHubMutationError } from "./github.mjs";
 import { readJson } from "./io.mjs";
 import { COMMAND_STATUS_MARKER } from "./markers.mjs";
 import {
@@ -74,6 +74,63 @@ function statusBody(issue, command, outcome) {
 Available commands: \`/codekeeper status\`, \`/codekeeper review\`, \`/codekeeper triage\`, \`/codekeeper defer\`, \`/codekeeper implement\`, \`/codekeeper fix\`, and \`/codekeeper stop\`.`;
 }
 
+function assertEligibleReviewPull(pull, number, repository, defaultBranch) {
+  if (
+    pull.draft ||
+    pull.head?.repo?.full_name !== repository ||
+    pull.base?.repo?.full_name !== repository ||
+    pull.base?.ref !== defaultBranch
+  ) {
+    throw new Error(`PR #${number} is not eligible for Codekeeper review`);
+  }
+  return pull;
+}
+
+async function dispatchAfterUnpausing(
+  github,
+  issue,
+  number,
+  eventType,
+  payload,
+) {
+  const wasPaused = labels(issue).includes("codekeeper:paused");
+  if (wasPaused) {
+    try {
+      await github.removeLabel(number, "codekeeper:paused");
+    } catch (error) {
+      if (isAmbiguousGitHubMutationError(error)) {
+        try {
+          const currentIssue = await github.getIssue(number);
+          if (!labels(currentIssue).includes("codekeeper:paused")) {
+            await github.addLabels(number, ["codekeeper:paused"]);
+          }
+        } catch (rollbackError) {
+          throw new Error(
+            `${error.message}; codekeeper:paused could not be restored: ${rollbackError.message}`,
+            { cause: error },
+          );
+        }
+      }
+      throw error;
+    }
+  }
+  try {
+    await github.createRepositoryDispatch(eventType, payload);
+  } catch (error) {
+    if (wasPaused && !isAmbiguousGitHubMutationError(error)) {
+      try {
+        await github.addLabels(number, ["codekeeper:paused"]);
+      } catch (rollbackError) {
+        throw new Error(
+          `${error.message}; codekeeper:paused could not be restored: ${rollbackError.message}`,
+          { cause: error },
+        );
+      }
+    }
+    throw error;
+  }
+}
+
 export async function runOwnerCommand({
   eventPath,
   config,
@@ -123,15 +180,12 @@ export async function runOwnerCommand({
   if (command === "review" || command === "rerun") {
     if (!issue.pull_request)
       throw new Error(`/${command} requires a pull request`);
-    const pull = await github.getPull(number);
-    if (
-      pull.draft ||
-      pull.head?.repo?.full_name !== repository ||
-      pull.base?.repo?.full_name !== repository ||
-      pull.base?.ref !== config.repository.defaultBranch
-    ) {
-      throw new Error(`PR #${number} is not eligible for Codekeeper review`);
-    }
+    const pull = assertEligibleReviewPull(
+      await github.getPull(number),
+      number,
+      repository,
+      config.repository.defaultBranch,
+    );
     await github.createRepositoryDispatch("codekeeper_review", {
       number,
       head_sha: pull.head.sha,
@@ -143,7 +197,12 @@ export async function runOwnerCommand({
     outcome = "A new review was requested for the current pull request commit.";
   } else if (command === "triage") {
     if (issue.pull_request) {
-      const pull = await github.getPull(number);
+      const pull = assertEligibleReviewPull(
+        await github.getPull(number),
+        number,
+        repository,
+        config.repository.defaultBranch,
+      );
       await github.createRepositoryDispatch("codekeeper_review", {
         number,
         head_sha: pull.head.sha,
@@ -228,8 +287,7 @@ export async function runOwnerCommand({
   } else if (command === "implement") {
     if (issue.pull_request)
       throw new Error("/codekeeper implement requires an issue");
-    await github.removeLabel(number, "codekeeper:paused");
-    await github.createRepositoryDispatch("codekeeper_fix", {
+    await dispatchAfterUnpausing(github, issue, number, "codekeeper_fix", {
       number,
       authorization_mode: "owner",
       requested_by: actor,
@@ -238,7 +296,6 @@ export async function runOwnerCommand({
   } else if (command === "fix") {
     if (!issue.pull_request)
       throw new Error("/codekeeper fix requires a pull request");
-    await github.removeLabel(number, "codekeeper:paused");
     const payload = {
       number,
       authorization_mode: "owner",
@@ -255,7 +312,13 @@ export async function runOwnerCommand({
       );
       if (thread) payload.review_thread_ids = [thread.id];
     }
-    await github.createRepositoryDispatch("codekeeper_fix", payload);
+    await dispatchAfterUnpausing(
+      github,
+      issue,
+      number,
+      "codekeeper_fix",
+      payload,
+    );
     outcome = "The bounded owner-requested repair was queued.";
   } else if (command === "stop") {
     await github.ensureLabels(config.labels, ["codekeeper:paused"]);

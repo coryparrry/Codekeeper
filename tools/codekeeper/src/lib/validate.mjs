@@ -235,11 +235,11 @@ export async function validateIssue({ directory, contextPath = path.join(directo
   return writeCandidate({ artifactDirectory, context, result, patch: null, validation: { checks: ["duplicate-target", "clean-worktree"] }, agentProfileBytes: agentProfile.bytes, runtimeMetadataBytes });
 }
 
-async function capturePatch(cwd = process.cwd()) {
+async function capturePatch(config, cwd = process.cwd()) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-"));
   const patchPath = path.join(directory, "patch.diff");
   try {
-    const changes = await createPatch(patchPath, cwd);
+    const changes = await createPatch(patchPath, cwd, config.audit.repair);
     return { changes, bytes: await readFile(patchPath) };
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -252,7 +252,7 @@ async function captureWorkspacePatch({ context, config, repairRequested, risk })
     reasons.push(`Checkout HEAD changed from ${context.baseSha} to ${currentHead()}`);
   }
 
-  const initial = await capturePatch();
+  const initial = await capturePatch(config);
   const changes = initial.changes;
   const policy = validatePatch(changes, config);
   reasons.push(...policy.reasons);
@@ -432,17 +432,17 @@ async function verifyPatchCandidate({ mode, candidateDirectory, expectedCandidat
   }
   ensureClean();
   applyPatch(path.join(candidateDirectory, "patch.diff"));
-  const initial = await capturePatch();
+  const initial = await capturePatch(config);
   if (sha256(initial.bytes) !== candidate.patch.sha256) {
     throw new Error("Fresh verification checkout produced a different patch");
   }
   const policy = validatePatch(initial.changes, config);
   if (!policy.valid) throw new Error(`Fresh verification patch failed policy: ${policy.reasons.join("; ")}`);
-  runValidationCommands(config.audit.repair.validationCommands);
+  await runValidationCommands(config.audit.repair.validationCommands);
   if (currentHead() !== context.baseSha) {
     throw new Error(`Validation commands changed checkout HEAD from ${context.baseSha} to ${currentHead()}`);
   }
-  const afterValidation = await capturePatch();
+  const afterValidation = await capturePatch(config);
   if (sha256(initial.bytes) !== sha256(afterValidation.bytes)) {
     throw new Error("Validation commands modified the proposed patch");
   }

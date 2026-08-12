@@ -9,6 +9,29 @@ import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, v
 
 export { providerCompatibleJsonSchema } from "./schemas.mjs";
 
+const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 5 * 60 * 1000;
+export const PROVIDER_CLEANUP_TIMEOUT_CODE = "CODEKEEPER_PROVIDER_CLEANUP_TIMEOUT";
+
+export function isProviderCleanupTimeout(error) {
+  return error?.code === PROVIDER_CLEANUP_TIMEOUT_CODE;
+}
+
+async function closeProviderWithDeadline(modelProvider, timeoutMs) {
+  const timeoutError = new Error(`Codekeeper provider cleanup timed out after ${timeoutMs}ms`);
+  timeoutError.code = PROVIDER_CLEANUP_TIMEOUT_CODE;
+  let timer;
+  try {
+    await Promise.race([
+      modelProvider.close(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(timeoutError), timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const MODE_NAMES = Object.freeze({
   review: "Pull request reviewer",
   audit: "Repository auditor",
@@ -433,8 +456,12 @@ export async function runConfiguredAgent({
   sdkLoader = () => import("@openai/agents"),
   diagnostic,
   profile = undefined,
-  profileMetadata = undefined
+  profileMetadata = undefined,
+  turnTimeoutMs = DEFAULT_PROVIDER_TURN_TIMEOUT_MS
 }) {
+  if (!Number.isSafeInteger(turnTimeoutMs) || turnTimeoutMs <= 0) {
+    throw new Error("Provider turn timeout must be a positive integer");
+  }
   let modelProvider;
   let lastError;
   let lastFailureStage = "provider-run";
@@ -517,7 +544,30 @@ export async function runConfiguredAgent({
       let previousOutput = "";
       try {
         lastFailureStage = "provider-run";
-        const runResult = await runner.run(configuredAgent, input, { maxTurns: agent.maxTurns });
+        const controller = new AbortController();
+        const timeoutError = new Error(
+          `Codekeeper ${mode} provider turn timed out after ${turnTimeoutMs}ms`
+        );
+        let rejectTimeout;
+        const deadline = new Promise((_, reject) => {
+          rejectTimeout = reject;
+        });
+        const timer = setTimeout(() => {
+          controller.abort(timeoutError);
+          rejectTimeout(timeoutError);
+        }, turnTimeoutMs);
+        let runResult;
+        try {
+          runResult = await Promise.race([
+            runner.run(configuredAgent, input, {
+              maxTurns: agent.maxTurns,
+              signal: controller.signal
+            }),
+            deadline
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
         usage = addUsage(usage, usageMetadata(runResult));
         previousOutput = runResult?.finalOutput;
         lastFailureStage = "output-parse";
@@ -568,7 +618,7 @@ export async function runConfiguredAgent({
   } finally {
     if (modelProvider && typeof modelProvider.close === "function") {
       try {
-        await modelProvider.close();
+        await closeProviderWithDeadline(modelProvider, turnTimeoutMs);
       } catch (error) {
         reportDiagnostic(diagnostic, "provider-close", lastFailureAttempt);
         // The provider close failure is the final runtime result at this boundary.
