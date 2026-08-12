@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "6214bb8dc89214d332137f8a7b96f4f70fc23e24b641fed53771022ebe1b70f8";
+const toolingManifestSha256 = "12819998c3f039a2a7d7711b3649a16159cbc164e4b265ae47ccbc3aead88151";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -68,7 +68,7 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.doesNotMatch(reviewCaller, /on:\n\s+pull_request:/);
   assert.match(reviewCaller, /pull-requests: read/);
   assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\}"/);
-  assert.match(reviewCaller, /const route = !commandIntent && !automationReply/);
+  assert.match(reviewCaller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply/);
   const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
@@ -400,7 +400,7 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   );
   assert.match(
     jobSection(source, "workspace", "analyze"),
-    /feedback_triage[\s\S]*github\.actor != inputs\.automation_bot_login/
+    /feedback_triage &&\s+inputs\.automation_bot_login != '' &&\s+github\.actor != inputs\.automation_bot_login/
   );
   assert.match(
     publisher,
@@ -418,6 +418,8 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(caller, /auto_review: true/);
   assert.match(caller, /feedback_triage: true/);
   assert.match(caller, /const mentioned = mentionBot && new RegExp\(`/);
+  assert.match(caller, /const feedbackEvent = eventName === "pull_request_review" \|\| eventName === "pull_request_review_comment";/);
+  assert.match(caller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply;/);
   assert.match(caller, /appendFileSync\(process\.env\.GITHUB_OUTPUT, `owner_command=\$\{commandIntent\}\\nroute=\$\{route\}\\n`\)/);
   assert.match(caller, /owner_command: \$\{\{ needs\.intent\.outputs\.owner_command == 'true' \}\}/);
   assert.doesNotMatch(source, /publish-review-status|on:\n\s+pull_request_target|state="success"/);

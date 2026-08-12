@@ -361,6 +361,9 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     eligible: (blocking || repairFeedback.length > 0) && config.review.autoRepair && !existingLabels.has("codekeeper:paused") && !existingLabels.has("codekeeper:auto-repaired"),
     dispatched: false
   };
+  const suspendAutoMergeForRepair = (decision) => automaticRepair.eligible
+    ? { ...decision, eligible: false, reasons: [...decision.reasons, "Automatic repair is pending"] }
+    : decision;
   const publicationState = (autoMerge) => {
     const desiredSet = new Set(reviewLabels(result));
     desiredSet.delete("codekeeper:auto-merge");
@@ -378,7 +381,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     };
   };
 
-  const autoMerge = evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin });
+  const autoMerge = suspendAutoMergeForRepair(evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin }));
   const initialState = publicationState(autoMerge);
 
   if (dryRun) {
@@ -394,7 +397,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     () => currentReviewPull(github, context, config)
   );
   reconciledPull = suspension.pullRequest;
-  let publishedAutoMerge = evaluateAutoMerge({ config, pullRequest: reconciledPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login });
+  let publishedAutoMerge = suspendAutoMergeForRepair(evaluateAutoMerge({ config, pullRequest: reconciledPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login }));
   const eligibleState = publicationState(publishedAutoMerge);
   const manualFallbackState = publicationState({ ...publishedAutoMerge, eligible: false });
   const provisionedLabels = [...new Set([...eligibleState.desiredLabels, ...manualFallbackState.desiredLabels])];
@@ -492,7 +495,7 @@ export async function replyToReviewFeedback({ github, context, result, automatio
   const replies = [];
   for (const feedback of result.reviewFeedback.filter((item) => item.disposition !== "defer")) {
     const commentIds = rootReviewCommentIds(feedback.sourceKeys.map((key) => sourcesByKey.get(key)).filter(Boolean));
-    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.problemKey);
+    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.sourceKeys);
     const label = feedback.disposition === "fix_now" ? "Fix now"
       : feedback.disposition === "fix_if_cheap" ? "Fix if cheap"
         : "No action";
@@ -514,7 +517,7 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
   const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
   const published = [];
   for (const feedback of deferred) {
-    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.problemKey);
+    const fingerprint = deferredReviewFingerprint(context.repository, context.pullRequest.number, feedback.sourceKeys);
     const marker = deferredReviewMarker(fingerprint);
     const match = existing.find((issue) => isTrustedMaintenanceIssue(issue, {
       marker,
