@@ -49,7 +49,8 @@ jobs:
             const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
             const commandIntent = eventName === "pull_request_review_comment" && trustedAssociation && (slash || mentioned);
             const automationReply = eventName === "pull_request_review_comment" && automationBot && author === automationBot;
-            const route = !commandIntent && !automationReply;
+            const feedbackEvent = eventName === "pull_request_review" || eventName === "pull_request_review_comment";
+            const route = (!feedbackEvent || Boolean(automationBot)) && !commandIntent && !automationReply;
             appendFileSync(process.env.GITHUB_OUTPUT, `owner_command=${commandIntent}\nroute=${route}\n`);
           '
   bootstrap:
