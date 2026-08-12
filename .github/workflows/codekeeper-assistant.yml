@@ -33,7 +33,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 271650db15058760dacdcd0a0fb0f2905a7e161ff4913159da5e5ac4472ffbca
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 638070e5972dbcfbeee9ac0d0449f52b32051a9015e28c335d8121f63a41db78
 
 concurrency:
   group: codekeeper-assistant-${{ github.run_id }}

@@ -112,7 +112,7 @@ function setIdentityEnvironment() {
   };
 }
 
-test("issue duplicate closure survives Codekeeper's own marker-comment update", async () => {
+test("issue duplicate closure accepts owned comments and rejects post-inventory user comments", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-marker-hardening-"));
   const configSha256 = "a".repeat(64);
   const issueConfig = structuredClone(config);
@@ -141,6 +141,8 @@ test("issue duplicate closure survives Codekeeper's own marker-comment update", 
   let updatedAt = context.issue.updatedAt;
   let labels = [];
   let comments = [];
+  let injectPostInventoryComment = false;
+  let duplicateInventoryAccepted = false;
   const calls = [];
   const issue = () => ({
     number: 7,
@@ -155,9 +157,22 @@ test("issue duplicate closure survives Codekeeper's own marker-comment update", 
   const restoreGitHub = replaceGitHubMethods({
     async getIssue(number) {
       if (number === 9) return { number, state: "open" };
+      if (injectPostInventoryComment && duplicateInventoryAccepted) {
+        injectPostInventoryComment = false;
+        comments.push({
+          id: 72,
+          body: "One more detail from the reporter.",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          user: { id: 1, login: "reporter", type: "User" }
+        });
+      }
       return issue();
     },
-    async listIssueComments() { return structuredClone(comments); },
+    async listIssueComments() {
+      if (comments.some((comment) => comment.id === 71)) duplicateInventoryAccepted = true;
+      return structuredClone(comments);
+    },
     async ensureLabels() {},
     async replaceManagedLabels(_number, desiredLabels) {
       labels = desiredLabels.map((name) => ({ name }));
@@ -205,6 +220,25 @@ test("issue duplicate closure survives Codekeeper's own marker-comment update", 
       token: "unused"
     });
     assert.deepEqual(calls, ["marker", "duplicate-comment", "close"]);
+
+    updatedAt = context.issue.updatedAt;
+    labels = [];
+    comments = [];
+    calls.length = 0;
+    duplicateInventoryAccepted = false;
+    injectPostInventoryComment = true;
+    await assert.rejects(
+      publishIssue({
+        artifactDirectory,
+        config: issueConfig,
+        configSha256,
+        agentProfilePath: profilePaths.issue,
+        ...integrity,
+        token: "unused"
+      }),
+      /changed while Codekeeper reconciled comments/
+    );
+    assert.deepEqual(calls, ["marker", "duplicate-comment"]);
   } finally {
     restoreEnvironment();
     restoreGitHub();

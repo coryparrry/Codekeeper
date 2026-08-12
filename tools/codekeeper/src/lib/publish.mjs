@@ -752,6 +752,7 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     afterOwnedComment = await acceptOwnedCommentUpdate(afterOwnedComment, duplicateMutation, duplicateBody, commentsBeforeDuplicate);
     await currentIssue();
     await currentOpenIssue(github, duplicateContext, "duplicate assessment");
+    assertExpectedOwnedCommentInventory(commentsBeforeDuplicate, await github.listIssueComments(issue.number), duplicateMutation, duplicateBody, automationIdentity, issue.number);
     await github.updateIssue(issue.number, { state: "closed", state_reason: "not_planned" });
   }
   return { issue: issue.number, desiredLabels };
