@@ -151,12 +151,12 @@ test("the pinned runtime accepts the policy version emitted by this installer", 
     defaultBranch: "main",
     ownerLogins: ["coryparrry"]
   })).version;
-  const pinnedConfig = execFileSync("git", ["show", `${SOURCE_COMMIT}:tools/codekeeper/src/lib/config.mjs`], {
+  const pinnedValidator = execFileSync("git", ["show", `${SOURCE_COMMIT}:tools/codekeeper/src/lib/policy-validator.mjs`], {
     cwd: REPOSITORY_ROOT,
     encoding: "utf8"
   });
   assert.equal(emittedVersion, 3);
-  assert.match(pinnedConfig, /config\.version === 3/);
+  assert.match(pinnedValidator, /config\.version === 3/);
 });
 
 test("bundled provenance is byte-for-byte metadata from the pinned source release", async () => {
