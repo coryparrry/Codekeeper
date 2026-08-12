@@ -503,6 +503,13 @@ export async function replyToReviewFeedback({ github, context, result, automatio
       : feedback.disposition === "fix_if_cheap" ? "Fix if cheap"
         : "No action";
     const body = `${label}: ${sanitizeMarkdown(feedback.explanation)}\n\nValidation: ${sanitizeMarkdown(feedback.validation)}`;
+    if (commentIds.length === 0) {
+      if (!dryRun) {
+        await github.upsertMarkerComment(context.pullRequest.number, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
+      }
+      replies.push({ problemKey: feedback.problemKey, commentId: null, disposition: feedback.disposition, dryRun });
+      continue;
+    }
     for (const commentId of commentIds) {
       if (!dryRun) {
         await github.upsertReviewReply(context.pullRequest.number, commentId, reviewFeedbackReplyMarker(fingerprint), body, automationIdentity);
