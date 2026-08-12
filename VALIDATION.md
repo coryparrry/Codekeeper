@@ -9,7 +9,7 @@ cd ../../packages/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && 
 cd ../../acceptance && npm run check
 ```
 
-The maintainer `npm run check` also regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. The manifest's SHA-256 is deliberately embedded in the four source workflows: release changes to the production tooling must update the generated manifest and its four pinned workflow digests together. The installer suite covers generated assets, fixed agent-profile paths, preflight failures, secret boundaries, Git recovery, the terminal flow, and the packed entrypoint. The acceptance suite remains offline and uses only its deterministic fixture. The top-level release manifest remains a separate release-owner responsibility.
+The maintainer `npm run check` also verifies the complete source-release inventory and fails unless [`MANIFEST.sha256`](MANIFEST.sha256) exactly covers every tracked file except itself. It also regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. The tooling manifest's SHA-256 is deliberately embedded in the four source workflows: release changes to the production tooling must update the generated manifest and its four pinned workflow digests together. The installer suite covers generated assets, fixed agent-profile paths, preflight failures, secret boundaries, Git recovery, the terminal flow, and the packed entrypoint. The acceptance suite remains offline and uses only its deterministic fixture.
 
 ## Decision-quality evaluation
 

@@ -49,6 +49,11 @@ test("self-test runs for every tracked-file change", async () => {
   assert.doesNotMatch(triggers, /\n\s+paths(?:-ignore)?:/);
 });
 
+test("the standard repository check verifies the complete source-release inventory", async () => {
+  const packageJson = JSON.parse(await repositoryFile("package.json"));
+  assert.match(packageJson.scripts.check, /bash scripts\/release-source\.sh --verify/);
+});
+
 test("four generic mode workflows expose workflow_call and caller templates remain non-executable", async () => {
   const files = await readdir(workflowDirectory);
   for (const mode of modes) {
