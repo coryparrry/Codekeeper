@@ -983,11 +983,34 @@ test("a completed automatic repair consumes the pass after the pull request head
     assert.equal(crashed.automaticRepair.consumed, true);
     assert.equal(crashed.automaticRepair.eligible, false);
 
+    repairHead = "0".repeat(40);
+    const crashedRepairScope = sha256(JSON.stringify({
+      repository: context.repository, pullNumber: pull.number, headSha: repairHead
+    }));
+    extraRepairComments = [{
+      body: `<!-- codekeeper:repair-lease-active=${crashedRepairScope} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`,
+      user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+    }];
+    const crashedAfterDispatch = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(crashedAfterDispatch.automaticRepair.consumed, true);
+    assert.equal(crashedAfterDispatch.automaticRepair.eligible, false);
+    assert.equal(crashedAfterDispatch.automaticRepair.pending, false);
+
+    extraRepairComments[0].body = `<!-- codekeeper:repair-lease-active=${"a".repeat(64)} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`;
+    const unrelatedActiveLease = await publishReview({
+      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
+    });
+    assert.equal(unrelatedActiveLease.automaticRepair.consumed, false);
+    assert.equal(unrelatedActiveLease.automaticRepair.eligible, true);
+    assert.equal(unrelatedActiveLease.automaticRepair.pending, false);
+
     repairState = "Automatic repair dispatch failed.";
-    extraRepairComments = [];
     const retryable = await publishReview({
       artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
     });
+    assert.equal(retryable.automaticRepair.consumed, false);
     assert.equal(retryable.automaticRepair.eligible, true);
     assert.equal(retryable.automaticRepair.pending, false);
 

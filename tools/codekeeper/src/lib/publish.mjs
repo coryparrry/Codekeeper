@@ -18,12 +18,12 @@ function automaticRepairLeaseBody(state, scope, marker) {
   return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${marker}`;
 }
 
+function automaticRepairLeaseScope(repository, pullNumber, headSha) {
+  return sha256(JSON.stringify({ repository, pullNumber, headSha }));
+}
+
 export async function acquireAutomaticRepairLease({ github, context, pull, automationIdentity }) {
-  const scope = sha256(JSON.stringify({
-    repository: context.repository,
-    pullNumber: pull.number,
-    headSha: pull.head.sha
-  }));
+  const scope = automaticRepairLeaseScope(context.repository, pull.number, pull.head.sha);
   const fingerprint = sha256(JSON.stringify({ scope, runId: context.runId }));
   const marker = `<!-- codekeeper:repair-lease=${fingerprint} -->`;
   const activeBody = automaticRepairLeaseBody("active", scope, marker);
@@ -269,15 +269,18 @@ async function suspendAutoMerge(github, pullRequest) {
   return { pullRequest: refreshedPull, disabled: true };
 }
 
-function ownedAutomaticRepairState(comments, automationIdentity, currentHead) {
+function ownedAutomaticRepairState(comments, automationIdentity, repository, pullNumber, currentHead) {
   let consumed = false;
   let pending = false;
   let expiredLease = false;
+  const pendingScopes = new Set();
+  const activeLeaseScopes = new Set();
   for (const comment of comments) {
     const body = String(comment?.body ?? "");
-    const lease = body.match(/^<!-- codekeeper:repair-lease-(completed|ambiguous|expired)=[a-f0-9]{64} -->\n[\s\S]*?(<!-- codekeeper:repair-lease=[a-f0-9]{64} -->)$/);
-    if (lease && isOwnedMarkerComment(comment, lease[2], automationIdentity)) {
-      if (lease[1] === "expired") expiredLease = true;
+    const lease = body.match(/^<!-- codekeeper:repair-lease-(active|completed|ambiguous|expired)=([a-f0-9]{64}) -->\n[\s\S]*?(<!-- codekeeper:repair-lease=[a-f0-9]{64} -->)$/);
+    if (lease && isOwnedMarkerComment(comment, lease[3], automationIdentity)) {
+      if (lease[1] === "active") activeLeaseScopes.add(lease[2]);
+      else if (lease[1] === "expired") expiredLease = true;
       else consumed = true;
       continue;
     }
@@ -286,9 +289,13 @@ function ownedAutomaticRepairState(comments, automationIdentity, currentHead) {
     const marker = automaticRepairMarker(match[1]);
     if (!isOwnedMarkerComment(comment, marker, automationIdentity)) continue;
     if (/^(Automatic repair was dispatched|Automatic repair dispatch is ambiguous)/.test(body)) consumed = true;
-    if (body.startsWith("Automatic repair dispatch is pending") && match[1].toLowerCase() === currentHead.toLowerCase()) pending = true;
+    if (body.startsWith("Automatic repair dispatch is pending")) {
+      pendingScopes.add(automaticRepairLeaseScope(repository, pullNumber, match[1]));
+      if (match[1].toLowerCase() === currentHead.toLowerCase()) pending = true;
+    }
   }
-  return { consumed: consumed || (expiredLease && pending), pending };
+  const unresolvedActiveLease = [...pendingScopes].some((scope) => activeLeaseScopes.has(scope));
+  return { consumed: consumed || unresolvedActiveLease || (expiredLease && pending), pending };
 }
 
 async function disableFailedAutoMergePostcondition(github, pullRequest, cause) {
@@ -375,6 +382,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     repairState = ownedAutomaticRepairState(
       await github.listIssueComments(pull.number),
       expectedAutomationIdentity(),
+      context.repository,
+      pull.number,
       pull.head.sha
     );
   }

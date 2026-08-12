@@ -103,7 +103,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "73d572756ff1a25aa028d6e8ca20fa3b4a4c65bd5d7454b8870508c5ba70e1e7"
+      "sha256": "387f5b50b825b9ea11f2333533ea54156ac39ec0f05e045bcaddd94224b977c3"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",
