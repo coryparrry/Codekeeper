@@ -74,6 +74,9 @@ test("one settings object keeps coordinator and workspace models independent", a
   const boundedSchedule = structuredClone(edited);
   boundedSchedule.policy.automation.maintenanceSchedule = "*/15 0-23/2 1,15 * 1-5";
   validateEditableSettings(boundedSchedule, policy);
+  const namedSchedule = structuredClone(edited);
+  namedSchedule.policy.automation.maintenanceSchedule = "*/15 0-23/2 1,15 JAN-DEC MON-FRI";
+  validateEditableSettings(namedSchedule, policy);
 });
 
 test("changing a provider selects a compatible default model", async () => {

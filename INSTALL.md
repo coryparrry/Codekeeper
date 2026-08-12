@@ -123,7 +123,7 @@ Only a GitHub login listed in `repository.ownerLogins` can request manual issue 
 /codekeeper triage
 ```
 
-On a pull request review thread, `/codekeeper defer` asks the assistant to verify the claim and create or update one fingerprinted deferred issue. It replies with the issue link and lets normal issue triage apply priority, risk, readiness, testing, duplicate, and manual-review labels. Unverified, stale, duplicate, preference-only, and false-positive comments are rejected on the pull request instead of becoming issues.
+On a pull request review thread, `/codekeeper defer` is an unconditional owner-authorized deferral. It must reply to the review comment that should become an issue; it does not ask the reviewer or model to verify the claim first. The assistant creates or updates one fingerprinted deferred issue, replies with its link, and lets normal issue triage apply priority, risk, readiness, testing, duplicate, and manual-review labels.
 
 When `issues.allowAiImplementation=true`, trusted triage adds `codekeeper:ready` only to a clear, bounded, testable issue. That label starts the issue implementation workflow, which may open one bounded repair pull request.
 

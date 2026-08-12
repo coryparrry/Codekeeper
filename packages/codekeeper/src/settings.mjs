@@ -18,7 +18,15 @@ const CAPS = Object.freeze({
   "merge.maximumFiles": [1, 50],
   "merge.maximumChangedLines": [1, 5_000]
 });
-const CRON_RANGES = Object.freeze([[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]]);
+const CRON_MONTHS = new Map([["JAN", 1], ["FEB", 2], ["MAR", 3], ["APR", 4], ["MAY", 5], ["JUN", 6], ["JUL", 7], ["AUG", 8], ["SEP", 9], ["OCT", 10], ["NOV", 11], ["DEC", 12]]);
+const CRON_WEEKDAYS = new Map([["SUN", 0], ["MON", 1], ["TUE", 2], ["WED", 3], ["THU", 4], ["FRI", 5], ["SAT", 6]]);
+const CRON_FIELDS = Object.freeze([
+  Object.freeze({ minimum: 0, maximum: 59 }),
+  Object.freeze({ minimum: 0, maximum: 23 }),
+  Object.freeze({ minimum: 1, maximum: 31 }),
+  Object.freeze({ minimum: 1, maximum: 12, names: CRON_MONTHS }),
+  Object.freeze({ minimum: 0, maximum: 6, names: CRON_WEEKDAYS })
+]);
 const REQUIRED_RUNTIME_LABELS = Object.freeze([
   "codekeeper:reviewed", "codekeeper:maintenance", "codekeeper:ready", "codekeeper:blocked",
   "codekeeper:manual-review", "codekeeper:paused", "codekeeper:auto-repaired", "codekeeper:auto-merge",
@@ -269,29 +277,42 @@ function validateJson(value, name, depth = 0) {
   }
 }
 
-function validCronField(field, minimum, maximum) {
-  const span = maximum - minimum + 1;
-  return field.split(",").every((part) => {
-    const [base, step, extra] = part.split("/");
-    if (!base || extra !== undefined) return false;
-    if (step !== undefined && (!/^\d+$/.test(step) || Number(step) < 1 || Number(step) > span)) return false;
-    if (base === "*") return true;
-    const [start, end, extraRange] = base.split("-");
-    if (!/^\d+$/.test(start) || extraRange !== undefined) return false;
-    const startValue = Number(start);
-    if (startValue < minimum || startValue > maximum) return false;
-    if (end === undefined) return true;
-    if (!/^\d+$/.test(end)) return false;
-    const endValue = Number(end);
-    return endValue >= startValue && endValue <= maximum;
+function cronValue(value, field) {
+  const named = field.names?.get(value.toUpperCase());
+  if (named !== undefined) return named;
+  if (!/^\d+$/.test(value)) return null;
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric >= field.minimum && numeric <= field.maximum ? numeric : null;
+}
+
+function validCronBase(value, field) {
+  if (value === "*") return true;
+  const range = value.split("-");
+  if (range.length === 1) return cronValue(range[0], field) !== null;
+  if (range.length !== 2) return false;
+  const start = cronValue(range[0], field);
+  const end = cronValue(range[1], field);
+  return start !== null && end !== null && start <= end;
+}
+
+function validCronField(value, field) {
+  if (!value || value.startsWith(",") || value.endsWith(",")) return false;
+  return value.split(",").every((entry) => {
+    const parts = entry.split("/");
+    if (parts.length > 2 || !validCronBase(parts[0], field)) return false;
+    if (parts.length === 1) return true;
+    const step = Number(parts[1]);
+    return /^\d+$/.test(parts[1])
+      && Number.isSafeInteger(step)
+      && step > 0
+      && step <= field.maximum - field.minimum + 1;
   });
 }
 
 function validMaintenanceSchedule(value) {
-  if (/[^\d\s*,\/-]/.test(value)) return false;
-  const fields = value.split(/\s+/);
-  return fields.length === CRON_RANGES.length
-    && fields.every((field, index) => validCronField(field, ...CRON_RANGES[index]));
+  const fields = value.trim().split(/\s+/);
+  return fields.length === CRON_FIELDS.length
+    && fields.every((field, index) => validCronField(field, CRON_FIELDS[index]));
 }
 
 export function validateEditableSettings(settings, baselinePolicy) {

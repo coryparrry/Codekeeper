@@ -97,7 +97,7 @@ The currently pinned earlier installer checkpoint does not gain this behavior me
 Reusable workflow callers expose explicit controls alongside `enabled`:
 
 - `auto_review` defaults to `true` and permits eligible pull-request events to run the review workflow. Setting it to `false` skips automatic review; the supplied required review gate then fails closed.
-- `auto_review_feedback` defaults to `true` and permits review and review-comment events to inventory and triage the complete current review surface.
+- `feedback_triage` defaults to `true` and permits review and review-comment events to inventory and triage the complete current review surface.
 - `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/codekeeper triage` comments from configured owners remain available.
 - `dry_run=true` makes maintenance report-only. A live run can repair only when `audit.repair.enabled=true` and every patch limit passes.
 
@@ -105,7 +105,7 @@ Reusable workflow callers expose explicit controls alongside `enabled`:
 
 Configured owners can use `/codekeeper status`, `/codekeeper review`, `/codekeeper rerun`, `/codekeeper triage`, `/codekeeper defer`, `/codekeeper implement`, `/codekeeper fix`, and `/codekeeper stop`. Slash commands must be the complete comment. The always-installed assistant caller also accepts the exact mention form `@<app-slug> <action>` for one supported action. It ignores extra prose and ambiguous actions; non-owner content cannot authorize writes.
 
-Verified `defer` results create or update one issue using a hidden root-cause fingerprint, add `codekeeper:deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue. Deferred and ignored threads are not automatically resolved.
+Automated feedback-triage `defer` results create or update one issue using a hidden root-cause fingerprint, add `codekeeper:deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue through that automated path. A direct owner `/codekeeper defer` reply is an unconditional owner-authorized deferral and does not ask the reviewer or model to verify the claim. Deferred and ignored threads are not automatically resolved.
 
 Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
 

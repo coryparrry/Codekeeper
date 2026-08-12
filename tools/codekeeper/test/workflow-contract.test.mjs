@@ -498,6 +498,15 @@ test("owner-commanded pull request repair can update only the frozen existing he
   assert.doesNotMatch(publisher, /createPull|createBranchAndCommit|pushBranch|enableAutoMerge|updateIssue|deleteBranch/);
 });
 
+test("documentation uses the live feedback input and owner-authorized defer contract", async () => {
+  const configuration = await repositoryFile("docs/CONFIGURATION.md");
+  const install = await repositoryFile("INSTALL.md");
+  assert.match(configuration, /`feedback_triage` defaults to `true`/);
+  assert.doesNotMatch(configuration, /auto_review_feedback/);
+  assert.match(install, /owner-authorized deferral/i);
+  assert.doesNotMatch(install, /asks the assistant to verify the claim/);
+});
+
 test("Fixer repository dispatches retain their target and explicit policy authorization", async () => {
   const fix = await workflow("fix");
   const analyze = jobSection(fix, "analyze", "verify");
