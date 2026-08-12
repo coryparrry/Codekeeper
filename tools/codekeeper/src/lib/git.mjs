@@ -1,16 +1,14 @@
-import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { copyFile, lstat, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { superviseProcess } from "./process-supervisor.mjs";
 
 const MAX_CAPTURE_FILE_BYTES = 1024 * 1024;
 const MAX_CAPTURE_PATCH_BYTES = 5 * 1024 * 1024;
 const CAPTURE_GIT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_VALIDATION_TIMEOUT_MS = 5 * 60 * 1000;
-const VALIDATION_KILL_GRACE_MS = 100;
-const MAX_VALIDATION_OUTPUT_BYTES = 12000;
 const VALIDATION_ENVIRONMENT_KEYS = Object.freeze([
   "PATH", "Path", "PATHEXT", "HOME", "TMPDIR", "TMP", "TEMP",
   "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "CI",
@@ -353,170 +351,6 @@ export function applyPatch(patchPath, cwd = process.cwd()) {
   git(["apply", "--whitespace=error-all", patchPath], { cwd });
 }
 
-function appendOutputTail(current, chunk) {
-  const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-  if (bytes.length >= MAX_VALIDATION_OUTPUT_BYTES) {
-    return Buffer.from(bytes.subarray(-MAX_VALIDATION_OUTPUT_BYTES));
-  }
-  const retained = current.subarray(Math.max(0, current.length + bytes.length - MAX_VALIDATION_OUTPUT_BYTES));
-  return Buffer.concat([retained, bytes]);
-}
-
-function validationDescendantProcessIds(rootPid, runId) {
-  if (process.platform === "win32" || !rootPid) return [];
-  let result = spawnSync("ps", ["e", "-ww", "-Ao", "pid=,ppid=,command="], {
-    encoding: "utf8",
-    timeout: VALIDATION_KILL_GRACE_MS,
-    maxBuffer: 1024 * 1024
-  });
-  if (result.error || result.status !== 0) {
-    result = spawnSync("ps", ["-Ao", "pid=,ppid="], {
-      encoding: "utf8",
-      timeout: VALIDATION_KILL_GRACE_MS,
-      maxBuffer: 1024 * 1024
-    });
-  }
-  if (result.error || result.status !== 0) return [];
-  const children = new Map();
-  const marked = [];
-  for (const line of result.stdout.split("\n")) {
-    const match = line.trim().match(/^(\d+)\s+(\d+)(?:\s+(.*))?$/);
-    if (!match) continue;
-    const pid = Number(match[1]);
-    const parentPid = Number(match[2]);
-    if (runId && match[3]?.includes(`CODEKEEPER_VALIDATION_RUN_ID=${runId}`)) marked.push(pid);
-    const siblings = children.get(parentPid) ?? [];
-    siblings.push(pid);
-    children.set(parentPid, siblings);
-  }
-  const descendants = [];
-  const pending = [...(children.get(rootPid) ?? [])];
-  while (pending.length > 0) {
-    const pid = pending.pop();
-    descendants.push(pid);
-    pending.push(...(children.get(pid) ?? []));
-  }
-  return [...new Set([...descendants.reverse(), ...marked])]
-    .filter((pid) => pid !== rootPid && pid !== process.pid);
-}
-
-function signalValidationProcess(child, descendants, signal, launcherExited = false) {
-  const processIds = [...descendants];
-  if (!launcherExited) {
-    try {
-      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
-      else child.kill(signal);
-    } catch (error) {
-      if (error.code !== "ESRCH" && error.code !== "EPERM") {
-        throw new Error(`Could not signal validation process group ${child.pid}: ${error.message}`, { cause: error });
-      }
-      if (child.pid) processIds.push(child.pid);
-    }
-  }
-  for (const pid of new Set(processIds)) {
-    try {
-      process.kill(pid, signal);
-    } catch (error) {
-      if (error.code !== "ESRCH") throw new Error(`Could not signal validation descendant ${pid}: ${error.message}`, { cause: error });
-    }
-  }
-}
-
-function runValidationProcess(command, { cwd, environment, timeoutMs }) {
-  return new Promise((resolve, reject) => {
-    const detached = process.platform !== "win32";
-    const runId = randomUUID();
-    const child = spawn("bash", ["-c", command], {
-      cwd,
-      env: { ...environment, CODEKEEPER_VALIDATION_RUN_ID: runId },
-      detached,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    let stdout = Buffer.alloc(0);
-    let stderr = Buffer.alloc(0);
-    let timedOut = false;
-    let descendants = [];
-    let exitStatus = null;
-    let exitSignal = null;
-    let launcherExited = false;
-    let settled = false;
-    let killTimer;
-    const settle = (callback) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutTimer);
-      clearTimeout(killTimer);
-      callback();
-    };
-    const timeoutTimer = setTimeout(() => {
-      timedOut = true;
-      try {
-        descendants = validationDescendantProcessIds(child.pid, runId);
-        signalValidationProcess(child, descendants, "SIGTERM", launcherExited);
-        killTimer = setTimeout(() => {
-          try {
-            descendants = [...new Set([...descendants, ...validationDescendantProcessIds(child.pid, runId)])];
-            signalValidationProcess(child, descendants, "SIGKILL", launcherExited);
-            child.stdout.destroy();
-            child.stderr.destroy();
-            settle(() => resolve({ status: exitStatus, signal: exitSignal, stdout, stderr, timedOut }));
-          } catch (error) {
-            settle(() => reject(error));
-          }
-        }, VALIDATION_KILL_GRACE_MS);
-      } catch (error) {
-        settle(() => reject(error));
-      }
-    }, timeoutMs);
-    const settleAfterSuccessfulDescendantCleanup = (status, signal) => {
-      if (settled || timedOut || killTimer) return;
-      clearTimeout(timeoutTimer);
-      try {
-        descendants = validationDescendantProcessIds(child.pid, runId);
-        if (descendants.length === 0) {
-          settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
-          return;
-        }
-        signalValidationProcess(child, descendants, "SIGTERM", true);
-        killTimer = setTimeout(() => {
-          try {
-            descendants = [...new Set([...descendants, ...validationDescendantProcessIds(child.pid, runId)])];
-            signalValidationProcess(child, descendants, "SIGKILL", true);
-            settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
-          } catch (error) {
-            settle(() => reject(error));
-          }
-        }, VALIDATION_KILL_GRACE_MS);
-      } catch (error) {
-        settle(() => reject(error));
-      }
-    };
-    child.stdout.on("data", (chunk) => { stdout = appendOutputTail(stdout, chunk); });
-    child.stderr.on("data", (chunk) => { stderr = appendOutputTail(stderr, chunk); });
-    child.once("error", (error) => {
-      settle(() => reject(error));
-    });
-    child.once("exit", (status, signal) => {
-      launcherExited = true;
-      exitStatus = status;
-      exitSignal = signal;
-      if (!timedOut) return;
-      child.stdout.destroy();
-      child.stderr.destroy();
-      if (killTimer) return;
-      settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
-    });
-    child.once("close", (status, signal) => {
-      if (timedOut && killTimer) return;
-      if (!timedOut) {
-        settleAfterSuccessfulDescendantCleanup(status, signal);
-        return;
-      }
-      settle(() => resolve({ status, signal, stdout, stderr, timedOut }));
-    });
-  });
-}
-
 export async function runValidationCommands(
   commands,
   cwd = process.cwd(),
@@ -532,7 +366,7 @@ export async function runValidationCommands(
   for (const command of commands) {
     let result;
     try {
-      result = await runValidationProcess(command, { cwd, environment, timeoutMs });
+      result = await superviseProcess("bash", ["-c", command], { cwd, environment, timeoutMs });
     } catch (error) {
       const failure = new Error(`Validation command could not run: ${command}: ${error.message}`);
       failure.validationResults = results;
