@@ -446,6 +446,42 @@ test("ignored and repairable inline feedback receive idempotent replies without 
   assert.match(replies[1].body, /^Fix now:/);
 });
 
+test("reclassified review-body feedback updates its PR-level deferred reply", async () => {
+  const comments = [];
+  const context = {
+    repository: "owner/repository",
+    pullRequest: {
+      number: 7,
+      reviewFeedback: [
+        { sourceKey: "review:99", kind: "review", author: "reviewer" }
+      ]
+    }
+  };
+  const result = { reviewFeedback: [{
+    problemKey: "review-body-follow-up",
+    disposition: "fix_now",
+    explanation: "The current review-body finding is valid.",
+    validation: "A regression test now covers it.",
+    sourceKeys: ["review:99"]
+  }] };
+
+  const published = await replyToReviewFeedback({
+    github: {
+      async upsertMarkerComment(number, marker, body) {
+        comments.push({ number, marker, body });
+      }
+    },
+    context,
+    result,
+    automationIdentity: identity
+  });
+
+  assert.equal(comments.length, 1);
+  assert.match(comments[0].body, /^Fix now:/);
+  assert.equal(published[0].commentId, null);
+  assert.equal(published[0].disposition, "fix_now");
+});
+
 test("review publication rejects feedback that changed after preparation", async () => {
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-stale-feedback-test-"));
   const configSha256 = "f".repeat(64);

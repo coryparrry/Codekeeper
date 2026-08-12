@@ -97,7 +97,7 @@ test("one settings object keeps coordinator and workspace models independent", a
 });
 
 test("changing a provider selects a compatible default model", async () => {
-  const { settings } = await fixture(["review"]);
+  const { policy, settings } = await fixture(["review"]);
   const provider = row(settings, "policy:ai.agents.review.provider");
 
   const deepseek = setSetting(settings, provider, "deepseek");
@@ -106,17 +106,31 @@ test("changing a provider selects a compatible default model", async () => {
   const openrouter = setSetting(settings, provider, "openrouter");
   assert.equal(openrouter.policy.ai.agents.review.model, "openai/gpt-5.6-sol");
 
-  const customSettings = structuredClone(settings);
-  customSettings.policy.ai.providers.custom = {
+  const customProviderDefinition = {
     baseUrl: "https://models.example/v1",
     apiKeySecret: "CUSTOM_API_KEY",
     supportsReasoningEffort: false
   };
+  policy.ai.providers.custom = structuredClone(customProviderDefinition);
+  const customSettings = structuredClone(settings);
+  customSettings.policy.ai.providers.custom = structuredClone(customProviderDefinition);
   const customProvider = row(customSettings, "policy:ai.agents.review.provider");
+  assert.deepEqual(customProvider.choices, ["openai", "deepseek", "openrouter"]);
   const currentModel = customSettings.policy.ai.agents.review.model;
   const custom = setSetting(customSettings, customProvider, "custom");
   assert.equal(custom.policy.ai.agents.review.model, currentModel);
   assert.equal(custom.policy.ai.agents.review.effort, "none");
+  assert.throws(() => validateEditableSettings(custom, policy), /installable provider/);
+});
+
+test("settings preserve runtime-valid empty model-setting strings", async () => {
+  const { policy, settings } = await fixture(["review"]);
+  settings.policy.ai.agents.review.modelSettings = {
+    providerData: { optional: "" }
+  };
+
+  validateEditableSettings(settings, policy);
+  assert.equal(settings.policy.ai.agents.review.modelSettings.providerData.optional, "");
 });
 
 test("settings reject runtime-incompatible model settings and managed-label removal", async () => {

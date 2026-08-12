@@ -1,4 +1,4 @@
-import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODEL_OPTIONS, MODES, SOURCE_COMMIT, SOURCE_REPOSITORY } from "./constants.mjs";
+import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODEL_OPTIONS, MODEL_PROVIDER_SECRETS, MODES, SOURCE_COMMIT, SOURCE_REPOSITORY } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 
 const AGENT_IDS = Object.freeze(["review", "audit", "issue", "fix"]);
@@ -99,7 +99,9 @@ function readOnlyPolicyPath(path) {
 }
 
 function enumChoices(path, policy) {
-  if (/^ai\.agents\.[^.]+\.provider$/.test(path)) return Object.keys(policy.ai.providers);
+  if (/^ai\.agents\.[^.]+\.provider$/.test(path)) {
+    return Object.keys(MODEL_PROVIDER_SECRETS).filter((provider) => policy.ai.providers[provider]);
+  }
   if (/^ai\.agents\.[^.]+\.(?:workspace\.)?effort$/.test(path)) return EFFORTS;
   if (path === "merge.method") return ["MERGE", "SQUASH", "REBASE"];
   return null;
@@ -271,7 +273,10 @@ function stringList(value, name, maximumEntries = 128, maximumLength = 16_384) {
 function validateJson(value, name, depth = 0) {
   if (depth > 20) throw new InstallerError(`${name} is nested too deeply.`, { code: "SETTING_INVALID" });
   if (value === null || typeof value === "boolean") return;
-  if (typeof value === "string") return requiredString(value, name);
+  if (typeof value === "string") {
+    if (value.length > 16_384) throw new InstallerError(`${name} is invalid.`, { code: "SETTING_INVALID" });
+    return;
+  }
   if (typeof value === "number") {
     if (!Number.isFinite(value) || Math.abs(value) > 1_000_000) throw new InstallerError(`${name} contains an invalid number.`, { code: "SETTING_INVALID" });
     return;
@@ -359,7 +364,9 @@ export function validateEditableSettings(settings, baselinePolicy) {
   }
   for (const agentId of AGENT_IDS) {
     const agent = policy.ai.agents[agentId];
-    if (!policy.ai.providers[agent.provider]) throw new InstallerError(`${agentId} references an unknown provider.`, { code: "SETTING_INVALID" });
+    if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, agent.provider) || !policy.ai.providers[agent.provider]) {
+      throw new InstallerError(`${agentId} must use an installable provider.`, { code: "SETTING_INVALID" });
+    }
     modelId(agent.model, `${agentId} model`);
     if (!EFFORTS.includes(agent.effort) || (agent.effort !== "none" && !policy.ai.providers[agent.provider].supportsReasoningEffort)) {
       throw new InstallerError(`${agentId} effort is incompatible with its provider.`, { code: "SETTING_INVALID" });
