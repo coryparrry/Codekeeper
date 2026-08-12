@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "51377b2cc48f2dcc7591c3891a57f10b233af6bc02a4bdc1e13ca1387b72ffd4";
+const toolingManifestSha256 = "4b2d6f1b50352356c838c80440d45fd655cda78d667e5025c6090ae7c774c44c";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -406,15 +406,17 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
     /feedback_triage[\s\S]*github\.actor != inputs\.automation_bot_login/
   );
   assert.match(
-    jobSection(source, "workspace", "analyze"),
-    /!\(github\.event_name == 'pull_request_review_comment' &&\s+startsWith\(github\.event\.comment\.body, '\/codekeeper '\)\)/
-  );
-  assert.match(
     publisher,
     /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*authorization_mode: "policy"/
   );
   assert.doesNotMatch(jobSection(source, "workspace", "analyze"), /inputs\.auto_review &&\s*\(\(github\.event_name/);
   assert.match(gate, /IS_COMMAND_REVIEW/);
+  assert.match(gate, /IS_OWNER_COMMAND_REVIEW/);
+  assert.match(gate, /Owner review command is intentionally routed by the repository assistant/);
+  assert.match(
+    jobSection(source, "workspace", "analyze"),
+    /contains\(fromJSON\('\["\/codekeeper status"[\s\S]*"\/codekeeper stop"\]'\), github\.event\.comment\.body\)/
+  );
   assert.match(gate, /Codekeeper-authored review feedback is intentionally ignored/);
   assert.match(caller, /auto_review: true/);
   assert.match(caller, /feedback_triage: true/);

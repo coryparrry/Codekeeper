@@ -230,6 +230,27 @@ test("feedback-triggered review preparation freezes the complete current review 
       "review:7"
     ]);
     assert.equal(context.pullRequest.reviewFeedback[0].threadId, "PRRT_thread");
+
+    const config = structuredClone(templateConfig);
+    config.ai.agents.review.workspace.enabled = false;
+    config.ai.tracing.enabled = false;
+    const resultPath = bundle(root, "review-feedback-result.json");
+    const metadata = await runAgentFromBundle({
+      mode: "review",
+      directory: bundle(root, "review-feedback"),
+      config,
+      resultPath,
+      apiKey: "",
+      sdkLoader: async () => { throw new Error("provider must not load"); }
+    });
+    assert.equal(metadata.provider, "deterministic");
+    const result = JSON.parse(await readFile(resultPath, "utf8"));
+    assert.deepEqual(result.reviewFeedback.flatMap((item) => item.sourceKeys), [
+      "review_comment:41",
+      "review_comment:42",
+      "review:7"
+    ]);
+    assert.ok(result.reviewFeedback.every((item) => item.disposition === "ignore"));
   } finally {
     globalThis.fetch = originalFetch;
     if (originalAutomationLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;

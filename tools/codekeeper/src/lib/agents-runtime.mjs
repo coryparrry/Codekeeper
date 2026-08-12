@@ -602,7 +602,15 @@ function deterministicNoWorkspaceResult(mode, context) {
       labels: [],
       blockingFindings: [],
       nonBlockingFindings: [],
-      reviewFeedback: [],
+      reviewFeedback: (context.pullRequest?.reviewFeedback ?? []).map((feedback, index) => ({
+        problemKey: `workspace-disabled-feedback-${index + 1}`,
+        disposition: "ignore",
+        type: "maintenance",
+        explanation: "The optional workspace specialist is disabled, so Codekeeper did not evaluate this feedback.",
+        validation: "No workspace evidence was available; the feedback remains unresolved for maintainer review.",
+        sourceKeys: [feedback.sourceKey],
+        threadIds: feedback.threadId ? [feedback.threadId] : []
+      })),
       tests: { adequate: false, notes: "Test adequacy cannot be established without workspace evidence." },
       diagram: null,
       mergeRecommendation: "manual",

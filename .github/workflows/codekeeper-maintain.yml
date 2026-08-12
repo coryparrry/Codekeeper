@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 51377b2cc48f2dcc7591c3891a57f10b233af6bc02a4bdc1e13ca1387b72ffd4
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 4b2d6f1b50352356c838c80440d45fd655cda78d667e5025c6090ae7c774c44c
 
 concurrency:
   group: codekeeper-maintenance-${{ github.repository }}

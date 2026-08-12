@@ -51,7 +51,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 51377b2cc48f2dcc7591c3891a57f10b233af6bc02a4bdc1e13ca1387b72ffd4
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 4b2d6f1b50352356c838c80440d45fd655cda78d667e5025c6090ae7c774c44c
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
@@ -69,7 +69,10 @@ jobs:
          (inputs.feedback_triage &&
           github.actor != inputs.automation_bot_login &&
           !(github.event_name == 'pull_request_review_comment' &&
-            startsWith(github.event.comment.body, '/codekeeper ')) &&
+            (github.event.comment.author_association == 'OWNER' ||
+             github.event.comment.author_association == 'MEMBER' ||
+             github.event.comment.author_association == 'COLLABORATOR') &&
+            contains(fromJSON('["/codekeeper status","/codekeeper review","/codekeeper rerun","/codekeeper triage","/codekeeper defer","/codekeeper implement","/codekeeper fix","/codekeeper stop"]'), github.event.comment.body)) &&
           (github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment'))) &&
         !github.event.pull_request.draft &&
         github.event.pull_request.head.repo.full_name == github.repository &&
@@ -617,6 +620,7 @@ jobs:
           AUTO_REVIEW_FEEDBACK: ${{ inputs.feedback_triage }}
           IS_REVIEW_FEEDBACK: ${{ github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment' || (github.event_name == 'repository_dispatch' && github.event.client_payload.review_feedback) }}
           IS_COMMAND_REVIEW: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review' }}
+          IS_OWNER_COMMAND_REVIEW: ${{ github.event_name == 'pull_request_review_comment' && (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR') && contains(fromJSON('["/codekeeper status","/codekeeper review","/codekeeper rerun","/codekeeper triage","/codekeeper defer","/codekeeper implement","/codekeeper fix","/codekeeper stop"]'), github.event.comment.body) }}
           IS_DRAFT: ${{ github.event.pull_request.draft || github.event.client_payload.draft }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.event.client_payload.head_repository }}
           REPOSITORY: ${{ github.repository }}
@@ -630,6 +634,10 @@ jobs:
         run: |
           [[ "$IS_REVIEW_FEEDBACK" == "true" && -n "$AUTOMATION_BOT_LOGIN" && "$ACTOR" == "$AUTOMATION_BOT_LOGIN" ]] && {
             echo "Codekeeper-authored review feedback is intentionally ignored."
+            exit 0
+          }
+          [[ "$IS_OWNER_COMMAND_REVIEW" == "true" ]] && {
+            echo "Owner review command is intentionally routed by the repository assistant."
             exit 0
           }
           [[ "$ENABLED" == "true" ]] || { echo "Codekeeper is disabled; this required gate fails closed."; exit 1; }
