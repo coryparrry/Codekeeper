@@ -206,6 +206,11 @@ test("settings require each enabled capability to have its executing workflow", 
     () => validateEditableSettings(automaticMergeWithoutReview, policy),
     /Automatic merge requires the Review workflow.*repair workflow/
   );
+
+  const omittedModelSettings = structuredClone(settings);
+  delete omittedModelSettings.policy.ai.agents.review.modelSettings;
+  validateEditableSettings(omittedModelSettings, policy);
+  assert.deepEqual(omittedModelSettings.policy.ai.agents.review.modelSettings, {});
 });
 
 test("fresh settings can enable capabilities after bundled defaults are verified", async () => {
