@@ -158,7 +158,7 @@ function boundedRepairComments(comments, config, { actor, authorizationMode }) {
     }));
 }
 
-async function completeReviewFeedback(github, pullNumber) {
+export async function completeReviewFeedback(github, pullNumber) {
   const [reviews, threads] = await Promise.all([
     github.listPullReviews(pullNumber, 129),
     github.listPullReviewThreads(pullNumber, 129)

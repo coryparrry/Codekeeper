@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "7a4889489d2cd26b425c6ab2b8759cef00fd15de949167372a3cdc4e8c7b57f7";
+const toolingManifestSha256 = "a0ab3d93d335decac3b82eb07793c3d4f5f0ec4961720a8e973efa9c11c20b13";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
