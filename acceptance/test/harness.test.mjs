@@ -421,6 +421,15 @@ test("source pin parser requires exact matching bootstrap and reusable workflow 
   assert.equal(parsePinnedWorkflowUses(exact, workflow, SHA), true);
   assert.equal(parsePinnedWorkflowUses(quoted, workflow, SHA), true);
   assert.equal(parsePinnedWorkflowUses(`# - uses: ${bootstrap}\n# uses: ${reusable}\n${exact}`, workflow, SHA), true);
+  assert.equal(parsePinnedWorkflowUses(exact.replace(
+    `- uses: ${bootstrap}`,
+    `- name: Route review feedback\n        run: |\n          const fake = "uses: owner/other@main";\n          process.stdout.write(fake);\n      - uses: ${bootstrap}`
+  ), workflow, SHA), true);
+  assert.equal(parsePinnedWorkflowUses(callerSource("codekeeper-review.yml", {
+    bootstrapJobIf: "needs.intent.outputs.route == 'true'",
+    reusableJobIf: "needs.intent.outputs.route == 'true' && needs.bootstrap.result == 'success'",
+    reusableNeeds: "[intent, bootstrap]"
+  }).replace("  bootstrap:\n", "  bootstrap:\n    needs: intent\n"), "codekeeper-review.yml", SHA), true);
 
   for (const source of [
     exact.replace(`- uses: ${bootstrap}`, `# - uses: ${bootstrap}`),
@@ -448,7 +457,7 @@ test("source pin parser requires exact matching bootstrap and reusable workflow 
     `${exact}  bootstrap:\n    uses: ${bootstrap}`,
     exact.replace(`- uses: ${bootstrap}`, `- uses: ${bootstrap}\n        if: always()`),
     exact.replace(`- uses: ${bootstrap}`, `- name: bootstrap\n        with:\n          uses: ${bootstrap}`),
-    `${exact}notes: |\n  - uses: ${bootstrap}\n  uses: ${reusable}`,
+    `notes: |\n  - uses: ${bootstrap}\n  uses: ${reusable}`,
     `jobs:\n  note: ${reusable}`
   ]) {
     assert.throws(() => parsePinnedWorkflowUses(source, "codekeeper-maintain.yml", SHA), /Caller workflow/);
@@ -521,11 +530,10 @@ test("a malformed two-pin source caller fails before a scenario can dispatch", a
   assert.equal(fake.calls.some((args) => args[0] === "workflow"), false);
 });
 
-test("block-scalar, misplaced, and gated caller pins fail before an acceptance tag can be created", async () => {
+test("misplaced and gated caller pins fail before an acceptance tag can be created", async () => {
   const bootstrap = `owner/codekeeper/tools/codekeeper@${SHA}`;
   const reusable = `owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`;
   for (const source of [
-    `${callerSource("codekeeper-maintain.yml")}notes: |\n  - uses: ${bootstrap}\n  uses: ${reusable}`,
     `${callerSource("codekeeper-maintain.yml")}  observer:\n    steps:\n      - uses: ${bootstrap}`,
     callerSource("codekeeper-maintain.yml", { bootstrapJobIf: "always()" }),
     callerSource("codekeeper-maintain.yml", { bootstrapStepIf: "always()" }),
