@@ -7,6 +7,21 @@ const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
 );
 
+test("review validator supplies a safe Mermaid fallback for legacy results", () => {
+  const result = validateReviewResult({
+    mode: "review",
+    summary: "No current defect was found.",
+    risk: "low",
+    labels: [],
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    tests: { adequate: true, notes: "Current behavior is covered." },
+    mergeRecommendation: "manual",
+    noActionReason: null
+  }, config);
+  assert.match(result.diagram, /^flowchart LR/);
+});
+
 test("review validator rejects auto recommendation with blockers", () => {
   assert.throws(
     () =>
@@ -31,6 +46,7 @@ test("review validator rejects auto recommendation with blockers", () => {
           ],
           nonBlockingFindings: [],
           tests: { adequate: false, notes: "No regression test." },
+          diagram: "flowchart LR\n  Change --> Failure",
           mergeRecommendation: "auto",
           noActionReason: null
         },
@@ -59,7 +75,7 @@ test("review validator cannot promote a stale finding to the fixer", () => {
     }],
     nonBlockingFindings: [],
     tests: { adequate: true, notes: "The current behavior is covered." },
-    diagram: null,
+    diagram: "flowchart LR\n  Change --> Review",
     mergeRecommendation: "block",
     noActionReason: null
   }, config), /current validated finding/);
@@ -212,6 +228,7 @@ test("review validator rejects a critical finding hidden as non-blocking", () =>
           line: 1
         }],
         tests: { adequate: true, notes: "Regression coverage exists." },
+        diagram: "flowchart LR\n  Change --> DataLoss",
         mergeRecommendation: "auto",
         noActionReason: null
       },
@@ -250,7 +267,7 @@ test("review feedback uses four exhaustive triage buckets and stable unique prob
       }
     ],
     tests: { adequate: true, notes: "Current behavior is covered." },
-    diagram: null,
+    diagram: "flowchart LR\n  Change --> Review",
     mergeRecommendation: "manual",
     noActionReason: null
   };

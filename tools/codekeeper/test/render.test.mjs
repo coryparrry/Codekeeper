@@ -43,7 +43,31 @@ test("review comment contains deterministic policy decision", () => {
   assert.match(markdown, /Fix now/);
   assert.match(markdown, /Defer/);
   assert.match(markdown, /Ignore/);
+  assert.doesNotMatch(markdown, /Fix if cheap/);
   assert.match(markdown, /<sub>Codekeeper workflow run: https:\/\/github\.com\/owner\/repository\/actions\/runs\/7001<\/sub>/);
+});
+
+test("normal reviews keep the original compact shape and name missing test coverage", () => {
+  const markdown = renderReviewComment(
+    {
+      summary: "No current defects found.",
+      risk: "medium",
+      tests: {
+        adequate: false,
+        notes: "No deterministic test covers PR and repository-dispatch run-name evaluation."
+      },
+      diagram: "flowchart LR\n  Change --> Review",
+      mergeRecommendation: "manual",
+      blockingFindings: [],
+      nonBlockingFindings: [],
+      reviewFeedback: []
+    },
+    { eligible: false, reasons: ["Tests are incomplete"] }
+  );
+  assert.match(markdown, /\| Tests \| \*\*Needs more coverage\*\* — see Test assessment below \|/);
+  assert.match(markdown, /### Test assessment\n\n\*\*Missing coverage:\*\* No deterministic test covers PR and repository-dispatch run-name evaluation\./);
+  assert.match(markdown, /### Change flow\n\n```mermaid\nflowchart LR/);
+  assert.doesNotMatch(markdown, /Review feedback triage|Fix now|Fix if cheap|#### Defer|#### Ignore/);
 });
 
 test("issue triage keeps trusted workflow-run evidence separate from model text", () => {

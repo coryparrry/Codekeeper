@@ -694,7 +694,7 @@ function deterministicNoWorkspaceResult(mode, context) {
         threadIds: feedback.threadId ? [feedback.threadId] : []
       })),
       tests: { adequate: false, notes: "Test adequacy cannot be established without workspace evidence." },
-      diagram: null,
+      diagram: 'flowchart LR\n  Evidence["Workspace evidence unavailable"] --> Review["Manual review required"]',
       mergeRecommendation: "manual",
       noActionReason: "Workspace review is disabled, so Codekeeper did not inspect the pull request checkout."
     };

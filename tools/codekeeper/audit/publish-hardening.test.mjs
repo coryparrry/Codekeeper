@@ -360,7 +360,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       threadIds: ["thread-1"]
     }],
     tests: { adequate: true, notes: "The failing behavior is covered." },
-    diagram: null,
+    diagram: "flowchart LR\n  Change --> Review",
     mergeRecommendation: "manual",
     noActionReason: null
   };
