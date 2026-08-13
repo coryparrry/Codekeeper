@@ -36,8 +36,13 @@ test("review comment contains deterministic policy decision", () => {
     { eligible: false, reasons: ["Swift files require manual review"] },
     "https://github.com/owner/repository/actions/runs/7001"
   );
-  assert.match(markdown, /^## Codekeeper review$/m);
-  assert.match(markdown, /Ready for a person to decide/);
+  assert.match(markdown, /^# Codekeeper review$/m);
+  assert.match(markdown, /^## What this changes$/m);
+  assert.match(markdown, /^## Merge readiness$/m);
+  assert.match(markdown, /Ready for maintainer review/);
+  assert.match(markdown, /^## Verification$/m);
+  assert.match(markdown, /^## Before merge$/m);
+  assert.match(markdown, /<summary><strong>Agent review details<\/strong><\/summary>/);
   assert.match(markdown, /Swift files require manual review/);
   assert.doesNotMatch(markdown, /```mermaid/);
   assert.match(markdown, /Fix now/);
@@ -64,8 +69,9 @@ test("ordinary reviews are friendly, compact, and name missing test coverage", (
     },
     { eligible: false, reasons: ["Tests are incomplete"] }
   );
-  assert.match(markdown, /\*\*Ready for a person to decide\*\* · Medium risk · More tests needed/);
-  assert.match(markdown, /### Tests\n\n\*\*Coverage still needed:\*\* No deterministic test covers PR and repository-dispatch run-name evaluation\./);
+  assert.match(markdown, /⚠️ \*\*Ready for maintainer review — test coverage remains\*\*/);
+  assert.match(markdown, /\| Tests \| ⚠️ Needs coverage \| No deterministic test covers PR and repository-dispatch run-name evaluation\. \|/);
+  assert.match(markdown, /- \[ \] \*\*Add the missing test coverage\*\* — No deterministic test covers PR and repository-dispatch run-name evaluation\./);
   assert.doesNotMatch(markdown, /\| Signal|```mermaid|### Blocking findings|### Non-blocking findings/);
   assert.doesNotMatch(markdown, /Review feedback triage|Fix now|Fix if cheap|#### Defer|#### Ignore/);
 });
@@ -81,7 +87,31 @@ test("a model-selected flow diagram renders only when supplied", () => {
     nonBlockingFindings: [],
     reviewFeedback: []
   }, { eligible: false, reasons: ["A person must approve the state change"] });
-  assert.match(markdown, /### How the change behaves\n\n```mermaid\nflowchart LR/);
+  assert.match(markdown, /## How this fits together\n\n```mermaid\nflowchart LR/);
+});
+
+test("blocking findings become the before-merge checklist", () => {
+  const markdown = renderReviewComment({
+    summary: "Discounted totals can now be calculated.",
+    risk: "high",
+    tests: { adequate: true, notes: "The existing total tests pass." },
+    diagram: null,
+    mergeRecommendation: "block",
+    blockingFindings: [{
+      title: "Reject a zero divisor",
+      explanation: "The calculation can divide by zero.",
+      file: "src/discount.mjs",
+      line: 18,
+      severity: "high",
+      confidence: "high"
+    }],
+    nonBlockingFindings: [],
+    reviewFeedback: []
+  }, { eligible: false, reasons: ["A blocking finding remains"] });
+  assert.match(markdown, /⛔ \*\*Changes needed before merge\*\*/);
+  assert.match(markdown, /\*\*Risk:\*\* High/);
+  assert.match(markdown, /- \[ \] \*\*Reject a zero divisor\*\* — The calculation can divide by zero\. \(`src\/discount\.mjs:18`\)/);
+  assert.doesNotMatch(markdown, /```mermaid/);
 });
 
 test("issue triage keeps trusted workflow-run evidence separate from model text", () => {
