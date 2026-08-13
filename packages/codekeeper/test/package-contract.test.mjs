@@ -5,7 +5,7 @@ import { SOURCE_COMMIT } from "../src/constants.mjs";
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
-const REVIEWED_SOURCE_CHECKPOINT = "03ebeb56a7eb6f2a64030e301bb358a7cfb52a73";
+const REVIEWED_SOURCE_CHECKPOINT = "ee791d7fdcbfb55c076c8307f9671c278eaf8e12";
 const PRODUCTION_SOURCE_PATHS = [
   "tools/codekeeper",
   ".github/workflows/codekeeper-assistant.yml",
