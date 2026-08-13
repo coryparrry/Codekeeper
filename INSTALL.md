@@ -12,6 +12,10 @@ cd /absolute/path/to/adopter-repository
 npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.2.0.tgz -- codekeeper init
 ```
 
+The tarball includes the reviewed npm shrinkwrap, so this invocation installs the exact
+dependency versions and integrity hashes reviewed in this checkout rather than resolving
+new versions that merely satisfy transitive semver ranges.
+
 The installer generates a disabled setup PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Review the generated policy, callers, and agent profiles before merging. If the installer cannot be used, the numbered steps below remain the manual fallback.
 
 The installer metadata in an older checkout may still pin a source checkpoint that predates adopter-owned profiles, owner-authorized maintenance repair, and same-PR repair. That older pin does **not** provide the behavior described below. Do not test or deploy these contracts until installer metadata names the final reviewed source checkpoint containing them; building a newer tarball does not change an older embedded pin.

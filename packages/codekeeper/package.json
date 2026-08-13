@@ -11,6 +11,7 @@
     "assets/",
     "bin/",
     "src/",
+    "npm-shrinkwrap.json",
     "LICENSE",
     "README.md"
   ],

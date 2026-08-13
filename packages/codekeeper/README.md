@@ -8,6 +8,9 @@ The package is currently **unpublished** while private acceptance is in progress
 npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper init
 ```
 
+The packed artifact includes `npm-shrinkwrap.json`; npm therefore installs the reviewed,
+integrity-locked dependency graph instead of selecting newer transitive package versions.
+
 The v1 CLI surface is:
 
 ```bash
