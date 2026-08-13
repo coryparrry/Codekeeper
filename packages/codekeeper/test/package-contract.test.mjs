@@ -5,7 +5,15 @@ import { SOURCE_COMMIT } from "../src/constants.mjs";
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
-const REVIEWED_SOURCE_CHECKPOINT = "cf9e0cabadb3bc638a42bfc21ed9db58b176ecb3";
+const REVIEWED_SOURCE_CHECKPOINT = "bf4cd4716d070978a9a5c5bb535d023d2e26d186";
+const PRODUCTION_SOURCE_PATHS = [
+  "tools/codekeeper",
+  ".github/workflows/codekeeper-assistant.yml",
+  ".github/workflows/codekeeper-fix.yml",
+  ".github/workflows/codekeeper-issues.yml",
+  ".github/workflows/codekeeper-maintain.yml",
+  ".github/workflows/codekeeper-review.yml",
+];
 
 function resolveDefaultBranchRef(repositoryRoot, defaultBranch) {
   const localRef = `refs/heads/${defaultBranch}`;
@@ -56,6 +64,22 @@ test("installer source pin is a full reviewed checkpoint reachable from the repo
   assert.equal(SOURCE_COMMIT, REVIEWED_SOURCE_CHECKPOINT);
   const defaultBranchRef = resolveDefaultBranchRef(REPOSITORY_ROOT, SOURCE_DEFAULT_BRANCH);
   git(REPOSITORY_ROOT, ["merge-base", "--is-ancestor", SOURCE_COMMIT, defaultBranchRef]);
+});
+
+test("installer source pin includes the latest production workflow checkpoint on the default branch", () => {
+  const defaultBranchRef = resolveDefaultBranchRef(REPOSITORY_ROOT, SOURCE_DEFAULT_BRANCH);
+  const latestProductionCheckpoint = git(REPOSITORY_ROOT, [
+    "rev-list",
+    "-1",
+    defaultBranchRef,
+    "--",
+    ...PRODUCTION_SOURCE_PATHS,
+  ]).trim();
+  assert.equal(
+    SOURCE_COMMIT,
+    latestProductionCheckpoint,
+    "Installer source pin is stale; publish a follow-up checkpoint update after production workflow changes land on the default branch",
+  );
 });
 
 test("source-pin ancestry accepts local and renamed-remote default-branch refs", async (t) => {
