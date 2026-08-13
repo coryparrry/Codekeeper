@@ -1,8 +1,8 @@
 export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
-export const SOURCE_REPOSITORY = "coryparrry/Codekeeper";
-export const SOURCE_COMMIT = "0d70514ccf2a352321c83420171491d8b8fc598c";
+export const SOURCE_REPOSITORY = "coryparry/Codekeeper";
+export const SOURCE_COMMIT = "8595efb833ba00ab43d8ff4501b75350b58e6891";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";

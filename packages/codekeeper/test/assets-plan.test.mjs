@@ -53,13 +53,13 @@ const EXPECTED_ASSETS = Object.freeze({
   "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
   "agents/pr-reviewer.md": "2432af8cca474962d50a764af894639716ad5ae1076bc60ae811d34e4e2a4a1f",
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
-  "policies/mixed.json": "c53612a50a6af7b3f6f00171160d333fc4ddefdcd7dbed1d925def56c53f94d7",
-  "policies/openai.json": "9c7c5665d8471f474b83380b71cbc3cc528308258029dfbcc8d3786462283501",
-  "workflows/assistant.yml": "4c02233c71945860ea792b07fe408a4b911aa13cd8b0f739d88559a25e66c545",
-  "workflows/fix.yml": "72c50767a21b45213b250d40b191548da68675442a61ceeb6ac5f9eeea7edc1d",
-  "workflows/issues.yml": "7b2fa27e495c3900ed215b930e246ce92643cca30a9749288cfc85e0702f3b11",
-  "workflows/maintain.yml": "a8c150416ff8f98b90994f7f32a708371be991d42ec095cf77a74765c2bddb31",
-  "workflows/review.yml": "aee2598e970018feff763740224e0e038da718f03b572812b60d1f70fc35af1e"
+  "policies/mixed.json": "f27e4a9672f3f17973f0b9611c25a6eb4abe66aaac86dd12cd31fc28995c89f3",
+  "policies/openai.json": "ff25fd252f894a1e90dea44650b730cd03dd534c1ce2e1df38aafb8a051c240f",
+  "workflows/assistant.yml": "bef52c224e85cb593f4d6f484d8811879197ebe797fcd79a462650eaf45ea2d7",
+  "workflows/fix.yml": "16df1467e273a6ee9e15732c6902c8b8f21c73aad53970f9744666ee10a6ee42",
+  "workflows/issues.yml": "a129b6c5d1f1264d4e2da3c433238e6a18561ea877875f6f9ff08493d49e1c17",
+  "workflows/maintain.yml": "da7b8fb26ec8b1203fa06453c89732e341d57f86747ed89cd7316b56112cf231",
+  "workflows/review.yml": "3e332340d577cb214b1d7b795b4ddfa5efaf1231bde9d341772d1ec0ef381ea2"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
@@ -357,7 +357,12 @@ test("openai preset changes only issue-triage model policy from the mixed preset
   assert.equal(openaiIssue.effort, "medium");
   assert.equal(openaiIssue.workspace.enabled, false);
   assert.equal(openaiIssue.workspace.allowWrites, false);
-  assert.deepEqual(openaiIssue.workspace, mixedIssue.workspace);
+  assert.deepEqual(openaiIssue.workspace, {
+    enabled: false,
+    allowWrites: false,
+    model: "gpt-5.6-terra",
+    effort: "medium"
+  });
 });
 
 test("each rendered workflow contains exactly the paired immutable bootstrap and reusable-workflow pins", async () => {

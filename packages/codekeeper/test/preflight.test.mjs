@@ -211,7 +211,7 @@ test("installation-file collision checks reject known, case-colliding, and disgu
   await t.test("renamed caller invoking Codekeeper fails", async (t) => {
     const root = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
-    await writeFile(path.join(root, ".github", "workflows", "automation.yml"), "jobs:\n  call:\n    uses: coryparrry/Codekeeper/.github/workflows/codekeeper-review.yml@abc\n");
+    await writeFile(path.join(root, ".github", "workflows", "automation.yml"), "jobs:\n  call:\n    uses: coryparry/Codekeeper/.github/workflows/codekeeper-review.yml@abc\n");
     await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "EXISTING_INSTALLATION"));
   });
   await t.test("unrelated workflow passes", async (t) => {

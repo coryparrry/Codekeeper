@@ -708,7 +708,7 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
       effort: "none"
     });
     assert.equal(result.models.fix.provider, "openai");
-    assert.equal(result.policy.ai.agents.issue.workspace.model, "gpt-5.6-sol");
+    assert.equal(result.policy.ai.agents.issue.workspace.model, "gpt-5.6-terra");
   });
 });
 
