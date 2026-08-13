@@ -183,6 +183,29 @@ test("reusable workflows default to GitHub runners and allow a trusted caller ov
   }
 });
 
+test("workspace workflows keep Codex privilege isolation generic and safely configurable", async () => {
+  for (const mode of modes) {
+    const source = await workflow(mode);
+    const caller = await repositoryFile(`examples/workflows/codekeeper-${mode}.yml.example`);
+    const workspace = jobSection(source, "workspace", "analyze");
+
+    assert.match(source, /codex_safety_strategy:\n\s+description: Codex privilege isolation\. Use unprivileged-user on managed runners where drop-sudo cannot be verified\.\n\s+required: false\n\s+default: drop-sudo\n\s+type: string/);
+    assert.match(caller, /^\s+codex_safety_strategy: \$\{\{ vars\.CODEKEEPER_CODEX_SAFETY_STRATEGY \|\| 'drop-sudo' \}\}$/m);
+    assert.match(workspace, /name: Validate Codex privilege isolation/);
+    assert.match(workspace, /drop-sudo\|unprivileged-user\) ;;/);
+    assert.match(workspace, /name: Prepare isolated Codex user/);
+    assert.match(workspace, /\[ "\$RUNNER_OS" = Linux \]/);
+    assert.match(workspace, /\[ "\$\(id -u "\$CODEX_USER"\)" -ne 0 \]/);
+    assert.match(workspace, /CODEX_USER: codekeeper-codex/);
+    assert.match(workspace, /safety-strategy: \$\{\{ inputs\.codex_safety_strategy \}\}/);
+    assert.match(workspace, /codex-user: codekeeper-codex/);
+    assert.match(workspace, /name: Restore runner ownership after Codex/);
+    assert.doesNotMatch(source, /(?:default|safety-strategy): (?:unsafe|read-only)/);
+    assert.doesNotMatch(source, /blacksmith/i);
+    assert.doesNotMatch(caller, /blacksmith/i);
+  }
+});
+
 test("private-action bootstrap stages only the production runtime and retains it for one day", async () => {
   const action = await repositoryFile("tools/codekeeper/action.yml");
   assert.match(action, /using: composite/);
