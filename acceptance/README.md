@@ -15,7 +15,7 @@ The harness has two GitHub-read-only commands and four explicitly acknowledged s
 
 ## Manual prerequisites
 
-Before any scenario command, a maintainer must manually prepare an existing private repository whose name begins `codekeeper-acceptance-`. Seed it from [`fixture/`](fixture), configure it as a Codekeeper adopter using the normal pinned workflow templates and policy, and configure an App, names-only variables, and secrets through the normal GitHub UI or approved operational process. The harness neither creates nor reads any of those credentials.
+Before any scenario command, a maintainer must prepare the durable private repository named `codekeeper-test-environment` or an isolated private repository whose name begins `codekeeper-acceptance-`. Seed it from [`fixture/`](fixture), configure it as a Codekeeper adopter using the normal pinned workflow templates and policy, and configure an App, names-only variables, and secrets through the normal GitHub UI or approved operational process. The harness neither creates nor reads any of those credentials.
 
 Use the fixture policy to keep fixes low-risk: set `issues.allowAiImplementation=true`; permit **exactly** `src/discount.mjs` and `test/discount.test.mjs` in `audit.repair.allowedPaths`; configure `node --test test/*.test.mjs` as the fixture validation command; keep auto-merge disabled; and retain a slash-terminated automation prefix. The harness validates those policy preconditions before dispatch and later observes the Codekeeper implementation-verification job; no workflow log or test output is captured. Keep the fixture free of prior open PRs on that automation prefix, because the harness refuses an ambiguous candidate rather than cleaning one up.
 
@@ -28,7 +28,7 @@ Store evidence outside the local checkout of that target fixture repository. The
 Read-only preflight:
 
 ```sh
-node bin/codekeeper-acceptance.mjs preflight --repo OWNER/codekeeper-acceptance-NAME
+node bin/codekeeper-acceptance.mjs preflight --repo OWNER/codekeeper-test-environment
 ```
 
 Every scenario requires its exact immutable Codekeeper source commit, an explicit acknowledgement, an existing local fixture checkout, and a fresh JSON evidence path outside that checkout:
