@@ -17,7 +17,7 @@ permissions:
 jobs:
   intent:
     name: Detect a Codekeeper owner request
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
     outputs:
       route: ${{ steps.intent.outputs.route }}
     steps:
@@ -44,7 +44,7 @@ jobs:
     needs: intent
     if: needs.intent.outputs.route == 'true'
     name: Codekeeper pinned tooling bootstrap
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
         with:
@@ -55,6 +55,7 @@ jobs:
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-assistant.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
+      runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
       owner_requests: true
       installed_modes: review,maintain,issues,fix
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}

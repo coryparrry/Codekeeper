@@ -19,7 +19,7 @@ permissions:
 jobs:
   bootstrap:
     name: Codekeeper pinned tooling bootstrap
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
         with:
@@ -29,6 +29,7 @@ jobs:
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-maintain.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
+      runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
       dry_run: ${{ inputs.dry_run || false }}
       # Optional for dry_run=true; required when dry_run=false publishes changes.
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
