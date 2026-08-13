@@ -72,7 +72,7 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.match(reviewCaller, /pull_request_review_comment:\n\s+types: \[created, edited, deleted\]/);
   assert.doesNotMatch(reviewCaller, /on:\n\s+pull_request:/);
   assert.match(reviewCaller, /pull-requests: read/);
-  assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\}"/);
+  assert.match(reviewCaller, /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\} @\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.event\.client_payload\.head_sha \}\}"/);
   assert.match(reviewCaller, /const botMention = mentionBot && new RegExp\(`\^@\$\{escapedMention\}\(\?:\\\\s\|\$\)`/);
   assert.match(reviewCaller, /const mentioned = mentionBot && new RegExp\(`\^@\$\{escapedMention\}\\\\s\+\(\$\{actions\.join\("\|"\)\}\)\$`/);
   assert.match(reviewCaller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply && !botMention/);

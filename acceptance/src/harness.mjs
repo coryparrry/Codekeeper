@@ -584,9 +584,9 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
 
 export function parseEventCallerRunName(yaml, scenario) {
   const expected = scenario === "review-introduced-defect"
-    ? 'run-name: "Codekeeper review #${{ github.event.pull_request.number }} @${{ github.event.pull_request.head.sha }}"'
+    ? 'run-name: "Codekeeper review #${{ github.event.pull_request.number || github.event.client_payload.number }} @${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}"'
     : scenario === "issue-triage-related"
-      ? 'run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"'
+      ? 'run-name: "Codekeeper issue triage #${{ github.event.issue.number || github.event.client_payload.number }}"'
       : null;
   assert(expected !== null, "Only event-driven scenarios require a caller run-name contract");
   const active = String(yaml)

@@ -1,7 +1,7 @@
 # Copy to .github/workflows/codekeeper-review.yml, then replace OWNER/REPOSITORY
 # and FULL_COMMIT_SHA with the published maintainer repository and release commit.
 name: Codekeeper review
-run-name: "Codekeeper review #${{ github.event.pull_request.number || github.event.client_payload.number }}"
+run-name: "Codekeeper review #${{ github.event.pull_request.number || github.event.client_payload.number }} @${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}"
 
 on:
   pull_request_target:
