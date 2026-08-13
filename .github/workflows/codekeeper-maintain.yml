@@ -210,6 +210,8 @@ jobs:
           [ "$(id -u "$CODEX_USER")" -ne 0 ] || { echo "The isolated Codex user cannot be root" >&2; exit 1; }
           sudo usermod -a -G "$(id -gn)" "$CODEX_USER"
           group="$(id -gn "$CODEX_USER")"
+          sudo chgrp "$group" "$(dirname "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+          sudo chmod g+rx "$(dirname "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
           sudo chown -R "$(id -un):$group" "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
           sudo chmod -R g+rwX "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
           sudo find "$REPOSITORY" "$BUNDLE" "$CODEX_HOME" -type d -exec chmod g+s {} +
