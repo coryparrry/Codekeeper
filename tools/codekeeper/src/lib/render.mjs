@@ -41,12 +41,11 @@ const FEEDBACK_LABELS = Object.freeze({
 });
 
 function feedbackTriage(feedback = []) {
-  return Object.entries(FEEDBACK_LABELS).map(([disposition, label]) => {
+  return Object.entries(FEEDBACK_LABELS).flatMap(([disposition, label]) => {
     const items = feedback.filter((item) => item.disposition === disposition);
-    const rendered = items.length
-      ? items.map((item) => `- **${safeMarkdown(item.problemKey)}** — ${safeMarkdown(item.explanation)}\n  _Validation:_ ${safeMarkdown(item.validation)}`).join("\n")
-      : "None.";
-    return `#### ${label}\n\n${rendered}`;
+    if (items.length === 0) return [];
+    const rendered = items.map((item) => `- **${safeMarkdown(item.problemKey)}** — ${safeMarkdown(item.explanation)}\n  _Validation:_ ${safeMarkdown(item.validation)}`).join("\n");
+    return [`#### ${label}\n\n${rendered}`];
   }).join("\n\n");
 }
 
@@ -61,6 +60,12 @@ export function renderReviewComment(result, autoMerge, runUrl = "") {
   const diagram = result.diagram
     ? `\n\n### Change flow\n\n\`\`\`mermaid\n${result.diagram.trim()}\n\`\`\``
     : "";
+  const triage = feedbackTriage(result.reviewFeedback);
+  const triageSection = triage ? `\n\n### Review feedback triage\n\n${triage}` : "";
+  const testStatus = result.tests.adequate ? "Adequate" : "**Needs more coverage** — see Test assessment below";
+  const testAssessment = result.tests.adequate
+    ? safeMarkdown(result.tests.notes || "No additional test note.")
+    : `**Missing coverage:** ${safeMarkdown(result.tests.notes || "The review did not identify a specific missing test.")}`;
   return `## PR review summary
 
 ${safeMarkdown(result.summary)}
@@ -68,7 +73,7 @@ ${safeMarkdown(result.summary)}
 | Signal | Result |
 |---|---|
 | Risk | **${escapeTable(result.risk)}** |
-| Tests | ${result.tests.adequate ? "Adequate" : "Needs more coverage"} |
+| Tests | ${testStatus} |
 | Merge recommendation | **${escapeTable(result.mergeRecommendation)}** |
 | Policy decision | ${escapeTable(decision)} |
 
@@ -80,13 +85,9 @@ ${findingList(result.blockingFindings)}
 
 ${findingList(result.nonBlockingFindings)}
 
-### Review feedback triage
-
-${feedbackTriage(result.reviewFeedback)}
-
 ### Test assessment
 
-${safeMarkdown(result.tests.notes || "No additional test note.")}${diagram}
+${testAssessment}${triageSection}${diagram}
 
 <sub>Generated from the exact PR head analysed by the repository maintainer. Blocking findings fail the required Codekeeper review gate; GitHub branch protection remains authoritative.</sub>${workflowRunEvidence(runUrl)}`;
 }
