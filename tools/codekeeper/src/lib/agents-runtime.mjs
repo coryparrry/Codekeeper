@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { fileURLToPath } from "node:url";
 import { agentProfilePathForMode, loadFrozenAgentProfile, pinnedAgentProfileSection } from "./agent-profiles.mjs";
-import { getAgentConfig } from "./config.mjs";
+import { getAgentConfig, getAgentRuntimeSettings } from "./config.mjs";
 import { readJson, readOptionalRegularJson, writeJson } from "./io.mjs";
 import { sha256 } from "./markers.mjs";
 import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
@@ -10,6 +11,8 @@ import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, v
 export { providerCompatibleJsonSchema } from "./schemas.mjs";
 
 const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_CODEX_MCP_TIMEOUT_SECONDS = 20 * 60;
+const CODEX_BIN = fileURLToPath(new URL("../../node_modules/@openai/codex/bin/codex.js", import.meta.url));
 export const PROVIDER_CLEANUP_TIMEOUT_CODE = "CODEKEEPER_PROVIDER_CLEANUP_TIMEOUT";
 
 export function isProviderCleanupTimeout(error) {
@@ -145,6 +148,38 @@ export function parseAgentOutput(output) {
     }
   }
   throw new Error("Agent response did not contain one valid top-level JSON object");
+}
+
+function codexMcpOutput(result) {
+  if (typeof result?.structuredContent?.content === "string") {
+    return result.structuredContent.content;
+  }
+  const text = (result?.content ?? [])
+    .filter((item) => item?.type === "text" && typeof item.text === "string")
+    .map((item) => item.text)
+    .join("\n")
+    .trim();
+  if (!text) throw new Error("Codex MCP returned no text output");
+  return text;
+}
+
+function codexMcpEnvironment(apiKey, environment) {
+  const childEnvironment = {};
+  for (const name of ["CI", "HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR"]) {
+    if (environment[name]) childEnvironment[name] = environment[name];
+  }
+  if (!environment.CODEX_HOME) throw new Error("CODEX_HOME is required for the isolated Codex MCP server");
+  childEnvironment.CODEX_HOME = environment.CODEX_HOME;
+  childEnvironment.OPENAI_API_KEY = apiKey;
+  return childEnvironment;
+}
+
+export function workspaceCodexDeveloperInstructions(schema) {
+  return [
+    "The trusted runtime requires the final response to be one JSON object matching this schema:",
+    JSON.stringify(schema),
+    "Return only that JSON object."
+  ].join("\n");
 }
 
 export async function loadCoordinatorProfile(mode, reader = readFile) {
@@ -673,6 +708,78 @@ function validatorForBundle(mode, config, context) {
     return (output) => validateFixResult(output, target);
   }
   throw new Error(`Unknown agent mode: ${mode}`);
+}
+
+export async function runWorkspaceAgentFromBundle({
+  mode,
+  directory,
+  config,
+  resultPath,
+  apiKey = process.env.CODEKEEPER_WORKSPACE_API_KEY,
+  environment = process.env,
+  sdkLoader = () => import("@openai/agents"),
+  codexCommand = process.execPath,
+  codexArgs = [CODEX_BIN, "mcp-server"]
+}) {
+  if (!apiKey || !String(apiKey).trim()) {
+    throw new Error("CODEKEEPER_WORKSPACE_API_KEY is required for the configured workspace specialist");
+  }
+  const promptPath = path.join(directory, "workspace-prompt.md");
+  const schemaPath = path.join(directory, "schema.json");
+  const contextPath = path.join(directory, "context.json");
+  const [prompt, schema, context] = await Promise.all([
+    readFile(promptPath, "utf8"),
+    readJson(schemaPath),
+    readJson(contextPath)
+  ]);
+  if (context?.mode !== mode) {
+    throw new Error(`Frozen context mode is ${context?.mode ?? "missing"}; expected ${mode}`);
+  }
+  const settings = getAgentRuntimeSettings(config, mode, {
+    mutationAuthorized: mode === "fix" || context.repairAuthorized === true
+  });
+  if (!settings.workspaceEnabled) {
+    throw new Error(`Codekeeper ${mode} workspace specialist is disabled`);
+  }
+
+  const sdk = await sdkLoader();
+  if (typeof sdk.MCPServerStdio !== "function") {
+    throw new Error("Installed @openai/agents package does not export MCPServerStdio");
+  }
+  const server = new sdk.MCPServerStdio({
+    name: "Codekeeper Codex",
+    command: codexCommand,
+    args: codexArgs,
+    cwd: process.cwd(),
+    env: codexMcpEnvironment(String(apiKey).trim(), environment),
+    cacheToolsList: true,
+    clientSessionTimeoutSeconds: DEFAULT_CODEX_MCP_TIMEOUT_SECONDS
+  });
+  await server.connect();
+  try {
+    const toolNames = (await server.listTools()).map((tool) => tool.name);
+    if (!toolNames.includes("codex")) {
+      throw new Error(`Codex MCP server exposed an unexpected tool set: ${toolNames.join(", ") || "none"}`);
+    }
+    const response = await server.callToolResult("codex", {
+      prompt: prompt.trim(),
+      "developer-instructions": workspaceCodexDeveloperInstructions(schema),
+      "approval-policy": "never",
+      cwd: process.cwd(),
+      model: settings.workspaceModel,
+      sandbox: settings.workspaceSandbox,
+      config: {
+        model_reasoning_effort: settings.workspaceEffort
+      }
+    });
+    if (response?.isError === true) throw new Error("Codex MCP tool reported failure");
+    const content = codexMcpOutput(response);
+    const output = validatorForBundle(mode, config, context)(parseAgentOutput(content));
+    await writeJson(resultPath, output);
+    return { completed: true };
+  } finally {
+    await server.close();
+  }
 }
 
 function deterministicNoWorkspaceResult(mode, context) {

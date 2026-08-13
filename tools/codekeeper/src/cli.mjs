@@ -17,7 +17,7 @@ import { publishAudit, publishFix, publishIssue, publishReview } from "./lib/pub
 import { sealAudit, sealFix, sealIssue, sealReview, validateAudit, validateFix, validateIssue, validateReview, verifyAudit, verifyFix } from "./lib/validate.mjs";
 import { assertRunnerOwnedDirectory } from "./lib/workspace.mjs";
 import { sha256 } from "./lib/markers.mjs";
-import { isProviderCleanupTimeout, runAgentFromBundle } from "./lib/agents-runtime.mjs";
+import { isProviderCleanupTimeout, runAgentFromBundle, runWorkspaceAgentFromBundle } from "./lib/agents-runtime.mjs";
 import { runOwnerCommand } from "./lib/commands.mjs";
 
 function integer(value, name) {
@@ -130,7 +130,7 @@ async function main() {
     : args.get("config", ".github/codekeeper.json");
   const { config, path: loadedConfigPath } = await loadConfig(configPath);
   const configSha256 = sha256(await readFile(loadedConfigPath));
-  const usesRunnerDirectory = command.startsWith("prepare-") || command.startsWith("validate-") || command === "run-agent" || command === "capture-workspace-patch";
+  const usesRunnerDirectory = command.startsWith("prepare-") || command.startsWith("validate-") || command === "run-agent" || command === "run-workspace-agent" || command === "capture-workspace-patch";
   const directory = usesRunnerDirectory
     ? assertRunnerOwnedDirectory(args.require("directory"))
     : null;
@@ -181,6 +181,14 @@ async function main() {
         workspaceResultPath: args.get("workspace-result")
           ? runnerFile(args.get("workspace-result"), "workspace-result")
           : undefined
+      });
+      break;
+    case "run-workspace-agent":
+      result = await runWorkspaceAgentFromBundle({
+        mode: args.require("mode"),
+        directory,
+        config,
+        resultPath: bundleFile(directory, args.require("result"), "result")
       });
       break;
     case "capture-workspace-patch":

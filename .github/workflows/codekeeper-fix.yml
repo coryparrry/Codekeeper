@@ -13,11 +13,6 @@ on:
         required: false
         default: ubuntu-latest
         type: string
-      codex_safety_strategy:
-        description: Codex privilege isolation. Use unprivileged-user on managed runners where drop-sudo cannot be verified.
-        required: false
-        default: drop-sudo
-        type: string
       automation_bot_login:
         description: Installed GitHub App bot login that may authorize ready-label implementation.
         required: false
@@ -60,7 +55,7 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: d38479c3dba3f891404c8006e5f565d7adad8816cbe244f37cd083757c12b588
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 93c3b2cc5596f1fc1def0225dd2fa1f1c60d34afcdc34e7343e62753fb2c1c9b
 
 concurrency:
   group: codekeeper-fix-${{ inputs.issue_number || github.event.issue.number || github.event.client_payload.number }}
@@ -201,6 +196,10 @@ jobs:
             echo "workspace_api_key is required because ai.agents.fix.workspace.enabled=true"
             exit 1
           }
+      - name: Install pinned Agents SDK and Codex runtime
+        if: steps.settings.outputs.workspace_enabled == 'true'
+        working-directory: tooling/tools/codekeeper
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Isolate Codex from repository instruction surfaces
         if: steps.settings.outputs.workspace_enabled == 'true'
         working-directory: repository
@@ -222,6 +221,10 @@ jobs:
             echo 'include_instructions = false'
             echo 'bundled = { enabled = false }'
             echo
+            echo '[shell_environment_policy]'
+            echo 'inherit = "core"'
+            echo 'ignore_default_excludes = false'
+            echo
             printf '[projects.%s]\n' "$(node -p 'JSON.stringify(process.env.REPOSITORY_PATH)')"
             echo 'trust_level = "untrusted"'
           } > "$CODEX_HOME/config.toml"
@@ -231,61 +234,20 @@ jobs:
               mv -- "$surface" "$QUARANTINE/$surface"
             fi
           done
-      - name: Validate Codex privilege isolation
+      - name: Implement with Codex through the Agents SDK
         if: steps.settings.outputs.workspace_enabled == 'true'
+        working-directory: repository
         env:
-          SAFETY_STRATEGY: ${{ inputs.codex_safety_strategy }}
-        run: |
-          case "$SAFETY_STRATEGY" in
-            drop-sudo|unprivileged-user) ;;
-            *) echo "Unsupported Codex safety strategy" >&2; exit 1 ;;
-          esac
-      - name: Prepare isolated Codex user
-        if: steps.settings.outputs.workspace_enabled == 'true' && inputs.codex_safety_strategy == 'unprivileged-user'
-        env:
+          CODEKEEPER_WORKSPACE_API_KEY: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
-          CODEX_USER: codekeeper-codex
-          REPOSITORY: ${{ github.workspace }}/repository
+          CONFIG: ${{ runner.temp }}/codekeeper-config.json
         run: |
-          [ "$RUNNER_OS" = Linux ] || { echo "The isolated Codex user requires Linux" >&2; exit 1; }
-          id "$CODEX_USER" >/dev/null 2>&1 || sudo useradd --create-home --shell /bin/bash "$CODEX_USER"
-          [ "$(id -u "$CODEX_USER")" -ne 0 ] || { echo "The isolated Codex user cannot be root" >&2; exit 1; }
-          sudo usermod -a -G "$(id -gn)" "$CODEX_USER"
-          group="$(id -gn "$CODEX_USER")"
-          shared_path="$GITHUB_WORKSPACE"
-          while ! sudo -u "$CODEX_USER" test -x "$shared_path"; do
-            sudo chgrp "$group" "$shared_path"
-            sudo chmod g+rx "$shared_path"
-            shared_path="$(dirname "$shared_path")"
-          done
-          sudo chown -R "$(id -un):$group" "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
-          sudo chmod -R g+rwX "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
-          sudo find "$REPOSITORY" "$BUNDLE" "$CODEX_HOME" -type d -exec chmod g+s {} +
-      - name: Implement with optional Codex specialist
-        if: steps.settings.outputs.workspace_enabled == 'true'
-        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
-        with:
-          openai-api-key: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
-          codex-home: ${{ github.workspace }}/codekeeper-codex-home
-          codex-version: 0.146.0
-          model: ${{ steps.settings.outputs.workspace_model }}
-          effort: ${{ steps.settings.outputs.workspace_effort }}
-          sandbox: ${{ steps.settings.outputs.workspace_sandbox }}
-          safety-strategy: ${{ inputs.codex_safety_strategy }}
-          codex-user: codekeeper-codex
-          allow-users: ${{ github.actor }}
-          working-directory: repository
-          prompt-file: ${{ github.workspace }}/codekeeper-bundle/workspace-prompt.md
-          output-file: ${{ github.workspace }}/codekeeper-bundle/workspace-result.json
-          output-schema-file: ${{ github.workspace }}/codekeeper-bundle/schema.json
-      - name: Restore runner ownership after Codex
-        if: always() && steps.settings.outputs.workspace_enabled == 'true' && inputs.codex_safety_strategy == 'unprivileged-user'
-        env:
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
-          REPOSITORY: ${{ github.workspace }}/repository
-        run: sudo chown -R "$(id -u):$(id -g)" "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
+          node ../tooling/tools/codekeeper/src/cli.mjs run-workspace-agent \
+            --config "$CONFIG" \
+            --directory "$BUNDLE" \
+            --mode fix \
+            --result "$BUNDLE/workspace-result.json"
       - name: Restore quarantined repository skills
         if: always() && steps.settings.outputs.workspace_enabled == 'true'
         working-directory: repository

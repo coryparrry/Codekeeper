@@ -15,11 +15,10 @@ const actionPins = {
   "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
   "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
   "actions/create-github-app-token": "bcd2ba49218906704ab6c1aa796996da409d3eb1",
-  "openai/codex-action": "52fe01ec70a42f454c9d2ebd47598f9fd6893d56",
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "d38479c3dba3f891404c8006e5f565d7adad8816cbe244f37cd083757c12b588";
+const toolingManifestSha256 = "93c3b2cc5596f1fc1def0225dd2fa1f1c60d34afcdc34e7343e62753fb2c1c9b";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -183,36 +182,27 @@ test("reusable workflows default to GitHub runners and allow a trusted caller ov
   }
 });
 
-test("workspace workflows keep Codex privilege isolation generic and safely configurable", async () => {
+test("workspace workflows run pinned Codex through the Agents SDK without runner privilege mutation", async () => {
+  const runtimePackage = JSON.parse(await repositoryFile("tools/codekeeper/package.json"));
+  assert.equal(runtimePackage.dependencies["@openai/codex"], "0.146.0");
   for (const mode of modes) {
     const source = await workflow(mode);
     const caller = await repositoryFile(`examples/workflows/codekeeper-${mode}.yml.example`);
     const workspace = jobSection(source, "workspace", "analyze");
 
-    assert.match(source, /codex_safety_strategy:\n\s+description: Codex privilege isolation\. Use unprivileged-user on managed runners where drop-sudo cannot be verified\.\n\s+required: false\n\s+default: drop-sudo\n\s+type: string/);
-    assert.match(caller, /^\s+codex_safety_strategy: \$\{\{ vars\.CODEKEEPER_CODEX_SAFETY_STRATEGY \|\| 'drop-sudo' \}\}$/m);
-    assert.match(workspace, /name: Validate Codex privilege isolation/);
-    assert.match(workspace, /drop-sudo\|unprivileged-user\) ;;/);
-    assert.match(workspace, /name: Prepare isolated Codex user/);
-    assert.match(workspace, /\[ "\$RUNNER_OS" = Linux \]/);
-    assert.match(workspace, /\[ "\$\(id -u "\$CODEX_USER"\)" -ne 0 \]/);
-    assert.match(workspace, /CODEX_USER: codekeeper-codex/);
-    assert.match(workspace, /sudo usermod -a -G "\$\(id -gn\)" "\$CODEX_USER"/);
-    assert.match(workspace, /while ! sudo -u "\$CODEX_USER" test -x "\$shared_path"; do/);
-    assert.match(workspace, /sudo chgrp "\$group" "\$shared_path"/);
-    assert.match(workspace, /sudo chmod g\+rx "\$shared_path"/);
-    assert.match(workspace, /shared_path="\$\(dirname "\$shared_path"\)"/);
-    assert.match(workspace, /sudo chown -R "\$\(id -un\):\$group" "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME"/);
-    assert.match(workspace, /sudo chmod -R g\+rwX "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME"/);
-    assert.match(workspace, /sudo find "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME" -type d -exec chmod g\+s \{\} \+/);
+    assert.doesNotMatch(source, /codex_safety_strategy|openai\/codex-action@/);
+    assert.doesNotMatch(caller, /CODEKEEPER_CODEX_SAFETY_STRATEGY|codex_safety_strategy/);
+    assert.match(workspace, /name: Install pinned Agents SDK and Codex runtime/);
+    assert.match(workspace, /working-directory: tooling\/tools\/codekeeper\n\s+run: npm ci --ignore-scripts --no-audit --no-fund/);
+    assert.match(workspace, /name: .*Codex through the Agents SDK/);
+    assert.match(workspace, /CODEKEEPER_WORKSPACE_API_KEY: \$\{\{ secrets\.workspace_api_key \|\| secrets\.openai_api_key \}\}/);
+    assert.match(workspace, /run-workspace-agent/);
+    assert.match(workspace, new RegExp(`--mode ${mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode}`));
+    assert.match(workspace, /--result "\$BUNDLE\/workspace-result\.json"/);
     assert.match(workspace, /BUNDLE: \$\{\{ github\.workspace \}\}\/codekeeper-bundle/);
     assert.match(workspace, /CODEX_HOME: \$\{\{ github\.workspace \}\}\/codekeeper-codex-home/);
     assert.doesNotMatch(workspace, /\$\{\{ runner\.temp \}\}\/codekeeper-(?:bundle|codex-home)/);
-    assert.doesNotMatch(workspace, /sudo chown -R "\$CODEX_USER:/);
-    assert.match(workspace, /safety-strategy: \$\{\{ inputs\.codex_safety_strategy \}\}/);
-    assert.match(workspace, /codex-user: codekeeper-codex/);
-    assert.match(workspace, /name: Restore runner ownership after Codex/);
-    assert.doesNotMatch(source, /(?:default|safety-strategy): (?:unsafe|read-only)/);
+    assert.doesNotMatch(workspace, /sudo|useradd|usermod|codex-user|safety-strategy/);
     assert.doesNotMatch(source, /blacksmith/i);
     assert.doesNotMatch(caller, /blacksmith/i);
   }
@@ -271,10 +261,9 @@ test("all checkouts discard persisted credentials and tool versions are exact", 
     assert.equal(protectedCount, checkoutCount, `${mode} leaves a checkout credential persisted`);
     assert.match(source, /node-version: 24\.19\.0/);
   }
-  for (const mode of modes) {
-    const source = await workflow(mode);
-    assert.match(source, /codex-version: 0\.146\.0/);
-  }
+  const runtimePackage = JSON.parse(await repositoryFile("tools/codekeeper/package.json"));
+  assert.equal(runtimePackage.dependencies["@openai/agents"], "0.14.3");
+  assert.equal(runtimePackage.dependencies["@openai/codex"], "0.146.0");
 });
 
 test("every mode isolates untrusted candidate creation, tokenless sealing, and App publication", async () => {
@@ -293,8 +282,8 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(workspace, /cp "\$SOURCE_CONFIG" "\$CONFIG"/);
     assert.match(workspace, /Configured default branch does not match the repository default branch/);
     assert.match(workspace, new RegExp(`prepare-${effectiveMode}`));
-    assert.match(workspace, /openai\/codex-action@/);
-    assert.match(workspace, /output-schema-file: \$\{\{ github\.workspace \}\}\/codekeeper-bundle\/schema\.json/);
+    assert.match(workspace, /run-workspace-agent/);
+    assert.match(workspace, /--result "\$BUNDLE\/workspace-result\.json"/);
     assert.match(workspace, /outputs:\n\s+context_sha256: \$\{\{ steps\.prepare\.outputs\.context_sha256 \}\}/);
     if (repairMode) {
       assert.match(workspace, /capture-workspace-patch/);
@@ -547,7 +536,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(caller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
 
   assert.doesNotMatch(fix, /owner_requests|github\.event\.comment\.body/);
-  assert.match(fix, /allow-users: \$\{\{ github\.actor \}\}/);
+  assert.doesNotMatch(fix, /allow-users:/);
   assert.match(fix, /--target-number "\$TARGET_NUMBER"/);
   assert.match(fix, /fromJSON\(steps\.prepare\.outputs\.result\)\.baseSha/);
   assert.match(fix, /ref: \$\{\{ needs\.analyze\.outputs\.base_sha \}\}/);
@@ -623,9 +612,14 @@ test("Fixer repository dispatches retain their target and explicit policy author
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {
   const packageJson = JSON.parse(await repositoryFile("tools/codekeeper/package.json"));
   const packageLock = JSON.parse(await repositoryFile("tools/codekeeper/package-lock.json"));
-  assert.deepEqual(packageJson.dependencies, { "@openai/agents": "0.14.3", zod: "4.4.3" });
+  assert.deepEqual(packageJson.dependencies, {
+    "@openai/agents": "0.14.3",
+    "@openai/codex": "0.146.0",
+    zod: "4.4.3"
+  });
   assert.equal(packageLock.lockfileVersion, 3);
   assert.equal(packageLock.packages[""].dependencies["@openai/agents"], "0.14.3");
+  assert.equal(packageLock.packages[""].dependencies["@openai/codex"], "0.146.0");
   assert.equal(packageLock.packages[""].dependencies.zod, "4.4.3");
 
   for (const mode of modes) {
@@ -637,20 +631,23 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
     const effectiveMode = mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode;
     assert.match(source, /model_api_key:\n[\s\S]*required: true/);
     assert.match(source, /trace_api_key:\n\s+description:[^\n]*\n\s+required: false/);
-    assert.doesNotMatch(workspace, /npm ci --ignore-scripts --no-audit --no-fund/);
+    assert.match(workspace, /npm ci --ignore-scripts --no-audit --no-fund/);
     assert.match(workspace, new RegExp(`agent-settings[\\s\\S]*--mode ${effectiveMode}`));
     assert.match(workspace, /secrets\.workspace_api_key \|\| secrets\.openai_api_key/);
     assert.doesNotMatch(workspace, /secrets\.(?:model_api_key|trace_api_key|app_private_key)/);
-    assert.match(workspace, /codex-home: \$\{\{ github\.workspace \}\}\/codekeeper-codex-home/);
+    assert.match(workspace, /CODEX_HOME: \$\{\{ github\.workspace \}\}\/codekeeper-codex-home/);
     assert.match(workspace, /project_doc_max_bytes = 0/);
     assert.match(workspace, /project_doc_fallback_filenames = \[\]/);
     assert.match(workspace, /include_instructions = false/);
     assert.match(workspace, /bundled = \{ enabled = false \}/);
+    assert.match(workspace, /\[shell_environment_policy\]/);
+    assert.match(workspace, /inherit = "core"/);
+    assert.match(workspace, /ignore_default_excludes = false/);
     assert.match(workspace, /Refusing symlinked \.agents instruction root/);
     assert.match(workspace, /Refusing symlinked \.codex instruction root/);
     assert.match(workspace, /\.agents\/skills \.codex\/skills/);
     assert.match(workspace, /if \[ -e "\$surface" \] \|\| \[ -L "\$surface" \]; then[\s\S]*contaminated=true[\s\S]*if \[ -e "\$QUARANTINE\/\$surface" \]/);
-    assert.match(workspace, /workspace-prompt\.md/);
+    assert.match(workspace, /run-workspace-agent/);
     assert.doesNotMatch(workspace, /prompt-file: .*\/prompt\.md/);
     assert.match(analyze, /npm ci --ignore-scripts --no-audit --no-fund/);
     assert.match(analyze, /run-agent/);
@@ -679,6 +676,6 @@ test("self-test reports through annotations with read-only repository permission
 test("pull request repair runs reviewer then one-pass fixer roles", async () => {
   const source = await workflow("fix");
   assert.doesNotMatch(source, /\n  plan:|maintenance-planner\.md|--mode plan|plan-result\.json/);
-  assert.match(jobSection(source, "workspace", "analyze"), /fixer\.md[\s\S]*workspace-prompt\.md/);
+  assert.match(jobSection(source, "workspace", "analyze"), /fixer\.md[\s\S]*run-workspace-agent/);
   assert.match(jobSection(source, "analyze", "verify"), /fixer\.md[\s\S]*--mode fix/);
 });
