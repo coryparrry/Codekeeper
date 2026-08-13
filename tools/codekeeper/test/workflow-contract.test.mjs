@@ -49,6 +49,19 @@ test("self-test runs for every tracked-file change", async () => {
   assert.doesNotMatch(triggers, /\n\s+paths(?:-ignore)?:/);
 });
 
+test("source CI stays generic while repository settings select its runner", async () => {
+  const source = await workflow("self-test");
+  const runnerLines = source.match(/^\s+runs-on: .*$/gm) ?? [];
+  assert.ok(runnerLines.length > 0);
+  assert.ok(
+    runnerLines.every((line) => line.trim() === "runs-on: ${{ vars.CODEKEEPER_CI_RUNNER || 'ubuntu-latest' }}"),
+    "tracked source CI must not contain a concrete organization or third-party runner label"
+  );
+  assert.doesNotMatch(source, /blacksmith|coryparr?y|codekeeper-test-environment/i);
+  const actionlint = await repositoryFile(".github/actionlint.yaml");
+  assert.doesNotMatch(actionlint, /blacksmith|coryparr?y|codekeeper-test-environment/i);
+});
+
 test("the standard repository check verifies the complete source-release inventory", async () => {
   const packageJson = JSON.parse(await repositoryFile("package.json"));
   assert.match(packageJson.scripts.check, /bash scripts\/release-source\.sh --verify/);

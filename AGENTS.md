@@ -29,3 +29,7 @@ Follow the repository’s Conventional Commit history: `fix(review): ...`, `feat
 
 Never commit or paste provider keys, GitHub App PEMs, tokens, or live traces. Report vulnerabilities through GitHub private vulnerability reporting.
 Release and source pins must be full, reviewed commits reachable from the repository default branch and containing the intended runtime; ancestry alone is insufficient, so verify the exact checkpoint before publication.
+
+## Generic Product Boundary
+
+Keep this repository generic and adopter-safe. Do not commit organization-specific runner labels, billing settings, repository names, fixture credentials, user identities, or other deployment-local values to product workflows, examples, policies, or tests. Put concrete CI runner choices in repository or organization settings behind a generic variable with a portable default. Put live acceptance-only configuration in the private acceptance repository. Any exception requires explicit product-level justification and a contract test proving it is not personal configuration.
