@@ -19,7 +19,7 @@ import { upgradePolicy } from "./policy.mjs";
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const GITHUB_WORKFLOW_REFERENCE = /(?:coryparrry\/Codekeeper|\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-)/i;
+const GITHUB_WORKFLOW_REFERENCE = /(?:\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-)/i;
 
 function isInstalledCodekeeperWorkflow(source, mode) {
   const activeUses = source
