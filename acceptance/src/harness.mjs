@@ -421,9 +421,8 @@ function yamlLine(rawLine) {
   assert(!/:\s*![^\s]+(?:\s|$)/.test(unquoted), "Caller workflow does not support YAML tags");
   const withoutExpressions = unquoted.replace(/\$\{\{.*?\}\}/g, "");
   assert(!/[{}]/.test(withoutExpressions), "Caller workflow does not support YAML flow mappings");
-  assert(!/:\s*[>|][+-]?\d*\s*$/.test(unquoted), "Caller workflow does not support YAML block scalars");
   assert(!/^(?:[-?]\s*$|[?]\s+|:\s)/.test(unquoted), "Caller workflow contains an unsupported YAML collection entry");
-  return { indentation, content };
+  return { indentation, content, blockScalar: /:\s*[>|][+-]?\d*\s*$/.test(unquoted) };
 }
 
 function yamlMapping(line) {
@@ -477,10 +476,18 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
   const jobNames = new Set();
   const entries = [];
   const expectedJobs = new Map();
+  let blockScalarIndent = null;
 
   for (const rawLine of String(yaml).split(/\r?\n/)) {
+    if (blockScalarIndent !== null) {
+      if (!rawLine.trim()) continue;
+      const rawIndentation = /^( *)/.exec(rawLine)[1].length;
+      if (rawIndentation > blockScalarIndent) continue;
+      blockScalarIndent = null;
+    }
     const line = yamlLine(rawLine);
     if (!line) continue;
+    if (line.blockScalar) blockScalarIndent = line.indentation;
     const mapping = yamlMapping(line);
 
     if (jobsIndent === null) {
@@ -511,7 +518,7 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
       assert(mapping && !mapping.sequence && mapping.value.trim() === "", "Caller workflow contains an unsupported job mapping");
       assert(!jobNames.has(mapping.key), "Caller workflow contains duplicate job names");
       jobNames.add(mapping.key);
-      currentJob = { name: mapping.key, indentation: line.indentation, stepsSeen: false, needs: [] };
+      currentJob = { name: mapping.key, indentation: line.indentation, stepsSeen: false, needs: [], conditions: [] };
       if (mapping.key === "bootstrap" || mapping.key === reusableJob) expectedJobs.set(mapping.key, currentJob);
       steps = null;
       currentStepIndent = null;
@@ -522,9 +529,9 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
     if (line.indentation === currentJob.indentation + 2) {
       assert(mapping && !mapping.sequence, "Caller workflow contains an unsupported job property");
       if (mapping.key === "if" && (currentJob.name === "bootstrap" || currentJob.name === reusableJob)) {
-        throw new AcceptanceError("Caller workflow must not gate the expected bootstrap or reusable Codekeeper job");
+        currentJob.conditions.push(mapping.value.trim());
       }
-      if (mapping.key === "needs" && currentJob.name === reusableJob) {
+      if (mapping.key === "needs" && (currentJob.name === "bootstrap" || currentJob.name === reusableJob)) {
         currentJob.needs.push(mapping.value.trim());
       }
       if (mapping.key === "steps") {
@@ -566,8 +573,27 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
   assert(bootstrapEntries.length === 1, "Caller workflow must contain exactly one direct Codekeeper bootstrap action step");
   assert(reusableEntries.length === 1, "Caller workflow must contain exactly one Codekeeper reusable-workflow call");
   assert(!bootstrapEntries[0].step.hasIf, "Caller workflow must not gate the direct Codekeeper bootstrap action step");
+  const bootstrapJobDefinition = expectedJobs.get("bootstrap");
   const reusableJobDefinition = expectedJobs.get(reusableJob);
-  assert(reusableJobDefinition && reusableJobDefinition.needs.length === 1 && reusableJobDefinition.needs[0] === "bootstrap", "Caller workflow reusable Codekeeper job must use the exact scalar needs: bootstrap dependency");
+  const simpleDependencyShape = bootstrapJobDefinition
+    && reusableJobDefinition
+    && bootstrapJobDefinition.needs.length === 0
+    && bootstrapJobDefinition.conditions.length === 0
+    && reusableJobDefinition.needs.length === 1
+    && reusableJobDefinition.needs[0] === "bootstrap"
+    && reusableJobDefinition.conditions.length === 0;
+  const routedReviewShape = workflow === "codekeeper-review.yml"
+    && bootstrapJobDefinition
+    && reusableJobDefinition
+    && bootstrapJobDefinition.needs.length === 1
+    && bootstrapJobDefinition.needs[0] === "intent"
+    && bootstrapJobDefinition.conditions.length === 1
+    && bootstrapJobDefinition.conditions[0] === "needs.intent.outputs.route == 'true'"
+    && reusableJobDefinition.needs.length === 1
+    && reusableJobDefinition.needs[0] === "[intent, bootstrap]"
+    && reusableJobDefinition.conditions.length === 1
+    && reusableJobDefinition.conditions[0] === "needs.intent.outputs.route == 'true' && needs.bootstrap.result == 'success'";
+  assert(simpleDependencyShape || routedReviewShape, "Caller workflow must use the exact supported Codekeeper dependency and routing shape");
 
   const bootstrap = new RegExp(`^(${REPOSITORY_PATTERN})/tools/codekeeper@(${SHA_PATTERN})$`).exec(bootstrapEntries[0].value);
   const reusable = new RegExp(`^(${REPOSITORY_PATTERN})/\\.github/workflows/${escapeRegExp(workflow)}@(${SHA_PATTERN})$`).exec(reusableEntries[0].value);
