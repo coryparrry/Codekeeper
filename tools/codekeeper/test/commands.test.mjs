@@ -416,7 +416,7 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
     number: 42,
     state: "open",
     pull_request: {},
-    labels: [{ name: "codekeeper:paused" }],
+    labels: [{ name: "paused" }],
   });
   GitHubClient.prototype.removeLabel = async (number, label) => {
     removed.push({ number, label });
@@ -439,7 +439,7 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
       automationIdentity: { login: "codekeeper[bot]", id: "123" },
     });
     assert.equal(result.command, "fix");
-    assert.deepEqual(removed, [{ number: 42, label: "codekeeper:paused" }]);
+    assert.deepEqual(removed, [{ number: 42, label: "paused" }]);
     assert.deepEqual(dispatches, [
       {
         eventType: "codekeeper_fix",

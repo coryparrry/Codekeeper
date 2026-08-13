@@ -105,16 +105,16 @@ Reusable workflow callers expose explicit controls alongside `enabled`:
 
 Configured owners can use `/codekeeper status`, `/codekeeper review`, `/codekeeper rerun`, `/codekeeper triage`, `/codekeeper defer`, `/codekeeper implement`, `/codekeeper fix`, and `/codekeeper stop`. Slash commands must be the complete comment. The always-installed assistant caller also accepts the exact mention form `@<app-slug> <action>` for one supported action. It ignores extra prose and ambiguous actions; non-owner content cannot authorize writes.
 
-Automated feedback-triage `defer` results create or update one issue using a hidden root-cause fingerprint, add `codekeeper:deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue through that automated path. A direct owner `/codekeeper defer` reply is an unconditional owner-authorized deferral and does not ask the reviewer or model to verify the claim. Deferred and ignored threads are not automatically resolved.
+Automated feedback-triage `defer` results create or update one issue using a hidden root-cause fingerprint, add `deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue through that automated path. A direct owner `/codekeeper defer` reply is an unconditional owner-authorized deferral and does not ask the reviewer or model to verify the claim. Deferred and ignored threads are not automatically resolved.
 
-Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. It does not close issues; `issues.closeExactDuplicates` is an independent policy setting and remains `false` in the starter policy.
+Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. With the starter policy's `issues.closeResolvedIssues=true`, it closes an issue as completed only when GitHub's closing-reference metadata identifies a merged pull request, and revalidates that exact reference immediately before publication. `issues.closeExactDuplicates` is independent and remains `false` in the starter policy.
 
 ## Explicit repair targets
 
 Capabilities decide which automatic actions can run.
 
 - **Maintenance:** a live scheduled or manual run may create one repair when `audit.repair.enabled=true`. A dry run remains report-only.
-- **Issue:** when `issues.allowAiImplementation=true`, trusted triage may add `codekeeper:ready` to a clear, bounded issue. That label starts a fix run which may create one bounded repair pull request. A configured owner may also provide an issue through manual dispatch.
+- **Issue:** when `issues.allowAiImplementation=true`, trusted triage may add `ready` to a clear, bounded issue. That label starts a fix run which may create one bounded repair pull request. A configured owner may also provide an issue through manual dispatch.
 - **Same-repository pull request:** the same exact owner command may target an eligible open, non-draft pull request to the default branch. A valid repair is committed and pushed to that pull request's existing head branch. The publisher never calls the create-pull-request path for this target and has no fallback that opens a second pull request. Forks, default/protected head branches, stale heads, branch movement, or target drift fail closed.
 - **Automatic review repair:** when `review.autoRepair=true`, a blocking review can request one repair for the exact PR head. The next blocking review requires a maintainer.
 

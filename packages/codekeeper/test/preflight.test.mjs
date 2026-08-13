@@ -278,7 +278,7 @@ test("existing generated files are recognized as a rerunnable installation", asy
     structuredOutputs: false,
     supportsReasoningEffort: false
   });
-  assert.equal(installation.policy.labels["codekeeper:deferred"].color, "C5DEF5");
+  assert.equal(installation.policy.labels["deferred"].color, "C5DEF5");
   assert.equal(installation.policy.ai.agents.review.model, "gpt-5.6-sol");
   assert.equal(installation.policy.ai.agents.plan, undefined);
   for (const agent of ["review", "audit", "issue", "fix"]) {

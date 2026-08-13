@@ -71,41 +71,41 @@ function hasFixNowFeedback(result) {
 }
 
 export function reviewLabels(result) {
-  const labels = new Set(["codekeeper:reviewed", `codekeeper:risk-${result.risk}`, ...result.labels]);
-  if (!result.tests.adequate) labels.add("codekeeper:needs-tests");
+  const labels = new Set(["reviewed", `risk ${result.risk}`, ...result.labels]);
+  if (!result.tests.adequate) labels.add("needs tests");
   if (result.blockingFindings.length > 0 || hasCriticalFinding(result) || hasFixNowFeedback(result) || result.mergeRecommendation === "block") {
-    labels.add("codekeeper:blocked");
+    labels.add("blocked");
   } else if (result.mergeRecommendation === "auto") {
-    labels.add("codekeeper:auto-merge");
+    labels.add("auto merge");
   } else {
-    labels.add("codekeeper:manual-review");
+    labels.add("manual review");
   }
   return [...labels];
 }
 
 export function issueTypeLabel(type) {
   const map = {
-    bug: "codekeeper:type-bug",
-    enhancement: "codekeeper:type-enhancement",
-    documentation: "codekeeper:type-documentation",
-    question: "codekeeper:type-question",
-    security: "codekeeper:type-security",
-    maintenance: "codekeeper:type-maintenance",
-    testing: "codekeeper:type-testing"
+    bug: "bug",
+    enhancement: "enhancement",
+    documentation: "documentation",
+    question: "question",
+    security: "security",
+    maintenance: "maintenance",
+    testing: "testing"
   };
-  return map[type] ?? "codekeeper:type-maintenance";
+  return map[type] ?? "maintenance";
 }
 
 export function findingLabels(finding) {
   const categoryMap = {
-    docs: "codekeeper:type-documentation",
-    dependency: "codekeeper:type-maintenance",
-    cleanup: "codekeeper:type-maintenance",
-    bug: "codekeeper:type-bug",
-    security: "codekeeper:type-security",
-    testing: "codekeeper:type-testing"
+    docs: "documentation",
+    dependency: "maintenance",
+    cleanup: "maintenance",
+    bug: "bug",
+    security: "security",
+    testing: "testing"
   };
-  return [...new Set(["codekeeper:maintenance", categoryMap[finding.category], ...finding.labels])];
+  return [...new Set(["maintenance", categoryMap[finding.category], ...finding.labels])];
 }
 
 export function evaluateAutoMerge({
@@ -120,7 +120,7 @@ export function evaluateAutoMerge({
   const reasons = [];
   const labels = (pullRequest.labels ?? []).map((label) => typeof label === "string" ? label : label.name);
   if (!policy.enabled) reasons.push("Auto-merge is disabled by policy");
-  if (labels.includes("codekeeper:paused")) reasons.push("Pull request is paused");
+  if (labels.includes("paused")) reasons.push("Pull request is paused");
   if (pullRequest.draft) reasons.push("Pull request is a draft");
   if (pullRequest.state !== "open") reasons.push(`Pull request state is ${pullRequest.state}`);
   if (pullRequest.head?.repo?.full_name !== pullRequest.base?.repo?.full_name) reasons.push("Pull request comes from a fork");

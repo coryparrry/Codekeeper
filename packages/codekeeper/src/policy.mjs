@@ -20,6 +20,60 @@ export const DEFERRED_LABEL = Object.freeze({
   description: "Verified work deferred from a pull request"
 });
 
+const LEGACY_LABEL_NAMES = Object.freeze({
+  "codekeeper:reviewed": "reviewed",
+  "codekeeper:maintenance": "maintenance",
+  "codekeeper:ready": "ready",
+  "codekeeper:blocked": "blocked",
+  "codekeeper:manual-review": "manual review",
+  "codekeeper:paused": "paused",
+  "codekeeper:auto-repaired": "auto repaired",
+  "codekeeper:auto-merge": "auto merge",
+  "codekeeper:duplicate-candidate": "duplicate",
+  "codekeeper:deferred": "deferred",
+  "codekeeper:needs-tests": "needs tests",
+  "codekeeper:priority-p1": "priority p1",
+  "codekeeper:priority-p2": "priority p2",
+  "codekeeper:priority-p3": "priority p3",
+  "codekeeper:risk-low": "risk low",
+  "codekeeper:risk-medium": "risk medium",
+  "codekeeper:risk-high": "risk high",
+  "codekeeper:type-bug": "bug",
+  "codekeeper:type-enhancement": "enhancement",
+  "codekeeper:type-documentation": "documentation",
+  "codekeeper:type-question": "question",
+  "codekeeper:type-maintenance": "maintenance",
+  "codekeeper:type-security": "security",
+  "codekeeper:type-testing": "testing"
+});
+
+const CLEAN_LABEL_DESCRIPTIONS = Object.freeze({
+  reviewed: "Automated review complete",
+  maintenance: "Repository maintenance",
+  paused: "Automatic work is paused",
+  "auto repaired": "Automatically repaired"
+});
+
+function cleanLabelName(name) {
+  return LEGACY_LABEL_NAMES[name] ?? name;
+}
+
+function cleanLabelList(labels) {
+  return [...new Set(labels.map(cleanLabelName))];
+}
+
+function migrateLegacyLabels(policy) {
+  policy.labels = Object.fromEntries(
+    Object.entries(policy.labels ?? {}).map(([name, definition]) => [cleanLabelName(name), definition])
+  );
+  for (const [name, description] of Object.entries(CLEAN_LABEL_DESCRIPTIONS)) {
+    if (policy.labels[name]) policy.labels[name].description = description;
+  }
+  policy.review.allowedLabels = cleanLabelList(policy.review.allowedLabels);
+  policy.review.managedLabels = cleanLabelList(policy.review.managedLabels);
+  policy.issues.managedLabels = cleanLabelList(policy.issues.managedLabels);
+}
+
 export function upgradePolicy(input) {
   const policy = structuredClone(input);
   if (policy.version !== 2 && policy.version !== POLICY_VERSION) {
@@ -30,10 +84,12 @@ export function upgradePolicy(input) {
     policy.automation = { ...AUTOMATION_DEFAULTS };
     policy.review.createDeferredIssues ??= false;
     policy.ai.providers.openrouter ??= structuredClone(OPENROUTER_PROVIDER);
-    policy.labels["codekeeper:deferred"] ??= structuredClone(DEFERRED_LABEL);
-    if (!policy.issues.managedLabels.includes("codekeeper:deferred")) {
-      policy.issues.managedLabels.push("codekeeper:deferred");
+    policy.labels["deferred"] ??= structuredClone(DEFERRED_LABEL);
+    if (!policy.issues.managedLabels.includes("deferred")) {
+      policy.issues.managedLabels.push("deferred");
     }
   }
+  migrateLegacyLabels(policy);
+  policy.issues.closeResolvedIssues ??= true;
   return policy;
 }

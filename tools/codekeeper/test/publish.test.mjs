@@ -319,7 +319,7 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
 
   const created = await upsertDeferredReviewFeedback(input);
   assert.deepEqual(created.map((item) => item.state), ["created"]);
-  assert.deepEqual(calls.created[0].labels, ["codekeeper:deferred", "codekeeper:type-testing"]);
+  assert.deepEqual(calls.created[0].labels, ["deferred", "testing"]);
   assert.match(calls.created[0].body, /pull\/7#discussion_r41/);
   assert.match(calls.created[0].body, new RegExp(deferredReviewMarker(fingerprint)));
   assert.equal(calls.replies[0].commentId, 41);
@@ -889,7 +889,7 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
       /review feedback changed after preparation/
     );
     assert.equal(dispatches, 0);
-    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
+    assert.equal(pull.labels.some((label) => label.name === "auto repaired"), false);
 
     resolved = false;
     const retried = await publishReview({
@@ -897,7 +897,7 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
     });
     assert.equal(retried.automaticRepair.dispatched, true);
     assert.equal(dispatches, 1);
-    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), true);
+    assert.equal(pull.labels.some((label) => label.name === "auto repaired"), true);
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -954,8 +954,8 @@ test("fix-now feedback blocks auto-merge even when repair dispatch is disabled",
   });
   assert.equal(decision.eligible, false);
   assert.match(decision.reasons.join("\n"), /fix-now review feedback/);
-  assert.ok(reviewLabels(result).includes("codekeeper:blocked"));
-  assert.ok(!reviewLabels(result).includes("codekeeper:auto-merge"));
+  assert.ok(reviewLabels(result).includes("blocked"));
+  assert.ok(!reviewLabels(result).includes("auto merge"));
 });
 
 test("a completed automatic repair consumes the pass after the pull request head changes", async () => {
@@ -968,7 +968,7 @@ test("a completed automatic repair consumes the pass after the pull request head
     assert.equal(publication.automaticRepair.consumed, true);
     assert.equal(publication.automaticRepair.pending, false);
 
-    pull.labels = [{ name: "codekeeper:auto-repaired" }];
+    pull.labels = [{ name: "auto repaired" }];
     const repeated = await fixture.publish();
     assert.equal(repeated.autoMerge.eligible, false);
     assert.match(repeated.autoMerge.reasons.join("\n"), /repair pass is already consumed/i);
@@ -1049,7 +1049,7 @@ test("a legacy pending repair marker consumes only its matching active lease", a
     repair.state = `Automatic repair is pending for head ${headSha}.`;
     repair.head = headSha;
     repair.comments = [leaseComment("active")];
-    pull.labels = [{ name: "codekeeper:auto-repaired" }];
+    pull.labels = [{ name: "auto repaired" }];
     const legacyPending = await fixture.publish();
     assert.equal(legacyPending.automaticRepair.consumed, true);
     assert.equal(legacyPending.automaticRepair.eligible, false);
@@ -1300,7 +1300,7 @@ test("review publication activates auto-merge last and falls back safely", async
     async getPull() {
       if ((mutateHeadAfterEnable || pauseAfterEnable) && enabledThisRun) {
         if (mutateHeadAfterEnable) pull.head.sha = "moved-after-activation";
-        if (pauseAfterEnable) pull.labels = [{ name: "codekeeper:paused" }];
+        if (pauseAfterEnable) pull.labels = [{ name: "paused" }];
         pull.auto_merge = { enabled_at: "now" };
         enabledThisRun = false;
       }
@@ -1349,11 +1349,11 @@ test("review publication activates auto-merge last and falls back safely", async
     assert.equal(publication.autoMerge.eligible, false);
     assert.equal(publication.autoMergeResult.enabled, false);
     assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "labels", "comment"]);
-    assert.ok(provisioned.desiredLabels.includes("codekeeper:auto-merge"));
-    assert.ok(provisioned.desiredLabels.includes("codekeeper:manual-review"));
-    assert.ok(labelCalls[0].desiredLabels.includes("codekeeper:auto-merge"));
-    assert.ok(labels.desiredLabels.includes("codekeeper:manual-review"));
-    assert.ok(!labels.desiredLabels.includes("codekeeper:auto-merge"));
+    assert.ok(provisioned.desiredLabels.includes("auto merge"));
+    assert.ok(provisioned.desiredLabels.includes("manual review"));
+    assert.ok(labelCalls[0].desiredLabels.includes("auto merge"));
+    assert.ok(labels.desiredLabels.includes("manual review"));
+    assert.ok(!labels.desiredLabels.includes("auto merge"));
     assert.match(comment.comment, /Ready for maintainer review/);
     assert.match(comment.comment, /Auto-merge is not active: GitHub rejected enablement/);
     assert.doesNotMatch(comment.comment, /Ready to merge/);
@@ -1599,7 +1599,7 @@ test("issue publication accepts its exact managed-label mutation and preserves a
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   let updatedAt = context.issue.updatedAt;
-  let labels = [{ name: "external" }, { name: "codekeeper:priority-p1" }, { name: "codekeeper:deferred" }];
+  let labels = [{ name: "external" }, { name: "priority p1" }, { name: "deferred" }];
   let markerPublished = false;
   const issue = () => ({
     number: 7, title: "Report", body: `Details\n${deferredReviewMarker("f".repeat(64))}`, state: "open", updated_at: updatedAt,
@@ -1621,13 +1621,71 @@ test("issue publication accepts its exact managed-label mutation and preserves a
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256, artifactConfig: issueConfig });
     await publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" });
     assert.equal(markerPublished, true);
-    assert.deepEqual(labels.map((label) => label.name).sort(), ["codekeeper:deferred", "codekeeper:priority-p3", "codekeeper:ready", "codekeeper:type-bug", "external"].sort());
+    assert.deepEqual(labels.map((label) => label.name).sort(), ["deferred", "priority p3", "ready", "bug", "external"].sort());
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
     else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
     if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
     else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("issue publication closes a GitHub-linked merged pull request resolution as completed", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-resolved-test-"));
+  const configSha256 = "9".repeat(64);
+  const resolvedByPullRequest = {
+    number: 12,
+    url: "https://github.com/owner/repository/pull/12",
+    mergedAt: "2026-08-13T10:00:00Z",
+    repository: "owner/repository"
+  };
+  const context = {
+    mode: "issue",
+    repository: "owner/repository",
+    configSha256,
+    runId: "7012",
+    runUrl: "https://github.com/owner/repository/actions/runs/7012",
+    issue: { number: 7, title: "Report", updatedAt: "2026-08-13T11:00:00Z" },
+    resolvedByPullRequest
+  };
+  const result = {
+    mode: "issue", summary: "Resolved by pull request #12.", type: "bug", priority: "p3", labels: [], actionable: false,
+    missingInformation: [], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "no",
+    decision: { required: false, question: "", rationale: "", options: [] }, comment: "This was resolved by pull request #12."
+  };
+  let closingComment = "";
+  let update = null;
+  const restoreGitHub = replaceGitHubMethods({
+    async beginIssueMutation() { return { number: 7, title: "Report", body: "Details", labels: [] }; },
+    async listMergedPullRequestsClosingIssue() { return [resolvedByPullRequest]; },
+    async ensureLabels() {},
+    async replaceManagedIssueLabels() {},
+    async verifyIssueMutation() {},
+    async upsertOwnedIssueMarker() {},
+    async createOwnedIssueComment(_number, body) { closingComment = body; },
+    async updateIssue(_number, changes) { update = changes; }
+  });
+  try {
+    const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    try {
+      const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
+      const published = await publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
+      assert.deepEqual(published.desiredLabels.sort(), ["bug", "priority p3"]);
+      assert.match(closingComment, /merged pull request \[#12\]/);
+      assert.deepEqual(update, { state: "closed", state_reason: "completed" });
+    } finally {
+      if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+      else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+      if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+      else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    }
+  } finally {
+    restoreGitHub();
     await rm(artifactDirectory, { recursive: true, force: true });
   }
 });
@@ -2223,8 +2281,8 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
     ["fork", (pull) => ({ ...pull, head: { ...pull.head, repo: { full_name: "fork/repository" } } }), /head repository changed/],
     ["retargeted", (pull) => ({ ...pull, base: { ...pull.base, ref: "release" } }), /base branch changed/],
     ["base moved", (pull) => ({ ...pull, base: { ...pull.base, sha: "d".repeat(40) } }), /base SHA changed/],
-    ["paused owner repair", (pull) => ({ ...pull, labels: [{ name: "codekeeper:paused" }] }), /paused/, undefined, undefined, "owner", 0],
-    ["paused automatic repair", (pull) => ({ ...pull, labels: [{ name: "codekeeper:paused" }] }), /paused/, undefined, undefined, "policy", 0],
+    ["paused owner repair", (pull) => ({ ...pull, labels: [{ name: "paused" }] }), /paused/, undefined, undefined, "owner", 0],
+    ["paused automatic repair", (pull) => ({ ...pull, labels: [{ name: "paused" }] }), /paused/, undefined, undefined, "policy", 0],
     ["protected", (pull) => pull, /is protected/, { protected: true }],
     ["branch moved", (pull) => pull, /head branch moved/, { protected: false, commit: { sha: "e".repeat(40) } }]
   ];

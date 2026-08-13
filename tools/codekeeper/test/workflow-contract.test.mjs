@@ -19,7 +19,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "d342dbe3a02017584c28679275b8a15e1bf4d520bb5068a4948a0dd7d02826de";
+const toolingManifestSha256 = "d38479c3dba3f891404c8006e5f565d7adad8816cbe244f37cd083757c12b588";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -95,7 +95,7 @@ test("caller bootstrap fetches the same immutable private action release as its 
     const pins = [...generated.matchAll(/uses:\s+octo\/private-codekeeper\/(?:tools\/codekeeper|\.github\/workflows\/codekeeper-[a-z-]+\.yml)@([0-9a-f]{40})/g)]
       .map((match) => match[1]);
     assert.deepEqual(pins, [releaseSha, releaseSha], `${mode} caller must pin bootstrap and reusable workflow identically`);
-    assert.match(template, /bootstrap:\n(?:\s+(?:needs|if): [^\n]+\n)*\s+name: Codekeeper pinned tooling bootstrap\n(?:\s+(?:needs|if): [^\n]+\n)*\s+runs-on: ubuntu-latest/);
+    assert.match(template, /bootstrap:\n(?:\s+(?:needs|if): [^\n]+\n)*\s+name: Codekeeper pinned tooling bootstrap\n(?:\s+(?:needs|if): [^\n]+\n)*\s+runs-on: \$\{\{ vars\.CODEKEEPER_RUNNER \|\| 'ubuntu-latest' \}\}/);
     assert.match(template, new RegExp(`(?:maintain|fix|triage|review):\\n\\s+needs: (?:bootstrap|\\[[^\\n]*bootstrap[^\\n]*\\])\\n(?:\\s+if: [^\\n]+\\n)?\\s+uses: OWNER/REPOSITORY/\\.github/workflows/codekeeper-${mode}\\.yml@FULL_COMMIT_SHA`));
     const bootstrap = template.slice(template.indexOf("  bootstrap:\n"), template.indexOf(`  ${mode === "issues" ? "triage" : mode === "maintain" ? "maintain" : mode}:\n`));
     const bootstrapArtifactNames = [...bootstrap.matchAll(/^ {10}artifact-name: ([^\n]+)$/gm)].map((match) => match[1]);
@@ -151,6 +151,19 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
     );
     assert.doesNotMatch(source, /job\.workflow_repository/);
     assert.doesNotMatch(source, /repository: \$\{\{ job\.workflow_repository \}\}/);
+  }
+});
+
+test("reusable workflows default to GitHub runners and allow a trusted caller override", async () => {
+  for (const mode of ["assistant", "maintain", "fix", "issues", "review"]) {
+    const source = await workflow(mode);
+    const caller = await repositoryFile(`examples/workflows/codekeeper-${mode}.yml.example`);
+    assert.match(source, /runner:\n\s+description: Runner label used by every job in this reusable workflow\.\n\s+required: false\n\s+default: ubuntu-latest\n\s+type: string/);
+    assert.doesNotMatch(source, /^\s+runs-on: ubuntu-latest$/m);
+    assert.match(source, /^\s+runs-on: \$\{\{ inputs\.runner \}\}$/m);
+    assert.doesNotMatch(caller, /^\s+runs-on: ubuntu-latest$/m);
+    assert.match(caller, /^\s+runs-on: \$\{\{ vars\.CODEKEEPER_RUNNER \|\| 'ubuntu-latest' \}\}$/m);
+    assert.match(caller, /^\s+runner: \$\{\{ vars\.CODEKEEPER_RUNNER \|\| 'ubuntu-latest' \}\}$/m);
   }
 });
 
@@ -490,7 +503,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(fix, /Check out frozen repair target/);
   assert.match(fix, /github\.event_name == 'issues'/);
   assert.match(fix, /github\.event\.action == 'labeled'/);
-  assert.match(fix, /github\.event\.label\.name == 'codekeeper:ready'/);
+  assert.match(fix, /github\.event\.label\.name == 'ready'/);
   assert.match(fix, /automation_bot_login:/);
   assert.match(fix, /github\.event\.sender\.login == inputs\.automation_bot_login/);
   assert.match(fix, /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_fix'[\s\S]*github\.actor == inputs\.automation_bot_login/);
@@ -506,7 +519,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   const commands = await repositoryFile("tools/codekeeper/src/lib/commands.mjs");
   assert.match(commands, /pull\.base\?\.ref !== defaultBranch/);
   assert.match(commands, /config\.repository\.defaultBranch/);
-  assert.match(commands, /removeLabel\(number, "codekeeper:paused"\)/);
+  assert.match(commands, /removeLabel\(number, "paused"\)/);
 });
 
 test("owner-commanded pull request repair can update only the frozen existing head", async () => {
@@ -553,7 +566,7 @@ test("Fixer repository dispatches retain their target and explicit policy author
   assert.match(workspace, /prepare-fix[\s\S]*agent-settings[\s\S]*--mode fix \\\n\s+--mutation-authorized true/);
   assert.match(publisher, /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*authorization_mode: "policy"/);
   assert.match(publisher, /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*requested_by: automationIdentity\.login/);
-  assert.match(publisher, /Automatic repair dispatch is pending[\s\S]*?createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*?dispatchSucceeded = true;[\s\S]*?Automatic repair was dispatched[\s\S]*?addLabels\(pull\.number, \["codekeeper:auto-repaired"\]\)/);
+  assert.match(publisher, /Automatic repair dispatch is pending[\s\S]*?createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*?dispatchSucceeded = true;[\s\S]*?Automatic repair was dispatched[\s\S]*?addLabels\(pull\.number, \["auto repaired"\]\)/);
 });
 
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {

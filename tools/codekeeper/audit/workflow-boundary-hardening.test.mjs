@@ -44,6 +44,6 @@ test("conditional review mutation rejects draft and paused pull requests", () =>
   const assertCurrent = section(githubSource, "  async assertPullMutationCurrent", "\n  assertPullMutationIdentity");
   const assertIdentity = section(githubSource, "  assertPullMutationIdentity", "\n  advancePullMutationState");
   assertContains(assertIdentity, /pull\.draft/u, "conditional review mutation omits draft state");
-  assertContains(assertCurrent, /codekeeper:paused/u, "conditional review mutation omits the paused label");
+  assertContains(assertCurrent, /paused/u, "conditional review mutation omits the paused label");
   assertContains(publishSource, /beginPullMutation/u, "review publication does not enter the conditional mutation seam");
 });

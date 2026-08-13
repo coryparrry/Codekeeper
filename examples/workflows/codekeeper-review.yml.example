@@ -20,7 +20,7 @@ permissions:
 jobs:
   intent:
     name: Detect Codekeeper review feedback
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
     outputs:
       owner_command: ${{ steps.intent.outputs.owner_command }}
       route: ${{ steps.intent.outputs.route }}
@@ -61,7 +61,7 @@ jobs:
     needs: intent
     if: needs.intent.outputs.route == 'true'
     name: Codekeeper pinned tooling bootstrap
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: OWNER/REPOSITORY/tools/codekeeper@FULL_COMMIT_SHA
         with:
@@ -72,6 +72,7 @@ jobs:
     uses: OWNER/REPOSITORY/.github/workflows/codekeeper-review.yml@FULL_COMMIT_SHA
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
+      runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
       auto_review: true
       feedback_triage: true
       owner_command: ${{ needs.intent.outputs.owner_command == 'true' }}

@@ -76,7 +76,7 @@ test("auto-merge is limited to low-risk allowlisted automation PRs", () => {
 
   const paused = evaluateAutoMerge({
     config,
-    pullRequest: { ...pullRequest, labels: [{ name: "codekeeper:paused" }] },
+    pullRequest: { ...pullRequest, labels: [{ name: "paused" }] },
     files: [{ filename: "docs/README.md", additions: 10, deletions: 2 }],
     reviewResult,
     reviewContextComplete: true,

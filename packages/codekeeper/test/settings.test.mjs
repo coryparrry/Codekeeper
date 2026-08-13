@@ -156,18 +156,18 @@ test("settings reject runtime-incompatible model settings and managed-label remo
 
   const missingReviewLabel = structuredClone(settings);
   missingReviewLabel.policy.review.managedLabels = missingReviewLabel.policy.review.managedLabels
-    .filter((label) => label !== "codekeeper:reviewed");
+    .filter((label) => label !== "reviewed");
   assert.throws(
     () => validateEditableSettings(missingReviewLabel, policy),
-    /review must explicitly manage emitted label codekeeper:reviewed/
+    /review must explicitly manage emitted label reviewed/
   );
 
   const missingIssueLabel = structuredClone(settings);
   missingIssueLabel.policy.issues.managedLabels = missingIssueLabel.policy.issues.managedLabels
-    .filter((label) => label !== "codekeeper:ready");
+    .filter((label) => label !== "ready");
   assert.throws(
     () => validateEditableSettings(missingIssueLabel, policy),
-    /issues must explicitly manage emitted label codekeeper:ready/
+    /issues must explicitly manage emitted label ready/
   );
 });
 

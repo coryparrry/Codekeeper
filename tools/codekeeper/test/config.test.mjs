@@ -48,10 +48,10 @@ test("configuration validator rejects unsafe or incomplete policy values", async
   );
 
   const missingRuntimeLabel = structuredClone(source);
-  delete missingRuntimeLabel.labels["codekeeper:ready"];
+  delete missingRuntimeLabel.labels["ready"];
   await assert.rejects(
     loadConfig(await writeConfig(missingRuntimeLabel)),
-    /runtime requires undefined label codekeeper:ready/
+    /runtime requires undefined label ready/
   );
 
   await assert.rejects(

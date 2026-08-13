@@ -529,7 +529,7 @@ test("coordinator evidence boundary rejects invented review findings and fix tes
   assert.throws(
     () => enforceCoordinatorEvidenceBoundary(
       "issue",
-      { duplicateOf: 9, actionable: true, implementationRecommendation: "ai-ready", labels: ["codekeeper:ready"] },
+      { duplicateOf: 9, actionable: true, implementationRecommendation: "ai-ready", labels: ["ready"] },
       { duplicateOf: null, actionable: false, implementationRecommendation: "no", labels: [] }
     ),
     /duplicate not present in workspace evidence/
@@ -609,7 +609,7 @@ test("coordinator evidence cannot become more permissive than specialist authori
   assert.throws(
     () => enforceCoordinatorEvidenceBoundary(
       "review",
-      reviewEvidence(["codekeeper:type-security"]),
+      reviewEvidence(["security"]),
       reviewEvidence([])
     ),
     /review label/
@@ -617,8 +617,8 @@ test("coordinator evidence cannot become more permissive than specialist authori
   assert.doesNotThrow(
     () => enforceCoordinatorEvidenceBoundary(
       "review",
-      reviewEvidence(["codekeeper:type-security"]),
-      reviewEvidence(["codekeeper:type-security", "codekeeper:type-bug"])
+      reviewEvidence(["security"]),
+      reviewEvidence(["security", "bug"])
     )
   );
   assert.throws(

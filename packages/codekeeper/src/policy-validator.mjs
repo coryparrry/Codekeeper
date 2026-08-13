@@ -220,62 +220,60 @@ function validateAutomationBranchPrefix(value) {
 }
 
 const REQUIRED_RUNTIME_LABELS = [
-  "codekeeper:reviewed",
-  "codekeeper:maintenance",
-  "codekeeper:ready",
-  "codekeeper:blocked",
-  "codekeeper:manual-review",
-  "codekeeper:paused",
-  "codekeeper:auto-repaired",
-  "codekeeper:auto-merge",
-  "codekeeper:duplicate-candidate",
-  "codekeeper:deferred",
-  "codekeeper:needs-tests",
-  "codekeeper:priority-p1",
-  "codekeeper:priority-p2",
-  "codekeeper:priority-p3",
-  "codekeeper:risk-low",
-  "codekeeper:risk-medium",
-  "codekeeper:risk-high",
-  "codekeeper:type-bug",
-  "codekeeper:type-documentation",
-  "codekeeper:type-enhancement",
-  "codekeeper:type-maintenance",
-  "codekeeper:type-question",
-  "codekeeper:type-security",
-  "codekeeper:type-testing"
+  "reviewed",
+  "ready",
+  "blocked",
+  "manual review",
+  "paused",
+  "auto repaired",
+  "auto merge",
+  "duplicate",
+  "deferred",
+  "needs tests",
+  "priority p1",
+  "priority p2",
+  "priority p3",
+  "risk low",
+  "risk medium",
+  "risk high",
+  "bug",
+  "documentation",
+  "enhancement",
+  "maintenance",
+  "question",
+  "security",
+  "testing"
 ];
 
 const REVIEW_MANAGED_LABELS = [
-  "codekeeper:reviewed",
-  "codekeeper:blocked",
-  "codekeeper:manual-review",
-  "codekeeper:auto-merge",
-  "codekeeper:needs-tests",
-  "codekeeper:risk-low",
-  "codekeeper:risk-medium",
-  "codekeeper:risk-high"
+  "reviewed",
+  "blocked",
+  "manual review",
+  "auto merge",
+  "needs tests",
+  "risk low",
+  "risk medium",
+  "risk high"
 ];
 
 const ISSUE_MANAGED_LABELS = [
-  "codekeeper:maintenance",
-  "codekeeper:ready",
-  "codekeeper:manual-review",
-  "codekeeper:duplicate-candidate",
-  "codekeeper:deferred",
-  "codekeeper:priority-p1",
-  "codekeeper:priority-p2",
-  "codekeeper:priority-p3",
-  "codekeeper:risk-low",
-  "codekeeper:risk-medium",
-  "codekeeper:risk-high",
-  "codekeeper:type-bug",
-  "codekeeper:type-documentation",
-  "codekeeper:type-enhancement",
-  "codekeeper:type-maintenance",
-  "codekeeper:type-question",
-  "codekeeper:type-security",
-  "codekeeper:type-testing"
+  "maintenance",
+  "ready",
+  "manual review",
+  "duplicate",
+  "deferred",
+  "priority p1",
+  "priority p2",
+  "priority p3",
+  "risk low",
+  "risk medium",
+  "risk high",
+  "bug",
+  "documentation",
+  "enhancement",
+  "question",
+  "security",
+  "testing"
 ];
 
 function validateAi(config) {
@@ -403,8 +401,9 @@ export function validatePolicy(config) {
   cappedPositiveInteger(config.audit.repair.maximumPatchBytes, "audit.repair.maximumPatchBytes", LIMITS.maximumPatchBytes);
   cappedPositiveInteger(config.audit.repair.maximumFileBytes, "audit.repair.maximumFileBytes", LIMITS.maximumFileBytes);
 
-  fixedObject(config.issues, "issues", ["closeExactDuplicates", "allowAiImplementation", "maximumOpenIssueContext", "managedLabels"]);
+  fixedObject(config.issues, "issues", ["closeExactDuplicates", "closeResolvedIssues", "allowAiImplementation", "maximumOpenIssueContext", "managedLabels"]);
   boolean(config.issues.closeExactDuplicates, "issues.closeExactDuplicates");
+  boolean(config.issues.closeResolvedIssues, "issues.closeResolvedIssues");
   boolean(config.issues.allowAiImplementation, "issues.allowAiImplementation");
   cappedPositiveInteger(config.issues.maximumOpenIssueContext, "issues.maximumOpenIssueContext", LIMITS.maximumOpenIssueContext);
   stringArray(config.issues.managedLabels, "issues.managedLabels", { maximumLength: 256 });

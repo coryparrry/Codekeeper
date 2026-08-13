@@ -12,6 +12,11 @@ on:
         required: false
         default: true
         type: boolean
+      runner:
+        description: Runner label used by every job in this reusable workflow.
+        required: false
+        default: ubuntu-latest
+        type: string
       auto_review:
         description: Automatically review eligible pull request events.
         required: false
@@ -56,7 +61,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: d342dbe3a02017584c28679275b8a15e1bf4d520bb5068a4948a0dd7d02826de
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: d38479c3dba3f891404c8006e5f565d7adad8816cbe244f37cd083757c12b588
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
@@ -86,7 +91,7 @@ jobs:
         !github.event.pull_request.draft &&
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.base.ref == github.event.repository.default_branch))
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -277,7 +282,7 @@ jobs:
     name: Codekeeper review analysis
     needs: workspace
     if: needs.workspace.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -436,7 +441,7 @@ jobs:
     name: Codekeeper review seal
     needs: analyze
     if: needs.analyze.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     outputs:
       manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
@@ -523,7 +528,7 @@ jobs:
     name: Codekeeper review publication
     needs: seal
     if: needs.seal.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -622,7 +627,7 @@ jobs:
     name: Codekeeper review gate
     if: always()
     needs: [analyze, seal, publish]
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 5
     steps:
       - name: Fail closed unless a current review was published

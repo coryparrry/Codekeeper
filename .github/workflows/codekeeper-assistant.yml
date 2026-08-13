@@ -8,6 +8,11 @@ on:
         required: false
         default: true
         type: boolean
+      runner:
+        description: Runner label used by every job in this reusable workflow.
+        required: false
+        default: ubuntu-latest
+        type: string
       owner_requests:
         description: Allow configured owners to request bounded Codekeeper actions.
         required: false
@@ -33,7 +38,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: d342dbe3a02017584c28679275b8a15e1bf4d520bb5068a4948a0dd7d02826de
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: d38479c3dba3f891404c8006e5f565d7adad8816cbe244f37cd083757c12b588
 
 concurrency:
   group: codekeeper-assistant-${{ github.run_id }}
@@ -49,7 +54,7 @@ jobs:
       (github.event.comment.author_association == 'OWNER' ||
        github.event.comment.author_association == 'MEMBER' ||
        github.event.comment.author_association == 'COLLABORATOR')
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
