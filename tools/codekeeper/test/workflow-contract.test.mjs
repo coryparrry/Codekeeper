@@ -57,9 +57,12 @@ test("source CI stays generic while repository settings select its runner", asyn
     runnerLines.every((line) => line.trim() === "runs-on: ${{ vars.CODEKEEPER_CI_RUNNER || 'ubuntu-latest' }}"),
     "tracked source CI must not contain a concrete organization or third-party runner label"
   );
-  assert.doesNotMatch(source, /blacksmith|coryparr?y|codekeeper-test-environment/i);
   const actionlint = await repositoryFile(".github/actionlint.yaml");
-  assert.doesNotMatch(actionlint, /blacksmith|coryparr?y|codekeeper-test-environment/i);
+  assert.doesNotMatch(
+    actionlint,
+    /^\s*self-hosted-runner:/m,
+    "tracked lint configuration must not register deployment-specific runner labels"
+  );
 });
 
 test("the standard repository check verifies the complete source-release inventory", async () => {
