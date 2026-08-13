@@ -76,7 +76,9 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.match(reviewCaller, /const botMention = mentionBot && new RegExp\(`\^@\$\{escapedMention\}\(\?:\\\\s\|\$\)`/);
   assert.match(reviewCaller, /const mentioned = mentionBot && new RegExp\(`\^@\$\{escapedMention\}\\\\s\+\(\$\{actions\.join\("\|"\)\}\)\$`/);
   assert.match(reviewCaller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply && !botMention/);
-  assert.match(reviewCaller, /const automationReply = eventName === "pull_request_review_comment" && automationBot && author === automationBot/);
+  assert.match(reviewCaller, /REVIEW_AUTHOR: \$\{\{ github\.event\.review\.user\.login \}\}/);
+  assert.match(reviewCaller, /const author = eventName === "pull_request_review" \? reviewAuthor : commentAuthor/);
+  assert.match(reviewCaller, /const automationReply = feedbackEvent && automationBot && author === automationBot/);
   const assistantCaller = await repositoryFile("examples/workflows/codekeeper-assistant.yml.example");
   assert.match(assistantCaller, /const mentioned = bot && new RegExp\(`\^@\$\{escapedBot\}\\\\s\+\(\$\{actions\.join\("\|"\)\}\)\$`/);
   assert.doesNotMatch(assistantCaller, /body\.includes\(`/);
@@ -451,6 +453,7 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(caller, /feedback_triage: true/);
   assert.match(caller, /const mentioned = mentionBot && new RegExp\(`/);
   assert.match(caller, /const feedbackEvent = eventName === "pull_request_review" \|\| eventName === "pull_request_review_comment";/);
+  assert.match(caller, /const automationReply = feedbackEvent && automationBot && author === automationBot;/);
   assert.match(caller, /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply && !botMention;/);
   assert.match(caller, /appendFileSync\(process\.env\.GITHUB_OUTPUT, `owner_command=\$\{commandIntent\}\\nroute=\$\{route\}\\n`\)/);
   assert.match(caller, /owner_command: \$\{\{ needs\.intent\.outputs\.owner_command == 'true' \}\}/);

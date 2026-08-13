@@ -31,6 +31,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          REVIEW_AUTHOR: ${{ github.event.review.user.login }}
           AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
           AUTOMATION_BOT_LOGIN: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
         run: |
@@ -38,7 +39,9 @@ jobs:
             import { appendFileSync } from "node:fs";
             const eventName = String(process.env.EVENT_NAME ?? "");
             const body = String(process.env.COMMENT_BODY ?? "").trim();
-            const author = String(process.env.COMMENT_AUTHOR ?? "").toLowerCase();
+            const commentAuthor = String(process.env.COMMENT_AUTHOR ?? "").toLowerCase();
+            const reviewAuthor = String(process.env.REVIEW_AUTHOR ?? "").toLowerCase();
+            const author = eventName === "pull_request_review" ? reviewAuthor : commentAuthor;
             const association = String(process.env.AUTHOR_ASSOCIATION ?? "");
             const automationBot = String(process.env.AUTOMATION_BOT_LOGIN ?? "").toLowerCase();
             const mentionBot = automationBot.replace(/\[bot\]$/i, "");
@@ -49,8 +52,8 @@ jobs:
             const mentioned = mentionBot && new RegExp(`^@${escapedMention}\\s+(${actions.join("|")})$`, "i").test(body);
             const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
             const commandIntent = eventName === "pull_request_review_comment" && trustedAssociation && (slash || mentioned);
-            const automationReply = eventName === "pull_request_review_comment" && automationBot && author === automationBot;
             const feedbackEvent = eventName === "pull_request_review" || eventName === "pull_request_review_comment";
+            const automationReply = feedbackEvent && automationBot && author === automationBot;
             const route = (!feedbackEvent || Boolean(automationBot)) && !commandIntent && !automationReply && !botMention;
             appendFileSync(process.env.GITHUB_OUTPUT, `owner_command=${commandIntent}\nroute=${route}\n`);
           '
