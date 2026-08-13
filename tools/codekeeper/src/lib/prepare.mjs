@@ -77,7 +77,6 @@ function trustedAgentProfile(mode, agentProfilePath, agentProfileSourceSha) {
 function runMetadata({ toolingSha = process.env.CODEKEEPER_TOOLING_SHA ?? "", configSha256 = "" } = {}) {
   return {
     runId: process.env.GITHUB_RUN_ID ?? "",
-    runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "",
     toolingSha: String(toolingSha).trim(),
     configSha256: String(configSha256).trim()
   };

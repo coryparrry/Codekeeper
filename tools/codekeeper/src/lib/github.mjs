@@ -89,6 +89,14 @@ function isGraphqlMutation(query) {
   return /^\s*mutation\b/i.test(String(query));
 }
 
+function isAmbiguousGraphqlMutationPayload(payload) {
+  const hasData = payload?.data !== null && payload?.data !== undefined;
+  const hasExecutionPath = payload?.errors?.some((error) =>
+    Array.isArray(error?.path) && error.path.length > 0
+  );
+  return hasData || hasExecutionPath;
+}
+
 function labelNames(subject) {
   return [...new Set((subject?.labels ?? []).map((label) =>
     String(typeof label === "string" ? label : label?.name ?? "").trim()
@@ -1207,6 +1215,9 @@ export class GitHubClient {
       const error = new Error(`GitHub GraphQL failed: ${message}`);
       error.status = response.status;
       error.payload = payload;
+      if (mutation && isAmbiguousGraphqlMutationPayload(payload)) {
+        error.githubMutationOutcome = "ambiguous";
+      }
       throw error;
     }
     return payload.data;

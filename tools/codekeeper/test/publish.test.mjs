@@ -157,6 +157,97 @@ function replaceGitHubMethods(methods) {
   return () => Object.assign(GitHubClient.prototype, originals);
 }
 
+async function automaticRepairReviewFixture() {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-review-cheap-repair-test-"));
+  const configSha256 = "e".repeat(64);
+  const reviewConfig = structuredClone(config);
+  reviewConfig.merge.enabled = true;
+  reviewConfig.review.autoRepair = true;
+  const frozenFeedback = {
+    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
+    body: "Please make this repair.", bodySha256: sha256("Please make this repair."),
+    url: "https://github.test/comment/41",
+    state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
+    resolved: false, outdated: false, path: "README.md", line: 1
+  };
+  const headSha = "1".repeat(40);
+  const baseSha = "2".repeat(40);
+  const context = {
+    mode: "review", repository: "owner/repository", configSha256, runId: "7004",
+    runUrl: "https://github.com/owner/repository/actions/runs/7004",
+    pullRequest: {
+      number: 7, headSha, baseSha,
+      diff: { truncated: false, disabled: false }, reviewFeedbackFrozen: true,
+      reviewFeedback: [frozenFeedback]
+    }
+  };
+  const result = {
+    mode: "review", summary: "Queue the cheap repair.", risk: "low", labels: [],
+    blockingFindings: [], nonBlockingFindings: [],
+    reviewFeedback: [{
+      problemKey: "cheap-repair", disposition: "fix_if_cheap", type: "bug",
+      explanation: "Apply the bounded repair.", validation: "The repair remains applicable.",
+      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }],
+    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto", noActionReason: null
+  };
+  const pull = {
+    number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
+    user: { login: identity.login, type: "Bot" },
+    head: { sha: headSha, ref: "automation/codekeeper/cheap-repair", repo: { full_name: context.repository } },
+    base: { sha: baseSha, ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
+  };
+  const repair = {
+    state: "Automatic repair was dispatched.",
+    head: "0".repeat(40),
+    comments: []
+  };
+  const restoreGitHub = replaceGitHubMethods({
+    async getPull() { return structuredClone(pull); },
+    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
+    async listPullReviews() { return []; },
+    async listPullReviewThreads() {
+      return [{
+        id: frozenFeedback.threadId, isResolved: false, isOutdated: false,
+        comments: { nodes: [{
+          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
+          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
+          author: { login: frozenFeedback.author }
+        }] }
+      }];
+    },
+    async listIssueComments() {
+      return [{
+        body: `${repair.state}\n${automaticRepairMarker(repair.head)}`,
+        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+      }, ...repair.comments];
+    }
+  });
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+  process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+  const integrity = await writeSealedArtifact(artifactDirectory, {
+    mode: "review", context, result, configSha256, artifactConfig: reviewConfig
+  });
+  return {
+    artifactDirectory, configSha256, context, headSha, integrity, pull, repair, result, reviewConfig,
+    publish(artifactIntegrity = integrity) {
+      return publishReview({
+        artifactDirectory, config: reviewConfig, configSha256, ...artifactIntegrity, token: "unused", dryRun: true
+      });
+    },
+    async cleanup() {
+      restoreGitHub();
+      if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+      else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+      if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+      else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+      await rm(artifactDirectory, { recursive: true, force: true });
+    }
+  };
+}
+
 test("repair PR deduplication accepts only the configured App marker, branch, and repositories", () => {
   assert.equal(matches(trustedPull), true);
   assert.equal(matches({ ...trustedPull, user: { login: "person", id: 123456, type: "User" } }), false);
@@ -868,168 +959,121 @@ test("fix-now feedback blocks auto-merge even when repair dispatch is disabled",
 });
 
 test("a completed automatic repair consumes the pass after the pull request head changes", async () => {
-  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-review-cheap-repair-test-"));
-  const configSha256 = "e".repeat(64);
-  const reviewConfig = structuredClone(config);
-  reviewConfig.merge.enabled = true;
-  reviewConfig.review.autoRepair = true;
-  const frozenFeedback = {
-    sourceKey: "review_comment:41", kind: "review_comment", author: "reviewer",
-    body: "Please make this repair.", bodySha256: sha256("Please make this repair."),
-    url: "https://github.test/comment/41",
-    state: "commented", threadId: "PRRT_thread", rootCommentId: 41,
-    resolved: false, outdated: false, path: "README.md", line: 1
-  };
-  const headSha = "1".repeat(40);
-  const baseSha = "2".repeat(40);
-  const context = {
-    mode: "review", repository: "owner/repository", configSha256, runId: "7004",
-    runUrl: "https://github.com/owner/repository/actions/runs/7004",
-    pullRequest: {
-      number: 7, headSha, baseSha,
-      diff: { truncated: false, disabled: false }, reviewFeedbackFrozen: true,
-      reviewFeedback: [frozenFeedback]
-    }
-  };
-  const result = {
-    mode: "review", summary: "Queue the cheap repair.", risk: "low", labels: [],
-    blockingFindings: [], nonBlockingFindings: [],
-    reviewFeedback: [{
-      problemKey: "cheap-repair", disposition: "fix_if_cheap", type: "bug",
-      explanation: "Apply the bounded repair.", validation: "The repair remains applicable.",
-      sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
-    }],
-    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto", noActionReason: null
-  };
-  const pull = {
-    number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
-    user: { login: identity.login, type: "Bot" },
-    head: { sha: headSha, ref: "automation/codekeeper/cheap-repair", repo: { full_name: context.repository } },
-    base: { sha: baseSha, ref: reviewConfig.repository.defaultBranch, repo: { full_name: context.repository } }
-  };
-  let repairState = "Automatic repair was dispatched.";
-  let repairHead = "0".repeat(40);
-  let extraRepairComments = [];
-  const restoreGitHub = replaceGitHubMethods({
-    async getPull() { return structuredClone(pull); },
-    async listPullFiles() { return [{ filename: "README.md", additions: 1, deletions: 0 }]; },
-    async listPullReviews() { return []; },
-    async listPullReviewThreads() {
-      return [{
-        id: frozenFeedback.threadId, isResolved: false, isOutdated: false,
-        comments: { nodes: [{
-          databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
-          path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
-          author: { login: frozenFeedback.author }
-        }] }
-      }];
-    },
-    async listIssueComments() {
-      return [{
-        body: `${repairState}\n${automaticRepairMarker(repairHead)}`,
-        user: { login: identity.login, id: Number(identity.id), type: "Bot" }
-      }, ...extraRepairComments];
-    }
-  });
-  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
-  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  const fixture = await automaticRepairReviewFixture();
+  const { artifactDirectory, configSha256, context, headSha, pull, repair, result, reviewConfig } = fixture;
   try {
-    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
-    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
-    const integrity = await writeSealedArtifact(artifactDirectory, {
-      mode: "review", context, result, configSha256, artifactConfig: reviewConfig
-    });
-    const publication = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
-    });
+    const publication = await fixture.publish();
     assert.equal(publication.autoMerge.eligible, false);
     assert.match(publication.autoMerge.reasons.join("\n"), /repair pass is already consumed/i);
     assert.equal(publication.automaticRepair.consumed, true);
     assert.equal(publication.automaticRepair.pending, false);
 
     pull.labels = [{ name: "codekeeper:auto-repaired" }];
-    const repeated = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
-    });
+    const repeated = await fixture.publish();
     assert.equal(repeated.autoMerge.eligible, false);
     assert.match(repeated.autoMerge.reasons.join("\n"), /repair pass is already consumed/i);
     assert.equal(repeated.automaticRepair.consumed, true);
     assert.equal(repeated.automaticRepair.pending, false);
 
     pull.labels = [];
-    repairState = "Automatic repair dispatch is ambiguous.";
-    const ambiguous = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
-    });
+    repair.state = "Automatic repair dispatch is ambiguous.";
+    const ambiguous = await fixture.publish();
     assert.equal(ambiguous.automaticRepair.consumed, true);
     assert.equal(ambiguous.automaticRepair.pending, false);
     assert.equal(ambiguous.automaticRepair.eligible, false);
 
-    repairState = "Automatic repair dispatch is pending.";
-    repairHead = headSha;
-    const pending = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
-    });
+    repair.state = "Automatic repair dispatch is pending.";
+    repair.head = headSha;
+    const pending = await fixture.publish();
     assert.equal(pending.automaticRepair.eligible, true);
     assert.equal(pending.automaticRepair.pending, true);
 
-    extraRepairComments = [{
+    repair.state = "Automatic repair dispatch is pending.";
+    pull.labels = [];
+    repair.comments = [{
       body: `<!-- codekeeper:repair-lease-expired=${"a".repeat(64)} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`,
       user: { login: identity.login, id: Number(identity.id), type: "Bot" }
     }];
-    const crashed = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
-    });
+    const crashed = await fixture.publish();
     assert.equal(crashed.automaticRepair.consumed, true);
     assert.equal(crashed.automaticRepair.eligible, false);
 
-    repairHead = "0".repeat(40);
+    repair.head = "0".repeat(40);
     const crashedRepairScope = sha256(JSON.stringify({
-      repository: context.repository, pullNumber: pull.number, headSha: repairHead
+      repository: context.repository, pullNumber: pull.number, headSha: repair.head
     }));
-    extraRepairComments = [{
+    repair.comments = [{
       body: `<!-- codekeeper:repair-lease-active=${crashedRepairScope} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`,
       user: { login: identity.login, id: Number(identity.id), type: "Bot" }
     }];
-    const crashedAfterDispatch = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
-    });
+    const crashedAfterDispatch = await fixture.publish();
     assert.equal(crashedAfterDispatch.automaticRepair.consumed, true);
     assert.equal(crashedAfterDispatch.automaticRepair.eligible, false);
     assert.equal(crashedAfterDispatch.automaticRepair.pending, false);
 
-    extraRepairComments[0].body = `<!-- codekeeper:repair-lease-active=${"a".repeat(64)} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`;
-    const unrelatedActiveLease = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
-    });
+    repair.comments[0].body = `<!-- codekeeper:repair-lease-active=${"a".repeat(64)} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`;
+    const unrelatedActiveLease = await fixture.publish();
     assert.equal(unrelatedActiveLease.automaticRepair.consumed, false);
     assert.equal(unrelatedActiveLease.automaticRepair.eligible, true);
     assert.equal(unrelatedActiveLease.automaticRepair.pending, false);
 
-    repairState = "Automatic repair dispatch failed.";
-    const retryable = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused", dryRun: true
-    });
+    repair.state = "Automatic repair dispatch failed.";
+    const retryable = await fixture.publish();
     assert.equal(retryable.automaticRepair.consumed, false);
     assert.equal(retryable.automaticRepair.eligible, true);
     assert.equal(retryable.automaticRepair.pending, false);
 
-    repairState = "Automatic repair was dispatched.";
-    repairHead = "0".repeat(40);
+    repair.state = "Automatic repair was dispatched.";
+    repair.head = "0".repeat(40);
     const cleanIntegrity = await writeSealedArtifact(artifactDirectory, {
       mode: "review", context, result: { ...result, reviewFeedback: [] }, configSha256, artifactConfig: reviewConfig
     });
-    const cleanReview = await publishReview({
-      artifactDirectory, config: reviewConfig, configSha256, ...cleanIntegrity, token: "unused", dryRun: true
-    });
+    const cleanReview = await fixture.publish(cleanIntegrity);
     assert.equal(cleanReview.autoMerge.eligible, true);
   } finally {
-    restoreGitHub();
-    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
-    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
-    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
-    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
-    await rm(artifactDirectory, { recursive: true, force: true });
+    await fixture.cleanup();
+  }
+});
+
+test("a legacy pending repair marker consumes only its matching active lease", async () => {
+  const fixture = await automaticRepairReviewFixture();
+  const { context, headSha, pull, repair } = fixture;
+  const repairScope = sha256(JSON.stringify({
+    repository: context.repository, pullNumber: pull.number, headSha
+  }));
+  const leaseComment = (state) => ({
+    body: `<!-- codekeeper:repair-lease-${state}=${repairScope} -->\n<!-- codekeeper:repair-lease=${"b".repeat(64)} -->`,
+    user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+  });
+  try {
+    repair.state = `Automatic repair is pending for head ${headSha}.`;
+    repair.head = headSha;
+    repair.comments = [leaseComment("active")];
+    pull.labels = [{ name: "codekeeper:auto-repaired" }];
+    const legacyPending = await fixture.publish();
+    assert.equal(legacyPending.automaticRepair.consumed, true);
+    assert.equal(legacyPending.automaticRepair.eligible, false);
+    assert.equal(legacyPending.automaticRepair.pending, true);
+    assert.equal(legacyPending.automaticRepair.staleMarker, false);
+
+    for (const leaseState of ["failed", "released"]) {
+      repair.comments = [leaseComment(leaseState)];
+      const retryable = await fixture.publish();
+      assert.equal(retryable.automaticRepair.consumed, false);
+      assert.equal(retryable.automaticRepair.eligible, true);
+      assert.equal(retryable.automaticRepair.pending, true);
+      assert.equal(retryable.automaticRepair.staleMarker, true);
+    }
+
+    repair.state = `Automatic repair is pending for head ${headSha}. Extra`;
+    repair.comments = [leaseComment("active")];
+    const inexactMarker = await fixture.publish();
+    assert.equal(inexactMarker.automaticRepair.consumed, false);
+    assert.equal(inexactMarker.automaticRepair.eligible, true);
+    assert.equal(inexactMarker.automaticRepair.pending, false);
+    assert.equal(inexactMarker.automaticRepair.staleMarker, true);
+  } finally {
+    await fixture.cleanup();
   }
 });
 

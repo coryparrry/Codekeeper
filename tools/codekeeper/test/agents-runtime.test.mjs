@@ -22,6 +22,7 @@ import {
 } from "../src/lib/agents-runtime.mjs";
 import { providerCompatibleJsonSchema, validateIssueResult } from "../src/lib/schemas.mjs";
 import { sha256 } from "../src/lib/markers.mjs";
+import { evaluateAutoMerge } from "../src/lib/policy.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -716,8 +717,14 @@ test("coordinator evidence cannot become more permissive than specialist authori
   );
 });
 
-test("coordinator review feedback dispositions may only become more conservative", () => {
+test("coordinator review feedback dispositions preserve repair authority while allowing safe conservative changes", () => {
   const dispositions = ["fix_now", "fix_if_cheap", "defer", "ignore"];
+  const permitted = new Map([
+    ["fix_now", new Set(["fix_now"])],
+    ["fix_if_cheap", new Set(["fix_if_cheap"])],
+    ["defer", new Set(["defer", "ignore"])],
+    ["ignore", new Set(["ignore"])]
+  ]);
   const feedback = {
     problemKey: "current-review-defect",
     disposition: "fix_now",
@@ -733,9 +740,9 @@ test("coordinator review feedback dispositions may only become more conservative
     reviewFeedback: [{ ...feedback, disposition }]
   });
 
-  for (const [specialistIndex, specialistDisposition] of dispositions.entries()) {
-    for (const [outputIndex, outputDisposition] of dispositions.entries()) {
-      if (outputIndex >= specialistIndex) {
+  for (const specialistDisposition of dispositions) {
+    for (const outputDisposition of dispositions) {
+      if (permitted.get(specialistDisposition).has(outputDisposition)) {
         assert.doesNotThrow(
           () => enforceCoordinatorEvidenceBoundary("review", review(outputDisposition), review(specialistDisposition)),
           `${specialistDisposition} should allow ${outputDisposition}`
@@ -743,7 +750,7 @@ test("coordinator review feedback dispositions may only become more conservative
       } else {
         assert.throws(
           () => enforceCoordinatorEvidenceBoundary("review", review(outputDisposition), review(specialistDisposition)),
-          /upgraded review feedback disposition/,
+          /auto-merge veto|repair request|upgraded review feedback disposition/,
           `${specialistDisposition} should reject ${outputDisposition}`
         );
       }
@@ -761,6 +768,52 @@ test("coordinator review feedback dispositions may only become more conservative
   assert.throws(
     () => enforceCoordinatorEvidenceBoundary("review", { ...review("fix_now"), reviewFeedback: [] }, review("fix_now")),
     /omitted review feedback/
+  );
+});
+
+test("coordinator cannot transform specialist fix-now feedback into auto-merge eligibility", () => {
+  const feedback = {
+    problemKey: "verified-must-fix",
+    type: "bug",
+    explanation: "The current head still contains the defect.",
+    validation: "A focused regression reproduces the failure.",
+    sourceKeys: ["review_comment:42"],
+    threadIds: ["PRRT_42"]
+  };
+  const review = (disposition) => ({
+    risk: "low",
+    labels: [],
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: [{ ...feedback, disposition }],
+    tests: { adequate: true },
+    mergeRecommendation: "auto"
+  });
+  const pullRequest = {
+    state: "open",
+    draft: false,
+    labels: [],
+    user: { login: "codekeeper[bot]", type: "Bot" },
+    head: { ref: `${config.repository.automationBranchPrefix}repair`, repo: { full_name: "owner/repository" } },
+    base: { repo: { full_name: "owner/repository" } }
+  };
+  const autoMergeDecision = (reviewResult) => evaluateAutoMerge({
+    config: { ...config, merge: { ...config.merge, enabled: true } },
+    pullRequest,
+    files: [{ filename: "README.md", additions: 1, deletions: 0 }],
+    reviewResult,
+    reviewContextComplete: true,
+    automationBotLogin: "codekeeper[bot]"
+  });
+
+  assert.equal(autoMergeDecision(review("fix_now")).eligible, false);
+  assert.equal(autoMergeDecision(review("ignore")).eligible, true);
+
+  assert.throws(
+    () => autoMergeDecision(
+      enforceCoordinatorEvidenceBoundary("review", review("ignore"), review("fix_now"))
+    ),
+    /cannot clear a specialist fix-now auto-merge veto/
   );
 });
 

@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: bc24a5367565e541e03c25c26d1422de635b0561a6feff45d1e3db8dbbd19a1f
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 7b1047d403b97836e8f91c39bf464603572eb5db39cee902ce9abd07e4666359
 
 concurrency:
   group: codekeeper-maintenance-${{ github.repository }}
@@ -225,10 +225,11 @@ jobs:
       - name: Upload untrusted workspace evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: codekeeper-maintenance-workspace-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codekeeper-maintenance-workspace-${{ github.run_id }}
           path: ${{ runner.temp }}/codekeeper-bundle
           retention-days: 1
           if-no-files-found: error
+          overwrite: true
 
   analyze:
     name: Codekeeper maintenance analysis
@@ -291,7 +292,7 @@ jobs:
       - name: Download untrusted workspace evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: codekeeper-maintenance-workspace-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codekeeper-maintenance-workspace-${{ github.run_id }}
           path: ${{ runner.temp }}/codekeeper-workspace
       - name: Prepare runner-owned maintenance bundle
         id: prepare
@@ -373,10 +374,11 @@ jobs:
       - name: Upload untrusted maintenance candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: codekeeper-maintenance-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codekeeper-maintenance-candidate-${{ github.run_id }}
           path: ${{ runner.temp }}/codekeeper-candidate
           retention-days: 1
           if-no-files-found: error
+          overwrite: true
 
   verify:
     name: Codekeeper maintenance verification
@@ -433,7 +435,7 @@ jobs:
       - name: Download untrusted maintenance candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: codekeeper-maintenance-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codekeeper-maintenance-candidate-${{ github.run_id }}
           path: ${{ runner.temp }}/codekeeper-candidate
       - name: Verify candidate without OpenAI or App credentials
         working-directory: repository
@@ -500,7 +502,7 @@ jobs:
       - name: Download untrusted maintenance candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: codekeeper-maintenance-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codekeeper-maintenance-candidate-${{ github.run_id }}
           path: ${{ runner.temp }}/codekeeper-candidate
       - name: Seal maintenance artifact without repository execution
         id: seal
@@ -520,10 +522,11 @@ jobs:
       - name: Upload sealed maintenance artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: codekeeper-maintenance-artifact-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codekeeper-maintenance-artifact-${{ github.run_id }}
           path: ${{ runner.temp }}/codekeeper-artifact
           retention-days: 1
           if-no-files-found: error
+          overwrite: true
 
   publish:
     needs: seal
@@ -603,7 +606,7 @@ jobs:
       - name: Download sealed maintenance artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: codekeeper-maintenance-artifact-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codekeeper-maintenance-artifact-${{ github.run_id }}
           path: ${{ runner.temp }}/codekeeper-artifact
       - name: Publish sealed maintenance output
         working-directory: repository

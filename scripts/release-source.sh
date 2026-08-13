@@ -143,7 +143,7 @@ git archive --format=tar --prefix="$prefix" "$commit" | gzip -n > "$archive"
 
 archive_inventory="$work_dir/archive-inventory"
 expected_inventory="$work_dir/expected-inventory"
-tar -tzf "$archive" | sed -e "s|^${prefix}||" -e '/^$/d' | awk 'substr($0, length($0), 1) != "/"' | sort > "$archive_inventory"
+tar -tzf "$archive" | sed -e "s|^${prefix}||" -e '/^$/d' | awk 'substr($0, length($0), 1) != "/"' | LC_ALL=C sort > "$archive_inventory"
 git ls-tree -r --name-only "$commit" | LC_ALL=C sort > "$expected_inventory"
 cmp -s "$expected_inventory" "$archive_inventory" || {
   diff -u "$expected_inventory" "$archive_inventory" >&2 || true

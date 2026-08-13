@@ -549,13 +549,17 @@ test("GraphQL marks mutation response-body timeouts ambiguous without retrying",
   assert.equal(attempts, 1);
 });
 
-test("GraphQL does not mark parsed mutation errors ambiguous or retry them", async () => {
+test("GraphQL marks mutation errors with partial data ambiguous without retrying", async () => {
   let attempts = 0;
+  const payload = {
+    data: { updateIssue: { clientMutationId: "applied" } },
+    errors: [{ type: "FORBIDDEN", message: "follow-up field failed" }]
+  };
   const github = client({
     sleep: async () => { throw new Error("mutations must not be retried"); },
     fetch: async () => {
       attempts += 1;
-      return new Response(JSON.stringify({ errors: [{ type: "RATE_LIMITED", message: "rate limited" }] }));
+      return new Response(JSON.stringify(payload));
     }
   });
 
@@ -563,12 +567,81 @@ test("GraphQL does not mark parsed mutation errors ambiguous or retry them", asy
     github.graphql("mutation Update { updateIssue(input: {}) { clientMutationId } }"),
     (error) => {
       assert.equal(error.status, 200);
-      assert.deepEqual(error.payload, { errors: [{ type: "RATE_LIMITED", message: "rate limited" }] });
+      assert.deepEqual(error.payload, payload);
+      assert.equal(error.githubMutationOutcome, "ambiguous");
+      return true;
+    }
+  );
+  assert.equal(attempts, 1);
+});
+
+test("GraphQL marks mutation errors with execution paths ambiguous without retrying", async () => {
+  let attempts = 0;
+  const payload = {
+    data: null,
+    errors: [{ type: "INTERNAL", message: "mutation failed", path: ["updateIssue"] }]
+  };
+  const github = client({
+    sleep: async () => { throw new Error("mutations must not be retried"); },
+    fetch: async () => {
+      attempts += 1;
+      return new Response(JSON.stringify(payload));
+    }
+  });
+
+  await assert.rejects(
+    github.graphql("mutation Update { updateIssue(input: {}) { clientMutationId } }"),
+    (error) => {
+      assert.equal(error.status, 200);
+      assert.deepEqual(error.payload, payload);
+      assert.equal(error.githubMutationOutcome, "ambiguous");
+      return true;
+    }
+  );
+  assert.equal(attempts, 1);
+});
+
+test("GraphQL keeps pathless data-null mutation errors deterministic without retrying", async () => {
+  let attempts = 0;
+  const payload = {
+    data: null,
+    errors: [{ type: "RATE_LIMITED", message: "rate limited" }]
+  };
+  const github = client({
+    sleep: async () => { throw new Error("mutations must not be retried"); },
+    fetch: async () => {
+      attempts += 1;
+      return new Response(JSON.stringify(payload));
+    }
+  });
+
+  await assert.rejects(
+    github.graphql("mutation Update { updateIssue(input: {}) { clientMutationId } }"),
+    (error) => {
+      assert.equal(error.status, 200);
+      assert.deepEqual(error.payload, payload);
       assert.equal(error.githubMutationOutcome, undefined);
       return true;
     }
   );
   assert.equal(attempts, 1);
+});
+
+test("GraphQL does not attach mutation outcomes to partial query errors", async () => {
+  const payload = {
+    data: { viewer: { login: "codekeeper" } },
+    errors: [{ type: "FORBIDDEN", message: "email unavailable", path: ["viewer", "email"] }]
+  };
+  const github = client({
+    fetch: async () => new Response(JSON.stringify(payload))
+  });
+
+  await assert.rejects(github.graphql("query { viewer { login email } }"), (error) => {
+    assert.equal(error.status, 200);
+    assert.deepEqual(error.payload, payload);
+    assert.equal(error.githubMutationOutcome, undefined);
+    return true;
+  });
 });
 
 test("GraphQL preserves exhausted HTTP 200 rate-limit errors", async () => {

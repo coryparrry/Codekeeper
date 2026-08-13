@@ -307,6 +307,16 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
       if (!specialistFeedback) {
         throw new Error("Coordinator introduced review feedback triage not present in workspace evidence");
       }
+      if (specialistFeedback.disposition === "fix_now" && feedback.disposition !== "fix_now") {
+        throw new Error("Coordinator cannot clear a specialist fix-now auto-merge veto");
+      }
+      if (
+        (specialistFeedback.disposition === "fix_now" || specialistFeedback.disposition === "fix_if_cheap") &&
+        feedback.disposition !== "fix_now" &&
+        feedback.disposition !== "fix_if_cheap"
+      ) {
+        throw new Error("Coordinator cannot clear a specialist review feedback repair request");
+      }
       const dispositions = ["fix_now", "fix_if_cheap", "defer", "ignore"];
       if (dispositions.indexOf(feedback.disposition) < dispositions.indexOf(specialistFeedback.disposition)) {
         throw new Error("Coordinator upgraded review feedback disposition beyond workspace evidence");
