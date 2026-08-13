@@ -17,20 +17,15 @@ function safeInlineCode(value) {
     .replaceAll("`", "\\`");
 }
 
-function escapeTable(value) {
-  return safeMarkdown(value).replaceAll("|", "\\|").replaceAll("\n", " ");
-}
-
 function findingList(findings) {
-  if (findings.length === 0) return "None.";
   return findings
     .map((finding, index) => {
       const location = finding.file
-        ? ` — \`${safeInlineCode(finding.file)}${finding.line ? `:${finding.line}` : ""}\``
+        ? `\n   \`${safeInlineCode(finding.file)}${finding.line ? `:${finding.line}` : ""}\` · ${finding.severity} severity · ${finding.confidence} confidence`
         : "";
-      return `${index + 1}. **${safeMarkdown(finding.title)}** (${finding.severity}, ${finding.confidence} confidence)${location}\n   ${safeMarkdown(finding.explanation)}`;
+      return `${index + 1}. **${safeMarkdown(finding.title)}**${location}\n\n   ${safeMarkdown(finding.explanation)}`;
     })
-    .join("\n");
+    .join("\n\n");
 }
 
 const FEEDBACK_LABELS = Object.freeze({
@@ -55,39 +50,46 @@ function workflowRunEvidence(runUrl = "") {
 
 export function renderReviewComment(result, autoMerge, runUrl = "") {
   const decision = autoMerge.eligible
-    ? "Eligible for policy-controlled auto-merge."
-    : `Manual boundary retained: ${autoMerge.reasons.join("; ") || "policy did not allow auto-merge"}.`;
+    ? "This pull request meets the configured automatic-merge policy."
+    : `Automatic merge stays off because: ${autoMerge.reasons.join("; ") || "the configured policy did not allow it"}.`;
   const diagram = result.diagram
-    ? `\n\n### Change flow\n\n\`\`\`mermaid\n${result.diagram.trim()}\n\`\`\``
+    ? `\n\n### How the change behaves\n\n\`\`\`mermaid\n${result.diagram.trim()}\n\`\`\``
     : "";
   const triage = feedbackTriage(result.reviewFeedback);
-  const triageSection = triage ? `\n\n### Review feedback triage\n\n${triage}` : "";
-  const testStatus = result.tests.adequate ? "Adequate" : "**Needs more coverage** — see Test assessment below";
+  const triageSection = triage ? `\n\n### Existing review feedback\n\n${triage}` : "";
+  const recommendation = result.mergeRecommendation === "block"
+    ? "Block this pull request"
+    : result.mergeRecommendation === "auto" && autoMerge.eligible
+      ? "Ready to merge"
+      : "Ready for a person to decide";
+  const risk = `${result.risk[0].toUpperCase()}${result.risk.slice(1)} risk`;
+  const testStatus = result.tests.adequate ? "Tests covered" : "More tests needed";
   const testAssessment = result.tests.adequate
     ? safeMarkdown(result.tests.notes || "No additional test note.")
-    : `**Missing coverage:** ${safeMarkdown(result.tests.notes || "The review did not identify a specific missing test.")}`;
-  return `## PR review summary
+    : `**Coverage still needed:** ${safeMarkdown(result.tests.notes || "The review did not identify a specific missing test.")}`;
+  const blockingSection = result.blockingFindings.length
+    ? `\n\n### Must fix before merge\n\n${findingList(result.blockingFindings)}`
+    : "";
+  const nonBlockingSection = result.nonBlockingFindings.length
+    ? `\n\n### Worth a look\n\n${findingList(result.nonBlockingFindings)}`
+    : "";
+  return `## Codekeeper review
+
+**${recommendation}** · ${risk} · ${testStatus}
 
 ${safeMarkdown(result.summary)}
+${blockingSection}${nonBlockingSection}
 
-| Signal | Result |
-|---|---|
-| Risk | **${escapeTable(result.risk)}** |
-| Tests | ${testStatus} |
-| Merge recommendation | **${escapeTable(result.mergeRecommendation)}** |
-| Policy decision | ${escapeTable(decision)} |
-
-### Blocking findings
-
-${findingList(result.blockingFindings)}
-
-### Non-blocking findings
-
-${findingList(result.nonBlockingFindings)}
-
-### Test assessment
+### Tests
 
 ${testAssessment}${triageSection}${diagram}
+
+<details>
+<summary>Why Codekeeper chose this result</summary>
+
+${safeMarkdown(decision)}
+
+</details>
 
 <sub>Generated from the exact PR head analysed by the repository maintainer. Blocking findings fail the required Codekeeper review gate; GitHub branch protection remains authoritative.</sub>${workflowRunEvidence(runUrl)}`;
 }

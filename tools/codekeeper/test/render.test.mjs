@@ -8,7 +8,7 @@ test("review comment contains deterministic policy decision", () => {
       summary: "The change is narrow.",
       risk: "low",
       tests: { adequate: true, notes: "Covered." },
-      diagram: "flowchart LR\n  Change --> Test",
+      diagram: null,
       mergeRecommendation: "auto",
       blockingFindings: [],
       nonBlockingFindings: [],
@@ -36,10 +36,10 @@ test("review comment contains deterministic policy decision", () => {
     { eligible: false, reasons: ["Swift files require manual review"] },
     "https://github.com/owner/repository/actions/runs/7001"
   );
-  assert.match(markdown, /^## PR review summary$/m);
-  assert.match(markdown, /Manual boundary retained/);
+  assert.match(markdown, /^## Codekeeper review$/m);
+  assert.match(markdown, /Ready for a person to decide/);
   assert.match(markdown, /Swift files require manual review/);
-  assert.match(markdown, /```mermaid\nflowchart LR/);
+  assert.doesNotMatch(markdown, /```mermaid/);
   assert.match(markdown, /Fix now/);
   assert.match(markdown, /Defer/);
   assert.match(markdown, /Ignore/);
@@ -47,7 +47,7 @@ test("review comment contains deterministic policy decision", () => {
   assert.match(markdown, /<sub>Codekeeper workflow run: https:\/\/github\.com\/owner\/repository\/actions\/runs\/7001<\/sub>/);
 });
 
-test("normal reviews keep the original compact shape and name missing test coverage", () => {
+test("ordinary reviews are friendly, compact, and name missing test coverage", () => {
   const markdown = renderReviewComment(
     {
       summary: "No current defects found.",
@@ -56,7 +56,7 @@ test("normal reviews keep the original compact shape and name missing test cover
         adequate: false,
         notes: "No deterministic test covers PR and repository-dispatch run-name evaluation."
       },
-      diagram: "flowchart LR\n  Change --> Review",
+      diagram: null,
       mergeRecommendation: "manual",
       blockingFindings: [],
       nonBlockingFindings: [],
@@ -64,10 +64,24 @@ test("normal reviews keep the original compact shape and name missing test cover
     },
     { eligible: false, reasons: ["Tests are incomplete"] }
   );
-  assert.match(markdown, /\| Tests \| \*\*Needs more coverage\*\* — see Test assessment below \|/);
-  assert.match(markdown, /### Test assessment\n\n\*\*Missing coverage:\*\* No deterministic test covers PR and repository-dispatch run-name evaluation\./);
-  assert.match(markdown, /### Change flow\n\n```mermaid\nflowchart LR/);
+  assert.match(markdown, /\*\*Ready for a person to decide\*\* · Medium risk · More tests needed/);
+  assert.match(markdown, /### Tests\n\n\*\*Coverage still needed:\*\* No deterministic test covers PR and repository-dispatch run-name evaluation\./);
+  assert.doesNotMatch(markdown, /\| Signal|```mermaid|### Blocking findings|### Non-blocking findings/);
   assert.doesNotMatch(markdown, /Review feedback triage|Fix now|Fix if cheap|#### Defer|#### Ignore/);
+});
+
+test("a model-selected flow diagram renders only when supplied", () => {
+  const markdown = renderReviewComment({
+    summary: "The request now moves through a new approval state.",
+    risk: "medium",
+    tests: { adequate: true, notes: "The state transition is covered." },
+    diagram: "flowchart LR\n  Request --> Review --> Approved",
+    mergeRecommendation: "manual",
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: []
+  }, { eligible: false, reasons: ["A person must approve the state change"] });
+  assert.match(markdown, /### How the change behaves\n\n```mermaid\nflowchart LR/);
 });
 
 test("issue triage keeps trusted workflow-run evidence separate from model text", () => {

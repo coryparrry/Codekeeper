@@ -1100,7 +1100,8 @@ async function verifyReview({ request, preflightResult, gh, sleep }) {
   const pull = await pullRequest({ repo: request.repo, number: request.pr, gh });
   assertSupportedReviewShape(pull, preflightResult.defaultBranch);
   const matchesCurrentPull = run.displayTitle === reviewRunTitle(request.pr, pull.headRefOid)
-    && run.headBranch === preflightResult.defaultBranch;
+    && run.headSha === pull.headRefOid
+    && run.headBranch === pull.headRefName;
   assert(matchesCurrentPull, "Review run no longer matches the PR's current immutable head");
   const [marker, checks] = await Promise.all([
     currentMarkerComment({ repo: request.repo, kind: "pull_request", number: request.pr, marker: REVIEW_MARKER, app: request.app, expectedRunUrl: expectedRunUrl(request.repo, run.databaseId), gh }),

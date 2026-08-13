@@ -154,7 +154,7 @@ export function reviewSchema(config) {
         adequate: { type: "boolean" },
         notes: stringSchema({ minLength: 0, maxLength: LIMITS.summary })
       }),
-      diagram: stringSchema({ minLength: 1, maxLength: LIMITS.diagram }),
+      diagram: nullableString(LIMITS.diagram),
       mergeRecommendation: { enum: ["block", "manual", "auto"] },
       noActionReason: nullableString(LIMITS.summary)
     });
@@ -311,9 +311,7 @@ function validateReviewFinding(finding, name, { blocking = false } = {}) {
 }
 
 export function validateReviewResult(result, config) {
-  if (result && typeof result === "object" && (!Object.hasOwn(result, "diagram") || result.diagram === null)) {
-    result.diagram = 'flowchart LR\n  Change["Pull request change"] --> Review["Codekeeper review"]';
-  }
+  if (result && typeof result === "object" && !Object.hasOwn(result, "diagram")) result.diagram = null;
   if (result && typeof result === "object" && !Object.hasOwn(result, "reviewFeedback")) result.reviewFeedback = [];
   assertExactKeys(result, [
     "mode", "summary", "risk", "labels", "blockingFindings", "nonBlockingFindings",
@@ -364,9 +362,11 @@ export function validateReviewResult(result, config) {
   assertExactKeys(result.tests, ["adequate", "notes"], "tests");
   assert(typeof result.tests.adequate === "boolean", "tests.adequate must be boolean");
   assertString(result.tests.notes, "tests.notes", { allowEmpty: true, maxLength: LIMITS.summary });
-  assertString(result.diagram, "diagram", { maxLength: LIMITS.diagram });
-  assert(/^(?:flowchart|sequenceDiagram|stateDiagram|classDiagram|erDiagram|gantt|pie|mindmap|timeline|gitGraph)\b/.test(result.diagram.trim()), "diagram must start with a supported Mermaid diagram type");
-  assert(!/```|%%\{|\bclick\b|\bhref\b|javascript:/i.test(result.diagram), "diagram contains unsupported Mermaid content");
+  assertNullableString(result.diagram, "diagram", LIMITS.diagram);
+  if (result.diagram !== null) {
+    assert(/^(?:flowchart|sequenceDiagram|stateDiagram|classDiagram|erDiagram|gantt|pie|mindmap|timeline|gitGraph)\b/.test(result.diagram.trim()), "diagram must start with a supported Mermaid diagram type");
+    assert(!/```|%%\{|\bclick\b|\bhref\b|javascript:/i.test(result.diagram), "diagram contains unsupported Mermaid content");
+  }
   assertEnum(result.mergeRecommendation, ["block", "manual", "auto"], "mergeRecommendation");
   assertNullableString(result.noActionReason, "noActionReason", LIMITS.summary);
   if (result.blockingFindings.length > 0) {

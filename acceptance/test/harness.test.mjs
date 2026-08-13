@@ -164,11 +164,11 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
     : scenario === "issue-triage-related"
       ? "Codekeeper issue triage #13"
       : detail[1];
-  const runHead = HEAD;
+  const runHead = scenario === "review-introduced-defect" ? reviewHead : HEAD;
   const runBranch = scenario === "maintenance-dry-run" || scenario === "controlled-fix"
     ? () => tag
     : scenario === "review-introduced-defect"
-      ? () => (wrongReviewRunBaseBranch ? "release" : "main")
+      ? () => (wrongReviewRunBaseBranch ? "release" : reviewHeadBranch)
       : () => "main";
   const runEntry = (id = 77, overrides = {}) => ({
     databaseId: id,
@@ -637,11 +637,11 @@ test("maintenance rejects a second matching run that appears after completion", 
   assert.equal(fake.runViewCount, 1);
 });
 
-test("review accepts a pull_request_target base SHA while binding the current PR head through title evidence and the run to the base branch", async () => {
+test("review binds pull_request_target run metadata and title to the current PR head", async () => {
   const good = fakeGh({ scenario: "review-introduced-defect" });
   const pass = await runScenario({ scenario: "review-introduced-defect", options: await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(pass.passed, true);
-  assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-review.yml?ref=${HEAD}`));
+  assert.ok(good.calls.some((args) => args[3] === `repos/${REPO}/contents/.github/workflows/codekeeper-review.yml?ref=${SHA}`));
   const stale = fakeGh({ scenario: "review-introduced-defect", staleMarker: true });
   const staleResult = await runScenario({ scenario: "review-introduced-defect", options: await manualRunOptions({ pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }), gh: stale.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(staleResult.passed, false);
