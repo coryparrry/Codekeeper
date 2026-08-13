@@ -45,13 +45,13 @@ function response(stdout, exitCode = 0, stderr = "") {
   return { stdout: typeof stdout === "string" ? stdout : JSON.stringify(stdout), stderr, exitCode };
 }
 
-function metadata() {
+function metadata(repository = REPO) {
   return {
-    full_name: REPO,
-    name: "codekeeper-acceptance-fixture",
+    full_name: repository,
+    name: repository.split("/")[1],
     private: true,
     visibility: "private",
-    html_url: `https://github.com/${REPO}`,
+    html_url: `https://github.com/${repository}`,
     default_branch: "main"
   };
 }
@@ -473,11 +473,24 @@ test("event caller run-name parser accepts only the exact active durable express
 
 test("preflight refuses implicit, unauthenticated, public, wrong-host, and mismatched targets without exposing CLI output", async () => {
   await assert.rejects(() => preflight({ repo: ".", gh: async () => response("") }), /explicit --repo/);
-  await assert.rejects(() => preflight({ repo: "owner/unrelated", gh: async () => response("") }), /must begin/);
+  await assert.rejects(() => preflight({ repo: "owner/unrelated", gh: async () => response("") }), /must be codekeeper-test-environment or begin/);
   await assert.rejects(() => preflight({ repo: REPO, gh: async () => response("token=leak ghp_abcdefghi", 1) }), (error) => error.message === "GitHub CLI command failed");
   await assert.rejects(() => preflight({ repo: REPO, gh: async (args) => args[0] === "auth" ? response("") : response({ ...metadata(), private: false, visibility: "public" }) }), /explicit private GitHub.com/);
   await assert.rejects(() => preflight({ repo: REPO, gh: async (args) => args[0] === "auth" ? response("") : response({ ...metadata(), html_url: "https://ghe.example/owner/codekeeper-acceptance-fixture" }) }), /explicit private GitHub.com/);
   await assert.rejects(() => preflight({ repo: REPO, gh: async (args) => args[0] === "auth" ? response("") : response({ ...metadata(), full_name: "owner/codekeeper-acceptance-other" }) }), /explicit private GitHub.com/);
+});
+
+test("preflight accepts the durable private test environment name", async () => {
+  const repository = "owner/codekeeper-test-environment";
+  const result = await preflight({
+    repo: repository,
+    gh: async (args) => {
+      if (args[0] === "auth") return response("");
+      if (args.at(-1) === "user" || args.includes(".login")) return response("owner\n");
+      return response(metadata(repository));
+    }
+  });
+  assert.equal(result.repository, repository);
 });
 
 test("scenario gates reject acknowledgements, non-SHAs, missing App identity, and unknown evidence parents before gh", async () => {

@@ -43,7 +43,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "d33e8a8b0ce78810fde50f2e1fbaa4df5bcbb489924a077515cb1123208d54b3"
+      "sha256": "2779297b68a3e82e8a81179c789aa4c689f912a9d638470b6400c45bae4a7acf"
     },
     {
       "path": "src/lib/commands.mjs",

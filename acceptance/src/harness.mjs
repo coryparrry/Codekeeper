@@ -5,6 +5,7 @@ import path from "node:path";
 import { prepareEvidenceDestination, writeEvidenceAtomically } from "./evidence.mjs";
 
 const PRIVATE_REPOSITORY_PREFIX = "codekeeper-acceptance-";
+const DURABLE_PRIVATE_REPOSITORY = "codekeeper-test-environment";
 const SHA_PATTERN = "[0-9A-Fa-f]{40}";
 const REPOSITORY_PATTERN = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
 const SHA = new RegExp(`^${SHA_PATTERN}$`, "i");
@@ -259,7 +260,10 @@ function validateRepositoryName(repo) {
   assert(typeof repo === "string" && repo.length <= MAX_REPOSITORY_LENGTH && REPOSITORY.test(repo), "An explicit --repo OWNER/REPOSITORY is required; implicit or current repositories are rejected");
   const [owner, name] = repo.split("/");
   assert(owner.length <= 39 && name.length <= 100, "Target repository name exceeds GitHub's bounded repository limits");
-  assert(name.startsWith(PRIVATE_REPOSITORY_PREFIX), `Target repository name must begin with ${PRIVATE_REPOSITORY_PREFIX}`);
+  assert(
+    name === DURABLE_PRIVATE_REPOSITORY || name.startsWith(PRIVATE_REPOSITORY_PREFIX),
+    `Target repository name must be ${DURABLE_PRIVATE_REPOSITORY} or begin with ${PRIVATE_REPOSITORY_PREFIX}`
+  );
   return repo;
 }
 
@@ -1336,5 +1340,5 @@ export function parseCommandLine(argv) {
 
 export function formatUsage() {
   const fixture = path.dirname(fileURLToPath(import.meta.url));
-  return `Codekeeper private acceptance harness (Node >=22)\n\nRead-only GitHub verification:\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} preflight --repo OWNER/codekeeper-acceptance-NAME\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} recover-controlled-fix --repo OWNER/codekeeper-acceptance-NAME --source-sha SHA --acknowledge-private-acceptance --fixture-checkout PATH --evidence PATH --issue NUMBER --run-id NUMBER --pr NUMBER --dispatch-ref TAG --app-login 'APP[bot]' --app-id NUMBER\n\nScenario commands require --repo, --source-sha (40-character commit),\n--acknowledge-private-acceptance, --fixture-checkout, and --evidence PATH.\nReview, issue, and fix verification also require the configured App bot login\nand immutable numeric --app-id. Review and issue verification require the\nrecorded event trigger time as --run-created-after ISO-8601.\n\nMaintenance and fix dispatch create one retained unique acceptance tag at the\npreflight default-branch SHA; GitHub workflow_dispatch receives that tag, never\na raw SHA. The evidence records the tag and the harness never deletes it.\nRecovery only reads that retained tag and an explicit completed run and PR.\n\n  maintenance-dry-run\n  review-introduced-defect --pr NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  issue-triage-related --issue NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  controlled-fix --issue NUMBER --app-login 'APP[bot]' --app-id NUMBER`;
+  return `Codekeeper private acceptance harness (Node >=22)\n\nRead-only GitHub verification:\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} preflight --repo OWNER/codekeeper-test-environment\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} recover-controlled-fix --repo OWNER/codekeeper-test-environment --source-sha SHA --acknowledge-private-acceptance --fixture-checkout PATH --evidence PATH --issue NUMBER --run-id NUMBER --pr NUMBER --dispatch-ref TAG --app-login 'APP[bot]' --app-id NUMBER\n\nScenario commands require --repo, --source-sha (40-character commit),\n--acknowledge-private-acceptance, --fixture-checkout, and --evidence PATH.\nReview, issue, and fix verification also require the configured App bot login\nand immutable numeric --app-id. Review and issue verification require the\nrecorded event trigger time as --run-created-after ISO-8601.\n\nMaintenance and fix dispatch create one retained unique acceptance tag at the\npreflight default-branch SHA; GitHub workflow_dispatch receives that tag, never\na raw SHA. The evidence records the tag and the harness never deletes it.\nRecovery only reads that retained tag and an explicit completed run and PR.\n\n  maintenance-dry-run\n  review-introduced-defect --pr NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  issue-triage-related --issue NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  controlled-fix --issue NUMBER --app-login 'APP[bot]' --app-id NUMBER`;
 }
