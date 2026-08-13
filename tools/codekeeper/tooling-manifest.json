@@ -19,11 +19,11 @@
     },
     {
       "path": "package-lock.json",
-      "sha256": "6e31eb36978e02962dcbf017e0a5fc06d224cb077f009712baef103cdc91584b"
+      "sha256": "47bc0424fee05d9be41ef0d02d1f45fc3d103fec73d325d592cb691e14b31bb2"
     },
     {
       "path": "package.json",
-      "sha256": "26ba74bf5b06c22ddb62e3dab6da7018c3753d17b7e2192896ad88009eb7f613"
+      "sha256": "9c9288c3e125afdcdeba0316bc02c2851855e79a3a0a91494cb4f4b43a610fc0"
     },
     {
       "path": "presets/catalogue.mjs",
@@ -35,7 +35,7 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "f90fb8dc30a3e5d3a9488464f0c93c734006a3cfd9ca58624b9862cdcb2bdf13"
+      "sha256": "24475a790cd1a796bd586e061056714afde54fb6aec0681f6a474f50be7cbe60"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
@@ -43,7 +43,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "2779297b68a3e82e8a81179c789aa4c689f912a9d638470b6400c45bae4a7acf"
+      "sha256": "3abc4e419880dcef40af2307b280b51d42b92f3f85ff468f13b44deaf05d122f"
     },
     {
       "path": "src/lib/commands.mjs",

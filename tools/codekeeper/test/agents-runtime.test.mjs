@@ -19,9 +19,11 @@ import {
   parseAgentOutput,
   runAgentFromBundle,
   runConfiguredAgent,
-  structuredOutputType
+  runWorkspaceAgentFromBundle,
+  structuredOutputType,
+  workspaceCodexDeveloperInstructions
 } from "../src/lib/agents-runtime.mjs";
-import { providerCompatibleJsonSchema, validateIssueResult } from "../src/lib/schemas.mjs";
+import { issueSchema, providerCompatibleJsonSchema, validateIssueResult } from "../src/lib/schemas.mjs";
 import { sha256 } from "../src/lib/markers.mjs";
 import { evaluateAutoMerge } from "../src/lib/policy.mjs";
 
@@ -78,6 +80,78 @@ test("agent output parser accepts structured, fenced, and surrounded JSON", () =
     { mode: "issue", summary: "brace } inside string" }
   );
   assert.throws(() => parseAgentOutput("not json"), /valid top-level JSON object/);
+});
+
+test("workspace Codex developer instructions carry the provider-compatible output schema", () => {
+  const instructions = workspaceCodexDeveloperInstructions(schema);
+  assert.match(instructions, /^The trusted runtime requires the final response to be one JSON object/);
+  assert.match(instructions, new RegExp(JSON.stringify(schema).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(instructions, /Return only that JSON object\.$/);
+});
+
+test("workspace execution runs one Codex MCP session through the Agents SDK", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-workspace-bundle-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const outputSchema = providerCompatibleJsonSchema(issueSchema(config));
+  const resultPath = path.join(directory, "workspace-result.json");
+  await Promise.all([
+    writeFile(path.join(directory, "workspace-prompt.md"), "Inspect the issue against the checkout.\n"),
+    writeFile(path.join(directory, "schema.json"), JSON.stringify(outputSchema)),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue" }))
+  ]);
+
+  const calls = { connected: 0, closed: 0 };
+  class FakeMCPServerStdio {
+    constructor(options) { calls.options = options; }
+    async connect() { calls.connected += 1; }
+    async close() { calls.closed += 1; }
+    async listTools() { return [{ name: "codex" }]; }
+    async callToolResult(name, args) {
+      calls.tool = { name, args };
+      return {
+        structuredContent: {
+          threadId: "thread-1",
+          content: JSON.stringify(validIssue())
+        },
+        content: []
+      };
+    }
+  }
+  const workspaceConfig = withoutTracing();
+  workspaceConfig.ai.agents.issue.workspace.enabled = true;
+  workspaceConfig.ai.agents.issue.workspace.model = "gpt-5.6-luna";
+  workspaceConfig.ai.agents.issue.workspace.effort = "max";
+  const metadata = await runWorkspaceAgentFromBundle({
+    mode: "issue",
+    directory,
+    config: workspaceConfig,
+    resultPath,
+    apiKey: "workspace-secret",
+    environment: {
+      CODEX_HOME: path.join(directory, "codex-home"),
+      HOME: directory,
+      PATH: "/usr/bin",
+      GITHUB_TOKEN: "must-not-cross-boundary"
+    },
+    sdkLoader: async () => ({ MCPServerStdio: FakeMCPServerStdio }),
+    codexCommand: "/usr/bin/node",
+    codexArgs: ["/runtime/codex.js", "mcp-server"]
+  });
+
+  assert.equal(calls.connected, 1);
+  assert.equal(calls.closed, 1);
+  assert.deepEqual(calls.options.args, ["/runtime/codex.js", "mcp-server"]);
+  assert.equal(calls.options.cwd, process.cwd());
+  assert.equal(calls.options.env.OPENAI_API_KEY, "workspace-secret");
+  assert.equal(calls.options.env.GITHUB_TOKEN, undefined);
+  assert.equal(calls.tool.name, "codex");
+  assert.equal(calls.tool.args.model, "gpt-5.6-luna");
+  assert.equal(calls.tool.args.sandbox, "read-only");
+  assert.deepEqual(calls.tool.args.config, { model_reasoning_effort: "max" });
+  assert.equal(calls.tool.args.prompt, "Inspect the issue against the checkout.");
+  assert.match(calls.tool.args["developer-instructions"], /The trusted runtime requires the final response/);
+  assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), validIssue());
+  assert.deepEqual(metadata, { completed: true });
 });
 
 test("model settings retain provider-specific fields while adding supported reasoning effort", () => {

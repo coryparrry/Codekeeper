@@ -122,7 +122,7 @@ Profiles can decide that an enabled repair is too risky and return no change. Th
 
 ## Workspace specialists
 
-The coordinator itself is one tool-less Agents SDK `Agent` per mode. Codex is optional and is used only as a checkout-aware specialist whose result remains untrusted evidence for the coordinator. The Codex job and coordinator run on separate fresh runners: the coordinator rebuilds trusted context, checks its digest against the workspace job output, consumes specialist JSON and any audit/fix patch as untrusted artifacts, and applies that patch only after model execution.
+The coordinator itself is one tool-less Agents SDK `Agent` per mode. Codex is optional and is used only as a checkout-aware specialist whose result remains untrusted evidence for the coordinator. Its job starts the pinned Codex CLI as a local stdio MCP server through the Agents SDK, then closes it before handing off the bounded result. The Codex job and coordinator run on separate fresh runners: the coordinator rebuilds trusted context, checks its digest against the workspace job output, consumes specialist JSON and any audit/fix patch as untrusted artifacts, and applies that patch only after model execution.
 
 | Mode | Default provider | Workspace behavior |
 |---|---|---|
