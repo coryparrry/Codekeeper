@@ -77,9 +77,9 @@ function callerSource(workflow, {
   }[workflow];
   assert.ok(reusableJob, `Unexpected caller workflow ${workflow}`);
   const runName = workflow === "codekeeper-review.yml"
-    ? 'run-name: "Codekeeper review #${{ github.event.pull_request.number }} @${{ github.event.pull_request.head.sha }}"\n'
+    ? 'run-name: "Codekeeper review #${{ github.event.pull_request.number || github.event.client_payload.number }} @${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}"\n'
     : workflow === "codekeeper-issues.yml"
-      ? 'run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"\n'
+      ? 'run-name: "Codekeeper issue triage #${{ github.event.issue.number || github.event.client_payload.number }}"\n'
       : "";
   const bootstrapJobGate = bootstrapJobIf === null ? "" : `    if: ${bootstrapJobIf}\n`;
   const bootstrapStep = bootstrapStepIf === null
@@ -456,8 +456,8 @@ test("source pin parser requires exact matching bootstrap and reusable workflow 
 });
 
 test("event caller run-name parser accepts only the exact active durable expressions", () => {
-  const review = 'run-name: "Codekeeper review #${{ github.event.pull_request.number }} @${{ github.event.pull_request.head.sha }}"';
-  const issue = 'run-name: "Codekeeper issue triage #${{ github.event.issue.number }}"';
+  const review = 'run-name: "Codekeeper review #${{ github.event.pull_request.number || github.event.client_payload.number }} @${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}"';
+  const issue = 'run-name: "Codekeeper issue triage #${{ github.event.issue.number || github.event.client_payload.number }}"';
   assert.equal(parseEventCallerRunName(review, "review-introduced-defect"), true);
   assert.equal(parseEventCallerRunName(issue, "issue-triage-related"), true);
   for (const source of [
