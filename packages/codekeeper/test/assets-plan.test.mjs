@@ -235,7 +235,10 @@ test("rendered policies personalize only repository identity while retaining con
     assert.equal(rendered.audit.repair.enabled, false);
     assert.equal(rendered.issues.allowAiImplementation, false);
     assert.equal(rendered.issues.closeExactDuplicates, false);
+    assert.equal(rendered.issues.closeResolvedIssues, true);
     assert.equal(rendered.merge.enabled, false);
+    assert.ok(Object.keys(rendered.labels).every((name) => /^[a-z0-9 ]+$/.test(name)));
+    assert.ok(Object.values(rendered.labels).every((definition) => !/codekeeper/i.test(definition.description)));
     assert.ok(rendered.audit.repair.protectedPaths.length > 0);
     assert.ok(rendered.audit.repair.validationCommands.includes("git diff --check"));
     assert.deepEqual(rendered.ai, upgradePolicy(original).ai);
@@ -320,11 +323,11 @@ test("retaining a curated model preserves adopter-edited model settings", async 
 
 test("policy reruns add newly required labels without replacing adopter customizations", async () => {
   const bundle = await loadVerifiedAssets();
-  const bundledPolicy = JSON.parse(bundle.contents["policies/openai.json"]);
+  const bundledPolicy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
   const previous = structuredClone(bundledPolicy);
-  delete previous.labels["codekeeper:paused"];
-  delete previous.labels["codekeeper:auto-repaired"];
-  previous.labels["codekeeper:ready"].description = "Repository-specific ready label";
+  delete previous.labels["paused"];
+  delete previous.labels["auto repaired"];
+  previous.labels["ready"].description = "Repository-specific ready label";
   const rendered = JSON.parse(renderPolicy(JSON.stringify(previous), {
     displayName: "Widget",
     defaultBranch: "main",
@@ -332,9 +335,9 @@ test("policy reruns add newly required labels without replacing adopter customiz
     enforceBundledDefaults: false,
     requiredPolicySource: bundle.contents["policies/openai.json"]
   }));
-  assert.equal(rendered.labels["codekeeper:ready"].description, "Repository-specific ready label");
-  assert.deepEqual(rendered.labels["codekeeper:paused"], bundledPolicy.labels["codekeeper:paused"]);
-  assert.deepEqual(rendered.labels["codekeeper:auto-repaired"], bundledPolicy.labels["codekeeper:auto-repaired"]);
+  assert.equal(rendered.labels["ready"].description, "Repository-specific ready label");
+  assert.deepEqual(rendered.labels["paused"], bundledPolicy.labels["paused"]);
+  assert.deepEqual(rendered.labels["auto repaired"], bundledPolicy.labels["auto repaired"]);
 });
 
 test("openai preset changes only issue-triage model policy from the mixed preset", async () => {
@@ -373,6 +376,7 @@ test("each rendered workflow contains exactly the paired immutable bootstrap and
       assert.match(rendered, new RegExp(`tools/codekeeper@${SOURCE_COMMIT}`));
       assert.match(rendered, new RegExp(`${path.basename(MODES[mode].target).replace(".", "\\.")}@${SOURCE_COMMIT}`));
       assert.doesNotMatch(rendered, /OWNER\/REPOSITORY|FULL_COMMIT_SHA|replace OWNER/);
+      assert.doesNotMatch(rendered, /codekeeper:ready/);
     }
   }
   const mixedIssue = renderWorkflow(bundle.contents[MODES.issues.asset], {

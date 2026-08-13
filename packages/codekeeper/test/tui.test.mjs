@@ -689,7 +689,7 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
     await tui.send(" ");
     await tui.send("j");
     await tui.send(" ");
-    for (let index = 0; index < 27; index += 1) await tui.send("j");
+    for (let index = 0; index < 28; index += 1) await tui.send("j");
     await tui.send("\u001b[C");
     await tui.send("\u001b[C");
     await tui.send("j");
@@ -729,7 +729,7 @@ test("settings JSON fields reject PEM pastes without rendering or submitting the
   });
   await tui.waitForText("CODEKEEPER  SETTINGS");
   await tui.send("A");
-  for (let index = 0; index < 49; index += 1) await tui.send("j");
+  for (let index = 0; index < 50; index += 1) await tui.send("j");
   await tui.send("\r");
   await tui.waitForText("repository.ownerLogins");
   await tui.send(`\u001b[200~${pem}\u001b[201~`);

@@ -113,9 +113,9 @@ function requireInstalledMode(command, issue, installedModes) {
   throw new Error(`/${command} requires the ${label} workflow`);
 }
 
-function statusBody(issue, command, outcome) {
-  const active = labels(issue).filter((label) =>
-    label.startsWith("codekeeper:"),
+function statusBody(issue, command, outcome, config) {
+  const active = labels(issue).filter(
+    (label) => config.labels && Object.hasOwn(config.labels, label),
   );
   return `## Codekeeper status
 
@@ -147,20 +147,20 @@ async function dispatchAfterUnpausing(
   eventType,
   payload,
 ) {
-  const wasPaused = labels(issue).includes("codekeeper:paused");
+  const wasPaused = labels(issue).includes("paused");
   if (wasPaused) {
     try {
-      await github.removeLabel(number, "codekeeper:paused");
+      await github.removeLabel(number, "paused");
     } catch (error) {
       if (isAmbiguousGitHubMutationError(error)) {
         try {
           const currentIssue = await github.getIssue(number);
-          if (!labels(currentIssue).includes("codekeeper:paused")) {
-            await github.addLabels(number, ["codekeeper:paused"]);
+          if (!labels(currentIssue).includes("paused")) {
+            await github.addLabels(number, ["paused"]);
           }
         } catch (rollbackError) {
           throw new Error(
-            `${error.message}; codekeeper:paused could not be restored: ${rollbackError.message}`,
+            `${error.message}; paused could not be restored: ${rollbackError.message}`,
             { cause: error },
           );
         }
@@ -173,10 +173,10 @@ async function dispatchAfterUnpausing(
   } catch (error) {
     if (wasPaused && !isAmbiguousGitHubMutationError(error)) {
       try {
-        await github.addLabels(number, ["codekeeper:paused"]);
+        await github.addLabels(number, ["paused"]);
       } catch (rollbackError) {
         throw new Error(
-          `${error.message}; codekeeper:paused could not be restored: ${rollbackError.message}`,
+          `${error.message}; paused could not be restored: ${rollbackError.message}`,
           { cause: error },
         );
       }
@@ -352,9 +352,9 @@ export async function runOwnerCommand({
     );
     outcome = "The bounded owner-requested repair was queued.";
   } else if (command === "stop") {
-    await github.ensureLabels(config.labels, ["codekeeper:paused"]);
-    await github.addLabels(number, ["codekeeper:paused"]);
-    await github.removeLabel(number, "codekeeper:ready");
+    await github.ensureLabels(config.labels, ["paused"]);
+    await github.addLabels(number, ["paused"]);
+    await github.removeLabel(number, "ready");
     if (issue.pull_request) {
       const pull = await github.getPull(number);
       if (pull.auto_merge) {
@@ -381,7 +381,7 @@ export async function runOwnerCommand({
   await github.upsertMarkerComment(
     number,
     COMMAND_STATUS_MARKER,
-    statusBody(issue, command, outcome),
+    statusBody(issue, command, outcome, config),
     automationIdentity,
   );
   return { number, command, outcome };

@@ -264,9 +264,12 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   }
   const issue = event.issue;
   if (!issue || issue.pull_request) throw new Error("Issue payload is missing or refers to a pull request");
-  const [existing, pulls] = await Promise.all([
+  const [existing, pulls, closingPulls] = await Promise.all([
     github.listOpenIssues(config.issues.maximumOpenIssueContext),
-    github.listOpenPulls(config.issues.maximumOpenIssueContext)
+    github.listOpenPulls(config.issues.maximumOpenIssueContext),
+    config.issues.closeResolvedIssues
+      ? github.listMergedPullRequestsClosingIssue(issue.number)
+      : Promise.resolve([])
   ]);
   const context = {
     mode: "issue",
@@ -283,6 +286,7 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
       url: boundedText(issue.html_url, 2048, "…"),
       updatedAt: issue.updated_at ?? ""
     },
+    resolvedByPullRequest: closingPulls[0] ?? null,
     duplicateCandidates: duplicateCandidates(issue, existing),
     relatedPullRequests: relatedPullRequests(issue, pulls)
   };
@@ -337,7 +341,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
       throw new Error(`PR #${targetNumber} moved from ${expectedHead} to ${pull.head?.sha}; stale repair will not start`);
     }
     const liveLabels = labelNames(issue.labels);
-    if (liveLabels.includes("codekeeper:paused")) throw new Error(`PR #${targetNumber} is paused`);
+    if (liveLabels.includes("paused")) throw new Error(`PR #${targetNumber} is paused`);
     if (authorizationMode === "policy") {
       if (!config.review.autoRepair) throw new Error("Automatic review repair is off in the Codekeeper policy");
       if (!expectedHead) throw new Error("Automatic review repair requires its dispatched head SHA");
@@ -390,11 +394,11 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     }
     if (reviewThreadIds.length > 0) throw new Error("Issue implementation cannot resolve pull request review threads");
     const liveLabels = labelNames(issue.labels);
-    if (authorizationMode === "policy" && liveLabels.includes("codekeeper:paused")) {
+    if (authorizationMode === "policy" && liveLabels.includes("paused")) {
       throw new Error(`Issue #${targetNumber} is paused`);
     }
-    if (authorizationMode === "policy" && !liveLabels.includes("codekeeper:ready")) {
-      throw new Error("Automatic issue implementation requires the codekeeper:ready label");
+    if (authorizationMode === "policy" && !liveLabels.includes("ready")) {
+      throw new Error("Automatic issue implementation requires the ready label");
     }
     target = { kind: "issue", number: targetNumber };
     baseSha = currentHead();

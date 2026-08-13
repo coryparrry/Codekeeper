@@ -36,6 +36,7 @@ const MUTATING_SCENARIOS = new Set([
   "maintenance-dry-run",
   "review-introduced-defect",
   "issue-triage-related",
+  "issue-resolved-by-pr",
   "controlled-fix"
 ]);
 const SCENARIO_DETAILS = Object.freeze({
@@ -50,6 +51,11 @@ const SCENARIO_DETAILS = Object.freeze({
     event: "pull_request_target"
   },
   "issue-triage-related": {
+    workflow: "codekeeper-issues.yml",
+    workflowName: "Codekeeper issue triage",
+    event: "issues"
+  },
+  "issue-resolved-by-pr": {
     workflow: "codekeeper-issues.yml",
     workflowName: "Codekeeper issue triage",
     event: "issues"
@@ -611,7 +617,7 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
 export function parseEventCallerRunName(yaml, scenario) {
   const expected = scenario === "review-introduced-defect"
     ? 'run-name: "Codekeeper review #${{ github.event.pull_request.number || github.event.client_payload.number }} @${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}"'
-    : scenario === "issue-triage-related"
+    : scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr"
       ? 'run-name: "Codekeeper issue triage #${{ github.event.issue.number || github.event.client_payload.number }}"'
       : null;
   assert(expected !== null, "Only event-driven scenarios require a caller run-name contract");
@@ -648,7 +654,7 @@ async function assertPinnedSource({ repo, scenario, sourceSha, revision, snapsho
     ? await repositoryFileAtImmutableSnapshot({ repo, file, snapshot, expectedSource, gh })
     : await repositoryFile({ repo, file, ref: revision, gh });
   parsePinnedWorkflowUses(source, workflow, sourceSha);
-  if (scenario === "review-introduced-defect" || scenario === "issue-triage-related") {
+  if (scenario === "review-introduced-defect" || scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr") {
     parseEventCallerRunName(source, scenario);
   }
   return source;
@@ -1030,6 +1036,7 @@ function validateScenarioOptions(scenario, options) {
     "maintenance-dry-run": commonOptions,
     "review-introduced-defect": new Set([...commonOptions, "pr", "run-id", "run-created-after", "app-login", "app-id"]),
     "issue-triage-related": new Set([...commonOptions, "issue", "run-id", "run-created-after", "app-login", "app-id"]),
+    "issue-resolved-by-pr": new Set([...commonOptions, "issue", "pr", "run-id", "run-created-after", "app-login", "app-id"]),
     "controlled-fix": new Set([...commonOptions, "issue", "app-login", "app-id"])
   }[scenario];
   assert(Object.keys(options).every((option) => scenarioOptions.has(option)), "Scenario command received an option that does not apply to this scenario");
@@ -1048,8 +1055,9 @@ function validateScenarioOptions(scenario, options) {
     result.runCreatedAfter = validateTimestamp(options["run-created-after"], "--run-created-after");
     result.app = validateAppIdentity(options);
   }
-  if (scenario === "issue-triage-related") {
+  if (scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr") {
     result.issue = validatePositiveInteger(options.issue, "--issue");
+    if (scenario === "issue-resolved-by-pr") result.pr = validatePositiveInteger(options.pr, "--pr");
     result.runId = validatePositiveInteger(options["run-id"], "--run-id");
     result.runCreatedAfter = validateTimestamp(options["run-created-after"], "--run-created-after");
     result.app = validateAppIdentity(options);
@@ -1136,7 +1144,7 @@ async function verifyReview({ request, preflightResult, gh, sleep }) {
   expect(assertions, "introduced-defect pull request remains open, non-draft, same-repository, and targets the default branch", true);
   expect(assertions, "review run title and immutable head are bound to the requested pull request", matchesCurrentPull);
   expect(assertions, "review workflow completed with the expected blocking conclusion", run.conclusion === "failure");
-  expect(assertions, "blocking review state is accompanied by publisher evidence for this exact run", labelsFrom(pull).includes("codekeeper:blocked") && hasExactCheck(checks, "review / Codekeeper review gate", "fail"));
+  expect(assertions, "blocking review state is accompanied by publisher evidence for this exact run", labelsFrom(pull).includes("blocked") && hasExactCheck(checks, "review / Codekeeper review gate", "fail"));
   expect(assertions, "review publication has one current canonical App marker correlated to the selected run URL", Boolean(marker));
   return { assertions, workflow: workflowEvidence(run), resource: resourceEvidence("pull_request", pull), passed: assertions.every((assertion) => assertion.passed) };
 }
@@ -1152,7 +1160,40 @@ async function verifyIssue({ request, gh, sleep }) {
   expect(assertions, "issue triage workflow completed successfully", run.conclusion === "success");
   expect(assertions, "issue publication is bound to this run's exact App marker evidence", Boolean(marker));
   expect(assertions, "related issue remains open", targetIssue.state === "OPEN");
-  expect(assertions, "related issue is not marked as a duplicate", !labels.includes("codekeeper:duplicate-candidate"));
+  expect(assertions, "related issue is not marked as a duplicate", !labels.includes("duplicate"));
+  return { assertions, workflow: workflowEvidence(run), resource: resourceEvidence("issue", targetIssue), passed: assertions.every((assertion) => assertion.passed) };
+}
+
+async function mergedPullRequestsClosingIssue({ repo, number, gh }) {
+  const [owner, name] = repo.split("/");
+  const query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:100,includeClosedPrs:true){nodes{number url merged mergedAt repository{nameWithOwner}} pageInfo{hasNextPage}}}}}";
+  const payload = await graphql({ gh, query, variables: { owner, name, number } });
+  const references = payload?.data?.repository?.issue?.closedByPullRequestsReferences;
+  assert(Array.isArray(references?.nodes) && references.nodes.length <= 100 && references.pageInfo?.hasNextPage === false, "Closing pull request metadata exceeded its safe bound");
+  return references.nodes;
+}
+
+async function verifyResolvedIssue({ request, gh, sleep }) {
+  const assertions = [];
+  const detail = SCENARIO_DETAILS["issue-resolved-by-pr"];
+  const run = await waitForRun({ repo: request.repo, runId: request.runId, expectedEvent: detail.event, expectedWorkflowName: detail.workflowName, expectedDisplayTitle: issueRunTitle(request.issue), gh, sleep, boundary: { dispatchedAt: request.runCreatedAfter } });
+  await assertPinnedSource({ repo: request.repo, scenario: "issue-resolved-by-pr", sourceSha: request.sourceSha, revision: run.headSha, gh });
+  const [targetIssue, marker, references] = await Promise.all([
+    issue({ repo: request.repo, number: request.issue, gh }),
+    currentMarkerComment({ repo: request.repo, kind: "issue", number: request.issue, marker: ISSUE_TRIAGE_MARKER, app: request.app, expectedRunUrl: expectedRunUrl(request.repo, run.databaseId), gh }),
+    mergedPullRequestsClosingIssue({ repo: request.repo, number: request.issue, gh })
+  ]);
+  const expectedUrl = `https://github.com/${request.repo}/pull/${request.pr}`;
+  const resolution = references.filter((pull) => Number(pull?.number) === request.pr
+    && pull?.url === expectedUrl
+    && pull?.merged === true
+    && validTimestamp(pull?.mergedAt)
+    && normaliseLogin(pull?.repository?.nameWithOwner) === normaliseLogin(request.repo));
+  expect(assertions, "resolved issue workflow title is bound to the requested issue", run.displayTitle === issueRunTitle(request.issue));
+  expect(assertions, "resolved issue workflow completed successfully", run.conclusion === "success");
+  expect(assertions, "resolved issue publication is bound to this run's exact App marker evidence", Boolean(marker));
+  expect(assertions, "issue is closed after triage", targetIssue.state === "CLOSED");
+  expect(assertions, "GitHub identifies the exact merged pull request as a closing reference", resolution.length === 1);
   return { assertions, workflow: workflowEvidence(run), resource: resourceEvidence("issue", targetIssue), passed: assertions.every((assertion) => assertion.passed) };
 }
 
@@ -1279,6 +1320,7 @@ export async function runScenario({ scenario, options, gh, now = () => new Date(
     if (scenario === "maintenance-dry-run") result = await verifyMaintenance({ request, preflightResult, gh, sleep, now, recordDispatchRef: (value) => { dispatchRef = value; } });
     if (scenario === "review-introduced-defect") result = await verifyReview({ request, preflightResult, gh, sleep });
     if (scenario === "issue-triage-related") result = await verifyIssue({ request, gh, sleep });
+    if (scenario === "issue-resolved-by-pr") result = await verifyResolvedIssue({ request, gh, sleep });
     if (scenario === "controlled-fix") result = await verifyFix({ request, preflightResult, gh, sleep, now, recordDispatchRef: (value) => { dispatchRef = value; } });
     result.passed = result.passed !== false;
   } catch {
@@ -1367,5 +1409,5 @@ export function parseCommandLine(argv) {
 
 export function formatUsage() {
   const fixture = path.dirname(fileURLToPath(import.meta.url));
-  return `Codekeeper private acceptance harness (Node >=22)\n\nRead-only GitHub verification:\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} preflight --repo OWNER/codekeeper-test-environment\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} recover-controlled-fix --repo OWNER/codekeeper-test-environment --source-sha SHA --acknowledge-private-acceptance --fixture-checkout PATH --evidence PATH --issue NUMBER --run-id NUMBER --pr NUMBER --dispatch-ref TAG --app-login 'APP[bot]' --app-id NUMBER\n\nScenario commands require --repo, --source-sha (40-character commit),\n--acknowledge-private-acceptance, --fixture-checkout, and --evidence PATH.\nReview, issue, and fix verification also require the configured App bot login\nand immutable numeric --app-id. Review and issue verification require the\nrecorded event trigger time as --run-created-after ISO-8601.\n\nMaintenance and fix dispatch create one retained unique acceptance tag at the\npreflight default-branch SHA; GitHub workflow_dispatch receives that tag, never\na raw SHA. The evidence records the tag and the harness never deletes it.\nRecovery only reads that retained tag and an explicit completed run and PR.\n\n  maintenance-dry-run\n  review-introduced-defect --pr NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  issue-triage-related --issue NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  controlled-fix --issue NUMBER --app-login 'APP[bot]' --app-id NUMBER`;
+  return `Codekeeper private acceptance harness (Node >=22)\n\nRead-only GitHub verification:\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} preflight --repo OWNER/codekeeper-test-environment\n  node ${path.join(fixture, "../bin/codekeeper-acceptance.mjs")} recover-controlled-fix --repo OWNER/codekeeper-test-environment --source-sha SHA --acknowledge-private-acceptance --fixture-checkout PATH --evidence PATH --issue NUMBER --run-id NUMBER --pr NUMBER --dispatch-ref TAG --app-login 'APP[bot]' --app-id NUMBER\n\nScenario commands require --repo, --source-sha (40-character commit),\n--acknowledge-private-acceptance, --fixture-checkout, and --evidence PATH.\nReview, issue, and fix verification also require the configured App bot login\nand immutable numeric --app-id. Review and issue verification require the\nrecorded event trigger time as --run-created-after ISO-8601.\n\nMaintenance and fix dispatch create one retained unique acceptance tag at the\npreflight default-branch SHA; GitHub workflow_dispatch receives that tag, never\na raw SHA. The evidence records the tag and the harness never deletes it.\nRecovery only reads that retained tag and an explicit completed run and PR.\n\n  maintenance-dry-run\n  review-introduced-defect --pr NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  issue-triage-related --issue NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  issue-resolved-by-pr --issue NUMBER --pr NUMBER --run-id NUMBER --run-created-after ISO-8601 --app-login 'APP[bot]' --app-id NUMBER\n  controlled-fix --issue NUMBER --app-login 'APP[bot]' --app-id NUMBER`;
 }

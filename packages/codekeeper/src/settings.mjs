@@ -16,6 +16,7 @@ const STANDARD_PATHS = Object.freeze([
   ["audit.repair.enabled", "Maintenance repair"],
   ["issues.allowAiImplementation", "Ready issue implementation"],
   ["issues.closeExactDuplicates", "Exact duplicate closure"],
+  ["issues.closeResolvedIssues", "Resolved issue closure"],
   ["merge.enabled", "Automatic merge"],
   ["automation.maintenanceSchedule", "Maintenance schedule"],
   ["ai.tracing.enabled", "OpenAI tracing"]
@@ -115,7 +116,10 @@ function flattenPolicy(policy, value = policy, prefix = "", rows = [], parentKey
 
 export function createEditableSettings({ policy, modes, enabled, profiles = {} }) {
   const editablePolicy = clone(policy);
-  if (!modes.includes("issues")) editablePolicy.review.createDeferredIssues = false;
+  if (!modes.includes("issues")) {
+    editablePolicy.review.createDeferredIssues = false;
+    editablePolicy.issues.closeResolvedIssues = false;
+  }
   return {
     policy: editablePolicy,
     modes: [...modes],
@@ -276,6 +280,7 @@ export function validateEditableSettings(settings, baselinePolicy) {
     throw new InstallerError("Issue implementation requires both the Issue triage and Fixer workflows.", { code: "SETTING_INVALID" });
   }
   if (policy.issues.closeExactDuplicates && !settings.modes.includes("issues")) throw new InstallerError("Duplicate closure requires the Issue triage workflow.", { code: "SETTING_INVALID" });
+  if (policy.issues.closeResolvedIssues && !settings.modes.includes("issues")) throw new InstallerError("Resolved issue closure requires the Issue triage workflow.", { code: "SETTING_INVALID" });
   if (policy.merge.enabled && !(settings.modes.includes("review") && settings.modes.some((mode) => mode === "maintain" || mode === "fix"))) {
     throw new InstallerError("Automatic merge requires the Review workflow and a repair workflow.", { code: "SETTING_INVALID" });
   }

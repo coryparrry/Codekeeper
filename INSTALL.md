@@ -63,7 +63,7 @@ Update these values in the adopter's `.github/codekeeper.json`:
 
 Profiles change judgment, not authorization. They cannot enable Codekeeper, permit maintenance or issue repair, weaken allowed/protected paths, bypass validation, authorize merge, change the run target, or grant credentials, tools, or network access. The workflow reads the selected profile from the trusted default branch, freezes its source commit and digest with the run, and refuses publication if that trusted file drifts before publication. A profile change on an unmerged pull-request branch cannot affect that pull request's run.
 
-The workflow rejects a policy whose `defaultBranch` differs from GitHub's repository default branch. Keep the supplied `codekeeper:*` labels, plus explicit `review.managedLabels` and `issues.managedLabels`; runtime emission depends on those exact names.
+The workflow rejects a policy whose `defaultBranch` differs from GitHub's repository default branch. Keep the supplied labels, plus explicit `review.managedLabels` and `issues.managedLabels`; runtime emission depends on those exact names.
 
 Validate a tailored copy before committing it:
 
@@ -125,7 +125,7 @@ Only a GitHub login listed in `repository.ownerLogins` can request manual issue 
 
 On a pull request review thread, `/codekeeper defer` is an unconditional owner-authorized deferral. It must reply to the review comment that should become an issue; it does not ask the reviewer or model to verify the claim first. The assistant creates or updates one fingerprinted deferred issue, replies with its link, and lets normal issue triage apply priority, risk, readiness, testing, duplicate, and manual-review labels.
 
-When `issues.allowAiImplementation=true`, trusted triage adds `codekeeper:ready` only to a clear, bounded, testable issue. That label starts the issue implementation workflow, which may open one bounded repair pull request.
+When `issues.allowAiImplementation=true`, trusted triage adds `ready` only to a clear, bounded, testable issue. That label starts the issue implementation workflow, which may open one bounded repair pull request.
 
 The same exact owner command can be added to an eligible open, non-draft, same-repository pull request targeting the default branch. Codekeeper freezes that pull request's current head and, after validation, pushes one App-owned commit to its existing head branch. It does not open a second pull request and does not fall back to creating one. Forks, default/protected head branches, stale heads, and changed targets fail closed.
 

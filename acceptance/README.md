@@ -11,6 +11,7 @@ The harness has two GitHub-read-only commands and four explicitly acknowledged s
 | `maintenance-dry-run` | Dispatch the adopter's maintenance workflow with `dry_run=true`; require a successful run and skipped publication. | Harness |
 | `review-introduced-defect` | Verify the run for a manually opened same-repository defect PR. | GitHub PR event |
 | `issue-triage-related` | Verify the run for a manually opened related, non-duplicate issue. | GitHub issue event |
+| `issue-resolved-by-pr` | Verify that triage closes a reopened issue only when GitHub links the supplied merged PR as its closing reference. | GitHub issue event |
 | `controlled-fix` | Dispatch a configured low-risk fix for an existing issue and verify the bounded open PR. | Harness |
 
 ## Manual prerequisites
@@ -61,6 +62,19 @@ node bin/codekeeper-acceptance.mjs issue-triage-related \
   --fixture-checkout /absolute/path/to/codekeeper-acceptance-NAME \
   --evidence /absolute/path/to/private-evidence/issue.json \
   --issue 13 --run-id 345679 --run-created-after 2026-08-11T10:05:00Z \
+  --app-login 'codekeeper-acceptance[bot]' --app-id 123456
+```
+
+For resolved-issue closure, merge a same-repository PR that uses GitHub's closing syntax for the issue, reopen the issue, record that new issue-event run, then verify the exact merged reference:
+
+```sh
+node bin/codekeeper-acceptance.mjs issue-resolved-by-pr \
+  --repo OWNER/codekeeper-test-environment \
+  --source-sha 0123456789abcdef0123456789abcdef01234567 \
+  --acknowledge-private-acceptance \
+  --fixture-checkout /absolute/path/to/codekeeper-test-environment \
+  --evidence /absolute/path/to/private-evidence/resolved-issue.json \
+  --issue 13 --pr 15 --run-id 345680 --run-created-after 2026-08-11T10:10:00Z \
   --app-login 'codekeeper-acceptance[bot]' --app-id 123456
 ```
 

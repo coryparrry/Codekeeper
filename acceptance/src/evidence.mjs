@@ -7,6 +7,7 @@ const SCENARIOS = new Set([
   "maintenance-dry-run",
   "review-introduced-defect",
   "issue-triage-related",
+  "issue-resolved-by-pr",
   "controlled-fix"
 ]);
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;

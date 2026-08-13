@@ -152,6 +152,7 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
     "maintenance-dry-run": ["codekeeper-maintain.yml", "Codekeeper maintenance", "workflow_dispatch"],
     "review-introduced-defect": ["codekeeper-review.yml", "Codekeeper review", "pull_request_target"],
     "issue-triage-related": ["codekeeper-issues.yml", "Codekeeper issue triage", "issues"],
+    "issue-resolved-by-pr": ["codekeeper-issues.yml", "Codekeeper issue triage", "issues"],
     "controlled-fix": ["codekeeper-fix.yml", "Codekeeper issue implementation", "workflow_dispatch"]
   }[scenario];
   const issueNumber = 14;
@@ -161,7 +162,7 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
   const reviewHeadBranch = "codekeeper/review-introduced-defect";
   const displayTitle = scenario === "review-introduced-defect"
     ? `Codekeeper review #12 @${reviewHead}`
-    : scenario === "issue-triage-related"
+    : scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr"
       ? "Codekeeper issue triage #13"
       : detail[1];
   const runHead = scenario === "review-introduced-defect" ? reviewHead : HEAD;
@@ -265,7 +266,7 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
     }
     if (args[0] === "api" && args[3] === `repos/${REPO}/actions/workflows/${detail[0]}/runs?event=${detail[2]}&per_page=100&page=1`) {
       workflowListCount += 1;
-      if (scenario === "issue-triage-related") {
+      if (scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr") {
         const runs = [runEntry()];
         return response(workflowRunPayload(runs));
       }
@@ -329,12 +330,12 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
         baseRefName: reviewRetarget ? "release" : "main",
         headRefOid: reviewHeadChanges && pullViewCount > 1 ? HEAD : reviewHead,
         headRefName: reviewHeadBranch,
-        labels: [{ name: "codekeeper:blocked" }],
+        labels: [{ name: "blocked" }],
         updatedAt: SUBJECT_UPDATED
       });
     }
     if (args[0] === "pr" && args[1] === "checks") return response([{ name: wrongReviewGateName ? "Codekeeper review gate" : "review / Codekeeper review gate", bucket: "fail" }]);
-    if (args[0] === "issue" && args[1] === "view") return response({ number: scenario === "issue-triage-related" ? 13 : issueNumber, url: `https://github.com/${REPO}/issues/${scenario === "issue-triage-related" ? 13 : issueNumber}`, state: "OPEN", labels: [{ name: "codekeeper:ready" }], updatedAt: SUBJECT_UPDATED });
+    if (args[0] === "issue" && args[1] === "view") return response({ number: scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr" ? 13 : issueNumber, url: `https://github.com/${REPO}/issues/${scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr" ? 13 : issueNumber}`, state: scenario === "issue-resolved-by-pr" ? "CLOSED" : "OPEN", labels: [{ name: "ready" }], updatedAt: SUBJECT_UPDATED });
     if (args[0] === "pr" && args[1] === "list") {
       pullListCount += 1;
       if (fullPullInventory && pullListCount === 1) return response(Array.from({ length: 100 }, (_, index) => ({ number: index + 1, url: `https://github.com/${REPO}/pull/${index + 1}`, headRefName: `unrelated/${index + 1}`, createdAt: SUBJECT_UPDATED })));
@@ -346,7 +347,7 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
         const isReview = text.includes("pullRequest(number:$number)");
         const marker = isReview ? "<!-- codekeeper:review -->" : scenario === "controlled-fix" ? `<!-- codekeeper:repair-notification=${wrongRepairMarker ? "0".repeat(64) : fingerprint} -->` : "<!-- codekeeper:issue-triage -->";
         const object = isReview ? "pullRequest" : "issue";
-        const runEvidence = (isReview || scenario === "issue-triage-related")
+        const runEvidence = (isReview || scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr")
           ? `\n<sub>Codekeeper workflow run: https://github.com/${REPO}/actions/runs/${staleMarker ? 78 : 77}</sub>`
           : "";
         const controlledFixBody = `Codekeeper opened a repair pull request: https://github.com/${REPO}/pull/14\n${marker}`;
@@ -369,6 +370,20 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
             repository: {
               pullRequest: {
                 files: { nodes: FIXTURE_ALLOWED_FIX_PATHS.map((file) => ({ path: file })), pageInfo: { hasNextPage: false } }
+              }
+            }
+          }
+        });
+      }
+      if (text.includes("closedByPullRequestsReferences")) {
+        return response({
+          data: {
+            repository: {
+              issue: {
+                closedByPullRequestsReferences: {
+                  nodes: [{ number: 12, url: `https://github.com/${REPO}/pull/12`, merged: true, mergedAt: SUBJECT_UPDATED, repository: { nameWithOwner: REPO } }],
+                  pageInfo: { hasNextPage: false }
+                }
               }
             }
           }
@@ -469,6 +484,7 @@ test("event caller run-name parser accepts only the exact active durable express
   const issue = 'run-name: "Codekeeper issue triage #${{ github.event.issue.number || github.event.client_payload.number }}"';
   assert.equal(parseEventCallerRunName(review, "review-introduced-defect"), true);
   assert.equal(parseEventCallerRunName(issue, "issue-triage-related"), true);
+  assert.equal(parseEventCallerRunName(issue, "issue-resolved-by-pr"), true);
   for (const source of [
     `# ${review}`,
     'run-name: "Codekeeper review #${{ github.event.pull_request.number }}"',
@@ -717,6 +733,18 @@ test("issue triage rejects stale publisher-run evidence and wrong durable titles
   assert.equal(wrongTitleResult.passed, false);
 });
 
+test("resolved issue verification requires the exact merged closing pull request", async () => {
+  const fake = fakeGh({ scenario: "issue-resolved-by-pr" });
+  const result = await runScenario({
+    scenario: "issue-resolved-by-pr",
+    options: await manualRunOptions({ issue: "13", pr: "12", "run-id": "77", "app-login": APP.login, "app-id": APP.id }),
+    gh: fake.runner,
+    now: () => new Date(NOW),
+    sleep: async () => {}
+  });
+  assert.equal(result.passed, true);
+});
+
 test("controlled fix rejects concurrent runs and accepts exactly one current canonical repair PR", async () => {
   const good = fakeGh({ scenario: "controlled-fix" });
   const pass = await runScenario({ scenario: "controlled-fix", options: await scenarioOptions({ issue: "14", "app-login": APP.login, "app-id": APP.id }), gh: good.runner, now: () => new Date(NOW), sleep: async () => {} });
@@ -930,7 +958,7 @@ test("evidence schema remains bounded and command parsing requires explicit opti
   assert.deepEqual(parseCommandLine(["preflight", "--repo", REPO]), { command: "preflight", options: { repo: REPO } });
   assert.equal(parseCommandLine(["recover-controlled-fix", "--repo", REPO]).command, "recover-controlled-fix");
   const usage = formatUsage();
-  assert.equal(usage.match(/--app-login 'APP\[bot\]'/g)?.length, 4);
+  assert.equal(usage.match(/--app-login 'APP\[bot\]'/g)?.length, 5);
   assert.doesNotMatch(usage, /--app-login APP\[bot\]/);
   assert.throws(() => parseCommandLine(["maintenance-dry-run", "--repo", REPO, "--repo", REPO]), /Duplicate/);
   assert.throws(() => parseCommandLine(["maintenance-dry-run", "--current-repo", "true"]), /unsupported/);

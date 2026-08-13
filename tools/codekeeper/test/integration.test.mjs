@@ -37,6 +37,21 @@ function bundle(root, name = "bundle") {
   return `${root}-${name}`;
 }
 
+function closingPullRequestsResponse(nodes = []) {
+  return {
+    data: {
+      repository: {
+        issue: {
+          closedByPullRequestsReferences: {
+            nodes,
+            pageInfo: { hasNextPage: false }
+          }
+        }
+      }
+    }
+  };
+}
+
 function assertWorkspaceOutputSchema(schema, mode) {
   assert.equal(schema.type, "object");
   assert.equal(schema.additionalProperties, false);
@@ -573,9 +588,11 @@ test("manual issue preparation requires an explicitly authorised actor", async (
   }), "utf8");
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => new Response(JSON.stringify(
-    String(url).includes("/issues/5")
-      ? { number: 5, title: "Example", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
-      : []
+    String(url).endsWith("/graphql")
+      ? closingPullRequestsResponse()
+      : String(url).includes("/issues/5")
+        ? { number: 5, title: "Example", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
+        : []
   ), { status: 200 });
   try {
     const prepared = await prepareIssue({
@@ -641,6 +658,7 @@ test("an explicit owner implementation request is sufficient when automatic issu
   const originalRepository = process.env.GITHUB_REPOSITORY;
   process.env.GITHUB_REPOSITORY = "acme/example";
   globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/graphql")) return new Response(JSON.stringify(closingPullRequestsResponse()), { status: 200 });
     if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
     if (String(url).includes("/issues/5")) {
       return new Response(JSON.stringify({
@@ -682,7 +700,7 @@ test("an explicit owner implementation request is sufficient when automatic issu
   }
 });
 
-test("automatic issue preparation records trusted mode without an owner command", async () => {
+test("automatic issue preparation freezes a GitHub-linked merged resolving pull request", async () => {
   const root = await createRepository();
   const directory = bundle(root, "automatic-issue-input");
   const event = bundle(root, "automatic-issue-event.json");
@@ -691,7 +709,17 @@ test("automatic issue preparation records trusted mode without an owner command"
     issue: { number: 5, title: "Example", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
   }), "utf8");
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify([]), { status: 200 });
+  globalThis.fetch = async (url) => new Response(JSON.stringify(
+    String(url).endsWith("/graphql")
+      ? closingPullRequestsResponse([{
+        number: 12,
+        url: "https://github.com/acme/example/pull/12",
+        merged: true,
+        mergedAt: "2026-08-13T10:00:00Z",
+        repository: { nameWithOwner: "acme/example" }
+      }])
+      : []
+  ), { status: 200 });
   try {
     const context = await prepareIssue({
       eventPath: event,
@@ -705,6 +733,12 @@ test("automatic issue preparation records trusted mode without an owner command"
     });
     assert.equal(context.triageMode, "automatic");
     assert.equal(context.issue.number, 5);
+    assert.deepEqual(context.resolvedByPullRequest, {
+      number: 12,
+      url: "https://github.com/acme/example/pull/12",
+      mergedAt: "2026-08-13T10:00:00Z",
+      repository: "acme/example"
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -736,7 +770,9 @@ test("issue preparation reduces repository history to five deterministic duplica
   const pulls = [{ number: 21, title: "Export timezone correction", body: "Correct CSV timezone conversion." }];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => new Response(
-    JSON.stringify(String(url).includes("/pulls?") ? pulls : issues),
+    JSON.stringify(String(url).endsWith("/graphql")
+      ? closingPullRequestsResponse()
+      : String(url).includes("/pulls?") ? pulls : issues),
     { status: 200 }
   );
   try {
@@ -857,7 +893,7 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
   const originalFetch = globalThis.fetch;
   const originalRepository = process.env.GITHUB_REPOSITORY;
   const fillerLabels = Array.from({ length: 30 }, (_, index) => ({ name: `filler-${index}` }));
-  let issueLabels = [...fillerLabels, { name: "codekeeper:ready" }];
+  let issueLabels = [...fillerLabels, { name: "ready" }];
   process.env.GITHUB_REPOSITORY = "acme/example";
   globalThis.fetch = async (url) => {
     if (String(url).includes("/comments")) return new Response(JSON.stringify([]), { status: 200 });
@@ -887,8 +923,8 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
     assert.equal(prepared.authorizationMode, "policy");
     assert.equal(prepared.requestedBy, "codekeeper-app[bot]");
     assert.equal(prepared.issue.labels.length, 30);
-    assert.equal(prepared.issue.labels.includes("codekeeper:ready"), false);
-    issueLabels = [...fillerLabels, { name: "codekeeper:ready" }, { name: "codekeeper:paused" }];
+    assert.equal(prepared.issue.labels.includes("ready"), false);
+    issueLabels = [...fillerLabels, { name: "ready" }, { name: "paused" }];
     await assert.rejects(
       prepareFix({
         targetNumber: 5,
@@ -1033,7 +1069,7 @@ test("automatic PR repair requires its current-head marker and every repair hono
     );
     assert.match(prepared.pullRequest.comments[0].body, /blocking review finding/);
     assert.doesNotMatch(JSON.stringify(prepared.pullRequest.comments), /ATTACKER INSTRUCTION/);
-    assert.equal(labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
+    assert.equal(labels.some((label) => label.name === "auto repaired"), false);
     assert.deepEqual(prepared.pullRequest.reviewThreads, [{
       id: "PRRT_thread",
       isResolved: false,
@@ -1050,7 +1086,7 @@ test("automatic PR repair requires its current-head marker and every repair hono
         originalLine: 17
       }]
     }]);
-    labels = [...fillerLabels, { name: "codekeeper:paused" }];
+    labels = [...fillerLabels, { name: "paused" }];
     await assert.rejects(
       prepareFix({
         targetNumber: 42,
@@ -1105,6 +1141,7 @@ test("prepare writes provider-compatible workspace output schemas for every mode
   process.env.GITHUB_RUN_ID = "123";
   process.env.GITHUB_RUN_ATTEMPT = "2";
   globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/graphql")) return new Response(JSON.stringify(closingPullRequestsResponse()), { status: 200 });
     if (String(url).includes("/issues/5/comments")) return new Response(JSON.stringify([]), { status: 200 });
     if (String(url).includes("/issues/5")) {
       return new Response(JSON.stringify({

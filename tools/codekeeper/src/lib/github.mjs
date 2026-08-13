@@ -414,7 +414,7 @@ export class GitHubClient {
       if (issue.pull_request || issue.state !== "open") {
         throw new Error(`Issue #${this.issueMutation.number} is no longer eligible`);
       }
-      if (this.issueMutation.rejectPaused && issueLabelNames(issue).includes("codekeeper:paused")) {
+      if (this.issueMutation.rejectPaused && issueLabelNames(issue).includes("paused")) {
         throw new Error(`Issue #${issue.number} is paused; automatic publication stopped`);
       }
       if (this.issueMutation.trackSubject && this.issueMutation.subject !== null &&
@@ -582,7 +582,7 @@ export class GitHubClient {
     ]);
     this.assertPullMutationIdentity(pull);
     const currentLabels = labelNames(pull);
-    if (currentLabels.includes("codekeeper:paused")) {
+    if (currentLabels.includes("paused")) {
       const error = new Error(`PR #${pull.number} is paused; publication will not mutate GitHub`);
       if (expected.repair?.rejectPaused) error.code = "CODEKEEPER_PAUSED";
       throw error;
@@ -893,7 +893,41 @@ export class GitHubClient {
     return this.paginate(this.repoPath("/pulls?state=open&sort=updated&direction=desc"), { limit });
   }
 
-  async listMaintenanceIssues(label = "codekeeper:maintenance") {
+  async listMergedPullRequestsClosingIssue(number, limit = 100) {
+    if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Issue number must be a positive integer");
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 100) throw new Error("Closing pull request limit must be between 1 and 100");
+    const query = `
+      query ClosingPullRequests($owner: String!, $repo: String!, $number: Int!, $first: Int!) {
+        repository(owner: $owner, name: $repo) {
+          issue(number: $number) {
+            closedByPullRequestsReferences(first: $first, includeClosedPrs: true) {
+              nodes { number url merged mergedAt repository { nameWithOwner } }
+              pageInfo { hasNextPage }
+            }
+          }
+        }
+      }
+    `;
+    const data = await this.graphql(query, { owner: this.owner, repo: this.repo, number, first: limit });
+    const connection = data?.repository?.issue?.closedByPullRequestsReferences;
+    if (!connection || !Array.isArray(connection.nodes)) {
+      throw new Error(`Issue #${number} has invalid closing pull request metadata`);
+    }
+    if (connection.pageInfo?.hasNextPage) {
+      throw new Error(`Issue #${number} has more than ${limit} closing pull request references`);
+    }
+    return connection.nodes
+      .filter((pull) => pull?.merged === true && typeof pull.mergedAt === "string" && pull.mergedAt)
+      .map((pull) => ({
+        number: pull.number,
+        url: pull.url,
+        mergedAt: pull.mergedAt,
+        repository: pull.repository?.nameWithOwner ?? ""
+      }))
+      .sort((left, right) => right.mergedAt.localeCompare(left.mergedAt));
+  }
+
+  async listMaintenanceIssues(label = "maintenance") {
     const encoded = encodeURIComponent(label);
     const items = await this.paginate(this.repoPath(`/issues?state=all&labels=${encoded}&sort=updated&direction=desc`));
     return items.filter((item) => !item.pull_request);

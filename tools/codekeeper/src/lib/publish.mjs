@@ -376,8 +376,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const repairFeedback = result.reviewFeedback.filter((feedback) =>
     feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
   );
-  const repairRequested = (blocking || repairFeedback.length > 0) && config.review.autoRepair && !existingLabels.has("codekeeper:paused");
-  const repairMarked = existingLabels.has("codekeeper:auto-repaired");
+  const repairRequested = (blocking || repairFeedback.length > 0) && config.review.autoRepair && !existingLabels.has("paused");
+  const repairMarked = existingLabels.has("auto repaired");
   let repairState = { consumed: false, pending: false };
   if (repairRequested || repairMarked) {
     repairState = ownedAutomaticRepairState(
@@ -406,14 +406,14 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   };
   const publicationState = (autoMerge) => {
     const desiredSet = new Set(reviewLabels(result));
-    desiredSet.delete("codekeeper:auto-merge");
-    desiredSet.delete("codekeeper:manual-review");
+    desiredSet.delete("auto merge");
+    desiredSet.delete("manual review");
     if (blocking) {
-      desiredSet.add("codekeeper:blocked");
+      desiredSet.add("blocked");
     } else if (autoMerge.eligible) {
-      desiredSet.add("codekeeper:auto-merge");
+      desiredSet.add("auto merge");
     } else {
-      desiredSet.add("codekeeper:manual-review");
+      desiredSet.add("manual review");
     }
     return {
       desiredLabels: [...desiredSet],
@@ -432,7 +432,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const automationIdentity = expectedAutomationIdentity();
   let reconciledPull = pull;
   if (automaticRepair.staleMarker) {
-    await github.removeLabel(pull.number, "codekeeper:auto-repaired");
+    await github.removeLabel(pull.number, "auto repaired");
     reconciledPull = await github.getPull(pull.number);
   }
   const suspension = await suspendAutoMerge(github, reconciledPull);
@@ -515,7 +515,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
 
   if (automaticRepair.eligible) {
     const authorizationPull = await github.getPull(pull.number);
-    if (issueLabelNames(authorizationPull).includes("codekeeper:auto-repaired")) {
+    if (issueLabelNames(authorizationPull).includes("auto repaired")) {
       automaticRepair.eligible = false;
     } else {
       const lease = await acquireAutomaticRepairLease({ github, context, pull, automationIdentity });
@@ -525,7 +525,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
         let dispatchAttempted = false;
         let dispatchSucceeded = false;
         try {
-          await github.ensureLabels(config.labels, ["codekeeper:auto-repaired"]);
+          await github.ensureLabels(config.labels, ["auto repaired"]);
           await github.upsertMarkerComment(
             pull.number,
             automaticRepairMarker(pull.head.sha),
@@ -548,7 +548,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
             `Automatic repair was dispatched for head ${pull.head.sha}.`,
             automationIdentity
           );
-          await github.addLabels(pull.number, ["codekeeper:auto-repaired"]);
+          await github.addLabels(pull.number, ["auto repaired"]);
           await releaseAutomaticRepairLease(github, lease, "completed");
         } catch (error) {
           let rollbackError = null;
@@ -650,7 +650,7 @@ export async function replyToReviewFeedback({ github, context, result, automatio
 export async function upsertDeferredReviewFeedback({ github, context, result, config, automationIdentity, dryRun = false, ownerRequested = false }) {
   const deferred = result.reviewFeedback?.filter((item) => item.disposition === "defer") ?? [];
   if (!ownerRequested && !config.review.createDeferredIssues) return [];
-  const existing = await github.listMaintenanceIssues("codekeeper:deferred");
+  const existing = await github.listMaintenanceIssues("deferred");
   const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
   const published = [];
   const deferredSources = deferred.flatMap((feedback) =>
@@ -696,7 +696,7 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
       botId: automationIdentity.id
     }));
     const sources = [sourcesByKey.get(sourceKey)].filter(Boolean);
-    const labels = ["codekeeper:deferred", issueTypeLabel(feedback.type)];
+    const labels = ["deferred", issueTypeLabel(feedback.type)];
     const title = singleLine(`[Deferred from PR #${context.pullRequest.number}] ${feedback.explanation}`, 256);
     const body = renderDeferredIssue({
       feedback: scopedFeedback,
@@ -759,23 +759,34 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   const closingDuplicate = Boolean(
     config.issues.closeExactDuplicates && result.duplicateOf && result.duplicateConfidence === "high"
   );
+  const closingResolved = Boolean(config.issues.closeResolvedIssues && context.resolvedByPullRequest);
   const issue = await github.beginIssueMutation({
     issue: context.issue,
     trackSubject: true,
-    trackComments: closingDuplicate
+    trackComments: closingDuplicate || closingResolved
   });
   const duplicate = closingDuplicate
     ? await github.requireOpenIssueMutationPrerequisite(result.duplicateOf)
     : null;
   const runUrl = trustedPublicationRunUrl(context);
+  const resolvedByPullRequest = closingResolved
+    ? (await github.listMergedPullRequestsClosingIssue(issue.number))
+      .find((pull) => pull.number === context.resolvedByPullRequest.number
+        && pull.url === context.resolvedByPullRequest.url
+        && pull.mergedAt === context.resolvedByPullRequest.mergedAt
+        && pull.repository === context.resolvedByPullRequest.repository)
+    : null;
+  if (closingResolved && !resolvedByPullRequest) {
+    throw new Error(`Issue #${issue.number} is no longer resolved by the frozen merged pull request`);
+  }
 
-  const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
+  const desired = new Set([issueTypeLabel(result.type), `priority ${result.priority}`, ...result.labels]);
   const automationIdentity = expectedAutomationIdentity();
   const deferredMarker = typeof issue.body === "string"
     ? issue.body.match(/<!-- codekeeper:deferred=[a-f0-9]{64} -->$/)?.[0]
     : null;
   if (
-    issueLabelNames(issue).includes("codekeeper:deferred") &&
+    issueLabelNames(issue).includes("deferred") &&
     deferredMarker &&
     isTrustedMaintenanceIssue(issue, {
       marker: deferredMarker,
@@ -783,12 +794,16 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
       botId: automationIdentity.id
     })
   ) {
-    desired.add("codekeeper:deferred");
+    desired.add("deferred");
   }
-  if (config.issues.allowAiImplementation && result.implementationRecommendation === "ai-ready") {
-    desired.add("codekeeper:ready");
+  if (!closingResolved && config.issues.allowAiImplementation && result.implementationRecommendation === "ai-ready") {
+    desired.add("ready");
   }
-  if (result.duplicateOf && result.duplicateConfidence === "high") desired.add("codekeeper:duplicate-candidate");
+  if (!closingResolved && result.duplicateOf && result.duplicateConfidence === "high") desired.add("duplicate");
+  if (closingResolved) {
+    desired.delete("ready");
+    desired.delete("duplicate");
+  }
   const desiredLabels = [...desired];
   const comment = renderIssueTriage(result, runUrl);
 
@@ -800,7 +815,7 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   await github.ensureLabels(config.labels, desiredLabels);
   await github.replaceManagedIssueLabels(issue.number, desiredLabels, managedIssueLabels(config));
   await github.verifyIssueMutation();
-  if (closingDuplicate) {
+  if (closingDuplicate || closingResolved) {
     await github.upsertOwnedIssueMarker(
       issue.number,
       ISSUE_TRIAGE_MARKER,
@@ -816,7 +831,15 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
       automationIdentity
     );
   }
-  if (closingDuplicate) {
+  if (closingResolved) {
+    const pullReference = resolvedByPullRequest.repository === context.repository
+      ? `#${resolvedByPullRequest.number}`
+      : `${resolvedByPullRequest.repository}#${resolvedByPullRequest.number}`;
+    const resolvedBody = `Closing as completed because merged pull request [${pullReference}](${resolvedByPullRequest.url}) resolves this issue.`;
+    await github.createOwnedIssueComment(issue.number, resolvedBody, automationIdentity);
+    await github.verifyIssueMutation();
+    await github.updateIssue(issue.number, { state: "closed", state_reason: "completed" });
+  } else if (closingDuplicate) {
     const duplicateBody = `Closing as a duplicate of #${duplicate.number}.`;
     await github.createOwnedIssueComment(issue.number, duplicateBody, automationIdentity);
     await github.verifyIssueMutation();
@@ -858,7 +881,7 @@ export function isTrustedMaintenanceFindingIssue(issue, comments, { marker, botL
 
 async function upsertMaintenanceFindings({ github, findings, config, runUrl, dryRun }) {
   const automationIdentity = expectedAutomationIdentity();
-  const existing = await github.listMaintenanceIssues("codekeeper:maintenance");
+  const existing = await github.listMaintenanceIssues("maintenance");
   const published = [];
   for (const finding of findings.slice(0, config.audit.maximumIssuesPerRun)) {
     const fingerprint = findingFingerprint(finding);
@@ -876,7 +899,7 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
         break;
       }
     }
-    const labels = [...new Set([...findingLabels(finding), `codekeeper:priority-${finding.priority}`])];
+    const labels = [...new Set([...findingLabels(finding), `priority ${finding.priority}`])];
     const title = singleLine(`[AI maintenance] ${finding.title}`) || "[AI maintenance] Repository finding";
     const body = renderMaintenanceIssue(finding, fingerprint, runUrl);
 
@@ -998,7 +1021,7 @@ async function publishPatchPullRequest({
     return { created: false, reason: manifest.patch?.reasons?.join("; ") || "No validated patch" };
   }
 
-  const labels = new Set(["codekeeper:maintenance", `codekeeper:risk-${risk}`, "codekeeper:manual-review"]);
+  const labels = new Set(["maintenance", `risk ${risk}`, "manual review"]);
   if (finding) findingLabels(finding).forEach((label) => labels.add(label));
   const existing = await findOpenRepairPull(github, fingerprint, config, context.mode);
   let pull = existing;
