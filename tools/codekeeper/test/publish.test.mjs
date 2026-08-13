@@ -1354,9 +1354,9 @@ test("review publication activates auto-merge last and falls back safely", async
     assert.ok(labelCalls[0].desiredLabels.includes("codekeeper:auto-merge"));
     assert.ok(labels.desiredLabels.includes("codekeeper:manual-review"));
     assert.ok(!labels.desiredLabels.includes("codekeeper:auto-merge"));
-    assert.match(comment.comment, /Manual boundary retained/);
+    assert.match(comment.comment, /Ready for a person to decide/);
     assert.match(comment.comment, /Auto-merge is not active: GitHub rejected enablement/);
-    assert.doesNotMatch(comment.comment, /Eligible for policy-controlled auto-merge/);
+    assert.doesNotMatch(comment.comment, /Ready to merge/);
     assert.match(comment.comment, /<sub>Codekeeper workflow run: https:\/\/github\.com\/owner\/repository\/actions\/runs\/7001<\/sub>/);
 
     calls.length = 0;
