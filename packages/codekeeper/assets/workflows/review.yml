@@ -73,7 +73,6 @@ jobs:
     with:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
-      codex_safety_strategy: ${{ vars.CODEKEEPER_CODEX_SAFETY_STRATEGY || 'drop-sudo' }}
       auto_review: true
       feedback_triage: true
       owner_command: ${{ needs.intent.outputs.owner_command == 'true' }}
