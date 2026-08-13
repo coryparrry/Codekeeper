@@ -208,9 +208,11 @@ jobs:
           [ "$RUNNER_OS" = Linux ] || { echo "The isolated Codex user requires Linux" >&2; exit 1; }
           id "$CODEX_USER" >/dev/null 2>&1 || sudo useradd --create-home --shell /bin/bash "$CODEX_USER"
           [ "$(id -u "$CODEX_USER")" -ne 0 ] || { echo "The isolated Codex user cannot be root" >&2; exit 1; }
-          sudo mkdir -p "$CODEX_HOME"
+          sudo usermod -a -G "$(id -gn)" "$CODEX_USER"
           group="$(id -gn "$CODEX_USER")"
-          sudo chown -R "$CODEX_USER:$group" "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
+          sudo chown -R "$(id -un):$group" "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
+          sudo chmod -R g+rwX "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
+          sudo find "$REPOSITORY" "$BUNDLE" "$CODEX_HOME" -type d -exec chmod g+s {} +
       - name: Audit checkout with optional Codex specialist
         if: steps.settings.outputs.workspace_enabled == 'true'
         uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11

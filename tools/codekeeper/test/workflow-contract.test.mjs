@@ -197,6 +197,11 @@ test("workspace workflows keep Codex privilege isolation generic and safely conf
     assert.match(workspace, /\[ "\$RUNNER_OS" = Linux \]/);
     assert.match(workspace, /\[ "\$\(id -u "\$CODEX_USER"\)" -ne 0 \]/);
     assert.match(workspace, /CODEX_USER: codekeeper-codex/);
+    assert.match(workspace, /sudo usermod -a -G "\$\(id -gn\)" "\$CODEX_USER"/);
+    assert.match(workspace, /sudo chown -R "\$\(id -un\):\$group" "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME"/);
+    assert.match(workspace, /sudo chmod -R g\+rwX "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME"/);
+    assert.match(workspace, /sudo find "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME" -type d -exec chmod g\+s \{\} \+/);
+    assert.doesNotMatch(workspace, /sudo chown -R "\$CODEX_USER:/);
     assert.match(workspace, /safety-strategy: \$\{\{ inputs\.codex_safety_strategy \}\}/);
     assert.match(workspace, /codex-user: codekeeper-codex/);
     assert.match(workspace, /name: Restore runner ownership after Codex/);
