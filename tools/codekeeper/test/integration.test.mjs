@@ -398,6 +398,43 @@ test("preparation freezes one trusted profile for workspace and coordinator inst
   assert.ok(!calls.input.includes(profile));
 });
 
+test("failed-job reruns produce the same frozen context across run attempts", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-rerun-context-test-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await installAgentProfiles(root);
+  const revision = run("git", ["rev-parse", "HEAD"], projectRoot).trim();
+  const savedEnvironment = Object.fromEntries(["GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"].map((name) => [name, process.env[name]]));
+  process.env.GITHUB_REPOSITORY = "acme/example";
+  process.env.GITHUB_RUN_ID = "123";
+  try {
+    process.env.GITHUB_RUN_ATTEMPT = "1";
+    await prepareAuditBundle({
+      directory: path.join(root, "attempt-1"),
+      config: templateConfig,
+      ...agentProfileOptions(root, "audit", revision)
+    });
+    process.env.GITHUB_RUN_ATTEMPT = "2";
+    await prepareAuditBundle({
+      directory: path.join(root, "attempt-2"),
+      config: templateConfig,
+      ...agentProfileOptions(root, "audit", revision)
+    });
+
+    const attemptOneContext = await readFile(path.join(root, "attempt-1/context.json"));
+    const attemptTwoContext = await readFile(path.join(root, "attempt-2/context.json"));
+    const frozenContext = JSON.parse(attemptOneContext);
+    assert.equal(digest(attemptOneContext), digest(attemptTwoContext));
+    assert.equal(frozenContext.runId, "123");
+    assert.equal(frozenContext.runUrl, "https://github.com/acme/example/actions/runs/123");
+    assert.deepEqual(frozenContext, JSON.parse(attemptTwoContext));
+  } finally {
+    for (const [name, value] of Object.entries(savedEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 test("workspace-disabled audit returns deterministic no-action without loading a provider", async (context) => {
   const root = await createRepository();
   context.after(() => rm(root, { recursive: true, force: true }));
@@ -1205,7 +1242,7 @@ test("seal produces the only manifest and embeds the frozen policy", async () =>
   const manifest = JSON.parse(await readFile(path.join(sealed, "manifest.json"), "utf8"));
   assert.equal(manifest.version, 3);
   assert.equal(manifest.sealed, true);
-  assert.equal(manifest.context.runAttempt, "2");
+  assert.equal("runAttempt" in manifest.context, false);
   assert.ok(manifest.context.configSha256);
   assert.equal(manifest.contextSha256, digest(await readFile(path.join(sealed, "context.json"))));
   assert.equal(manifest.resultSha256, digest(await readFile(path.join(sealed, "result.json"))));

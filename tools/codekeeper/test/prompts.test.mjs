@@ -62,7 +62,8 @@ test("review coordinator prompts preserve specialist blockers", () => {
 
   assert.match(prompt, /Every specialist blocking finding must remain blocking/);
   assert.match(prompt, /non-blocking findings may be omitted or retained only as non-blocking/);
-  assert.match(prompt, /fix_now.*fix_if_cheap.*defer.*ignore/);
+  assert.match(prompt, /Keep fix_now and fix_if_cheap dispositions unchanged because they carry merge and repair authority/);
+  assert.match(prompt, /A defer disposition may stay defer or move to ignore; keep ignore unchanged/);
   assert.match(prompt, /Never upgrade a disposition, invent a feedback group, omit a feedback group, or alter its evidence/);
   assert.match(prompt, /Emit a maintainer decision only by copying a required workspace decision exactly/);
   assert.match(prompt, /a required workspace decision must remain required/);

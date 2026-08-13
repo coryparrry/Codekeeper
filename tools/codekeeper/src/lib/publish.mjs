@@ -289,7 +289,8 @@ function ownedAutomaticRepairState(comments, automationIdentity, repository, pul
     const marker = automaticRepairMarker(match[1]);
     if (!isOwnedMarkerComment(comment, marker, automationIdentity)) continue;
     if (/^(Automatic repair was dispatched|Automatic repair dispatch is ambiguous)/.test(body)) consumed = true;
-    if (body.startsWith("Automatic repair dispatch is pending")) {
+    const legacyPending = body === `Automatic repair is pending for head ${match[1]}.\n${marker}`;
+    if (body.startsWith("Automatic repair dispatch is pending") || legacyPending) {
       pendingScopes.add(automaticRepairLeaseScope(repository, pullNumber, match[1]));
       if (match[1].toLowerCase() === currentHead.toLowerCase()) pending = true;
     }
