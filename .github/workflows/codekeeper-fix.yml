@@ -146,7 +146,7 @@ jobs:
         working-directory: repository
         env:
           CODEKEEPER_TOOLING_SHA: ${{ job.workflow_sha }}
-          BUNDLE: ${{ runner.temp }}/codekeeper-bundle
+          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -205,7 +205,7 @@ jobs:
         if: steps.settings.outputs.workspace_enabled == 'true'
         working-directory: repository
         env:
-          CODEX_HOME: ${{ runner.temp }}/codekeeper-codex-home
+          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
           QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
           REPOSITORY_PATH: ${{ github.workspace }}/repository
         run: |
@@ -243,8 +243,8 @@ jobs:
       - name: Prepare isolated Codex user
         if: steps.settings.outputs.workspace_enabled == 'true' && inputs.codex_safety_strategy == 'unprivileged-user'
         env:
-          BUNDLE: ${{ runner.temp }}/codekeeper-bundle
-          CODEX_HOME: ${{ runner.temp }}/codekeeper-codex-home
+          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
+          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
           CODEX_USER: codekeeper-codex
           REPOSITORY: ${{ github.workspace }}/repository
         run: |
@@ -261,7 +261,7 @@ jobs:
         uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
         with:
           openai-api-key: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
-          codex-home: ${{ runner.temp }}/codekeeper-codex-home
+          codex-home: ${{ github.workspace }}/codekeeper-codex-home
           codex-version: 0.146.0
           model: ${{ steps.settings.outputs.workspace_model }}
           effort: ${{ steps.settings.outputs.workspace_effort }}
@@ -270,14 +270,14 @@ jobs:
           codex-user: codekeeper-codex
           allow-users: ${{ github.actor }}
           working-directory: repository
-          prompt-file: ${{ runner.temp }}/codekeeper-bundle/workspace-prompt.md
-          output-file: ${{ runner.temp }}/codekeeper-bundle/workspace-result.json
-          output-schema-file: ${{ runner.temp }}/codekeeper-bundle/schema.json
+          prompt-file: ${{ github.workspace }}/codekeeper-bundle/workspace-prompt.md
+          output-file: ${{ github.workspace }}/codekeeper-bundle/workspace-result.json
+          output-schema-file: ${{ github.workspace }}/codekeeper-bundle/schema.json
       - name: Restore runner ownership after Codex
         if: always() && steps.settings.outputs.workspace_enabled == 'true' && inputs.codex_safety_strategy == 'unprivileged-user'
         env:
-          BUNDLE: ${{ runner.temp }}/codekeeper-bundle
-          CODEX_HOME: ${{ runner.temp }}/codekeeper-codex-home
+          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
+          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
           REPOSITORY: ${{ github.workspace }}/repository
         run: sudo chown -R "$(id -u):$(id -g)" "$REPOSITORY" "$BUNDLE" "$CODEX_HOME"
       - name: Restore quarantined repository skills
@@ -302,7 +302,7 @@ jobs:
       - name: Capture untrusted workspace patch
         working-directory: repository
         env:
-          BUNDLE: ${{ runner.temp }}/codekeeper-bundle
+          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
         run: |
           node ../tooling/tools/codekeeper/src/cli.mjs capture-workspace-patch \
@@ -313,7 +313,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: codekeeper-fix-workspace-${{ github.run_id }}
-          path: ${{ runner.temp }}/codekeeper-bundle
+          path: ${{ github.workspace }}/codekeeper-bundle
           retention-days: 1
           if-no-files-found: error
           overwrite: true

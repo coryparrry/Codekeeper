@@ -201,6 +201,9 @@ test("workspace workflows keep Codex privilege isolation generic and safely conf
     assert.match(workspace, /sudo chown -R "\$\(id -un\):\$group" "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME"/);
     assert.match(workspace, /sudo chmod -R g\+rwX "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME"/);
     assert.match(workspace, /sudo find "\$REPOSITORY" "\$BUNDLE" "\$CODEX_HOME" -type d -exec chmod g\+s \{\} \+/);
+    assert.match(workspace, /BUNDLE: \$\{\{ github\.workspace \}\}\/codekeeper-bundle/);
+    assert.match(workspace, /CODEX_HOME: \$\{\{ github\.workspace \}\}\/codekeeper-codex-home/);
+    assert.doesNotMatch(workspace, /\$\{\{ runner\.temp \}\}\/codekeeper-(?:bundle|codex-home)/);
     assert.doesNotMatch(workspace, /sudo chown -R "\$CODEX_USER:/);
     assert.match(workspace, /safety-strategy: \$\{\{ inputs\.codex_safety_strategy \}\}/);
     assert.match(workspace, /codex-user: codekeeper-codex/);
@@ -287,7 +290,7 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(workspace, /Configured default branch does not match the repository default branch/);
     assert.match(workspace, new RegExp(`prepare-${effectiveMode}`));
     assert.match(workspace, /openai\/codex-action@/);
-    assert.match(workspace, /output-schema-file: \$\{\{ runner\.temp \}\}\/codekeeper-bundle\/schema\.json/);
+    assert.match(workspace, /output-schema-file: \$\{\{ github\.workspace \}\}\/codekeeper-bundle\/schema\.json/);
     assert.match(workspace, /outputs:\n\s+context_sha256: \$\{\{ steps\.prepare\.outputs\.context_sha256 \}\}/);
     if (repairMode) {
       assert.match(workspace, /capture-workspace-patch/);
@@ -634,7 +637,7 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
     assert.match(workspace, new RegExp(`agent-settings[\\s\\S]*--mode ${effectiveMode}`));
     assert.match(workspace, /secrets\.workspace_api_key \|\| secrets\.openai_api_key/);
     assert.doesNotMatch(workspace, /secrets\.(?:model_api_key|trace_api_key|app_private_key)/);
-    assert.match(workspace, /codex-home: \$\{\{ runner\.temp \}\}\/codekeeper-codex-home/);
+    assert.match(workspace, /codex-home: \$\{\{ github\.workspace \}\}\/codekeeper-codex-home/);
     assert.match(workspace, /project_doc_max_bytes = 0/);
     assert.match(workspace, /project_doc_fallback_filenames = \[\]/);
     assert.match(workspace, /include_instructions = false/);
