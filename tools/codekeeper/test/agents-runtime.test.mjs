@@ -11,6 +11,7 @@ import {
 } from "../src/lib/agent-profiles.mjs";
 import {
   buildCoordinatorInput,
+  coordinatorPromptCacheKey,
   coordinatorInstructions,
   enforceCoordinatorEvidenceBoundary,
   loadCoordinatorProfile,
@@ -91,6 +92,19 @@ test("model settings retain provider-specific fields while adding supported reas
     modelSettingsFor({ effort: "max", modelSettings: { temperature: 0.2 } }, { supportsReasoningEffort: false }),
     { temperature: 0.2 }
   );
+});
+
+test("coordinator prompt cache keys stay within the OpenAI API boundary", () => {
+  const input = {
+    mode: "audit",
+    profileSha256: "a".repeat(64),
+    schemaSha256: "b".repeat(64)
+  };
+  const cacheKey = coordinatorPromptCacheKey(input);
+  assert.equal(cacheKey.length, 64);
+  assert.match(cacheKey, /^[0-9a-f]{64}$/);
+  assert.equal(cacheKey, coordinatorPromptCacheKey(input));
+  assert.notEqual(cacheKey, coordinatorPromptCacheKey({ ...input, mode: "review" }));
 });
 
 test("structured output wraps the deterministic schema in the SDK contract", () => {

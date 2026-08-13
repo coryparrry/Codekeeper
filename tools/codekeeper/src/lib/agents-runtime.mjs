@@ -75,6 +75,15 @@ export function modelSettingsFor(agent, provider, { cacheKey = "" } = {}) {
   return settings;
 }
 
+export function coordinatorPromptCacheKey({ mode, profileSha256, schemaSha256 }) {
+  return sha256(Buffer.from([
+    COORDINATOR_CONTRACT_VERSION,
+    mode,
+    profileSha256,
+    schemaSha256
+  ].join("\0")));
+}
+
 export function structuredOutputType(mode, schema) {
   if (!MODE_NAMES[mode]) throw new Error(`Unknown agent mode: ${mode}`);
   if (!isPlainObject(schema)) throw new Error("Agent output schema must be a JSON object");
@@ -536,7 +545,7 @@ export async function runConfiguredAgent({
     lastFailureStage = "agent-create";
     const schemaSha256 = sha256(Buffer.from(JSON.stringify(providerCompatibleJsonSchema(schema))));
     const profileSha256 = profileMetadata?.sha256 ?? sha256(Buffer.from(String(profile ?? "")));
-    const cacheKey = `codekeeper:${mode}:${profileSha256}:${schemaSha256}:${COORDINATOR_CONTRACT_VERSION}`;
+    const cacheKey = coordinatorPromptCacheKey({ mode, profileSha256, schemaSha256 });
     const configuredAgent = new sdk.Agent({
       name: MODE_NAMES[mode],
       instructions,
