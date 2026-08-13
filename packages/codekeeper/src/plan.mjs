@@ -296,6 +296,10 @@ export function setupPullRequestBody(plan) {
   if (plan.modes.includes("review")) proofs.push("Open a controlled same-repository pull request and verify the App-owned review.");
   if (plan.modes.includes("issues")) proofs.push("Use a controlled issue event and verify bounded triage.");
   if (plan.modes.includes("fix")) proofs.push("Use a controlled issue that triage marks ready. Use \`/codekeeper fix\` only when repairing an existing pull request.");
+  const requiredSettings = [
+    plan.variables.length ? `Required variables: ${plan.variables.map((item) => `\`${item.name}\``).join(", ")}.` : null,
+    plan.secrets.length ? `Required secrets: ${plan.secrets.map((item) => `\`${item.name}\``).join(", ")}. Values are never stored in this branch or pull request.` : null
+  ].filter(Boolean).join("\n\n");
   return `## Summary
 
 Codekeeper uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. ${plan.update && plan.enabled ? "It is enabled now with the current default-branch configuration; this update applies after the setup pull request merges." : `It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.`}
@@ -317,10 +321,7 @@ ${workflows}
 ${CONSERVATIVE_BOUNDARIES.map((item) => `- ${item}`).join("\n")}
 ${capabilitySummary(plan.capabilities, plan.modes).map((item) => `- ${item}`).join("\n")}
 ${reviewDisabledNote}
-
-Required variables: ${plan.variables.map((item) => `\`${item.name}\``).join(", ")}.
-
-Required secrets: ${plan.secrets.map((item) => `\`${item.name}\``).join(", ")}. Values are never stored in this branch or pull request.
+${requiredSettings ? `\n${requiredSettings}\n` : ""}
 
 ## After merge
 

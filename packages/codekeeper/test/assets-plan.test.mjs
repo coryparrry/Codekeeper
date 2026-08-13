@@ -56,10 +56,10 @@ const EXPECTED_ASSETS = Object.freeze({
   "policies/mixed.json": "f27e4a9672f3f17973f0b9611c25a6eb4abe66aaac86dd12cd31fc28995c89f3",
   "policies/openai.json": "ff25fd252f894a1e90dea44650b730cd03dd534c1ce2e1df38aafb8a051c240f",
   "workflows/assistant.yml": "bef52c224e85cb593f4d6f484d8811879197ebe797fcd79a462650eaf45ea2d7",
-  "workflows/fix.yml": "16df1467e273a6ee9e15732c6902c8b8f21c73aad53970f9744666ee10a6ee42",
-  "workflows/issues.yml": "a129b6c5d1f1264d4e2da3c433238e6a18561ea877875f6f9ff08493d49e1c17",
-  "workflows/maintain.yml": "da7b8fb26ec8b1203fa06453c89732e341d57f86747ed89cd7316b56112cf231",
-  "workflows/review.yml": "3e332340d577cb214b1d7b795b4ddfa5efaf1231bde9d341772d1ec0ef381ea2"
+  "workflows/fix.yml": "57311474c5422b94a68d2b744f654076483049eb55e1d0cb180f0c9575d6af62",
+  "workflows/issues.yml": "40d88f24796727462a111b47232f9c0a9df82367125cdb43c36ca4e504a09e7c",
+  "workflows/maintain.yml": "d21c3a97bb305c60bcd5d7f039f183383f294fef5585ffb6a359b1266a203a42",
+  "workflows/review.yml": "728ffe3c91f53ed42f31b309e02963481e8ad25763c7fdc9f6d24ca1efe6f238"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
@@ -875,6 +875,7 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
   assert.equal(update.pullRequest.title, "chore(codekeeper): update configuration");
   assert.match(update.pullRequest.body, /enabled now with the current default-branch configuration/i);
   assert.match(update.pullRequest.body, /continues running the current default-branch configuration now/i);
+  assert.doesNotMatch(update.pullRequest.body, /Required (?:variables|secrets):/);
   assert.match(completionGuidance(update.modes, update.enabled, update.update).heading, /running now with the current default-branch configuration/i);
 
   const providerUpdate = buildInstallPlan({
