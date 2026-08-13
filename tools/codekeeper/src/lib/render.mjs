@@ -17,6 +17,12 @@ function safeInlineCode(value) {
     .replaceAll("`", "\\`");
 }
 
+function safeTableCell(value) {
+  return safeMarkdown(value)
+    .replace(/[\r\n\t]+/g, " ")
+    .replaceAll("|", "\\|");
+}
+
 function findingList(findings) {
   return findings
     .map((finding, index) => {
@@ -48,46 +54,82 @@ function workflowRunEvidence(runUrl = "") {
   return runUrl ? `\n\n<sub>Codekeeper workflow run: ${runUrl}</sub>` : "";
 }
 
+function beforeMergeChecklist(result) {
+  const items = result.blockingFindings.map((finding) => {
+    const location = finding.file
+      ? ` (\`${safeInlineCode(finding.file)}${finding.line ? `:${finding.line}` : ""}\`)`
+      : "";
+    return `- [ ] **${safeMarkdown(finding.title)}** — ${safeMarkdown(finding.explanation)}${location}`;
+  });
+  if (!result.tests.adequate) {
+    items.push(`- [ ] **Add the missing test coverage** — ${safeMarkdown(result.tests.notes || "The review did not identify a specific missing test.")}`);
+  }
+  return items.length ? items.join("\n") : "None.";
+}
+
 export function renderReviewComment(result, autoMerge, runUrl = "") {
   const decision = autoMerge.eligible
     ? "This pull request meets the configured automatic-merge policy."
     : `Automatic merge stays off because: ${autoMerge.reasons.join("; ") || "the configured policy did not allow it"}.`;
   const diagram = result.diagram
-    ? `\n\n### How the change behaves\n\n\`\`\`mermaid\n${result.diagram.trim()}\n\`\`\``
+    ? `\n\n## How this fits together\n\n\`\`\`mermaid\n${result.diagram.trim()}\n\`\`\``
     : "";
   const triage = feedbackTriage(result.reviewFeedback);
   const triageSection = triage ? `\n\n### Existing review feedback\n\n${triage}` : "";
-  const recommendation = result.mergeRecommendation === "block"
-    ? "Block this pull request"
+  const recommendation = result.mergeRecommendation === "block" || result.blockingFindings.length > 0
+    ? "⛔ **Changes needed before merge**"
     : result.mergeRecommendation === "auto" && autoMerge.eligible
-      ? "Ready to merge"
-      : "Ready for a person to decide";
-  const risk = `${result.risk[0].toUpperCase()}${result.risk.slice(1)} risk`;
-  const testStatus = result.tests.adequate ? "Tests covered" : "More tests needed";
-  const testAssessment = result.tests.adequate
-    ? safeMarkdown(result.tests.notes || "No additional test note.")
-    : `**Coverage still needed:** ${safeMarkdown(result.tests.notes || "The review did not identify a specific missing test.")}`;
-  const blockingSection = result.blockingFindings.length
-    ? `\n\n### Must fix before merge\n\n${findingList(result.blockingFindings)}`
-    : "";
+      ? "✅ **Ready to merge**"
+      : result.tests.adequate
+        ? "✅ **Ready for maintainer review**"
+        : "⚠️ **Ready for maintainer review — test coverage remains**";
+  const readiness = result.blockingFindings.length > 0
+    ? `Codekeeper found ${result.blockingFindings.length} ${result.blockingFindings.length === 1 ? "item" : "items"} that should be resolved before this is merged.`
+    : result.tests.adequate
+      ? "No blocking issues were found. The final merge decision remains with the maintainer."
+      : "No blocking code issue was found, but the missing test coverage below still needs attention.";
+  const findingResult = result.blockingFindings.length > 0
+    ? `⛔ ${result.blockingFindings.length} blocking`
+    : result.nonBlockingFindings.length > 0
+      ? `⚠️ ${result.nonBlockingFindings.length} non-blocking`
+      : "✅ None";
+  const testResult = result.tests.adequate ? "✅ Covered" : "⚠️ Needs coverage";
+  const risk = `${result.risk[0].toUpperCase()}${result.risk.slice(1)}`;
   const nonBlockingSection = result.nonBlockingFindings.length
     ? `\n\n### Worth a look\n\n${findingList(result.nonBlockingFindings)}`
     : "";
-  return `## Codekeeper review
+  const details = `${nonBlockingSection}${triageSection}`;
+  return `# Codekeeper review
 
-**${recommendation}** · ${risk} · ${testStatus}
+## What this changes
 
 ${safeMarkdown(result.summary)}
-${blockingSection}${nonBlockingSection}
 
-### Tests
+## Merge readiness
 
-${testAssessment}${triageSection}${diagram}
+${recommendation}
+
+${readiness}
+
+**Risk:** ${risk}
+
+## Verification
+
+| Check | Result | Evidence |
+|---|---|---|
+| Findings | ${findingResult} | ${result.blockingFindings.length} blocking; ${result.nonBlockingFindings.length} non-blocking |
+| Tests | ${testResult} | ${safeTableCell(result.tests.notes || "No test evidence was supplied.")} |
+${diagram}
+
+## Before merge
+
+${beforeMergeChecklist(result)}
 
 <details>
-<summary>Why Codekeeper chose this result</summary>
+<summary><strong>Agent review details</strong></summary>
 
 ${safeMarkdown(decision)}
+${details || "\nNo additional review details."}
 
 </details>
 
