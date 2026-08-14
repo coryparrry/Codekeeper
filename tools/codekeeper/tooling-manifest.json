@@ -99,7 +99,7 @@
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "764fc051dce57ee24a8481d3171c07b0d02b8b04ca202877ac3fdb7ac120d453"
+      "sha256": "0127b66bf614d7bbdfc7ac17bef203667b9c167d9e1f69f9e01691d068e8011e"
     },
     {
       "path": "src/lib/publish.mjs",

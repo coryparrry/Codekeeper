@@ -32,6 +32,8 @@ test("prompts embed frozen workflow context without checkout-local context paths
   assert.match(issuePrompt, /\\u003ctag\\u003e/);
   assert.match(reviewPrompt, /tests\.missingTest only for a test that can be added to and run in the current checkout/);
   assert.match(reviewPrompt, /change only advances immutable dependency, action, or reusable-workflow references/);
+  assert.match(reviewPrompt, /release acceptance owns live and provenance validation/);
+  assert.match(reviewPrompt, /never assign that validation to the adopter/);
   assert.match(reviewPrompt, /Never request a generic local test of imported external behavior/);
   assert.match(reviewPrompt, /An evidence gap is not missing coverage/);
 });
