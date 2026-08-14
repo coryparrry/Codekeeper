@@ -103,7 +103,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "9510256e97a2b660a0b09efd6629a54a327578de0deed743be83be804281a397"
+      "sha256": "980ae4d7afb2a08f2f7b14bbe1fff24c6ac295afbc43a6ce1b4c30946291f1d7"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",
@@ -111,7 +111,7 @@
     },
     {
       "path": "src/lib/render.mjs",
-      "sha256": "1cb8d78894a43c8616a004e606f66c8ace5330ba2686e464dcb619e9c0a9b2e4"
+      "sha256": "173a61fea06601a8772086fb336f3809960719b9dc5c46d7b91f21a259ea69b8"
     },
     {
       "path": "src/lib/review-feedback.mjs",

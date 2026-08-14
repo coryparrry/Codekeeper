@@ -8,7 +8,7 @@ import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
 import { publishPullRequestRepair } from "./pr-repair.mjs";
-import { renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
+import { normalizeReleaseOwnedPinReview, renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
 const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
@@ -365,6 +365,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     policy: config
   });
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
+  const renderedResult = normalizeReleaseOwnedPinReview(result, files);
   const runUrl = trustedPublicationRunUrl(context);
   const automationBotLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
@@ -417,7 +418,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     }
     return {
       desiredLabels: [...desiredSet],
-      comment: renderReviewComment(result, autoMerge, runUrl)
+      comment: renderReviewComment(renderedResult, autoMerge, runUrl)
     };
   };
 
