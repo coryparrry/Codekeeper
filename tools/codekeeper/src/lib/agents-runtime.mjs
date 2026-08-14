@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -163,15 +164,31 @@ function codexMcpOutput(result) {
   return text;
 }
 
-function codexMcpEnvironment(apiKey, environment) {
+function codexMcpEnvironment(environment) {
   const childEnvironment = {};
   for (const name of ["CI", "HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR"]) {
     if (environment[name]) childEnvironment[name] = environment[name];
   }
   if (!environment.CODEX_HOME) throw new Error("CODEX_HOME is required for the isolated Codex MCP server");
   childEnvironment.CODEX_HOME = environment.CODEX_HOME;
-  childEnvironment.OPENAI_API_KEY = apiKey;
   return childEnvironment;
+}
+
+export async function authenticateCodexCli({ apiKey, command, args, environment }) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: process.cwd(),
+      env: environment,
+      stdio: ["pipe", "ignore", "ignore"]
+    });
+    child.once("error", reject);
+    child.stdin.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`Codex API-key login failed with exit code ${code ?? "unknown"}`));
+    });
+    child.stdin.end(`${apiKey}\n`);
+  });
 }
 
 export function workspaceCodexDeveloperInstructions(schema) {
@@ -719,7 +736,9 @@ export async function runWorkspaceAgentFromBundle({
   environment = process.env,
   sdkLoader = () => import("@openai/agents"),
   codexCommand = process.execPath,
-  codexArgs = [CODEX_BIN, "mcp-server"]
+  codexArgs = [CODEX_BIN, "mcp-server"],
+  codexLoginArgs = [CODEX_BIN, "login", "--with-api-key"],
+  codexAuthenticator = authenticateCodexCli
 }) {
   if (!apiKey || !String(apiKey).trim()) {
     throw new Error("CODEKEEPER_WORKSPACE_API_KEY is required for the configured workspace specialist");
@@ -742,6 +761,13 @@ export async function runWorkspaceAgentFromBundle({
     throw new Error(`Codekeeper ${mode} workspace specialist is disabled`);
   }
 
+  const childEnvironment = codexMcpEnvironment(environment);
+  await codexAuthenticator({
+    apiKey: String(apiKey).trim(),
+    command: codexCommand,
+    args: codexLoginArgs,
+    environment: childEnvironment
+  });
   const sdk = await sdkLoader();
   if (typeof sdk.MCPServerStdio !== "function") {
     throw new Error("Installed @openai/agents package does not export MCPServerStdio");
@@ -751,7 +777,7 @@ export async function runWorkspaceAgentFromBundle({
     command: codexCommand,
     args: codexArgs,
     cwd: process.cwd(),
-    env: codexMcpEnvironment(String(apiKey).trim(), environment),
+    env: childEnvironment,
     cacheToolsList: true,
     clientSessionTimeoutSeconds: DEFAULT_CODEX_MCP_TIMEOUT_SECONDS
   });
