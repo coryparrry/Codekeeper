@@ -779,7 +779,8 @@ export async function runWorkspaceAgentFromBundle({
     cwd: process.cwd(),
     env: childEnvironment,
     cacheToolsList: true,
-    clientSessionTimeoutSeconds: DEFAULT_CODEX_MCP_TIMEOUT_SECONDS
+    clientSessionTimeoutSeconds: DEFAULT_CODEX_MCP_TIMEOUT_SECONDS,
+    timeout: DEFAULT_CODEX_MCP_TIMEOUT_SECONDS * 1000
   });
   await server.connect();
   try {

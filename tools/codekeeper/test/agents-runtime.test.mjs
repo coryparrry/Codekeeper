@@ -170,6 +170,7 @@ test("workspace execution runs one Codex MCP session through the Agents SDK", as
   assert.equal(calls.closed, 1);
   assert.deepEqual(calls.options.args, ["/runtime/codex.js", "mcp-server"]);
   assert.equal(calls.options.cwd, process.cwd());
+  assert.equal(calls.options.timeout, 20 * 60 * 1000);
   assert.equal(calls.options.env.OPENAI_API_KEY, undefined);
   assert.equal(calls.options.env.GITHUB_TOKEN, undefined);
   assert.equal(calls.tool.name, "codex");
