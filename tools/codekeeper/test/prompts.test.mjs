@@ -141,6 +141,8 @@ test("audit prompt freezes explicit repair authorization and renders wildcard po
   const prompt = buildAuditPrompt({ baseSha: "a".repeat(40), repairAuthorized: false }, repairConfig);
 
   assert.match(prompt, /repair\.enabled=true; this run sets repairAuthorized=false/);
+  assert.match(prompt, /ownerLogins authorizes user accounts.*does not need to match the repository namespace owner/);
+  assert.match(prompt, /Trace event data through caller inputs and reusable-workflow fallbacks/);
   assert.match(prompt, /\["\*\*"\]/);
   assert.match(prompt, /protected JSON path list:\n\[\]/);
   assert.doesNotMatch(prompt, /^- \*\*$/m);

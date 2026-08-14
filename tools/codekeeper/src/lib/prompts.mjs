@@ -73,6 +73,8 @@ ${embeddedContext(context)}
 TASK:
 Audit the current default-branch checkout at ${context.baseSha} for real, evidence-backed repository drift. Look for contradictions between implementation, tests, current documentation and configuration; stale or broken maintenance instructions; missing regression coverage for clearly observable behavior; dead or obsolete repository material; and bounded correctness defects that can be proven from the checkout.
 
+Interpret configuration and workflow expressions through their complete documented runtime contract before reporting a contradiction. repository.ownerLogins authorizes user accounts to issue owner-only commands and does not need to match the repository namespace owner. Trace event data through caller inputs and reusable-workflow fallbacks; an empty intermediate input is not a defect when the trusted event supplies the target downstream.
+
 Do not create findings merely to fill the quota. Report at most ${config.audit.maximumIssuesPerRun} findings. Each finding needs concrete evidence and an owning path. Reuse a stable problemKey for the same underlying problem across future runs.
 
 You may implement at most one narrow repair only when both repository policy and the frozen workflow authorization permit it. Repository policy sets repair.enabled=${repair.enabled}; this run sets repairAuthorized=${context.repairAuthorized === true}. Unless both are true, leave the worktree unchanged and set repair.requested=false. When both are true, only edit files allowed by this JSON path list:
