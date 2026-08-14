@@ -763,7 +763,8 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   const issue = await github.beginIssueMutation({
     issue: context.issue,
     trackSubject: true,
-    trackComments: closingDuplicate || closingResolved
+    trackComments: closingDuplicate || closingResolved,
+    allowClosed: closingResolved,
   });
   const duplicate = closingDuplicate
     ? await github.requireOpenIssueMutationPrerequisite(result.duplicateOf)
