@@ -290,6 +290,42 @@ test("GitHub retries a REST response-body timeout within the capped budget", asy
   assert.equal(attempts, 2);
 });
 
+test("GitHub retries a pull read until a newly pushed head is visible", async () => {
+  const expectedHeadSha = "c".repeat(40);
+  let attempts = 0;
+  const github = client({
+    sleep: async () => {},
+    fetch: async () => {
+      attempts += 1;
+      return new Response(JSON.stringify(pullState({
+        headSha: attempts === 1 ? "a".repeat(40) : expectedHeadSha
+      })));
+    }
+  });
+
+  const pull = await github.getPull(7, { expectedHeadSha });
+
+  assert.equal(pull.head.sha, expectedHeadSha);
+  assert.equal(attempts, 2);
+});
+
+test("GitHub does not retry a rejected pull read while waiting for a pushed head", async () => {
+  let attempts = 0;
+  const github = client({
+    sleep: async () => { throw new Error("permission errors must not sleep"); },
+    fetch: async () => {
+      attempts += 1;
+      return new Response(JSON.stringify({ message: "Resource not accessible by integration" }), { status: 403 });
+    }
+  });
+
+  await assert.rejects(
+    github.getPull(7, { expectedHeadSha: "c".repeat(40) }),
+    (error) => error.status === 403
+  );
+  assert.equal(attempts, 1);
+});
+
 test("GitHub does not retry an ambiguous mutation response-body timeout", async () => {
   let attempts = 0;
   const github = client({

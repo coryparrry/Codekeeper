@@ -61,7 +61,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 004e71f25e32992a688084a2bebddc06186c81afe5000b3757d4617632f7e6f7
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 44448014887ce9defb9b2907bd1dfa715e608f6d2fb3de700e638a4c913fc321
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
