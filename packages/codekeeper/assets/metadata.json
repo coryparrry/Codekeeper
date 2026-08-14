@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "repository": "coryparry/Codekeeper",
-    "commit": "9bf01bcd09b8df4928a9a5762d01295df2e00bbc"
+    "commit": "08bdd20644a662ac25734d0b68b80303a3499e2d"
   },
   "assets": {
     "agents/pr-reviewer.md": {
@@ -56,8 +56,8 @@
       "sourcePath": "examples/workflows/codekeeper-issues.yml.example"
     },
     "workflows/fix.yml": {
-      "sha256": "16df1467e273a6ee9e15732c6902c8b8f21c73aad53970f9744666ee10a6ee42",
-      "bytes": 2041,
+      "sha256": "e388c51db33f6803f87a2695a6b98473f0760c659348ef48d4854b49e00981be",
+      "bytes": 2063,
       "sourcePath": "examples/workflows/codekeeper-fix.yml.example"
     }
   },
