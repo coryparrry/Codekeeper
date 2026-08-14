@@ -337,7 +337,7 @@ function writeRuntimeMetadataFixture(directory, mode) {
     outputBytes: 1,
     cacheKey: "offline-fixture",
     cacheMode: "unsupported",
-    usage: { requests: 1, inputTokens: 1, outputTokens: 1, totalTokens: 2, cachedInputTokens: 0 }
+    usage: { requests: 1, inputTokens: 1, outputTokens: 1, totalTokens: 2, cachedInputTokens: 0, cacheWriteInputTokens: 0 }
   }, null, 2)}\n`);
 }
 
@@ -361,7 +361,7 @@ test("prepare requires an external runner-owned directory and cannot follow chec
   assert.equal(await readFile(victim, "utf8"), "safe\n");
 });
 
-test("preparation freezes one trusted profile for workspace and coordinator instructions", async (context) => {
+test("preparation freezes one trusted profile for workspace and the coordinator cache prefix", async (context) => {
   const root = await createRepository();
   context.after(() => rm(root, { recursive: true, force: true }));
   const directory = bundle(root, "profile-proof");
@@ -409,8 +409,9 @@ test("preparation freezes one trusted profile for workspace and coordinator inst
     apiKey: "provider-secret",
     sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider })
   });
-  assert.ok(calls.instructions.includes(profile));
-  assert.ok(!calls.input.includes(profile));
+  assert.match(calls.instructions, /first input text block contains trusted Codekeeper instructions/);
+  assert.ok(calls.input[0].content[0].text.includes(profile));
+  assert.ok(!calls.input[0].content[1].text.includes(profile));
 });
 
 test("failed-job reruns produce the same frozen context across run attempts", async (context) => {

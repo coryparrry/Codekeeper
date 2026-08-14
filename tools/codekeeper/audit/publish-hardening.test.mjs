@@ -100,7 +100,7 @@ async function writeSealedArtifact(artifactDirectory, {
       outputBytes: 1,
       cacheKey: "offline-fixture",
       cacheMode: "unsupported",
-      usage: { requests: 1, inputTokens: 1, outputTokens: 1, totalTokens: 2, cachedInputTokens: 0 }
+      usage: { requests: 1, inputTokens: 1, outputTokens: 1, totalTokens: 2, cachedInputTokens: 0, cacheWriteInputTokens: 0 }
     })),
     [AGENT_PROFILE_BUNDLE_FILE]: agentProfile
   };

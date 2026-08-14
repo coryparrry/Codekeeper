@@ -421,7 +421,7 @@ test("configured agent selects the issue provider and retries contract-invalid J
             inputTokens: 10,
             outputTokens: 5,
             totalTokens: 15,
-            inputTokensDetails: [{ cached_tokens: calls.attempts }]
+            inputTokensDetails: [{ cached_tokens: calls.attempts, cache_write_tokens: calls.attempts }]
           }
         }
       };
@@ -446,7 +446,8 @@ test("configured agent selects the issue provider and retries contract-invalid J
     inputTokens: 20,
     outputTokens: 10,
     totalTokens: 30,
-    cachedInputTokens: 3
+    cachedInputTokens: 3,
+    cacheWriteInputTokens: 3
   });
   assert.equal(calls.provider.apiKey, "provider-secret");
   assert.equal(calls.provider.baseURL, "https://api.deepseek.com");
@@ -568,8 +569,9 @@ test("Responses retries preserve the explicit cache breakpoint without replaying
     modelSettings: { text: { verbosity: "low" } }
   };
   const inputs = [];
+  const agents = [];
   class FakeProvider { async close() {} }
-  class FakeAgent {}
+  class FakeAgent { constructor(options) { agents.push(options); } }
   class FakeRunner {
     async run(_agent, input) {
       inputs.push(input);
@@ -590,7 +592,11 @@ test("Responses retries preserve the explicit cache breakpoint without replaying
     sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider })
   });
   assert.equal(inputs.length, 2);
+  assert.match(agents[0].instructions, /first input text block contains trusted Codekeeper instructions/);
+  assert.doesNotMatch(agents[0].instructions, /# Issue triager profile/);
+  assert.equal(inputs[1][0].role, "user");
   assert.deepEqual(inputs[1][0].content[0].promptCacheBreakpoint, { mode: "explicit" });
+  assert.match(inputs[1][0].content[0].text, /# Issue triager profile/);
   assert.doesNotMatch(inputs[1][0].content[1].text, /UNIQUE_RESPONSES_PROMPT/);
   assert.match(inputs[1][0].content[1].text, /previous Codekeeper response attempt 1/i);
   assert.match(inputs[1][0].content[1].text, /"implementationRecommendation":"unsupported"/);
@@ -604,12 +610,20 @@ test("structured coordinators omit textual schemas and mark a stable cache break
     schema,
     specialistResult: { blockingFindings: [], nonBlockingFindings: [] },
     structuredOutputs: true,
-    cache: true
+    cache: true,
+    instructions: "Stable review instructions."
   });
   assert.equal(input.length, 1);
+  assert.equal(input[0].role, "user");
   assert.deepEqual(input[0].content[0].promptCacheBreakpoint, { mode: "explicit" });
+  assert.match(input[0].content[0].text, /Stable review instructions/);
   assert.doesNotMatch(input[0].content[1].text, /FINAL OUTPUT CONTRACT/);
   assert.doesNotMatch(input[0].content[1].text, /additionalProperties/);
+  assert.doesNotMatch(input[0].content[1].text, /\n  "/);
+  assert.throws(
+    () => buildCoordinatorInput({ mode: "review", prompt: "Task", schema, cache: true }),
+    /requires stable developer instructions/
+  );
 });
 
 test("coordinator evidence boundary rejects invented review findings and fix tests", () => {
