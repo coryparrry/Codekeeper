@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { fixSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "../src/lib/schemas.mjs";
+import { fixSchema, reviewSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "../src/lib/schemas.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -23,6 +23,8 @@ test("review validator keeps Mermaid optional for ordinary changes", () => {
 });
 
 test("review validator keeps missing tests explicit and separate from unknown evidence", () => {
+  assert.match(reviewSchema(config).properties.tests.properties.missingTest.description, /repository-local test/);
+  assert.match(reviewSchema(config).properties.tests.properties.missingTest.description, /null for unavailable external-source evidence/);
   const base = {
     mode: "review",
     summary: "No current defect was found.",
