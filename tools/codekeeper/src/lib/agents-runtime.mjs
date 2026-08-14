@@ -345,6 +345,7 @@ export function enforceCoordinatorEvidenceBoundary(mode, output, specialistResul
   if (mode === "review") {
     assertEvidenceField(output, specialistResult, "summary", "Coordinator review summary differs from workspace evidence");
     assertEvidenceField(output.tests, specialistResult.tests, "notes", "Coordinator review test notes differ from workspace evidence");
+    assertEvidenceField(output.tests, specialistResult.tests, "missingTest", "Coordinator review missing test differs from workspace evidence", { allowNull: true });
     assertEvidenceField(output, specialistResult, "diagram", "Coordinator review diagram differs from workspace evidence", { allowNull: true });
     assertEvidenceField(output, specialistResult, "noActionReason", "Coordinator review no-action reason differs from workspace evidence", { allowNull: true });
     for (const finding of output.blockingFindings ?? []) {
@@ -827,7 +828,7 @@ function deterministicNoWorkspaceResult(mode, context) {
         sourceKeys: [feedback.sourceKey],
         threadIds: feedback.threadId ? [feedback.threadId] : []
       })),
-      tests: { adequate: false, notes: "Test adequacy cannot be established without workspace evidence." },
+      tests: { adequate: false, notes: "Test adequacy cannot be established without workspace evidence.", missingTest: null },
       diagram: null,
       mergeRecommendation: "manual",
       noActionReason: "Workspace review is disabled, so Codekeeper did not inspect the pull request checkout."

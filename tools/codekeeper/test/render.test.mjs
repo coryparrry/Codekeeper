@@ -7,7 +7,7 @@ test("review comment contains deterministic policy decision", () => {
     {
       summary: "The change is narrow.",
       risk: "low",
-      tests: { adequate: true, notes: "Covered." },
+      tests: { adequate: true, notes: "Covered.", missingTest: null },
       diagram: null,
       mergeRecommendation: "auto",
       blockingFindings: [],
@@ -59,7 +59,8 @@ test("ordinary reviews are friendly, compact, and name missing test coverage", (
       risk: "medium",
       tests: {
         adequate: false,
-        notes: "No deterministic test covers PR and repository-dispatch run-name evaluation."
+        notes: "No deterministic test covers PR and repository-dispatch run-name evaluation.",
+        missingTest: "Add a caller test that triggers both PR and repository-dispatch events and expects the durable run name."
       },
       diagram: null,
       mergeRecommendation: "manual",
@@ -71,16 +72,38 @@ test("ordinary reviews are friendly, compact, and name missing test coverage", (
   );
   assert.match(markdown, /⚠️ \*\*Ready for maintainer review — test coverage remains\*\*/);
   assert.match(markdown, /\| Tests \| ⚠️ Needs coverage \| No deterministic test covers PR and repository-dispatch run-name evaluation\. \|/);
-  assert.match(markdown, /- \[ \] \*\*Add the missing test coverage\*\* — No deterministic test covers PR and repository-dispatch run-name evaluation\./);
+  assert.match(markdown, /- \[ \] \*\*Add the missing test coverage\*\* — Add a caller test that triggers both PR and repository-dispatch events and expects the durable run name\./);
   assert.doesNotMatch(markdown, /\| Signal|```mermaid|### Blocking findings|### Non-blocking findings/);
   assert.doesNotMatch(markdown, /Review feedback triage|Fix now|Fix if cheap|#### Defer|#### Ignore/);
+});
+
+test("unknown test evidence does not invent missing coverage", () => {
+  const markdown = renderReviewComment({
+    summary: "The workflows advance an external source pin.",
+    risk: "medium",
+    tests: {
+      adequate: false,
+      notes: "The external source is unavailable in this checkout.",
+      missingTest: null
+    },
+    diagram: null,
+    mergeRecommendation: "manual",
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: []
+  }, { eligible: false, reasons: ["External provenance needs manual review"] });
+
+  assert.match(markdown, /✅ \*\*Ready for maintainer review\*\*/);
+  assert.match(markdown, /\| Tests \| ⚠️ Not established \| The external source is unavailable in this checkout\. \|/);
+  assert.match(markdown, /## Before merge\n\nNone\./);
+  assert.doesNotMatch(markdown, /Needs coverage|missing test coverage|needs tests/i);
 });
 
 test("a model-selected flow diagram renders only when supplied", () => {
   const markdown = renderReviewComment({
     summary: "The request now moves through a new approval state.",
     risk: "medium",
-    tests: { adequate: true, notes: "The state transition is covered." },
+    tests: { adequate: true, notes: "The state transition is covered.", missingTest: null },
     diagram: "flowchart LR\n  Request --> Review --> Approved",
     mergeRecommendation: "manual",
     blockingFindings: [],
@@ -94,7 +117,7 @@ test("blocking findings become the before-merge checklist", () => {
   const markdown = renderReviewComment({
     summary: "Discounted totals can now be calculated.",
     risk: "high",
-    tests: { adequate: true, notes: "The existing total tests pass." },
+    tests: { adequate: true, notes: "The existing total tests pass.", missingTest: null },
     diagram: null,
     mergeRecommendation: "block",
     blockingFindings: [{

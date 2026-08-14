@@ -189,7 +189,7 @@ async function automaticRepairReviewFixture() {
       explanation: "Apply the bounded repair.", validation: "The repair remains applicable.",
       sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
     }],
-    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto", noActionReason: null
+    tests: { adequate: true, notes: "Covered.", missingTest: null }, mergeRecommendation: "auto", noActionReason: null
   };
   const pull = {
     number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
@@ -708,7 +708,7 @@ test("review publication rejects feedback that changed after preparation", async
       explanation: "Add timeout coverage.", validation: "Coverage is still absent.",
       sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
     }],
-    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "manual", noActionReason: null
+    tests: { adequate: true, notes: "Covered.", missingTest: null }, mergeRecommendation: "manual", noActionReason: null
   };
   const pull = {
     number: 7, state: "open", draft: false, labels: [],
@@ -811,7 +811,7 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
       explanation: "Repair the current feedback.", validation: "The feedback is still active.",
       sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
     }],
-    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "manual", noActionReason: null
+    tests: { adequate: true, notes: "Covered.", missingTest: null }, mergeRecommendation: "manual", noActionReason: null
   };
   const pull = {
     number: 7, node_id: "PR_7", state: "open", draft: false, auto_merge: null, labels: [],
@@ -939,7 +939,7 @@ test("fix-now feedback blocks auto-merge even when repair dispatch is disabled",
   const result = {
     risk: "low", labels: [], blockingFindings: [], nonBlockingFindings: [],
     reviewFeedback: [{ disposition: "fix_now" }],
-    tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto"
+    tests: { adequate: true, notes: "Covered.", missingTest: null }, mergeRecommendation: "auto"
   };
   const decision = evaluateAutoMerge({
     config: reviewConfig,
@@ -1273,7 +1273,7 @@ test("review publication activates auto-merge last and falls back safely", async
   };
   const result = {
     mode: "review", summary: "No blocking findings.", risk: "low", labels: [], blockingFindings: [],
-    nonBlockingFindings: [], tests: { adequate: true, notes: "Covered." }, mergeRecommendation: "auto", noActionReason: null
+    nonBlockingFindings: [], tests: { adequate: true, notes: "Covered.", missingTest: null }, mergeRecommendation: "auto", noActionReason: null
   };
   const pull = {
     number: 7,
@@ -2911,7 +2911,7 @@ test("review publication rejects same-SHA retargets before mutations", async () 
   };
   const result = {
     mode: "review", summary: "No blocking findings.", risk: "low", labels: [], blockingFindings: [],
-    nonBlockingFindings: [], tests: { adequate: true, notes: "" }, mergeRecommendation: "manual", noActionReason: null
+    nonBlockingFindings: [], tests: { adequate: true, notes: "", missingTest: null }, mergeRecommendation: "manual", noActionReason: null
   };
   const originalFetch = globalThis.fetch;
   try {

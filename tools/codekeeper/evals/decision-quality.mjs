@@ -23,7 +23,11 @@ function noFindingReview({ risk = "low", adequate = true, noActionReason = "The 
     labels: [],
     blockingFindings: [],
     nonBlockingFindings: [],
-    tests: { adequate, notes: adequate ? "Trusted evidence covers the changed boundary." : "No deterministic test exercises the changed boundary." },
+    tests: {
+      adequate,
+      notes: adequate ? "Trusted evidence covers the changed boundary." : "No deterministic test exercises the changed boundary.",
+      missingTest: adequate ? null : "Add a deterministic changed-boundary test and expect the documented behavior."
+    },
     mergeRecommendation: "manual",
     noActionReason
   };
@@ -181,7 +185,11 @@ const SCENARIOS = Object.freeze([
       labels: ["bug"],
       blockingFindings: [{ title: "Valid login always returns an authorization error", explanation: "The changed success branch returns before session creation, so every valid login fails.", severity: "high", confidence: "high", classification: "current", validation: "The current-head test fails while the base succeeds.", preventionTest: "Keep a valid-login success-path regression test.", file: "src/session.mjs", line: 1 }],
       nonBlockingFindings: [],
-      tests: { adequate: false, notes: "The supplied regression test demonstrates the failure but the PR does not preserve expected login coverage." },
+      tests: {
+        adequate: false,
+        notes: "The supplied regression test demonstrates the failure but the PR does not preserve expected login coverage.",
+        missingTest: "Keep a valid-login test that expects successful session creation."
+      },
       mergeRecommendation: "block",
       noActionReason: null
     },

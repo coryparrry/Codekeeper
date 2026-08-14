@@ -1340,7 +1340,7 @@ test("review findings must cite a changed line hunk", async () => {
       file: "README.md",
       line: 2
     }],
-    tests: { adequate: true, notes: "Documentation change." },
+    tests: { adequate: true, notes: "Documentation change.", missingTest: null },
     mergeRecommendation: "manual",
     noActionReason: null
   };

@@ -942,7 +942,7 @@ test("coordinator binds every rendered claim to specialist evidence", () => {
     labels: [],
     blockingFindings: [],
     nonBlockingFindings: [reviewFinding],
-    tests: { adequate: false, notes: "Specialist test note." },
+    tests: { adequate: false, notes: "Specialist test note.", missingTest: null },
     diagram: "flowchart TD\nA-->B",
     mergeRecommendation: "manual",
     noActionReason: "A maintainer must decide."
@@ -960,7 +960,7 @@ test("coordinator binds every rendered claim to specialist evidence", () => {
     /blocking finding/
   );
   assert.throws(
-    () => enforceCoordinatorEvidenceBoundary("review", { ...review, tests: { adequate: false, notes: "Invented test note." } }, review),
+    () => enforceCoordinatorEvidenceBoundary("review", { ...review, tests: { adequate: false, notes: "Invented test note.", missingTest: null } }, review),
     /test notes/
   );
   assert.throws(
