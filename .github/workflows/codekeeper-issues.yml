@@ -492,6 +492,7 @@ jobs:
           client-id: ${{ inputs.app_client_id }}
           private-key: ${{ secrets.app_private_key }}
           permission-issues: write
+          permission-pull-requests: read
       - name: Resolve immutable automation bot identity
         id: bot
         env:
