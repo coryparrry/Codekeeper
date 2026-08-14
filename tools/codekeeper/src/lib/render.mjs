@@ -11,6 +11,44 @@ function safeMarkdown(value) {
 
 export const sanitizeMarkdown = safeMarkdown;
 
+const GENERATED_WORKFLOW_PATHS = new Set([
+  ".github/workflows/codekeeper-assistant.yml",
+  ".github/workflows/codekeeper-fix.yml",
+  ".github/workflows/codekeeper-issues.yml",
+  ".github/workflows/codekeeper-maintain.yml",
+  ".github/workflows/codekeeper-review.yml",
+]);
+
+export function normalizeReleaseOwnedPinReview(result, files) {
+  if (!Array.isArray(files) || files.length !== GENERATED_WORKFLOW_PATHS.size || new Set(files.map((file) => file.filename)).size !== GENERATED_WORKFLOW_PATHS.size) return result;
+  let previousSha;
+  let nextSha;
+  for (const file of files) {
+    if (!GENERATED_WORKFLOW_PATHS.has(file.filename) || file.additions !== 3 || file.deletions !== 3 || typeof file.patch !== "string") return result;
+    const changed = file.patch.split("\n").filter((line) => /^[+-](?![+-])/.test(line));
+    const removed = changed.filter((line) => line.startsWith("-"));
+    const added = changed.filter((line) => line.startsWith("+"));
+    if (removed.length !== 3 || added.length !== 3 || !removed.every((line) => line.includes("coryparry/Codekeeper"))) return result;
+    const removedShas = new Set(removed.flatMap((line) => line.match(/\b[a-f0-9]{40}\b/g) ?? []));
+    const addedShas = new Set(added.flatMap((line) => line.match(/\b[a-f0-9]{40}\b/g) ?? []));
+    if (removedShas.size !== 1 || addedShas.size !== 1) return result;
+    const [oldSha] = removedShas;
+    const [newSha] = addedShas;
+    if (oldSha === newSha || (previousSha && previousSha !== oldSha) || (nextSha && nextSha !== newSha)) return result;
+    if (!removed.every((line, index) => line.slice(1).replaceAll(oldSha, "<sha>") === added[index].slice(1).replaceAll(newSha, "<sha>"))) return result;
+    previousSha = oldSha;
+    nextSha = newSha;
+  }
+  return {
+    ...result,
+    summary: "This installer-generated update advances the same reviewed Codekeeper source pin across all five workflows. No blocking issue is evidenced by the configuration change.",
+    tests: {
+      ...result.tests,
+      notes: "The generated workflows advance one source pin consistently. Live and provenance validation is owned by the Codekeeper release process; no adopter test is required.",
+    },
+  };
+}
+
 function safeInlineCode(value) {
   return safeMarkdown(value)
     .replace(/[\r\n\t]/g, " ")
