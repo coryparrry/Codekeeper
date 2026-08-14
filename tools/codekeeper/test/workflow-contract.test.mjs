@@ -317,6 +317,12 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.doesNotMatch(analyze, /openai\/codex-action@|secrets\.(?:workspace_api_key|openai_api_key|app_private_key)/);
     assert.doesNotMatch(analyze, /create-github-app-token/);
 
+    if (mode === "fix") {
+      assert.match(workspace, /source_sha: \$\{\{ fromJSON\(steps\.prepare\.outputs\.result\)\.agentProfile\.sourceSha \}\}/);
+      assert.match(workspace, /ref: \$\{\{ github\.sha \}\}/);
+      assert.match(analyze, /ref: \$\{\{ needs\.workspace\.outputs\.source_sha \}\}/);
+    }
+
     if (verify) {
       assert.match(verify, new RegExp(`verify-${mode === "maintain" ? "audit" : mode}`));
       assert.match(verify, /expected-candidate-sha/);
