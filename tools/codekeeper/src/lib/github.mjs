@@ -721,7 +721,7 @@ export class GitHubClient {
     throw new Error("GitHub retry budget exhausted");
   }
 
-  async request(method, endpoint, { body, headers = {}, retries, guardToken } = {}) {
+  async request(method, endpoint, { body, headers = {}, retries, retryPayload, guardToken } = {}) {
     const normalizedMethod = String(method).toUpperCase();
     if (!isRetrySafeMethod(normalizedMethod) &&
         guardToken !== PULL_MUTATION_COMPENSATION && guardToken !== ISSUE_MUTATION_INTERNAL) {
@@ -744,6 +744,7 @@ export class GitHubClient {
         body: body === undefined ? undefined : JSON.stringify(body)
       }, {
         retries: retryBudget,
+        retryPayload,
         consume: async (response, signal) => {
           const text = await awaitWithSignal(response.text(), signal);
           let payload = null;
@@ -820,8 +821,12 @@ export class GitHubClient {
     return `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}${suffix}`;
   }
 
-  async getPull(number) {
-    return (await this.request("GET", this.repoPath(`/pulls/${number}`))).data;
+  async getPull(number, { expectedHeadSha } = {}) {
+    return (await this.request("GET", this.repoPath(`/pulls/${number}`), {
+      retryPayload: expectedHeadSha
+        ? ({ response, payload }) => response.ok && payload?.head?.sha !== expectedHeadSha
+        : undefined
+    })).data;
   }
 
   async getIssue(number) {

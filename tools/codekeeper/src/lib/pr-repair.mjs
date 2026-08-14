@@ -189,7 +189,11 @@ export async function publishPullRequestRepair({
     await github.mutatePullHeadIfCurrent(commitSha, () =>
       gitOperations.pushHeadToBranch(target.headRef, github.token)
     );
-    const updatedPull = assertLivePullRepairTarget(await github.getPull(target.number), target, { expectedHeadSha: commitSha });
+    const updatedPull = assertLivePullRepairTarget(
+      await github.getPull(target.number, { expectedHeadSha: commitSha }),
+      target,
+      { expectedHeadSha: commitSha }
+    );
     let resolvedReviewThreadIds = [];
     let reviewThreadWarning = null;
     try {
