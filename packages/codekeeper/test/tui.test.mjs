@@ -883,10 +883,17 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
   });
   assert.equal(plan.settingsOnly, true);
   assert.deepEqual(plan.files, []);
-  const tui = await createTuiHarness(t);
+  const tui = await createTuiHarness(t, { columns: 80, rows: 24 });
   const review = tui.prompt.reviewInstallPlan(plan);
   const cancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  await tui.waitForText("Review the setup");
+  const frames = [];
+  for (let page = 1; page <= 7; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 7`);
+    frames.push(semanticText(tui.output.lastSemanticFrame()));
+    if (page < 7) await tui.send("\r");
+  }
+  assert.match(frames.join("\n"), /Repository variables/);
+  assert.doesNotMatch(frames.join("\n"), /Policy and caller documents|Editable agent profiles|Secrets requested through GitHub CLI/);
   await tui.send("\u001b");
   await cancellation;
 });
