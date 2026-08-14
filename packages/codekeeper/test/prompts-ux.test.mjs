@@ -185,7 +185,7 @@ test("recommended setup explains consequences and returns review plus maintenanc
   assert.deepEqual(capabilityCall.options.defaultValues, []);
   const transcript = output.toString();
   assert.match(transcript, /Pull request review:.*comments, labels, and a blocking result/);
-  assert.match(transcript, /Repository maintenance:.*manual dry run that makes no GitHub changes/);
+  assert.match(transcript, /Repository maintenance:.*manual or scheduled audits.*live runs can repair/);
   assert.match(transcript, /OpenAI starting models: you can assign any supported provider and model to each role/);
   assert.match(transcript, /Issue triage and issue fix are not included/);
   assert.match(transcript, /Repository repair: off/);

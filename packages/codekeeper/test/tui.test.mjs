@@ -8,7 +8,7 @@ import { loadVerifiedAssets } from "../src/assets.mjs";
 import { runCli } from "../src/cli.mjs";
 import { STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
 import { AGENT_PROFILE_IDS, AGENT_PROFILES } from "../src/constants.mjs";
-import { buildInstallPlan, collectAppAnswers, collectSetupAnswers, completionGuidance } from "../src/plan.mjs";
+import { buildInstallPlan, collectAppAnswers, collectSetupAnswers } from "../src/plan.mjs";
 import { upgradePolicy } from "../src/policy.mjs";
 import { createPrivateKeyPickerController, defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
 import { settingInputText } from "../src/settings-tui.mjs";
@@ -936,7 +936,6 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
       automationBotLogin: "codekeeper-widget[bot]"
     }
   });
-  const guidance = completionGuidance(plan.modes);
   const reviewMarkers = [
     ["Workflows", "Pull request review"],
     ["Models (editable", "gpt-5.6"],
@@ -947,7 +946,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     ["Settings", "Codekeeper starts after merge"],
     ["Capabilities", "Repository repair"],
     ["Fixed boundaries"],
-    [guidance.reviewGateWarning, "Create setup", "› Cancel"]
+    ["Create setup", "› Cancel"]
   ];
   const completionMarkers = [[
     "✓ Recheck the confirmed repository",
@@ -998,7 +997,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
       markers: [
         ["Workflows", "Models (editable", "gpt-5.6"],
         ["Document map", ".github/codekeeper/agents/pr-reviewer.md", "Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
-        ["Settings", guidance.reviewGateWarning, "Create setup", "› Cancel"]
+        ["Settings", "Create setup", "› Cancel"]
       ],
       ...dimensions
     });
@@ -1012,7 +1011,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     });
     await assertPagedScreenFits(tui, {
       kind: "completion",
-      markers: [[...completionMarkers[0], "OpenAI traces: enabled", guidance.reviewGateWarning, guidance.closing]],
+      markers: [[...completionMarkers[0], "OpenAI traces: enabled", "The installer did not run a workflow or merge the pull request."]],
       ...dimensions
     });
     assertFrameFits(tui.output.lastSemanticFrame(), dimensions);

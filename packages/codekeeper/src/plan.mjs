@@ -241,27 +241,16 @@ export function workflowMap(modes) {
 }
 
 export function completionGuidance(modes, enabled = true, update = false) {
-  const proofs = workflowMap(modes).map((item) => Object.freeze({
-    mode: item.mode,
-    label: item.label,
-    instruction: item.mode === "maintain"
-      ? "Run workflow_dispatch with dry_run=true to check the audit. A live run can repair when repository repair is on."
-      : item.mode === "review"
-        ? "controlled same-repository pull request"
-        : item.mode === "issues"
-          ? "controlled issue event"
-          : "controlled ready issue; use /codekeeper fix for a pull request repair"
-  }));
+  const normalizedModes = normalizeModes(modes);
   return Object.freeze({
     heading: enabled
       ? update
-        ? "Codekeeper is running now with the current default-branch configuration. After the setup pull request merges, test each updated workflow before making its check required."
-        : "After the setup pull request merges, Codekeeper starts running the workflows you selected. Test each one before making its check required."
-      : "Codekeeper will stay off after merge. Set CODEKEEPER_ENABLED=true when you are ready to test it.",
+        ? "Codekeeper keeps running the current default-branch configuration. The update takes effect when the setup pull request merges; no separate validation run is required."
+        : "Codekeeper is ready. It starts the selected workflows when the setup pull request merges; no separate dry run or controlled test is required."
+      : "Codekeeper stays off after merge. Set CODEKEEPER_ENABLED=true when you want it to start; no separate validation run is required.",
     profileGuidance: "Edit .github/codekeeper/agents/*.md to change priorities, work selection, implementation, review standards, and reporting. Capability switches control repair, issue implementation, issue closure, and merge actions.",
-    proofs: Object.freeze(proofs),
-    reviewGateWarning: proofs.some((item) => item.mode === "review")
-      ? "Do not make the Codekeeper review gate required until its controlled review proof passes."
+    reviewGateWarning: !enabled && normalizedModes.includes("review")
+      ? "Keep the Codekeeper review gate optional while Codekeeper is disabled."
       : null,
     closing: "The installer did not run a workflow or merge the pull request."
   });
@@ -288,14 +277,9 @@ export function setupPullRequestBody(plan) {
       return [MODES[mode].label, label, MODES[mode].description, MODES[mode].trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
     })
   );
-  const proofs = [];
   const reviewDisabledNote = plan.modes.includes("review") && !plan.enabled
-    ? "\nReview events fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`. Do not make the gate required until you enable Codekeeper and see a controlled review pass.\n"
+    ? "\nReview events fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`, so keep the gate optional until Codekeeper is enabled.\n"
     : "";
-  if (plan.modes.includes("maintain")) proofs.push("Run maintenance manually with `dry_run=true`.");
-  if (plan.modes.includes("review")) proofs.push("Open a controlled same-repository pull request and verify the App-owned review.");
-  if (plan.modes.includes("issues")) proofs.push("Use a controlled issue event and verify bounded triage.");
-  if (plan.modes.includes("fix")) proofs.push("Use a controlled issue that triage marks ready. Use \`/codekeeper fix\` only when repairing an existing pull request.");
   const requiredSettings = [
     plan.variables.length ? `Required variables: ${plan.variables.map((item) => `\`${item.name}\``).join(", ")}.` : null,
     plan.secrets.length ? `Required secrets: ${plan.secrets.map((item) => `\`${item.name}\``).join(", ")}. Values are never stored in this branch or pull request.` : null
@@ -327,13 +311,11 @@ ${requiredSettings ? `\n${requiredSettings}\n` : ""}
 
 ${plan.enabled
     ? plan.update
-      ? "Codekeeper continues running the current default-branch configuration now. After this pull request merges, test each updated workflow before making its check required:"
-      : "Codekeeper starts running the selected workflows. Test each one before making its check required:"
-    : "Codekeeper stays off. Set `CODEKEEPER_ENABLED=true` when you are ready, then test each selected workflow:"}
+      ? "Codekeeper keeps running the current default-branch configuration. The update takes effect when this pull request merges; no separate validation run is required."
+      : "Codekeeper starts running the selected workflows when this pull request merges; no separate dry run or controlled test is required."
+    : "Codekeeper stays off. Set `CODEKEEPER_ENABLED=true` when you want it to start; no separate validation run is required."}
 
 Edit \`.github/codekeeper/agents/*.md\` to tune priorities, work selection, implementation approach, review standards, and reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
-
-${proofs.map((item) => `- ${item}`).join("\n")}
 
 The installer did not merge this pull request or run a workflow.
 `;
@@ -505,7 +487,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   if (!installation) output.write("Recommended starter setup\n");
   if (!installation) {
     output.write("  - Pull request review: your GitHub App posts comments, labels, and a blocking result on controlled same-repository PRs\n");
-    output.write("  - Repository maintenance: begin with a manual dry run that makes no GitHub changes\n");
+    output.write("  - Repository maintenance: manual or scheduled audits; live runs can repair when repository repair is on\n");
     output.write("  - OpenAI starting models: you can assign any supported provider and model to each role\n");
     output.write("  - Issue triage and issue fix are not included\n");
     output.write("  - You choose whether Codekeeper starts when the setup pull request merges\n");

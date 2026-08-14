@@ -665,16 +665,14 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.match(output.toString(), /edit decision guidance in \.github\/codekeeper\/agents/);
   assert.match(output.toString(), /Capability switches control repair, issue implementation, issue closure, and merge actions/);
   assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
-  assert.match(output.toString(), /After the setup pull request merges, Codekeeper starts running the workflows you selected/);
-  assert.match(output.toString(), /Do not make the Codekeeper review gate required until its controlled review proof passes/);
+  assert.match(output.toString(), /starts the selected workflows when the setup pull request merges/);
+  assert.match(output.toString(), /no separate dry run or controlled test is required/);
+  assert.doesNotMatch(output.toString(), /controlled review|dry_run=true|test each/i);
   assert.match(output.toString(), /Created setup pull request: https:\/\/github\.com\/acme\/widget\/pull\/42/);
   assert.match(output.toString(), /did not run a workflow or merge the pull request/);
   const guidance = completionGuidance(["review", "maintain"]);
   assert.match(output.toString(), new RegExp(guidance.profileGuidance.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  for (const proof of guidance.proofs) {
-    assert.match(output.toString(), new RegExp(`  - ${proof.mode}: ${proof.instruction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  }
-  assert.match(output.toString(), new RegExp(guidance.reviewGateWarning.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(guidance.reviewGateWarning, null);
   assert.equal(errorOutput.toString(), "");
   const observable = `${JSON.stringify(calls)}\n${output.toString()}\n${errorOutput.toString()}`;
   assert.doesNotMatch(observable, new RegExp(privateKeyPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

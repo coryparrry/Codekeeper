@@ -22,7 +22,7 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 
 | Document | Purpose | When to use |
 |---|---|---|
-| This `README.md` | Installer boundary, prerequisites, generated setup, and proof sequence. | Before and during `codekeeper init`. |
+| This `README.md` | Installer boundary, prerequisites, generated setup, and operating model. | Before and during `codekeeper init`. |
 | [Source installation guide](https://github.com/coryparry/Codekeeper/blob/29caea862a2136057ec1d47040af565a66d2f94a/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
@@ -37,7 +37,7 @@ The Settings screen is the command centre for both new and existing installation
 |---|---|
 | Pull request review | App-owned review output for controlled same-repository pull requests after Codekeeper is deliberately enabled. |
 | Repository maintenance | Manual or scheduled audits. When repository repair is on, each live run can create one bounded repair pull request. |
-| Issue triage | Issue-event labels and comments when enabled; not needed for the starter proof. |
+| Issue triage | Issue-event labels and comments when enabled; not included in the starter selection. |
 | Issue implementation and pull request repair | Automatically implements issues that triage marks ready when issue implementation is on. When this workflow is selected, an owner can also use `/codekeeper fix` to repair an existing pull request. |
 
 The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and accepts any model ID for each provider. Coordinator selection is independent from the optional OpenAI Codex workspace specialist. OpenAI traces are optional. When traces are on, the installer requests a separate OpenAI Platform trace-export key. A ChatGPT subscription is not an API key.
@@ -109,7 +109,7 @@ The installer enables the selected workflows after merge by default. You can cho
 
 Automatic review, feedback triage, issue triage, owner requests, and deferred-issue creation start on when their callers are installed. Automatic code repair, issue implementation, duplicate closure, and merge remain off until enabled separately. The final review shows effective automation, changed files, variables, and required secrets before the installer changes repository settings or files.
 
-Review all triggers before you merge the setup pull request. Do not add the `Codekeeper review gate` to branch protection until a controlled review passes.
+Review all triggers before you merge the setup pull request. If you chose a disabled installation, keep the `Codekeeper review gate` optional until Codekeeper is enabled.
 
 Review protected paths, allowed repair paths, deterministic validation commands, owner logins, and `git diff --check` before merging. Enabling one control never implicitly enables another.
 
@@ -151,15 +151,10 @@ The installer renders the policy, caller controls, schedule, and provider-secret
 
 There is no hosted Codekeeper service, dashboard, webhook receiver, or central credential. GitHub issues, pull requests, Actions runs, and private local evidence are the system of record.
 
-## Proof after the setup PR merges
+## After the setup PR merges
 
-If you chose the enabled install, Codekeeper starts after the setup pull request merges. Test each selected mode before you make its check required. If you chose the disabled install, set `CODEKEEPER_ENABLED=true` when you are ready to test.
+An enabled installation starts its selected workflows as soon as the setup pull request merges. An update keeps running the current default-branch configuration until its setup pull request merges, then uses the updated configuration. No separate dry run or controlled test is required.
 
-| Mode | Next proof |
-|---|---|
-| Maintenance | Manually dispatch with `dry_run=true`; confirm a sealed artifact and no GitHub mutation. |
-| Review | Open a controlled same-repository PR against the default branch and confirm the App-owned review and blocking gate. |
-| Issues | Open or update a controlled issue and confirm bounded triage without a false duplicate closure. |
-| Fix | Use a controlled issue that triage marks ready and confirm that implementation opens a bounded pull request. Use `/codekeeper fix` only to test repair on an existing pull request. |
+If you chose a disabled installation, Codekeeper stays off until you set `CODEKEEPER_ENABLED=true`. Keep the review gate optional while Codekeeper is disabled.
 
 Codekeeper v1 has no force, non-interactive, GHES, or separate verify command.
