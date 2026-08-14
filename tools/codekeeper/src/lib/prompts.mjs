@@ -23,7 +23,7 @@ function embeddedContext(context) {
   // Context is created by the workflow, but several fields are event or
   // repository data. Escaping delimiter characters keeps those values data in
   // the prompt instead of allowing them to terminate its JSON block.
-  const json = JSON.stringify(context, null, 2)
+  const json = JSON.stringify(context)
     .replaceAll("`", "\\u0060")
     .replaceAll("<", "\\u003c")
     .replaceAll(">", "\\u003e")

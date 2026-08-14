@@ -25,6 +25,8 @@ test("prompts embed frozen workflow context without checkout-local context paths
   }
   const issuePrompt = buildIssuePrompt(contexts[2][1], config);
   const reviewPrompt = buildReviewPrompt(contexts[0][1], config);
+  assert.match(reviewPrompt, /```json\n\{/);
+  assert.doesNotMatch(reviewPrompt, /```json\n\{\n\s+"/);
   assert.match(issuePrompt, /authorized in automatic triage mode/);
   assert.match(issuePrompt, /\\u0060this\\u0060/);
   assert.match(issuePrompt, /\\u003ctag\\u003e/);
@@ -90,7 +92,7 @@ test("issue coordinators use full context directly and compact context after wor
   workspace.ai.agents.issue.workspace.enabled = true;
   const compact = buildCoordinatorPrompt("issue", context, workspace);
   assert.doesNotMatch(compact, /UNIQUE_ISSUE_BODY|UNIQUE_CANDIDATE_BODY/);
-  assert.match(compact, /"number": 9/);
+  assert.match(compact, /"number":9/);
 });
 
 test("fix prompt keeps an owner-commanded PR repair on its frozen existing head", () => {

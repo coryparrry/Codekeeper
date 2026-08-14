@@ -43,7 +43,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "224692fc169f9fa61ae0d8af9848455136604c37e8ca4c779dcc41b99282f6b6"
+      "sha256": "1be556986d776f2b090f07913e45312f0f3a5cf39965609256cccc59102a8a30"
     },
     {
       "path": "src/lib/commands.mjs",
@@ -99,7 +99,7 @@
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "879b862c8dafe945bd0e35249286ddf36109c031ec80e392ff06d24393233cf7"
+      "sha256": "d8c857e11bbbfd84cc2111039e5fcf7c6265c1ad61bfdb7e755b5cc0ab6523b9"
     },
     {
       "path": "src/lib/publish.mjs",
@@ -123,7 +123,7 @@
     },
     {
       "path": "src/lib/validate.mjs",
-      "sha256": "f88cf5a9738f65f41add30da47f1d4c4a83647308d36995895a227dd04093772"
+      "sha256": "d9b63ee1e246a5a33844d1bfbdfb22d167261ba20e7dd64c67b452c9eda0e12e"
     },
     {
       "path": "src/lib/workspace.mjs",

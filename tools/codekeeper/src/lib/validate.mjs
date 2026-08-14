@@ -68,7 +68,7 @@ function assertRuntimeMetadata(metadata, mode) {
       throw new Error(`Coordinator runtime metadata has an invalid ${field}`);
     }
   }
-  for (const field of ["requests", "inputTokens", "outputTokens", "totalTokens", "cachedInputTokens"]) {
+  for (const field of ["requests", "inputTokens", "outputTokens", "totalTokens", "cachedInputTokens", "cacheWriteInputTokens"]) {
     if (!Number.isFinite(metadata.usage[field]) || metadata.usage[field] < 0) {
       throw new Error(`Coordinator runtime metadata has invalid usage.${field}`);
     }
