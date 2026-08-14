@@ -247,6 +247,31 @@ test("conditional issue comments rebase from the live issue timestamp", async ()
   await github.verifyIssueMutation();
 });
 
+test("conditional issue mutations allow closed issues only for resolution reconciliation", async () => {
+  const updatedAt = "2026-08-14T19:36:22Z";
+  const github = client({
+    retries: 0,
+    fetch: async () => new Response(JSON.stringify({
+      number: 30,
+      title: "Resolved report",
+      body: "Details",
+      state: "closed",
+      updated_at: updatedAt,
+      labels: [],
+    })),
+  });
+
+  await assert.rejects(
+    github.beginIssueMutation({ issue: { number: 30, updatedAt } }),
+    /no longer eligible/
+  );
+  await github.beginIssueMutation({
+    issue: { number: 30, updatedAt },
+    allowClosed: true,
+  });
+  await github.verifyIssueMutation();
+});
+
 test("GitHub requests carry a finite abort deadline", async () => {
   let signal;
   const github = client({

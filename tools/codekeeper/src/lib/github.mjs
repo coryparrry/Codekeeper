@@ -361,7 +361,13 @@ export class GitHubClient {
     }
   }
 
-  async beginIssueMutation({ issue, rejectPaused = false, trackSubject = false, trackComments = false }) {
+  async beginIssueMutation({
+    issue,
+    rejectPaused = false,
+    trackSubject = false,
+    trackComments = false,
+    allowClosed = false,
+  }) {
     this.assertNoMutationGuard();
     if (!issue || !Number.isSafeInteger(issue.number) || issue.number <= 0 || typeof issue.updatedAt !== "string") {
       throw new Error("Conditional issue mutation requires a frozen issue number and timestamp");
@@ -375,7 +381,8 @@ export class GitHubClient {
       comments: null,
       prerequisites: [],
       trackSubject: trackSubject === true,
-      trackComments: trackComments === true
+      trackComments: trackComments === true,
+      allowClosed: allowClosed === true,
     };
     try {
       const live = await this.assertMutationCurrent();
@@ -411,7 +418,10 @@ export class GitHubClient {
         this.getIssue(this.issueMutation.number),
         ...this.issueMutation.prerequisites.map((item) => this.getIssue(item.number))
       ]);
-      if (issue.pull_request || issue.state !== "open") {
+      if (
+        issue.pull_request ||
+        (issue.state !== "open" && !(this.issueMutation.allowClosed && issue.state === "closed"))
+      ) {
         throw new Error(`Issue #${this.issueMutation.number} is no longer eligible`);
       }
       if (this.issueMutation.rejectPaused && issueLabelNames(issue).includes("paused")) {

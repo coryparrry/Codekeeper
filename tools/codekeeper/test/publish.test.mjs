@@ -1657,8 +1657,12 @@ test("issue publication closes a GitHub-linked merged pull request resolution as
   };
   let closingComment = "";
   let update = null;
+  let mutationOptions = null;
   const restoreGitHub = replaceGitHubMethods({
-    async beginIssueMutation() { return { number: 7, title: "Report", body: "Details", labels: [] }; },
+    async beginIssueMutation(options) {
+      mutationOptions = options;
+      return { number: 7, title: "Report", body: "Details", labels: [] };
+    },
     async listMergedPullRequestsClosingIssue() { return [resolvedByPullRequest]; },
     async ensureLabels() {},
     async replaceManagedIssueLabels() {},
@@ -1676,6 +1680,7 @@ test("issue publication closes a GitHub-linked merged pull request resolution as
       const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
       const published = await publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
       assert.deepEqual(published.desiredLabels.sort(), ["bug", "priority p3"]);
+      assert.equal(mutationOptions.allowClosed, true);
       assert.match(closingComment, /merged pull request \[#12\]/);
       assert.deepEqual(update, { state: "closed", state_reason: "completed" });
     } finally {
