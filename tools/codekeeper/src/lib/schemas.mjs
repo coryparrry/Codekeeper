@@ -153,7 +153,10 @@ export function reviewSchema(config) {
       tests: object({
         adequate: { type: "boolean" },
         notes: stringSchema({ minLength: 0, maxLength: LIMITS.summary }),
-        missingTest: nullableString(LIMITS.summary)
+        missingTest: {
+          ...nullableString(LIMITS.summary),
+          description: "A concrete repository-local test that can run in the current checkout, including its target, trigger or input, expected behavior, and the changed behavior it proves; null for unavailable external-source evidence."
+        }
       }),
       diagram: nullableString(LIMITS.diagram),
       mergeRecommendation: { enum: ["block", "manual", "auto"] },

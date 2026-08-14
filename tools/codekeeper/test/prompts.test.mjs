@@ -28,8 +28,10 @@ test("prompts embed frozen workflow context without checkout-local context paths
   assert.match(issuePrompt, /authorized in automatic triage mode/);
   assert.match(issuePrompt, /\\u0060this\\u0060/);
   assert.match(issuePrompt, /\\u003ctag\\u003e/);
-  assert.match(reviewPrompt, /tests\.missingTest only when a concrete deterministic test should be added/);
-  assert.match(reviewPrompt, /an evidence gap is not missing coverage/);
+  assert.match(reviewPrompt, /tests\.missingTest only for a test that can be added to and run in the current checkout/);
+  assert.match(reviewPrompt, /change only advances immutable dependency, action, or reusable-workflow references/);
+  assert.match(reviewPrompt, /Never request a generic local test of imported external behavior/);
+  assert.match(reviewPrompt, /An evidence gap is not missing coverage/);
 });
 
 test("workspace prompts place editable profile behavior below immutable safety rules", () => {
