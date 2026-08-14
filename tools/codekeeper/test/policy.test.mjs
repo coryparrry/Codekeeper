@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { validatePatch, evaluateAutoMerge } from "../src/lib/policy.mjs";
+import { validatePatch, evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 
 const source = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -27,6 +27,24 @@ function patch(files, overrides = {}) {
     ...overrides
   };
 }
+
+test("review labels distinguish missing coverage from unknown evidence", () => {
+  const result = {
+    risk: "medium",
+    labels: [],
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: [],
+    mergeRecommendation: "manual",
+    tests: { adequate: false, notes: "External evidence is unavailable.", missingTest: null }
+  };
+
+  assert.equal(reviewLabels(result).includes("needs tests"), false);
+  assert.equal(reviewLabels({
+    ...result,
+    tests: { ...result.tests, missingTest: "Add a dispatch test and expect one durable run name." }
+  }).includes("needs tests"), true);
+});
 
 test("patch policy accepts bounded source changes but rejects protected paths", () => {
   const accepted = validatePatch(

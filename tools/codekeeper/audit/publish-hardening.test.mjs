@@ -359,7 +359,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       sourceKeys: ["review_comment:1"],
       threadIds: ["thread-1"]
     }],
-    tests: { adequate: true, notes: "The failing behavior is covered." },
+    tests: { adequate: true, notes: "The failing behavior is covered.", missingTest: null },
     diagram: null,
     mergeRecommendation: "manual",
     noActionReason: null

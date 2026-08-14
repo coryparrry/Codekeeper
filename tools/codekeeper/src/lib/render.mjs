@@ -61,8 +61,8 @@ function beforeMergeChecklist(result) {
       : "";
     return `- [ ] **${safeMarkdown(finding.title)}** — ${safeMarkdown(finding.explanation)}${location}`;
   });
-  if (!result.tests.adequate) {
-    items.push(`- [ ] **Add the missing test coverage** — ${safeMarkdown(result.tests.notes || "The review did not identify a specific missing test.")}`);
+  if (result.tests.missingTest) {
+    items.push(`- [ ] **Add the missing test coverage** — ${safeMarkdown(result.tests.missingTest)}`);
   }
   return items.length ? items.join("\n") : "None.";
 }
@@ -80,20 +80,24 @@ export function renderReviewComment(result, autoMerge, runUrl = "") {
     ? "⛔ **Changes needed before merge**"
     : result.mergeRecommendation === "auto" && autoMerge.eligible
       ? "✅ **Ready to merge**"
-      : result.tests.adequate
-        ? "✅ **Ready for maintainer review**"
-        : "⚠️ **Ready for maintainer review — test coverage remains**";
+      : result.tests.missingTest
+        ? "⚠️ **Ready for maintainer review — test coverage remains**"
+        : "✅ **Ready for maintainer review**";
   const readiness = result.blockingFindings.length > 0
     ? `Codekeeper found ${result.blockingFindings.length} ${result.blockingFindings.length === 1 ? "item" : "items"} that should be resolved before this is merged.`
-    : result.tests.adequate
-      ? "No blocking issues were found. The final merge decision remains with the maintainer."
-      : "No blocking code issue was found, but the missing test coverage below still needs attention.";
+    : result.tests.missingTest
+      ? "No blocking code issue was found, but the missing test coverage below still needs attention."
+      : "No blocking issues were found. The final merge decision remains with the maintainer.";
   const findingResult = result.blockingFindings.length > 0
     ? `⛔ ${result.blockingFindings.length} blocking`
     : result.nonBlockingFindings.length > 0
       ? `⚠️ ${result.nonBlockingFindings.length} non-blocking`
       : "✅ None";
-  const testResult = result.tests.adequate ? "✅ Covered" : "⚠️ Needs coverage";
+  const testResult = result.tests.adequate
+    ? "✅ Covered"
+    : result.tests.missingTest
+      ? "⚠️ Needs coverage"
+      : "⚠️ Not established";
   const risk = `${result.risk[0].toUpperCase()}${result.risk.slice(1)}`;
   const nonBlockingSection = result.nonBlockingFindings.length
     ? `\n\n### Worth a look\n\n${findingList(result.nonBlockingFindings)}`

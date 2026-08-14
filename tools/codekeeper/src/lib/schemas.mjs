@@ -152,7 +152,8 @@ export function reviewSchema(config) {
       },
       tests: object({
         adequate: { type: "boolean" },
-        notes: stringSchema({ minLength: 0, maxLength: LIMITS.summary })
+        notes: stringSchema({ minLength: 0, maxLength: LIMITS.summary }),
+        missingTest: nullableString(LIMITS.summary)
       }),
       diagram: nullableString(LIMITS.diagram),
       mergeRecommendation: { enum: ["block", "manual", "auto"] },
@@ -359,9 +360,11 @@ export function validateReviewResult(result, config) {
     }
     assertUniqueStrings(feedback.threadIds, `${name}.threadIds`, { maximum: 128, itemMaximum: LIMITS.key });
   });
-  assertExactKeys(result.tests, ["adequate", "notes"], "tests");
+  assertExactKeys(result.tests, ["adequate", "notes", "missingTest"], "tests");
   assert(typeof result.tests.adequate === "boolean", "tests.adequate must be boolean");
   assertString(result.tests.notes, "tests.notes", { allowEmpty: true, maxLength: LIMITS.summary });
+  assertNullableString(result.tests.missingTest, "tests.missingTest", LIMITS.summary);
+  assert(!result.tests.adequate || result.tests.missingTest === null, "adequate tests cannot name a missing test");
   assertNullableString(result.diagram, "diagram", LIMITS.diagram);
   if (result.diagram !== null) {
     assert(/^(?:flowchart|sequenceDiagram|stateDiagram|classDiagram|erDiagram|gantt|pie|mindmap|timeline|gitGraph)\b/.test(result.diagram.trim()), "diagram must start with a supported Mermaid diagram type");

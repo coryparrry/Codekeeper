@@ -15,11 +15,47 @@ test("review validator keeps Mermaid optional for ordinary changes", () => {
     labels: [],
     blockingFindings: [],
     nonBlockingFindings: [],
-    tests: { adequate: true, notes: "Current behavior is covered." },
+    tests: { adequate: true, notes: "Current behavior is covered.", missingTest: null },
     mergeRecommendation: "manual",
     noActionReason: null
   }, config);
   assert.equal(result.diagram, null);
+});
+
+test("review validator keeps missing tests explicit and separate from unknown evidence", () => {
+  const base = {
+    mode: "review",
+    summary: "No current defect was found.",
+    risk: "medium",
+    labels: [],
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: [],
+    tests: { adequate: false, notes: "External evidence is unavailable.", missingTest: null },
+    diagram: null,
+    mergeRecommendation: "manual",
+    noActionReason: "A maintainer must verify the external source provenance."
+  };
+
+  assert.equal(validateReviewResult(structuredClone(base), config).tests.missingTest, null);
+  assert.equal(
+    validateReviewResult({
+      ...structuredClone(base),
+      tests: {
+        adequate: false,
+        notes: "The dispatch boundary is uncovered.",
+        missingTest: "Add a repository-dispatch test and expect one durable run name."
+      }
+    }, config).tests.adequate,
+    false
+  );
+  assert.throws(
+    () => validateReviewResult({
+      ...structuredClone(base),
+      tests: { adequate: true, notes: "Covered.", missingTest: "Add another test." }
+    }, config),
+    /adequate tests cannot name a missing test/
+  );
 });
 
 test("review validator rejects auto recommendation with blockers", () => {
@@ -45,7 +81,7 @@ test("review validator rejects auto recommendation with blockers", () => {
             }
           ],
           nonBlockingFindings: [],
-          tests: { adequate: false, notes: "No regression test." },
+          tests: { adequate: false, notes: "No regression test.", missingTest: "Add a nil-input regression test and expect the call not to crash." },
           mergeRecommendation: "auto",
           noActionReason: null
         },
@@ -73,7 +109,7 @@ test("review validator cannot promote a stale finding to the fixer", () => {
       line: 1
     }],
     nonBlockingFindings: [],
-    tests: { adequate: true, notes: "The current behavior is covered." },
+    tests: { adequate: true, notes: "The current behavior is covered.", missingTest: null },
     diagram: null,
     mergeRecommendation: "block",
     noActionReason: null
@@ -195,7 +231,7 @@ test("structured result validator rejects unsupported fields", () => {
           labels: [],
           blockingFindings: [],
           nonBlockingFindings: [],
-          tests: { adequate: true, notes: "No changed behavior." },
+          tests: { adequate: true, notes: "No changed behavior.", missingTest: null },
           mergeRecommendation: "manual",
           noActionReason: null,
           hiddenInstruction: "merge anyway"
@@ -226,7 +262,7 @@ test("review validator rejects a critical finding hidden as non-blocking", () =>
           file: "docs/README.md",
           line: 1
         }],
-        tests: { adequate: true, notes: "Regression coverage exists." },
+        tests: { adequate: true, notes: "Regression coverage exists.", missingTest: null },
         mergeRecommendation: "auto",
         noActionReason: null
       },
@@ -264,7 +300,7 @@ test("review feedback uses four exhaustive triage buckets and stable unique prob
         threadIds: []
       }
     ],
-    tests: { adequate: true, notes: "Current behavior is covered." },
+    tests: { adequate: true, notes: "Current behavior is covered.", missingTest: null },
     diagram: null,
     mergeRecommendation: "manual",
     noActionReason: null

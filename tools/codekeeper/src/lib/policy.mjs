@@ -72,7 +72,7 @@ function hasFixNowFeedback(result) {
 
 export function reviewLabels(result) {
   const labels = new Set(["reviewed", `risk ${result.risk}`, ...result.labels]);
-  if (!result.tests.adequate) labels.add("needs tests");
+  if (result.tests.missingTest) labels.add("needs tests");
   if (result.blockingFindings.length > 0 || hasCriticalFinding(result) || hasFixNowFeedback(result) || result.mergeRecommendation === "block") {
     labels.add("blocked");
   } else if (result.mergeRecommendation === "auto") {
@@ -160,7 +160,8 @@ export function evaluateAutoMerge({
     if (reviewResult.blockingFindings.length > 0) reasons.push("AI review has blocking findings");
     if (hasCriticalFinding(reviewResult)) reasons.push("AI review has a critical finding");
     if (hasFixNowFeedback(reviewResult)) reasons.push("AI review has fix-now review feedback");
-    if (!reviewResult.tests.adequate) reasons.push("AI review says test coverage is inadequate");
+    if (reviewResult.tests.missingTest) reasons.push("AI review names missing test coverage");
+    else if (!reviewResult.tests.adequate) reasons.push("AI review could not establish test adequacy");
     if (reviewResult.mergeRecommendation !== "auto") reasons.push(`AI merge recommendation is ${reviewResult.mergeRecommendation}`);
   }
   if (!reviewContextComplete) {

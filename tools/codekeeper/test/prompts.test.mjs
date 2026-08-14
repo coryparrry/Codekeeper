@@ -24,9 +24,12 @@ test("prompts embed frozen workflow context without checkout-local context paths
     assert.doesNotMatch(prompt, /\.treebar-ai\/context\.json/);
   }
   const issuePrompt = buildIssuePrompt(contexts[2][1], config);
+  const reviewPrompt = buildReviewPrompt(contexts[0][1], config);
   assert.match(issuePrompt, /authorized in automatic triage mode/);
   assert.match(issuePrompt, /\\u0060this\\u0060/);
   assert.match(issuePrompt, /\\u003ctag\\u003e/);
+  assert.match(reviewPrompt, /tests\.missingTest only when a concrete deterministic test should be added/);
+  assert.match(reviewPrompt, /an evidence gap is not missing coverage/);
 });
 
 test("workspace prompts place editable profile behavior below immutable safety rules", () => {
