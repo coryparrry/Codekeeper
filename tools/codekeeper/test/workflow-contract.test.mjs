@@ -99,6 +99,7 @@ test("four generic mode workflows expose workflow_call and caller templates rema
   assert.doesNotMatch(assistantCaller, /body\.includes\(`/);
   const issueCaller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issueCaller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
+  assert.match(issueCaller, /issues:\n\s+types: \[opened, reopened, edited, closed\]/);
   assert.ok(!files.some((name) => name.startsWith("treebar-ai-")));
 });
 
@@ -530,13 +531,13 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   const caller = await repositoryFile("examples/workflows/codekeeper-issues.yml.example");
   assert.match(issue, /auto_triage:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(issue, /inputs\.auto_triage &&\s+github\.event_name == 'issues'/);
-  for (const action of ["opened", "reopened", "edited"]) assert.match(issue, new RegExp(`github\\.event\\.action == '${action}'`));
+  for (const action of ["opened", "reopened", "edited", "closed"]) assert.match(issue, new RegExp(`github\\.event\\.action == '${action}'`));
   assert.doesNotMatch(issue, /owner_requests|github\.event\.comment\.body/);
   assert.match(issue, /TRIAGE_MODE: \$\{\{ github\.event_name == 'issues' && 'automatic' \|\| 'manual' \}\}/);
   assert.match(issue, /codekeeper_issue[\s\S]*github\.actor == inputs\.automation_bot_login/);
   assert.match(issue, /prepare-issue[\s\S]*--actor "\$REQUESTED_BY"/);
   assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
-  assert.match(caller, /issues:\n\s+types: \[opened, reopened, edited\]/);
+  assert.match(caller, /issues:\n\s+types: \[opened, reopened, edited, closed\]/);
   assert.doesNotMatch(caller, /issue_comment:/);
   assert.match(caller, /auto_triage: true/);
   assert.match(caller, /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/);
