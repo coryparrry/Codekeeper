@@ -479,8 +479,21 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const { stdout } = useStdout();
   const pagedDetail = usesPagedDetailLayout(stdout);
   const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
-  const lastPage = pagedDetail ? 9 : 2;
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
+  const pagedPages = useMemo(() => [
+    "overview",
+    "models",
+    ...(data.setupDocumentPaths.length ? ["documents"] : []),
+    ...(data.profileDocumentPaths.length ? ["profiles"] : []),
+    ...(data.variables.length ? ["variables"] : []),
+    ...(data.secrets.length ? ["secrets"] : []),
+    "settings",
+    "capabilities",
+    "boundaries",
+    "confirm"
+  ], [data]);
+  const lastPage = pagedDetail ? pagedPages.length - 1 : 2;
+  const pageKind = pagedPages[page];
   usePaste(() => {});
   useInput((input, key) => {
     cancel(input, key);
@@ -546,7 +559,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         h(Text, { bold: !confirmed, inverse: !confirmed }, `${!confirmed ? "›" : " "} Cancel`)
       )
     ) : null,
-    pagedDetail && page === 0 ? h(
+    pagedDetail && pageKind === "overview" ? h(
       Box,
       { flexDirection: "column" },
       h(Text, null, data.repository),
@@ -554,15 +567,15 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       h(Text, { dimColor: true }, data.preset),
       section("Workflows", data.workflows, 0)
     ) : null,
-    pagedDetail && page === 1 ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
-    pagedDetail && page === 2 ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
-    pagedDetail && page === 3 ? section("Editable agent profiles", data.profileDocumentPaths, 0) : null,
-    pagedDetail && page === 4 ? section("Repository variables", data.variables, 0) : null,
-    pagedDetail && page === 5 ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
-    pagedDetail && page === 6 ? section("Settings", [data.startup, ...data.automation], 0) : null,
-    pagedDetail && page === 7 ? section("Capabilities", data.capabilities, 0) : null,
-    pagedDetail && page === 8 ? section("Fixed boundaries", CONSERVATIVE_BOUNDARIES, 0) : null,
-    pagedDetail && page === 9 ? h(
+    pagedDetail && pageKind === "models" ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
+    pagedDetail && pageKind === "documents" ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
+    pagedDetail && pageKind === "profiles" ? section("Editable agent profiles", data.profileDocumentPaths, 0) : null,
+    pagedDetail && pageKind === "variables" ? section("Repository variables", data.variables, 0) : null,
+    pagedDetail && pageKind === "secrets" ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
+    pagedDetail && pageKind === "settings" ? section("Settings", [data.startup, ...data.automation], 0) : null,
+    pagedDetail && pageKind === "capabilities" ? section("Capabilities", data.capabilities, 0) : null,
+    pagedDetail && pageKind === "boundaries" ? section("Fixed boundaries", CONSERVATIVE_BOUNDARIES, 0) : null,
+    pagedDetail && pageKind === "confirm" ? h(
       Box,
       { flexDirection: "column" },
       data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
