@@ -554,6 +554,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.doesNotMatch(fix, /\n  command:/);
   const fixCaller = await repositoryFile("examples/workflows/codekeeper-fix.yml.example");
   assert.match(fixCaller, /issues:\n\s+types: \[labeled\]/);
+  assert.match(fixCaller, /permissions:\n\s+contents: read\n\s+issues: read\n\s+pull-requests: read/);
   assert.doesNotMatch(fixCaller, /issue_comment:/);
   assert.match(fixCaller, /automation_bot_login: \$\{\{ vars\.CODEKEEPER_AUTOMATION_BOT_LOGIN \}\}/);
   const commands = await repositoryFile("tools/codekeeper/src/lib/commands.mjs");
