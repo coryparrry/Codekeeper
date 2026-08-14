@@ -539,6 +539,8 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune priorities, work selection, implementation approach/);
   assert.match(plan.pullRequest.body, /capability switches above control which GitHub actions Codekeeper can take/);
   assert.match(plan.pullRequest.body, /live maintenance run can repair when repository repair is on/);
+  assert.match(plan.pullRequest.body, /no separate dry run or controlled test is required/i);
+  assert.doesNotMatch(plan.pullRequest.body, /Run maintenance manually|controlled same-repository pull request|controlled issue event|triage marks ready|test each updated workflow/i);
   assert.doesNotMatch(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
   assert.match(plan.pullRequest.body, /did not merge this pull request or run a workflow/);
   assert.doesNotMatch(plan.pullRequest.body, /PRIVATE KEY|sk-[A-Za-z0-9]/i);
@@ -874,9 +876,10 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
   assert.match(contents[".github/codekeeper/agents/pr-reviewer.md"], /Repository preference/);
   assert.equal(update.pullRequest.title, "chore(codekeeper): update configuration");
   assert.match(update.pullRequest.body, /enabled now with the current default-branch configuration/i);
-  assert.match(update.pullRequest.body, /continues running the current default-branch configuration now/i);
+  assert.match(update.pullRequest.body, /keeps running the current default-branch configuration/i);
+  assert.match(update.pullRequest.body, /no separate validation run is required/i);
   assert.doesNotMatch(update.pullRequest.body, /Required (?:variables|secrets):/);
-  assert.match(completionGuidance(update.modes, update.enabled, update.update).heading, /running now with the current default-branch configuration/i);
+  assert.match(completionGuidance(update.modes, update.enabled, update.update).heading, /keeps running the current default-branch configuration/i);
 
   const providerUpdate = buildInstallPlan({
     bundle,

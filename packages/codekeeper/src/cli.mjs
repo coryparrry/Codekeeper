@@ -91,8 +91,8 @@ function preview(plan, output) {
   output.write("  The GitHub App PEM is supplied from its downloaded file, never pasted into a terminal prompt.\n");
   output.write(`  Startup: ${plan.update && plan.enabled ? "enabled now; update applies after merge" : plan.enabled ? "enabled after merge" : "disabled after merge"}\n`);
   output.write("  The installer will not merge the setup pull request.\n");
-  if (plan.modes.includes("review")) {
-    output.write("  Do not make the Codekeeper review gate required until a controlled review passes.\n");
+  if (plan.modes.includes("review") && !plan.enabled) {
+    output.write("  Keep the Codekeeper review gate optional while Codekeeper is disabled.\n");
   }
 }
 
@@ -106,7 +106,6 @@ function printCompletion(plan, receipt, output) {
   const guidance = completionGuidance(plan.modes, plan.enabled, plan.update);
   output.write(`\n${guidance.profileGuidance}\n`);
   output.write(`\n${guidance.heading}\n`);
-  for (const item of guidance.proofs) output.write(`  - ${item.mode}: ${item.instruction}\n`);
   if (guidance.reviewGateWarning) output.write(`${guidance.reviewGateWarning}\n`);
   output.write(`${guidance.closing}\n`);
 }
