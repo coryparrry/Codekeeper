@@ -10,6 +10,7 @@ import {
   loadTrustedAgentProfile
 } from "../src/lib/agent-profiles.mjs";
 import {
+  authenticateCodexCli,
   buildCoordinatorInput,
   coordinatorPromptCacheKey,
   coordinatorInstructions,
@@ -89,6 +90,23 @@ test("workspace Codex developer instructions carry the provider-compatible outpu
   assert.match(instructions, /Return only that JSON object\.$/);
 });
 
+test("Codex CLI authentication pipes the API key without exporting it", async () => {
+  const script = [
+    'let input = "";',
+    'process.stdin.on("data", (chunk) => { input += chunk; });',
+    'process.stdin.on("end", () => {',
+    '  if (input.trim() !== "workspace-secret") process.exit(2);',
+    '  if (process.env.OPENAI_API_KEY || process.env.GITHUB_TOKEN) process.exit(3);',
+    '});'
+  ].join("\n");
+  await authenticateCodexCli({
+    apiKey: "workspace-secret",
+    command: process.execPath,
+    args: ["--input-type=module", "-e", script],
+    environment: { PATH: process.env.PATH, CODEX_HOME: "/isolated/codex-home" }
+  });
+});
+
 test("workspace execution runs one Codex MCP session through the Agents SDK", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-workspace-bundle-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
@@ -100,10 +118,10 @@ test("workspace execution runs one Codex MCP session through the Agents SDK", as
     writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue" }))
   ]);
 
-  const calls = { connected: 0, closed: 0 };
+  const calls = { connected: 0, closed: 0, order: [] };
   class FakeMCPServerStdio {
     constructor(options) { calls.options = options; }
-    async connect() { calls.connected += 1; }
+    async connect() { calls.connected += 1; calls.order.push("connect"); }
     async close() { calls.closed += 1; }
     async listTools() { return [{ name: "codex" }]; }
     async callToolResult(name, args) {
@@ -135,14 +153,24 @@ test("workspace execution runs one Codex MCP session through the Agents SDK", as
     },
     sdkLoader: async () => ({ MCPServerStdio: FakeMCPServerStdio }),
     codexCommand: "/usr/bin/node",
-    codexArgs: ["/runtime/codex.js", "mcp-server"]
+    codexArgs: ["/runtime/codex.js", "mcp-server"],
+    codexLoginArgs: ["/runtime/codex.js", "login", "--with-api-key"],
+    codexAuthenticator: async (options) => {
+      calls.auth = options;
+      calls.order.push("authenticate");
+    }
   });
 
+  assert.deepEqual(calls.order, ["authenticate", "connect"]);
+  assert.equal(calls.auth.apiKey, "workspace-secret");
+  assert.deepEqual(calls.auth.args, ["/runtime/codex.js", "login", "--with-api-key"]);
+  assert.equal(calls.auth.environment.OPENAI_API_KEY, undefined);
+  assert.equal(calls.auth.environment.GITHUB_TOKEN, undefined);
   assert.equal(calls.connected, 1);
   assert.equal(calls.closed, 1);
   assert.deepEqual(calls.options.args, ["/runtime/codex.js", "mcp-server"]);
   assert.equal(calls.options.cwd, process.cwd());
-  assert.equal(calls.options.env.OPENAI_API_KEY, "workspace-secret");
+  assert.equal(calls.options.env.OPENAI_API_KEY, undefined);
   assert.equal(calls.options.env.GITHUB_TOKEN, undefined);
   assert.equal(calls.tool.name, "codex");
   assert.equal(calls.tool.args.model, "gpt-5.6-luna");
