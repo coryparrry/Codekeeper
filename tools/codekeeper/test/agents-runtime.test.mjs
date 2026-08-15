@@ -1150,6 +1150,38 @@ test("tracing uses a separate export key without changing the model provider key
   assert.equal(calls.runner.traceIncludeSensitiveData, false);
 });
 
+test("evaluation can replace trace configuration without changing runtime defaults", async () => {
+  const calls = {};
+  class FakeProvider {
+    constructor(options) { calls.provider = options; }
+    async close() {}
+  }
+  class FakeAgent {}
+  class FakeRunner {
+    constructor(options) { calls.runner = options; }
+    async run() { return { finalOutput: validIssue() }; }
+  }
+  const evaluationConfig = structuredClone(config);
+  evaluationConfig.ai.tracing.includeSensitiveData = true;
+
+  await runConfiguredAgent({
+    mode: "issue",
+    config: evaluationConfig,
+    prompt: "Classify.",
+    schema,
+    apiKey: "provider-secret",
+    validateOutput: (output) => validateIssueResult(output, evaluationConfig),
+    sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider }),
+    configureTracing: async (options) => { calls.tracing = options; }
+  });
+
+  assert.equal(calls.tracing.modelApiKey, "provider-secret");
+  assert.equal(calls.tracing.tracing.includeSensitiveData, true);
+  assert.equal(calls.provider.apiKey, "provider-secret");
+  assert.equal(calls.runner.tracingDisabled, false);
+  assert.equal(calls.runner.traceIncludeSensitiveData, true);
+});
+
 test("tracing rejects a model provider key reused as its export key after normalization", async () => {
   const previous = process.env.CODEKEEPER_TRACE_API_KEY;
   process.env.CODEKEEPER_TRACE_API_KEY = " provider-secret ";

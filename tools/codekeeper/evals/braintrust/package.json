@@ -1,0 +1,16 @@
+{
+  "name": "codekeeper-braintrust-eval",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "eval": "node braintrust-eval.mjs"
+  },
+  "dependencies": {
+    "@braintrust/openai-agents": "0.1.5",
+    "braintrust": "3.27.0"
+  }
+}

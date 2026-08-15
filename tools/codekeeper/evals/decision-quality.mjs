@@ -375,9 +375,10 @@ export function makeOfflineSdk(fixtures = Object.fromEntries(SCENARIOS.map((scen
   return { Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider };
 }
 
-export async function runDecisionEvaluation({ preset = "mixed", repeat = DEFAULT_REPEAT, openaiIssueCandidate, scenario: scenarioName, keyResolver = environmentKeyResolver, sdkLoader, report = () => {}, throwOnFailure = true, starterPolicy, disableTracing = false } = {}) {
+export async function runDecisionEvaluation({ preset = "mixed", repeat = DEFAULT_REPEAT, openaiIssueCandidate, scenario: scenarioName, keyResolver = environmentKeyResolver, sdkLoader, configureTracing, report = () => {}, throwOnFailure = true, starterPolicy, disableTracing = false, includeSensitiveTraceData = false } = {}) {
   const policy = resolveEvaluationPolicy(starterPolicy ?? await readStarterPolicy(), { preset, openaiIssueCandidate });
   if (disableTracing) policy.ai.tracing.enabled = false;
+  if (includeSensitiveTraceData) policy.ai.tracing.includeSensitiveData = true;
   const scenarios = scenarioName ? SCENARIOS.filter((scenario) => scenario.name === scenarioName) : SCENARIOS;
   if (scenarios.length === 0) throw new Error(`Unknown evaluation scenario: ${scenarioName}`);
   const providerKeys = await requiredProviderKeys(policy, scenarios, keyResolver);
@@ -405,6 +406,7 @@ export async function runDecisionEvaluation({ preset = "mixed", repeat = DEFAULT
           validateOutput: validate,
           apiKey: providerKeys.get(agent.provider),
           sdkLoader,
+          configureTracing,
           diagnostic: (event) => { runtimeDiagnostic = event; }
         });
         metadata = result.metadata;

@@ -210,5 +210,5 @@ test("semantic assertions fail closed and evaluation never reports provider keys
   assert.equal(summary.results[0].stage, "evidence-boundary");
   assert.equal(summary.results[0].pass, false);
   assert.doesNotMatch(reports.join("\n"), /provider-key-secret|provider-result-secret/);
-  assert.deepEqual((await readdir(new URL("../evals/", import.meta.url))).sort(), ["decision-quality.mjs"]);
+  assert.deepEqual((await readdir(new URL("../evals/", import.meta.url))).sort(), ["braintrust", "decision-quality.mjs"]);
 });

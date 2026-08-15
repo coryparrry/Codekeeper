@@ -20,6 +20,21 @@ export function isProviderCleanupTimeout(error) {
   return error?.code === PROVIDER_CLEANUP_TIMEOUT_CODE;
 }
 
+export function configureOpenAITracing({ sdk, modelApiKey, tracing, environment = process.env }) {
+  if (!tracing.enabled) return;
+  const traceApiKey = environment.CODEKEEPER_TRACE_API_KEY?.trim();
+  if (!traceApiKey) {
+    throw new Error("CODEKEEPER_TRACE_API_KEY is required when ai.tracing.enabled=true");
+  }
+  if (traceApiKey === modelApiKey) {
+    throw new Error("CODEKEEPER_TRACE_API_KEY must differ from CODEKEEPER_MODEL_API_KEY when ai.tracing.enabled=true");
+  }
+  if (typeof sdk.setTracingExportApiKey !== "function") {
+    throw new Error("Installed @openai/agents package does not export setTracingExportApiKey");
+  }
+  sdk.setTracingExportApiKey(traceApiKey);
+}
+
 async function closeProviderWithDeadline(modelProvider, timeoutMs) {
   const timeoutError = new Error(`Codekeeper provider cleanup timed out after ${timeoutMs}ms`);
   timeoutError.code = PROVIDER_CLEANUP_TIMEOUT_CODE;
@@ -553,6 +568,7 @@ export async function runConfiguredAgent({
   validateOutput = (output) => output,
   apiKey = process.env.CODEKEEPER_MODEL_API_KEY,
   sdkLoader = () => import("@openai/agents"),
+  configureTracing = configureOpenAITracing,
   diagnostic,
   profile = undefined,
   profileMetadata = undefined,
@@ -583,20 +599,11 @@ export async function runConfiguredAgent({
         throw new Error(`Installed @openai/agents package does not export ${exportName}`);
       }
     }
-    const traceApiKey = process.env.CODEKEEPER_TRACE_API_KEY?.trim();
     lastFailureStage = "tracing";
-    if (tracing.enabled) {
-      if (!traceApiKey) {
-        throw new Error("CODEKEEPER_TRACE_API_KEY is required when ai.tracing.enabled=true");
-      }
-      if (traceApiKey === modelApiKey) {
-        throw new Error("CODEKEEPER_TRACE_API_KEY must differ from CODEKEEPER_MODEL_API_KEY when ai.tracing.enabled=true");
-      }
-      if (typeof sdk.setTracingExportApiKey !== "function") {
-        throw new Error("Installed @openai/agents package does not export setTracingExportApiKey");
-      }
-      sdk.setTracingExportApiKey(traceApiKey);
+    if (typeof configureTracing !== "function") {
+      throw new Error("configureTracing must be a function");
     }
+    await configureTracing({ sdk, modelApiKey, tracing, environment: process.env });
 
     lastFailureStage = "provider-create";
     modelProvider = new sdk.OpenAIProvider({
