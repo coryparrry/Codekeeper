@@ -147,8 +147,9 @@ test("retained Medium optimization results preserve the experiment boundary", as
   assert.equal(result.selectiveFusion.routedCases, 21);
   assert.equal(result.selectiveFusion.mean.functionalRecall, 0.6028);
   assert.match(result.selectiveFusion.status, /not a single Braintrust pipeline experiment/);
-  assert.match(result.proposedMaxEscalation.status, /Max requires a remote code-based Braintrust evaluation/);
-  assert.equal(result.proposedMaxEscalation.highIsNotAProxy, true);
+  assert.match(result.maxEscalation.status, /without a separate Max evaluation/);
+  assert.equal(result.maxEscalation.evaluation, "not run");
+  assert.equal(result.maxEscalation.highIsNotAProxy, true);
 });
 
 test("selective Medium fusion routes large diffs and suppresses nearby duplicates", () => {

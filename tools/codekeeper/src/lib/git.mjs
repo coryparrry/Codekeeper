@@ -621,6 +621,92 @@ export function boundedChangedFilesBetween(base, head, maximumFiles, cwd = proce
   });
 }
 
+export function boundedChangedFileStatsBetween(base, head, maximumFiles, cwd = process.cwd()) {
+  if (!Number.isSafeInteger(maximumFiles) || maximumFiles <= 0) {
+    throw new Error("maximumFiles must be a positive integer");
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["diff", "--no-ext-diff", "--no-renames", "--numstat", "-z", `${base}...${head}`], {
+      cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const files = [];
+    let additions = 0;
+    let deletions = 0;
+    let largestFileChangedLines = 0;
+    let pending = Buffer.alloc(0);
+    let exceeded = false;
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      if (exceeded) return;
+      pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
+      let delimiter;
+      while ((delimiter = pending.indexOf(0)) !== -1) {
+        const token = pending.subarray(0, delimiter).toString("utf8");
+        pending = pending.subarray(delimiter + 1);
+        if (!token) continue;
+        const firstTab = token.indexOf("\t");
+        const secondTab = token.indexOf("\t", firstTab + 1);
+        if (firstTab === -1 || secondTab === -1 || secondTab === token.length - 1) {
+          child.kill();
+          reject(new Error("Could not parse git diff --numstat output"));
+          return;
+        }
+        const additionsRaw = token.slice(0, firstTab);
+        const deletionsRaw = token.slice(firstTab + 1, secondTab);
+        const fileAdditions = additionsRaw === "-" ? 0 : Number(additionsRaw);
+        const fileDeletions = deletionsRaw === "-" ? 0 : Number(deletionsRaw);
+        if (!Number.isSafeInteger(fileAdditions) || !Number.isSafeInteger(fileDeletions)) {
+          child.kill();
+          reject(new Error("Could not parse git diff --numstat counts"));
+          return;
+        }
+        const changedLines = fileAdditions + fileDeletions;
+        files.push({
+          path: token.slice(secondTab + 1),
+          additions: fileAdditions,
+          deletions: fileDeletions,
+          binary: additionsRaw === "-" || deletionsRaw === "-"
+        });
+        additions += fileAdditions;
+        deletions += fileDeletions;
+        largestFileChangedLines = Math.max(largestFileChangedLines, changedLines);
+        if (files.length > maximumFiles) {
+          exceeded = true;
+          child.kill();
+          return;
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-12000);
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (exceeded) {
+        reject(new Error(`Review changed-file context exceeds configured maximum of ${maximumFiles} files`));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(`git diff --numstat failed with exit code ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
+        return;
+      }
+      if (pending.length !== 0) {
+        reject(new Error("Could not parse git diff --numstat output"));
+        return;
+      }
+      resolve({
+        files,
+        additions,
+        deletions,
+        changedLines: additions + deletions,
+        largestFileChangedLines
+      });
+    });
+  });
+}
+
 // A review may cite only a line that exists in the current side of a changed
 // hunk. Deletions intentionally have no eligible line: reviewers can describe
 // them at file scope instead of attaching stale coordinates.

@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   boundedChangedFilesBetween,
+  boundedChangedFileStatsBetween,
   boundedDiffBetween,
   changedFilesBetween,
   changedLineHunksBetween,
@@ -37,6 +38,16 @@ test("review diff helpers treat a pure rename as delete plus add", async () => {
 
     assert.deepEqual(changedFilesBetween(base, head, repository), ["after.txt", "before.txt"]);
     assert.deepEqual(await boundedChangedFilesBetween(base, head, 2, repository), ["after.txt", "before.txt"]);
+    assert.deepEqual(await boundedChangedFileStatsBetween(base, head, 2, repository), {
+      files: [
+        { path: "after.txt", additions: 1, deletions: 0, binary: false },
+        { path: "before.txt", additions: 0, deletions: 1, binary: false }
+      ],
+      additions: 1,
+      deletions: 1,
+      changedLines: 2,
+      largestFileChangedLines: 1
+    });
     const diff = await boundedDiffBetween(base, head, 4096, repository);
     assert.match(diff.patch, /deleted file mode/);
     assert.match(diff.patch, /new file mode/);

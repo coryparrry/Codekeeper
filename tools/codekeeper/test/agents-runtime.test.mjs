@@ -190,7 +190,14 @@ test("workspace review keeps only normalized left-to-right diagrams without losi
   await Promise.all([
     writeFile(path.join(directory, "workspace-prompt.md"), "Review the pull request.\n"),
     writeFile(path.join(directory, "schema.json"), JSON.stringify({ type: "object" })),
-    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "review" }))
+    writeFile(path.join(directory, "context.json"), JSON.stringify({
+      mode: "review",
+      pullRequest: {
+        labels: ["security"],
+        changedFiles: ["src/total.mjs"],
+        changeSummary: { changedLines: 20, largestFileChangedLines: 20 }
+      }
+    }))
   ]);
 
   const review = {
@@ -216,11 +223,13 @@ test("workspace review keeps only normalized left-to-right diagrams without losi
     mergeRecommendation: "block",
     noActionReason: null
   };
+  let workspaceArgs;
   class FakeMCPServerStdio {
     async connect() {}
     async close() {}
     async listTools() { return [{ name: "codex" }]; }
-    async callToolResult() {
+    async callToolResult(_name, args) {
+      workspaceArgs = args;
       return { structuredContent: { content: JSON.stringify(review) }, content: [] };
     }
   }
@@ -238,6 +247,8 @@ test("workspace review keeps only normalized left-to-right diagrams without losi
   });
 
   const result = JSON.parse(await readFile(resultPath, "utf8"));
+  assert.equal(workspaceArgs.model, "gpt-5.6-luna");
+  assert.deepEqual(workspaceArgs.config, { model_reasoning_effort: "max" });
   assert.equal(result.diagram, "flowchart LR\nCatalog --> Pricing --> Checkout");
   assert.deepEqual(result.blockingFindings, review.blockingFindings);
 
@@ -531,6 +542,52 @@ test("configured agent selects the issue provider and retries contract-invalid J
   assert.equal(calls.runOptions.maxTurns, 1);
   assert.match(calls.input, /Repair the previous Codekeeper response attempt 1/i);
   assert.equal(calls.closed, true);
+});
+
+test("security-facing review coordination uses Luna Max from frozen context", async () => {
+  const specialistResult = {
+    mode: "review",
+    summary: "Security review complete.",
+    risk: "high",
+    labels: ["security"],
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: [],
+    tests: { adequate: true, notes: "Covered.", missingTest: null },
+    diagram: null,
+    mergeRecommendation: "manual",
+    noActionReason: "No defect found."
+  };
+  const calls = {};
+  class FakeProvider { async close() {} }
+  class FakeAgent { constructor(options) { calls.agent = options; } }
+  class FakeRunner { async run() { return { finalOutput: specialistResult }; } }
+  const result = await runConfiguredAgent({
+    mode: "review",
+    config: withoutTracing(),
+    context: {
+      mode: "review",
+      pullRequest: {
+        labels: ["security"],
+        changedFiles: ["src/feature.mjs"],
+        changeSummary: { changedLines: 20, largestFileChangedLines: 20 }
+      }
+    },
+    prompt: "Review this pull request.",
+    schema: { type: "object" },
+    specialistResult,
+    apiKey: "provider-secret",
+    sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider })
+  });
+  assert.equal(calls.agent.model, "gpt-5.6-luna");
+  assert.equal(calls.agent.modelSettings.reasoning.effort, "max");
+  assert.equal(result.metadata.model, "gpt-5.6-luna");
+  assert.deepEqual(result.metadata.reasoningEscalation, {
+    escalated: true,
+    model: "gpt-5.6-luna",
+    effort: "max",
+    reason: "label:security"
+  });
 });
 
 test("contract retries repair only the previous output without replaying the task prompt", async () => {

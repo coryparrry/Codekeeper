@@ -1,7 +1,8 @@
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
-import { boundedChangedFilesBetween, boundedDiffBetween, currentHead } from "./git.mjs";
+import { reviewReasoningEscalation } from "./config.mjs";
+import { boundedChangedFileStatsBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
 import { automaticRepairMarker, sha256 } from "./markers.mjs";
@@ -173,6 +174,7 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
       headRef: boundedText(pull.head?.ref, 512, "…"),
       baseSha: pull.base?.sha,
       headSha: pull.head?.sha,
+      labels: boundedLabels(pull.labels),
       reviewFeedbackFrozen: feedbackEvent,
       reviewFeedback
     }
@@ -187,8 +189,8 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     truncated: false,
     disabled: true
   };
-  const [changedFiles, diff] = await Promise.all([
-    boundedChangedFilesBetween(
+  const [changeSummary, diff] = await Promise.all([
+    boundedChangedFileStatsBetween(
       context.pullRequest.baseSha,
       context.pullRequest.headSha,
       config.review.maximumChangedFiles
@@ -201,8 +203,16 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
         )
       : disabledDiff
   ]);
-  context.pullRequest.changedFiles = changedFiles;
+  context.pullRequest.changedFiles = changeSummary.files.map((file) => file.path);
+  context.pullRequest.changeSummary = {
+    changedFiles: changeSummary.files.length,
+    additions: changeSummary.additions,
+    deletions: changeSummary.deletions,
+    changedLines: changeSummary.changedLines,
+    largestFileChangedLines: changeSummary.largestFileChangedLines
+  };
   context.pullRequest.diff = diff;
+  context.pullRequest.reasoningEscalation = reviewReasoningEscalation(config, context);
   await writeBundle({
     directory,
     context,
