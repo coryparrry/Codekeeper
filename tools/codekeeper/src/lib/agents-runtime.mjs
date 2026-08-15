@@ -917,6 +917,7 @@ export async function runAgentFromBundle({
   workspaceResultPath = path.join(directory, "workspace-result.json"),
   apiKey = process.env.CODEKEEPER_MODEL_API_KEY,
   sdkLoader = () => import("@openai/agents"),
+  configureTracing,
   diagnostic
 }) {
   const promptPath = path.join(directory, "prompt.md");
@@ -952,6 +953,7 @@ export async function runAgentFromBundle({
     validateOutput,
     apiKey,
     sdkLoader,
+    configureTracing,
     diagnostic,
     profile: frozenProfile.text,
     profileMetadata: frozenProfile.metadata

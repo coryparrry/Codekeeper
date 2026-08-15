@@ -7,7 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "eval": "node braintrust-eval.mjs"
+    "eval": "node braintrust-eval.mjs",
+    "eval:bundle": "node braintrust-bundle-eval.mjs"
   },
   "dependencies": {
     "@braintrust/openai-agents": "0.1.5",
