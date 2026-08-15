@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -29,6 +29,7 @@ import {
 import { issueSchema, providerCompatibleJsonSchema, validateIssueResult } from "../src/lib/schemas.mjs";
 import { sha256 } from "../src/lib/markers.mjs";
 import { evaluateAutoMerge } from "../src/lib/policy.mjs";
+import { CODEX_BIN } from "../src/lib/runtime-paths.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -91,6 +92,12 @@ async function profileFixture(mode, contents = `# ${mode} behavior\n`) {
   await writeFile(profilePath, contents);
   return { root, profilePath };
 }
+
+test("Codex entrypoint resolves through the runtime package dependency graph", async () => {
+  assert.equal(path.isAbsolute(CODEX_BIN), true);
+  assert.match(CODEX_BIN, /node_modules[/\\]@openai[/\\]codex[/\\]bin[/\\]codex\.js$/);
+  await access(CODEX_BIN);
+});
 
 test("agent output parser accepts structured, fenced, and surrounded JSON", () => {
   assert.deepEqual(parseAgentOutput({ mode: "issue" }), { mode: "issue" });
