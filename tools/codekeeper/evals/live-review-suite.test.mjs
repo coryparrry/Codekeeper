@@ -47,6 +47,7 @@ test("scoring matches exact evidence files and rejects false positives or wrong 
   const passing = scoreReviewResult(manifest, result(), { runId: 42, runUrl: "https://example.invalid/run/42", headSha: "a".repeat(40) });
   assert.equal(passing.passed, true);
   assert.equal(passing.matched, 2);
+  assert.equal(passing.blockingCorrect, 2);
   assert.equal(passing.falsePositiveCount, 0);
   const wrong = scoreReviewResult(manifest, result({
     blockingFindings: [finding("src/archive.mjs")],
@@ -54,9 +55,10 @@ test("scoring matches exact evidence files and rejects false positives or wrong 
     diagram: "flowchart TD\nA --> B",
   }));
   assert.equal(wrong.passed, false);
-  assert.equal(wrong.matched, 1);
-  assert.equal(wrong.missed, 1);
-  assert.equal(wrong.falsePositiveCount, 2);
+  assert.equal(wrong.matched, 2);
+  assert.equal(wrong.missed, 0);
+  assert.equal(wrong.blockingCorrect, 1);
+  assert.equal(wrong.falsePositiveCount, 1);
   assert.equal(wrong.diagramValid, false);
 });
 
@@ -68,11 +70,13 @@ test("aggregation reports recall, precision, recommendation accuracy, and diagra
   assert.equal(report.matchedFindings, 3);
   assert.equal(report.expectedFindings, 4);
   assert.equal(report.recall, 0.75);
+  assert.equal(report.blockingClassificationAccuracy, 0.75);
   assert.equal(report.precision, 1);
   assert.equal(report.recommendationAccuracy, 0.5);
   assert.equal(report.diagramCompliance, 1);
   assert.deepEqual(report.caseResults.map(({ hits }) => hits), [2, 1]);
   assert.match(renderReviewSuiteMarkdown(report), /Recall: \*\*3\/4 \(75\.0%\)\*\*/);
+  assert.match(renderReviewSuiteMarkdown(report), /Blocking classification: \*\*3\/4 \(75\.0%\)\*\*/);
 });
 
 test("CLI loads run directories and writes create-only JSON and Markdown reports", async (context) => {
