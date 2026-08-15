@@ -853,49 +853,57 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
     }
   });
   const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
-  const plan = buildInstallPlan({
-    bundle,
-    snapshot: {
-      ...repositorySnapshot(),
-      installation: {
-        policy: JSON.parse(contents[".github/codekeeper.json"]),
-        policySource: contents[".github/codekeeper.json"],
-        modes: ["review", "maintain"],
-        contents
-      },
-      existingSettings: {
-        enabled: true,
-        appClientId: "Iv123456789012345678",
-        automationBotLogin: "codekeeper-widget[bot]"
-      },
-      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
-    },
-    answers: {
+  const snapshot = {
+    ...repositorySnapshot(),
+    installation: {
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
       modes: ["review", "maintain"],
-      preset: "openai",
-      displayName: "Widget",
-      ownerLogins: ["cory"],
+      contents
+    },
+    existingSettings: {
+      enabled: true,
       appClientId: "Iv123456789012345678",
-      automationBotLogin: "codekeeper-widget[bot]",
-      enabled: false,
-      capabilities: ["repair", "autoMerge"]
+      automationBotLogin: "codekeeper-widget[bot]"
+    },
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  };
+  for (const [releaseUpdate, title] of [[false, "configuration"], [true, "release update"]]) {
+    const plan = buildInstallPlan({
+      bundle,
+      snapshot,
+      answers: {
+        modes: ["review", "maintain"],
+        preset: "openai",
+        displayName: "Widget",
+        ownerLogins: ["cory"],
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]",
+        enabled: false,
+        capabilities: ["repair", "autoMerge"],
+        releaseUpdate
+      }
+    });
+    assert.equal(plan.settingsOnly, true);
+    assert.deepEqual(plan.files, []);
+    const tui = await createTuiHarness(t, { columns: 80, rows: 24 });
+    const review = tui.prompt.reviewInstallPlan(plan);
+    const cancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
+    const frames = [];
+    for (let page = 1; page <= 7; page += 1) {
+      await tui.waitForText(`Review the ${title} · ${page} of 7`);
+      frames.push(semanticText(tui.output.lastSemanticFrame()));
+      if (page < 7) await tui.send("\r");
     }
-  });
-  assert.equal(plan.settingsOnly, true);
-  assert.deepEqual(plan.files, []);
-  const tui = await createTuiHarness(t, { columns: 80, rows: 24 });
-  const review = tui.prompt.reviewInstallPlan(plan);
-  const cancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  const frames = [];
-  for (let page = 1; page <= 7; page += 1) {
-    await tui.waitForText(`Review the setup · ${page} of 7`);
-    frames.push(semanticText(tui.output.lastSemanticFrame()));
-    if (page < 7) await tui.send("\r");
+    assert.match(frames.join("\n"), /Repository variables/);
+    assert.doesNotMatch(frames.join("\n"), /Policy and caller documents|Editable agent profiles|Secrets requested through GitHub CLI/);
+    await tui.send("\u001b");
+    await cancellation;
+    const completion = tui.prompt.showCompletion(plan, { settingsOnly: true, pullRequestUrl: "No pull request was needed." });
+    await tui.waitForText(releaseUpdate ? "Update ready" : "Configuration ready");
+    await tui.send("\r");
+    assert.equal(await completion, true);
   }
-  assert.match(frames.join("\n"), /Repository variables/);
-  assert.doesNotMatch(frames.join("\n"), /Policy and caller documents|Editable agent profiles|Secrets requested through GitHub CLI/);
-  await tui.send("\u001b");
-  await cancellation;
 });
 
 test("Ink completion shows every completed step on one screen", async (t) => {

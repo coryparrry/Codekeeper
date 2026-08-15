@@ -80,6 +80,9 @@ test("one settings object keeps coordinator and workspace models independent", a
   const unsafe = structuredClone(edited);
   unsafe.policy.audit.repair.protectedPaths = ["src/**"];
   assert.throws(() => validateEditableSettings(unsafe, policy), /read-only safety boundary/);
+  const unsafeTurns = structuredClone(edited);
+  unsafeTurns.policy.ai.agents.review.maxTurns = 2;
+  assert.throws(() => validateEditableSettings(unsafeTurns, policy), /maxTurns is a read-only safety boundary/);
   const incompatible = structuredClone(edited);
   incompatible.policy.ai.agents.review.effort = "high";
   assert.throws(() => validateEditableSettings(incompatible, policy), /supportsReasoningEffort/);

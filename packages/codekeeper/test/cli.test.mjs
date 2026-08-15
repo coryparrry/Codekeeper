@@ -61,6 +61,7 @@ test("CLI accepts only the documented commands", () => {
   assert.deepEqual(parseCliArgs(["--help"]), { command: "help" });
   assert.deepEqual(parseCliArgs(["--version"]), { command: "version" });
   assert.deepEqual(parseCliArgs(["init"]), { command: "init" });
+  assert.deepEqual(parseCliArgs(["update"]), { command: "update" });
   assert.throws(() => parseCliArgs(["init", "--force"]), (error) => error.code === "CLI_USAGE");
   assert.throws(() => parseCliArgs(["verify"]), (error) => error.code === "CLI_USAGE");
   assert.throws(() => parseCliArgs("init"), TypeError);
@@ -426,10 +427,220 @@ test("an existing installation rerun skips App setup and secret prompts", async 
   assert.equal(status, 1);
   assert.equal(opens, 0);
   assert.equal(reviewedPlan.update, true);
+  assert.equal(reviewedPlan.operation, "configuration-update");
   assert.deepEqual(reviewedPlan.secrets, []);
   assert.deepEqual(reviewedPlan.variables, []);
   assert.deepEqual(reviewedPlan.files.map((file) => file.path), [".github/codekeeper.json"]);
   assert.equal(reviewedPlan.models.review.model, "gpt-5.6-luna");
+});
+
+test("update requires an existing installation before prompting or mutation", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  const prompt = {
+    async confirm() { throw new Error("update must reject before prompting"); }
+  };
+  const runner = createRecordingRunner(() => {
+    throw new Error("update must reject before mutation");
+  });
+  const status = await runCli({
+    argv: ["update"],
+    output,
+    errorOutput,
+    prompt,
+    runner,
+    inspect: async () => repositorySnapshot("/tmp/widget", HEAD_SHA)
+  });
+  assert.equal(status, 1);
+  assert.match(errorOutput.toString(), /No Codekeeper installation was found.*codekeeper init/s);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("update advances release-owned files while preserving adopter configuration and profiles", async () => {
+  const bundle = await loadVerifiedAssets();
+  const baseSnapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: baseSnapshot,
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: false
+    }
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const policy = JSON.parse(contents[".github/codekeeper.json"]);
+  policy.repository.displayName = "Adopter Widget";
+  policy.audit.repair.protectedPaths = ["adopter-stale-release-boundary"];
+  policy.ai.providers.openai.baseUrl = "https://stale-provider.example.test/v1";
+  policy.ai.agents.review.workspace.allowWrites = true;
+  policy.ai.agents.review.maxTurns = 99;
+  policy.merge.blockedPaths = ["adopter-stale-release-boundary"];
+  contents[".github/codekeeper.json"] = `${JSON.stringify(policy, null, 2)}\n`;
+  contents[".github/codekeeper/agents/pr-reviewer.md"] += "\nRepository rule: prioritise public API regressions.\n";
+  const nextCommit = "b".repeat(40);
+  const nextBundle = {
+    ...bundle,
+    metadata: {
+      ...bundle.metadata,
+      source: { ...bundle.metadata.source, commit: nextCommit }
+    }
+  };
+  const snapshot = {
+    ...baseSnapshot,
+    installation: {
+      policy,
+      policySource: contents[".github/codekeeper.json"],
+      modes: ["review", "maintain"],
+      contents
+    },
+    existingSettings: {
+      enabled: false,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]"
+    },
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  };
+  const configurationPolicy = structuredClone(policy);
+  configurationPolicy.ai.agents.review.workspace.allowWrites = false;
+  configurationPolicy.ai.agents.review.maxTurns = 1;
+  const configurationPlan = buildInstallPlan({
+    bundle: nextBundle,
+    snapshot: {
+      ...snapshot,
+      installation: {
+        ...snapshot.installation,
+        policy: configurationPolicy,
+        policySource: `${JSON.stringify(configurationPolicy, null, 2)}\n`,
+        contents: {
+          ...contents,
+          ".github/codekeeper.json": `${JSON.stringify(configurationPolicy, null, 2)}\n`
+        }
+      }
+    },
+    answers: {
+      modes: ["review", "maintain"],
+      preset: "openai",
+      enabled: false,
+      policy: configurationPolicy,
+      profiles: {
+        "pr-reviewer": contents[".github/codekeeper/agents/pr-reviewer.md"],
+        "repository-auditor": contents[".github/codekeeper/agents/repository-auditor.md"],
+        "issue-triager": contents[".github/codekeeper/agents/issue-triager.md"],
+        fixer: contents[".github/codekeeper/agents/fixer.md"]
+      },
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]"
+    }
+  });
+  assert.equal(configurationPlan.operation, "configuration-update");
+  assert.deepEqual(configurationPlan.policy.audit.repair.protectedPaths, ["adopter-stale-release-boundary"]);
+  assert.equal(configurationPlan.policy.ai.providers.openai.baseUrl, "https://stale-provider.example.test/v1");
+  assert.equal(configurationPlan.policy.ai.agents.review.workspace.allowWrites, false);
+  assert.equal(configurationPlan.policy.ai.agents.review.maxTurns, 1);
+  assert.deepEqual(configurationPlan.policy.merge.blockedPaths, ["adopter-stale-release-boundary"]);
+  let reviewedPlan;
+  const prompt = {
+    async confirm() { return true; },
+    async reviewInstallPlan(plan) {
+      reviewedPlan = plan;
+      return false;
+    },
+    async dispose() {}
+  };
+  const runner = createRecordingRunner(() => {
+    throw new Error("no mutation is allowed before final update approval");
+  });
+  const output = textSink();
+  const errorOutput = textSink();
+  const status = await runCli({
+    argv: ["update"],
+    output,
+    errorOutput,
+    prompt,
+    runner,
+    inspect: async () => snapshot,
+    loadAssets: async () => nextBundle
+  });
+
+  assert.equal(status, 1, errorOutput.toString());
+  assert.ok(reviewedPlan, errorOutput.toString());
+  assert.equal(reviewedPlan.source.commit, nextCommit);
+  assert.equal(reviewedPlan.operation, "release-update");
+  assert.equal(reviewedPlan.commitMessage, "chore(codekeeper): update release");
+  assert.equal(reviewedPlan.pullRequest.title, "chore(codekeeper): update release");
+  assert.equal(reviewedPlan.displayName, "Adopter Widget");
+  assert.equal(reviewedPlan.enabled, false);
+  assert.deepEqual(reviewedPlan.modes, ["review", "maintain"]);
+  assert.deepEqual(reviewedPlan.variables, []);
+  assert.deepEqual(reviewedPlan.secrets, []);
+  assert.deepEqual(reviewedPlan.policy.audit.repair.protectedPaths, JSON.parse(bundle.contents["policies/openai.json"]).audit.repair.protectedPaths);
+  assert.deepEqual(reviewedPlan.policy.ai.providers, JSON.parse(bundle.contents["policies/openai.json"]).ai.providers);
+  assert.equal(reviewedPlan.policy.ai.agents.review.workspace.allowWrites, false);
+  assert.equal(reviewedPlan.policy.ai.agents.review.maxTurns, 1);
+  assert.deepEqual(reviewedPlan.policy.merge.blockedPaths, JSON.parse(bundle.contents["policies/openai.json"]).merge.blockedPaths);
+  assert.ok(reviewedPlan.files.some((file) => file.path === ".github/codekeeper.json"));
+  assert.ok(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-assistant.yml" && file.contents.includes(nextCommit)));
+  assert.ok(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-review.yml" && file.contents.includes(nextCommit)));
+  assert.equal(reviewedPlan.files.some((file) => file.path === ".github/codekeeper/agents/pr-reviewer.md"), false);
+  assert.match(output.toString(), /selected workflows.*edited agent profiles stay unchanged/s);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("update exits successfully when the bundled release is already installed", async () => {
+  const bundle = await loadVerifiedAssets();
+  const baseSnapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: baseSnapshot,
+    answers: {
+      modes: ["review"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true
+    }
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const snapshot = {
+    ...baseSnapshot,
+    installation: {
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
+      modes: ["review"],
+      contents
+    },
+    existingSettings: {
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]"
+    },
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  };
+  const output = Object.assign(textSink(), { isTTY: true, columns: 80, rows: 24 });
+  let rawModeCalls = 0;
+  const status = await runCli({
+    argv: ["update"],
+    input: {
+      isTTY: true,
+      setRawMode() { rawModeCalls += 1; }
+    },
+    output,
+    errorOutput: textSink(),
+    environment: { TERM: "xterm-256color" },
+    runner: createRecordingRunner(() => { throw new Error("already-current update must not mutate"); }),
+    inspect: async () => snapshot,
+    loadAssets: async () => bundle
+  });
+  assert.equal(status, 0);
+  assert.equal(rawModeCalls, 0);
+  assert.match(output.toString(), new RegExp(`already up to date at ${bundle.metadata.source.repository}@${bundle.metadata.source.commit}`));
 });
 
 test("a plain-prompt rerun preserves disabled owner requests without asking for a bot login", async () => {
@@ -492,6 +703,7 @@ test("resume command formatting is executable on POSIX and PowerShell", () => {
     "& 'C:\\Program Files\\node.exe' 'C:\\Codekeeper''s CLI\\codekeeper.mjs' 'init'"
   );
   assert.equal(currentResumeCommand("node", "", "linux"), "codekeeper init");
+  assert.equal(currentResumeCommand("node", "", "linux", "update"), "codekeeper update");
   assert.equal(formatCommand("gh", ["pr", "view", "a'b"], "linux"), "'gh' 'pr' 'view' 'a'\"'\"'b'");
 });
 

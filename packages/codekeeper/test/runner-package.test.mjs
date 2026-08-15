@@ -294,9 +294,13 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "tui.mjs"
   )).href);
   assert.match(help, /^Usage:\n  codekeeper init/m);
+  assert.match(help, /^  codekeeper update$/m);
   assert.match(npmInstallHelp, /^Usage:\n  codekeeper init/m);
+  assert.match(npmInstallHelp, /^  codekeeper update$/m);
   assert.match(npmExecHelp, /^Usage:\n  codekeeper init/m);
+  assert.match(npmExecHelp, /^  codekeeper update$/m);
   assert.match(npxHelp, /^Usage:\n  codekeeper init/m);
+  assert.match(npxHelp, /^  codekeeper update$/m);
   assert.equal(version, "0.2.0\n");
   assert.equal(npmInstallVersion, "0.2.0\n");
   assert.equal(typeof installedTui.createInkPrompter, "function");

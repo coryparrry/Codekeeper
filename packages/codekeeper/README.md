@@ -1,17 +1,19 @@
 # Codekeeper installer
 
-`codekeeper` is the Node.js installer and configuration editor for Codekeeper's versioned GitHub Actions workflows. `npx codekeeper init` opens a terminal UI, creates a setup or update branch, pushes it, and opens a pull request. By default, the selected workflows start after the first pull request merges. You can choose a disabled install instead. The installer does not copy the private runtime into the adopter repository.
+`codekeeper` is the Node.js installer, updater, and configuration editor for Codekeeper's versioned GitHub Actions workflows. `npx codekeeper init` opens a terminal UI, creates a setup branch, pushes it, and opens a pull request. `npx --yes codekeeper@latest update` refreshes an existing installation. By default, the selected workflows start after the first pull request merges. You can choose a disabled install instead. The installer does not copy the private runtime into the adopter repository.
 
 The package is currently **unpublished** while private acceptance is in progress. Exercise the exact local tarball from a clean adopter checkout:
 
 ```bash
 npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper init
+npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper update
 ```
 
 The v1 CLI surface is:
 
 ```bash
 npx codekeeper init
+npx --yes codekeeper@latest update
 npx codekeeper --help
 npx codekeeper --version
 ```
@@ -23,11 +25,11 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and operating model. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparry/Codekeeper/blob/a3d8d6d82e666bb75504549695eccab929bcd5f5/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparry/Codekeeper/blob/a504ba130c68a1dc10de1b153b0bc1cdf2fbad7a/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Canonical starter profiles](https://github.com/coryparry/Codekeeper/tree/a3d8d6d82e666bb75504549695eccab929bcd5f5/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
+| [Canonical starter profiles](https://github.com/coryparry/Codekeeper/tree/a504ba130c68a1dc10de1b153b0bc1cdf2fbad7a/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
 
 ## What `init` does
 
@@ -45,7 +47,7 @@ The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and acc
 After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
 1. Generates `.github/codekeeper.json`, all four editable profiles under `.github/codekeeper/agents/`, the always-installed repository-assistant caller, and the selected role callers.
-2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `a3d8d6d82e666bb75504549695eccab929bcd5f5`.
+2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `a504ba130c68a1dc10de1b153b0bc1cdf2fbad7a`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
@@ -55,9 +57,15 @@ It never merges the pull request, runs a workflow, publishes an npm package, cop
 
 ## Change an existing installation
 
-Run `npx codekeeper init` again from the current default branch. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and edited profiles into the same Settings screen. You can add or remove role workflows, change every editable policy value, and open any profile in `$EDITOR` without losing prior customizations.
+Run `npx codekeeper init` again from the current default branch to edit configuration. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and edited profiles into the same Settings screen. You can add or remove role workflows, change every editable policy value, and open any profile in `$EDITOR` without losing prior customizations.
 
 The installer writes only values that changed. It preserves edited profiles and does not ask for secrets again. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
+
+## Update an existing installation
+
+Run `npx --yes codekeeper@latest update` from a clean, current default-branch checkout. Using `@latest` refreshes the installer and its npm dependencies first. The update then advances every generated caller to the new immutable source commit, which makes GitHub Actions install the runtime dependencies locked by that release. It also refreshes release-owned provider definitions and immutable safety boundaries.
+
+The update preserves selected workflows, repository settings, model and automation choices, GitHub variables and secrets, and edited agent profiles. The TUI shows the exact changed files before creating an update pull request. Codekeeper keeps running the current default-branch release until that pull request merges. If the installation already uses the release bundled with the CLI, the command exits successfully without writing.
 
 ## Editable agent behavior
 
