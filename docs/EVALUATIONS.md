@@ -103,6 +103,32 @@ The pre-calibration performance baseline was 5.9-6.4 seconds for the three count
 
 Two setup attempts were excluded before scoring: one was contaminated by an automatic reviewer that disclosed the planted findings, and one bound workspace evidence to a stale default-branch configuration snapshot. An earlier diagnostic run was also excluded after semantically correct findings supplied invalid line locations; that evidence led to the file-level fallback described below. Exact run artifacts, trace records, and the answer key remain in the private acceptance environment rather than the generic product repository.
 
+## 2026-08-15 blocking calibration result
+
+After separating impact severity from merge blocking, the identical pull-request head was reviewed three more times through the complete GitHub workflow. The low-severity expiry-boundary defect remained blocking in every repeat without changing the other classifications.
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Defect detection | 12/12 (100%) | 12/12 (100%) |
+| Blocking classification | 11/12 (91.7%) | 12/12 (100%) |
+| Unrelated findings | 0 | 0 |
+| Correct merge recommendation | 3/3 (100%) | 3/3 (100%) |
+| Left-to-right diagram compliance | 3/3 (100%) | 3/3 (100%) |
+| Runs passing every strict assertion | 2/3 | 3/3 |
+
+The contrastive decision-quality case now requires a current, reproducible, pull-request-introduced contract violation to remain blocking even when its impact is low. A mutation test moves that supported defect into the non-blocking bucket and proves that the semantic evaluator rejects the downgrade. The schema accepts this independent classification instead of coupling every blocker to medium-or-higher severity.
+
+| Post-calibration stage | Three-run observation |
+|---|---:|
+| Braintrust coordinator trace | 5.9-6.4 seconds |
+| Complete GitHub workflow | 3 minutes 37 seconds-4 minutes 12 seconds |
+| Luna workspace analysis job | 1 minute 19 seconds-1 minute 56 seconds |
+| Coordinator analysis job | 28-32 seconds |
+| Seal job | 15-18 seconds |
+| Publication job | 17-18 seconds |
+
+This small three-run sample shows no latency regression from the classification change: the coordinator stayed inside the pre-calibration range and the workflow maximum was five seconds lower. It is not a performance benchmark. A separate optimization phase should measure the Luna workspace job first because it is both the longest stage and the largest source of run-to-run variance. Braintrust currently times only the final coordinator span, so GitHub job timing remains necessary for that analysis.
+
 ## Interpret Braintrust traces
 
 The Braintrust span captures the final coordinator input and response, including the authoritative Luna workspace result. It does not currently expose Luna's internal workspace tool-call spans. Use the trace to inspect evidence handoff, token use, latency, retries, and the structured final response; use the sealed artifact and GitHub run for end-to-end authority and publication evidence.
