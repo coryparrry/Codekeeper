@@ -145,6 +145,12 @@ test("priority and severity calibration assertions reject schema-valid but incor
     ...fixtures["insufficient-tests"],
     nonBlockingFindings: [{ ...fixtures["insufficient-tests"].nonBlockingFindings[0], severity: "low" }]
   };
+  fixtures["introduced-low-severity-contract-failure"] = {
+    ...fixtures["introduced-low-severity-contract-failure"],
+    blockingFindings: [],
+    nonBlockingFindings: fixtures["introduced-low-severity-contract-failure"].blockingFindings,
+    mergeRecommendation: "manual"
+  };
   const summary = await runDecisionEvaluation({
     repeat: 1,
     keyResolver: () => "offline-provider-key",
@@ -152,10 +158,10 @@ test("priority and severity calibration assertions reject schema-valid but incor
     sdkLoader: async () => makeOfflineSdk(fixtures),
     throwOnFailure: false
   });
-  assert.equal(summary.failed, 4);
+  assert.equal(summary.failed, 5);
   assert.deepEqual(
     summary.results.filter((result) => !result.pass).map((result) => result.scenario).sort(),
-    ["insufficient-tests", "introduced-major-pr-failure", "material-nonurgent-impact", "unsupported-reporter-urgency"]
+    ["insufficient-tests", "introduced-low-severity-contract-failure", "introduced-major-pr-failure", "material-nonurgent-impact", "unsupported-reporter-urgency"]
   );
 });
 

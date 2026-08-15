@@ -310,7 +310,6 @@ function validateReviewFinding(finding, name, { blocking = false } = {}) {
   if (blocking) {
     assert(finding.classification === "current", `${name} must be a current validated finding before it can block`);
     assert(finding.confidence !== "low", `${name} cannot block with low confidence`);
-    assert(finding.severity !== "low", `${name} cannot block with low severity`);
   }
 }
 

@@ -36,6 +36,8 @@ test("prompts embed frozen workflow context without checkout-local context paths
   assert.match(reviewPrompt, /never assign that validation to the adopter/);
   assert.match(reviewPrompt, /Never request a generic local test of imported external behavior/);
   assert.match(reviewPrompt, /An evidence gap is not missing coverage/);
+  assert.match(reviewPrompt, /Severity measures impact; blocking measures merge readiness/);
+  assert.match(reviewPrompt, /low-severity finding must still block when this pull request introduces a reproducible contract violation/);
 });
 
 test("workspace prompts place editable profile behavior below immutable safety rules", () => {
