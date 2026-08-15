@@ -1,10 +1,10 @@
 name: Codekeeper tooling bootstrap
-description: Stage the pinned production Codekeeper runtime in an immutable manifest-bound workflow cache.
+description: Stage the pinned production Codekeeper runtime as a verified run artifact with an optional exact cache.
 
 inputs:
   artifact-name:
-    description: Legacy run-scoped artifact name used by already published caller workflows.
-    required: false
+    description: Exact run-scoped fallback artifact name derived from github.run_id.
+    required: true
   cache-key:
     description: Immutable cache key containing the pinned production tooling manifest digest.
     required: false
@@ -15,37 +15,65 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Select one bootstrap transport
+    - name: Select bootstrap transport
       id: transport
       shell: bash
       env:
         ARTIFACT_NAME: ${{ inputs.artifact-name }}
         CACHE_KEY: ${{ inputs.cache-key }}
+        EVENT_NAME: ${{ github.event_name }}
+        GITHUB_WORKSPACE_ROOT: ${{ github.workspace }}
         MANIFEST_SHA256: ${{ inputs.manifest-sha256 }}
+        RUNNER_TEMP_ROOT: ${{ runner.temp }}
       run: |
         set -euo pipefail
-        if test -n "$ARTIFACT_NAME"; then
-          test -z "$CACHE_KEY" && test -z "$MANIFEST_SHA256" || {
-            echo "Codekeeper tooling bootstrap accepts either artifact or cache inputs, not both" >&2
-            exit 1
-          }
+        test -n "$ARTIFACT_NAME" || {
+          echo "Codekeeper tooling bootstrap requires an artifact fallback" >&2
+          exit 1
+        }
+        echo "artifact-root=$RUNNER_TEMP_ROOT/codekeeper-tooling" >> "$GITHUB_OUTPUT"
+        if test -z "$CACHE_KEY" && test -z "$MANIFEST_SHA256"; then
           echo "mode=artifact" >> "$GITHUB_OUTPUT"
+          echo "destination=$RUNNER_TEMP_ROOT/codekeeper-tooling" >> "$GITHUB_OUTPUT"
+          echo "staging-root=$RUNNER_TEMP_ROOT/codekeeper-tooling" >> "$GITHUB_OUTPUT"
+          echo "tooling-root=$RUNNER_TEMP_ROOT/codekeeper-tooling/tooling/tools/codekeeper" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         test -n "$CACHE_KEY" && test -n "$MANIFEST_SHA256" || {
-          echo "Codekeeper tooling cache requires cache-key and manifest-sha256" >&2
+          echo "Codekeeper tooling cache requires both cache-key and manifest-sha256" >&2
           exit 1
         }
         echo "mode=cache" >> "$GITHUB_OUTPUT"
+        echo "destination=$GITHUB_WORKSPACE_ROOT/tooling" >> "$GITHUB_OUTPUT"
+        echo "staging-root=$GITHUB_WORKSPACE_ROOT" >> "$GITHUB_OUTPUT"
+        echo "tooling-root=$GITHUB_WORKSPACE_ROOT/tooling/tools/codekeeper" >> "$GITHUB_OUTPUT"
+        case "$EVENT_NAME" in
+          push|workflow_dispatch|repository_dispatch|delete|registry_package|page_build|schedule)
+            echo "cache-write=true" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo "cache-write=false" >> "$GITHUB_OUTPUT"
+            ;;
+        esac
 
-    - name: Require an empty tooling destination
+    - name: Require empty tooling destinations
       shell: bash
+      env:
+        ARTIFACT_ROOT: ${{ steps.transport.outputs.artifact-root }}
+        DESTINATION: ${{ steps.transport.outputs.destination }}
+        TRANSPORT_MODE: ${{ steps.transport.outputs.mode }}
       run: |
         set -euo pipefail
-        test ! -e "$GITHUB_WORKSPACE/tooling" || {
-          echo "Codekeeper tooling cache destination already exists" >&2
+        test ! -e "$DESTINATION" || {
+          echo "Codekeeper tooling bootstrap destination already exists" >&2
           exit 1
         }
+        if test "$TRANSPORT_MODE" = cache; then
+          test ! -e "$ARTIFACT_ROOT" || {
+            echo "Codekeeper tooling fallback destination already exists" >&2
+            exit 1
+          }
+        fi
 
     - name: Restore pinned production tooling cache
       if: steps.transport.outputs.mode == 'cache'
@@ -60,7 +88,7 @@ runs:
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-        STAGING_ROOT: ${{ github.workspace }}
+        STAGING_ROOT: ${{ steps.transport.outputs.staging-root }}
       run: |
         set -euo pipefail
         target="$STAGING_ROOT/tooling/tools/codekeeper"
@@ -107,18 +135,24 @@ runs:
         fi
         true
 
-    - name: Verify pinned production tooling cache
+    - name: Verify pinned production tooling
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
+        EXPECTED_CACHE_KEY: ${{ inputs.cache-key }}
         EXPECTED_MANIFEST_SHA256: ${{ inputs.manifest-sha256 }}
+        RUNNER_OS_NAME: ${{ runner.os }}
         TRANSPORT_MODE: ${{ steps.transport.outputs.mode }}
-        TOOLING_ROOT: ${{ github.workspace }}/tooling/tools/codekeeper
+        TOOLING_ROOT: ${{ steps.transport.outputs.tooling-root }}
       run: |
         set -euo pipefail
         source_manifest_sha256="$(sha256sum "$ACTION_PATH/tooling-manifest.json" | awk '{print $1}')"
         if test "$TRANSPORT_MODE" = cache; then
           test "$EXPECTED_MANIFEST_SHA256" = "$source_manifest_sha256" || {
+            echo "Codekeeper tooling cache manifest is not bound to this pinned action" >&2
+            exit 1
+          }
+          test "$EXPECTED_CACHE_KEY" = "codekeeper-tooling-$RUNNER_OS_NAME-$source_manifest_sha256" || {
             echo "Codekeeper tooling cache key is not bound to this pinned manifest" >&2
             exit 1
           }
@@ -133,18 +167,28 @@ runs:
           --expected-manifest-sha256 "$source_manifest_sha256"
 
     - name: Save pinned production tooling cache
-      if: steps.transport.outputs.mode == 'cache' && steps.tooling-cache.outputs.cache-hit != 'true'
+      if: steps.transport.outputs.mode == 'cache' && steps.transport.outputs.cache-write == 'true' && steps.tooling-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
       with:
         path: ${{ github.workspace }}/tooling
         key: ${{ inputs.cache-key }}
 
-    - name: Upload legacy pinned production tooling artifact
-      if: steps.transport.outputs.mode == 'artifact'
+    - name: Prepare pinned production tooling artifact fallback
+      if: steps.transport.outputs.mode == 'cache' && steps.tooling-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        ARTIFACT_ROOT: ${{ steps.transport.outputs.artifact-root }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$ARTIFACT_ROOT"
+        cp -R "$GITHUB_WORKSPACE/tooling" "$ARTIFACT_ROOT/tooling"
+
+    - name: Upload pinned production tooling artifact fallback
+      if: steps.transport.outputs.mode == 'artifact' || steps.tooling-cache.outputs.cache-hit != 'true'
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ inputs.artifact-name }}
-        path: ${{ github.workspace }}/tooling
+        path: ${{ steps.transport.outputs.artifact-root }}
         retention-days: 1
         if-no-files-found: error
         overwrite: true
