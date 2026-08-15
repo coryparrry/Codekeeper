@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export const TOOLING_DIRECTORIES = ["agents", "presets", "src"];
+export const TOOLING_DIRECTORIES = [
+  "agents",
+  "integrations/braintrust",
+  "presets",
+  "src",
+];
 export const TOOLING_FILES = ["package-lock.json", "package.json", "scripts/verify-tooling-artifact.mjs"];
 
 function sha256(bytes) {

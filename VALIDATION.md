@@ -34,7 +34,7 @@ npm run eval:braintrust:setup
 BRAINTRUST_API_URL=https://api-eu.braintrust.dev npm run eval:braintrust -- --preset openai --repeat 3
 ```
 
-Braintrust packages live under `evals/braintrust` and are not installed by reusable production workflows. OpenAI remains the default runtime trace exporter.
+The synthetic adapter remains isolated under `evals/braintrust`. The verified tooling artifact also carries a minimal pinned adapter under `integrations/braintrust`; the review workflow installs it only when its trusted caller selects `trace_exporter=braintrust`. OpenAI remains the default for review and every other mode.
 
 For an authorized OpenAI issue-triage release decision, run the same OpenAI matrix with one candidate at a time and select the first all-pass result deliberately. These commands are evaluation overrides only; they do not change the shipped policy:
 
@@ -81,4 +81,4 @@ These local checks do not prove an adopter installation. Before enabling writes,
 
 Record workflow-run, issue, pull-request, review, and App-owned commit URLs as evidence. Restore `CODEKEEPER_ENABLED=false` after proof. Forks, merge queues, non-default PR targets, and GitHub Enterprise Server are outside the supported surface.
 
-The local suite does not export live traces. In an adopter run, provide the separate `trace_api_key` required by the default `ai.tracing.enabled=true` policy, keep `includeSensitiveData=false`, and confirm the run appears at [OpenAI Platform Traces](https://platform.openai.com/traces) / **Logs > Traces**. Do not map a non-OpenAI provider key to this trace-export credential.
+The local suite does not export live traces. In an adopter run, provide the observability key for the selected exporter and keep sensitive tracing off unless the evaluation explicitly needs prompts and responses. Confirm the trace appears in OpenAI **Logs > Traces** by default, or in the configured Braintrust project for an opted-in review. Do not map a model-provider key to either trace-export credential.
