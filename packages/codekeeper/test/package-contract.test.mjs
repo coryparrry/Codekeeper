@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { SOURCE_COMMIT } from "../src/constants.mjs";
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
@@ -57,6 +57,19 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.test, /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
   assert.match(packageJson.scripts.check, /audit\/\*\.mjs/);
   assert.match(packageJson.scripts.check, /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
+});
+
+test("release packaging uses the deterministic stage and one publishable shrinkwrap", async () => {
+  const rootPackage = JSON.parse(
+    await readFile(new URL("../../../package.json", import.meta.url), "utf8"),
+  );
+  const packageManifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(rootPackage.scripts["package:stage"], "node scripts/build-codekeeper-package.mjs");
+  assert.match(rootPackage.scripts["package:stage:check"], /package-stage\.test\.mjs/);
+  assert.ok(packageManifest.files.includes("release/"));
+  assert.ok(packageManifest.files.includes("runtime/"));
+  await access(new URL("../npm-shrinkwrap.json", import.meta.url));
+  await assert.rejects(access(new URL("../package-lock.json", import.meta.url)), /ENOENT/);
 });
 
 test("installer source pin is a full reviewed checkpoint reachable from the repository default branch", () => {

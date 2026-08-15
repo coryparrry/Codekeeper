@@ -2,7 +2,7 @@
 
 Codekeeper is a set of **versioned reusable GitHub Actions workflows** for one repository at a time. It uses four independently configured agent roles to review pull requests, triage issues, audit the default branch, and implement explicitly enabled fixes.
 
-It is not a hosted service, webhook receiver, or multi-tenant GitHub App. The private runtime is not delivered through npm. A separate dependency-light [`codekeeper` installer package](packages/codekeeper/README.md) generates pinned policy and caller files; it remains unpublished while private acceptance is in progress. Each adopter owns its GitHub App credentials and policy, and caller workflows pin this repository to an immutable release commit.
+It is not a hosted service, webhook receiver, or multi-tenant GitHub App. The release builder now stages the CLI, TUI, production runtime, agents, integrations, reusable workflows, and their exact dependencies as one closed [`codekeeper` package](packages/codekeeper/README.md). The package remains unpublished while workflow migration and private acceptance are in progress, so current adopter workflows still execute the compatibility runtime pinned to an immutable repository commit. The CLI does not copy runtime source or dependencies into adopter repositories. Each adopter owns its GitHub App credentials and policy.
 
 ## What adopters install
 

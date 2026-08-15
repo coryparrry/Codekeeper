@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "package:stage": "node scripts/build-codekeeper-package.mjs",
+    "package:stage:check": "node --test packages/codekeeper/test/package-stage.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
