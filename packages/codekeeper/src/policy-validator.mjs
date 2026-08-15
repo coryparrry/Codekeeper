@@ -23,6 +23,7 @@ const LIMITS = Object.freeze({
   maximumNonBlockingFindings: 20,
   maximumDiffBytes: 5 * 1024 * 1024,
   maximumChangedFiles: 1_000,
+  maximumReasoningEscalationChangedLines: 1_000_000,
   maximumIssuesPerRun: 20,
   maximumRepairFiles: 100,
   maximumRepairChangedLines: 10_000,
@@ -370,7 +371,7 @@ export function validatePolicy(config) {
     assert(config.labels[label], `runtime requires undefined label ${label}`);
   }
 
-  fixedObject(config.review, "review", ["autoRepair", "createDeferredIssues", "maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext"]);
+  fixedObject(config.review, "review", ["autoRepair", "createDeferredIssues", "maximumBlockingFindings", "maximumNonBlockingFindings", "allowedLabels", "managedLabels", "maximumDiffBytes", "maximumChangedFiles", "includeDiffInAgentContext", "reasoningEscalation"]);
   boolean(config.review.autoRepair, "review.autoRepair");
   boolean(config.review.createDeferredIssues, "review.createDeferredIssues");
   cappedNonNegativeInteger(config.review.maximumBlockingFindings, "review.maximumBlockingFindings", LIMITS.maximumBlockingFindings);
@@ -387,6 +388,25 @@ export function validatePolicy(config) {
   for (const label of [...REVIEW_MANAGED_LABELS, ...config.review.allowedLabels]) {
     assert(managedReviewLabels.has(label), `review must explicitly manage emitted label ${label}`);
   }
+  const escalation = fixedObject(config.review.reasoningEscalation, "review.reasoningEscalation", ["enabled", "provider", "model", "effort", "labels", "pathPatterns", "minimumChangedLines", "minimumSingleFileChangedLines"]);
+  boolean(escalation.enabled, "review.reasoningEscalation.enabled");
+  nonEmptyString(escalation.provider, "review.reasoningEscalation.provider", 256);
+  assert(config.ai.providers[escalation.provider], `review.reasoningEscalation.provider references undefined provider ${escalation.provider}`);
+  nonEmptyString(escalation.model, "review.reasoningEscalation.model", 256);
+  assert(REASONING_EFFORTS.has(escalation.effort), "review.reasoningEscalation.effort is unsupported");
+  assert(
+    escalation.effort === "none" || config.ai.providers[escalation.provider].supportsReasoningEffort,
+    `review.reasoningEscalation.effort requires ai.providers.${escalation.provider}.supportsReasoningEffort=true`
+  );
+  stringArray(escalation.labels, "review.reasoningEscalation.labels", { maximumEntries: LIMITS.listEntries, maximumLength: 256 });
+  stringArray(escalation.pathPatterns, "review.reasoningEscalation.pathPatterns", { maximumEntries: LIMITS.listEntries, maximumLength: 1_024 });
+  assert(escalation.labels.length > 0, "review.reasoningEscalation.labels must not be empty");
+  assert(escalation.pathPatterns.length > 0, "review.reasoningEscalation.pathPatterns must not be empty");
+  for (const label of escalation.labels) {
+    assert(config.labels[label], `review.reasoningEscalation references undefined label ${label}`);
+  }
+  cappedPositiveInteger(escalation.minimumChangedLines, "review.reasoningEscalation.minimumChangedLines", LIMITS.maximumReasoningEscalationChangedLines);
+  cappedPositiveInteger(escalation.minimumSingleFileChangedLines, "review.reasoningEscalation.minimumSingleFileChangedLines", LIMITS.maximumReasoningEscalationChangedLines);
 
   fixedObject(config.audit, "audit", ["maximumIssuesPerRun", "repair"]);
   cappedPositiveInteger(config.audit.maximumIssuesPerRun, "audit.maximumIssuesPerRun", LIMITS.maximumIssuesPerRun);

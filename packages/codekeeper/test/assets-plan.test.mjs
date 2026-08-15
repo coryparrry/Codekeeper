@@ -53,8 +53,8 @@ const EXPECTED_ASSETS = Object.freeze({
   "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
   "agents/pr-reviewer.md": "edcb2d24d78c39290129ae8e80931eca067a0175568a6a72eb13e8c7c001af41",
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
-  "policies/mixed.json": "1578ef87ded86abcfa818ced3e0e8e828cdd1b1a98b2eea5ca15618567f3bfcd",
-  "policies/openai.json": "97af2683254fe1d3f8ed3ca81d1e35f8650872955109ccf496933cb01d4d049b",
+  "policies/mixed.json": "8431b2352fe5be158bdf3957b6077a86747ac199ae2fb4717b59a7cbe3620286",
+  "policies/openai.json": "59a30700d883a117100b31f2a16675f48e8ba9eafe66d3b6e2a34dcce1aa4a10",
   "workflows/assistant.yml": "bef52c224e85cb593f4d6f484d8811879197ebe797fcd79a462650eaf45ea2d7",
   "workflows/fix.yml": "e388c51db33f6803f87a2695a6b98473f0760c659348ef48d4854b49e00981be",
   "workflows/issues.yml": "a97b251d7918b0033983a6009d468b2a1aa038fec3d95082b21749b222c38463",
@@ -503,6 +503,44 @@ test("legacy policies keep deferred issue publication off until the publisher is
   delete legacy.labels["codekeeper:deferred"];
   legacy.issues.managedLabels = legacy.issues.managedLabels.filter((label) => label !== "codekeeper:deferred");
   assert.equal(upgradePolicy(legacy).review.createDeferredIssues, false);
+});
+
+test("existing policies gain the default high-risk review escalation", async () => {
+  const bundle = await loadVerifiedAssets();
+  const existing = JSON.parse(bundle.contents["policies/openai.json"]);
+  delete existing.review.reasoningEscalation;
+  assert.deepEqual(upgradePolicy(existing).review.reasoningEscalation, {
+    enabled: true,
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    effort: "max",
+    labels: ["security", "risk high"],
+    pathPatterns: [
+      ".github/actions/**",
+      ".github/codekeeper.json",
+      ".github/workflows/**",
+      "SECURITY.md",
+      "**/auth/**",
+      "**/authentication/**",
+      "**/authorization/**",
+      "**/billing/**",
+      "**/crypto/**",
+      "**/migration/**",
+      "**/migrations/**",
+      "**/payments/**",
+      "**/permissions/**",
+      "**/release/**",
+      "**/schema/**",
+      "**/schemas/**",
+      "**/secrets/**",
+      "**/security/**",
+      "**/*auth*.*",
+      "**/*migration*.*",
+      "**/*permission*.*"
+    ],
+    minimumChangedLines: 5000,
+    minimumSingleFileChangedLines: 1000
+  });
 });
 
 test("install plan is frozen, applies startup first, and documents selected workflows without credential values", async () => {
