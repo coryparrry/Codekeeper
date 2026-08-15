@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, "../../..");
 const workflowDirectory = path.join(repositoryRoot, ".github/workflows");
 const modes = ["review", "maintain", "issues", "fix"];
+const execFileAsync = promisify(execFile);
 const actionPins = {
   "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
   "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
@@ -41,11 +44,28 @@ function jobSection(source, name, nextName) {
   return source.slice(start, next);
 }
 
+function stepRunScript(source, stepName) {
+  const step = source.indexOf(`      - name: ${stepName}\n`);
+  assert.notEqual(step, -1, `missing ${stepName} step`);
+  const run = source.indexOf("        run: |\n", step);
+  assert.notEqual(run, -1, `missing ${stepName} run script`);
+  const next = source.indexOf("\n      - name:", run + 1);
+  return source
+    .slice(run + "        run: |\n".length, next === -1 ? source.length : next)
+    .split("\n")
+    .map((line) => (line.length === 0 ? line : line.replace(/^ {10}/, "")))
+    .join("\n");
+}
+
 test("self-test runs for every tracked-file change", async () => {
   const source = await workflow("self-test");
   const triggers = source.slice(0, source.indexOf("\npermissions:"));
   assert.match(triggers, /on:\n  pull_request:\n  push:\n  workflow_dispatch:/);
   assert.doesNotMatch(triggers, /\n\s+paths(?:-ignore)?:/);
+  assert.match(
+    source,
+    /concurrency:\n  group: codekeeper-checks-\$\{\{ github\.event_name \}\}-\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \|\| github\.repository \}\}-\$\{\{ github\.event\.pull_request\.head\.ref \|\| github\.ref_name \}\}\n  cancel-in-progress: true/,
+  );
 });
 
 test("source CI stays generic while repository settings select its runner", async () => {
@@ -276,8 +296,8 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     const workspace = jobSection(source, "workspace", "analyze");
     const analyze = jobSection(source, "analyze", repairMode ? "verify" : "seal");
     const verify = repairMode ? jobSection(source, "verify", "seal") : null;
-    const seal = jobSection(source, "seal", "publish");
-    const publish = jobSection(source, "publish", mode === "review" ? "gate" : undefined);
+    const seal = jobSection(source, "seal", mode === "review" ? "gate" : "publish");
+    const publish = mode === "review" ? jobSection(source, "gate") : jobSection(source, "publish");
 
     assert.match(workspace, /codekeeper-bundle/);
     assert.match(workspace, /codekeeper-config\.json/);
@@ -476,6 +496,63 @@ test("review and issue-triage retain mandatory App credentials", async () => {
   }
 });
 
+test("merged review gate executes the same fail-closed publication contract", async () => {
+  const script = stepRunScript(await workflow("review"), "Fail closed unless a current review was published");
+  const baseEnvironment = {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    ENABLED: "true",
+    AUTO_REVIEW: "true",
+    AUTO_REVIEW_FEEDBACK: "true",
+    IS_AUTOMATION_REPLY: "false",
+    IS_REVIEW_FEEDBACK: "false",
+    IS_COMMAND_REVIEW: "false",
+    IS_OWNER_COMMAND_REVIEW: "false",
+    IS_DRAFT: "false",
+    HEAD_REPOSITORY: "octo/example",
+    REPOSITORY: "octo/example",
+    BASE_REF: "main",
+    DEFAULT_BRANCH: "main",
+    ACTOR: "maintainer",
+    AUTOMATION_BOT_LOGIN: "codekeeper[bot]",
+    ANALYZE_RESULT: "success",
+    SEAL_RESULT: "success",
+    PUBLISH_RESULT: "success",
+  };
+  const runGate = (overrides = {}) =>
+    execFileAsync("bash", ["-c", script], {
+      env: { ...baseEnvironment, ...overrides },
+      maxBuffer: 16 * 1024,
+    });
+
+  const passed = await runGate();
+  assert.equal(passed.stdout, "");
+
+  for (const overrides of [
+    { PUBLISH_RESULT: "skipped" },
+    { PUBLISH_RESULT: "failure" },
+    { ANALYZE_RESULT: "skipped" },
+    { SEAL_RESULT: "failure" },
+  ]) {
+    await assert.rejects(
+      () => runGate(overrides),
+      (error) => error.code === 1 && /Codekeeper did not publish a passing current review\./.test(error.stdout),
+    );
+  }
+
+  for (const overrides of [
+    { IS_AUTOMATION_REPLY: "true" },
+    { IS_OWNER_COMMAND_REVIEW: "true" },
+  ]) {
+    const intentionalNoOp = await runGate({
+      ...overrides,
+      ANALYZE_RESULT: "skipped",
+      SEAL_RESULT: "skipped",
+      PUBLISH_RESULT: "skipped",
+    });
+    assert.match(intentionalNoOp.stdout, /intentionally (?:ignored|routed)/);
+  }
+});
+
 test("review uses a PR-native fail-closed gate instead of a reusable commit status", async () => {
   const source = await workflow("review");
   const publisher = await repositoryFile("tools/codekeeper/src/lib/publish.mjs");
@@ -484,8 +561,11 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(source, /cancel-in-progress: \$\{\{ github\.actor != inputs\.automation_bot_login \}\}/);
   assert.match(gate, /name: Codekeeper review gate/);
   assert.match(gate, /if: always\(\)/);
+  assert.match(gate, /timeout-minutes: 15/);
   assert.match(gate, /fails closed/);
   assert.match(gate, /exit 1/);
+  assert.match(gate, /PUBLISH_RESULT: \$\{\{ steps\.publish\.outcome \}\}/);
+  assert.doesNotMatch(source, /^  publish:\n/m);
   assert.match(source, /auto_review:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(source, /feedback_triage:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(source, /owner_command:\n\s+description:[^\n]*\n\s+required: false\n\s+default: false\n\s+type: boolean/);

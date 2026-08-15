@@ -70,7 +70,7 @@ GitHub does not provide a transaction or compare-and-swap precondition spanning 
 
 ## Review gate and auto-merge
 
-The reusable review workflow exposes a PR-native, fail-closed gate after publication. It passes only after analysis, sealing, and publication succeed for the supported PR shape. It is not an external commit-status publisher.
+The reusable review workflow exposes a PR-native, fail-closed gate in the same trusted post-seal job as publication, avoiding a serial runner allocation without combining the workspace, coordinator, seal, or App-token trust boundaries. The gate step always runs and passes only after analysis, sealing, and publication succeed for the supported PR shape. It is not an external commit-status publisher.
 
 Auto-merge is separately evaluated from the model recommendation. It requires an allowed author or automation branch, same-repository open non-draft PR, low risk, adequate tests, no blocking findings, complete frozen review-diff context, and the configured file, line, and path limits. A later ineligible review attempts to remove stale auto-merge.
 
