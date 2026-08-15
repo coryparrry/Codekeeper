@@ -15,9 +15,11 @@ import {
   MODES,
   MODEL_PROVIDER_SECRETS,
   OPENAI_SECRET,
+  PACKAGE_VERSION,
   PRESET_IDS,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
+  RELEASE_MANIFEST_TARGET,
   SECRET_PURPOSES,
   SETUP_BRANCH,
   SETUP_COMMIT_MESSAGE,
@@ -220,6 +222,8 @@ export function documentMap(files) {
     path: file.path,
     purpose: file.delete === true
       ? "Remove this installed workflow"
+      : file.path === RELEASE_MANIFEST_TARGET
+        ? "Release version and managed generated-file inventory"
       : file.path.endsWith("codekeeper.json")
       ? "Policy, model choices, protected paths, and startup controls"
       : AGENT_PROFILES[AGENT_PROFILE_IDS.find((profile) => AGENT_PROFILES[profile].target === file.path)]?.purpose
@@ -245,7 +249,7 @@ export function completionGuidance(modes, enabled = true, update = false) {
   return Object.freeze({
     heading: enabled
       ? update
-        ? "Codekeeper keeps running the current default-branch configuration. The update takes effect when the setup pull request merges; no separate validation run is required."
+        ? "Codekeeper keeps running the current default-branch configuration. The change takes effect when the pull request merges; no separate validation run is required."
         : "Codekeeper is ready. It starts the selected workflows when the setup pull request merges; no separate dry run or controlled test is required."
       : "Codekeeper stays off after merge. Set CODEKEEPER_ENABLED=true when you want it to start; no separate validation run is required.",
     profileGuidance: "Edit .github/codekeeper/agents/*.md to change priorities, work selection, implementation, review standards, and reporting. Capability switches control repair, issue implementation, issue closure, and merge actions.",
@@ -253,6 +257,41 @@ export function completionGuidance(modes, enabled = true, update = false) {
       ? "Keep the Codekeeper review gate optional while Codekeeper is disabled."
       : null,
     closing: "The installer did not run a workflow or merge the pull request."
+  });
+}
+
+function editableSettingsForInstallation(snapshot, bundle) {
+  const installation = snapshot.installation;
+  if (!installation) {
+    throw new InstallerError("No Codekeeper installation was found. Run codekeeper init first.", {
+      code: "UPDATE_NOT_INSTALLED"
+    });
+  }
+  const preset = installation.policy.ai.agents.issue?.provider === "deepseek" ? "mixed" : "openai";
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [
+    id,
+    installation.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
+  ]));
+  const settings = createEditableSettings({
+    policy: installation.policy,
+    modes: installation.modes,
+    enabled: snapshot.existingSettings.enabled,
+    profiles
+  });
+  return { preset, settings };
+}
+
+export function buildUpdateAnswers({ snapshot, bundle, output }) {
+  const { preset, settings } = editableSettingsForInstallation(snapshot, bundle);
+  output.write("Codekeeper release update\n\n");
+  output.write("This advances the release-owned workflow and runtime pins, policy safety boundaries, and provider definitions.\n");
+  output.write("Your selected workflows, repository settings, model choices, automation choices, and edited agent profiles stay unchanged.\n\n");
+  return Object.freeze({
+    ...settingsAnswers(settings),
+    preset,
+    releaseUpdate: true,
+    appClientId: snapshot.existingSettings.appClientId,
+    automationBotLogin: snapshot.existingSettings.automationBotLogin
   });
 }
 
@@ -286,7 +325,7 @@ export function setupPullRequestBody(plan) {
   ].filter(Boolean).join("\n\n");
   return `## Summary
 
-Codekeeper uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. ${plan.update && plan.enabled ? "It is enabled now with the current default-branch configuration; this update applies after the setup pull request merges." : `It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.`}
+Codekeeper CLI release **${plan.packageVersion}** uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. ${plan.update && plan.enabled ? "It is enabled now with the current default-branch configuration; this update applies after the pull request merges." : plan.update ? `It will be ${plan.enabled ? "enabled" : "disabled"} after this update pull request merges.` : `It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.`}
 
 OpenAI traces are **${plan.tracing ? "enabled" : "disabled"}**.
 
@@ -324,9 +363,15 @@ The installer did not merge this pull request or run a workflow.
 export function buildInstallPlan({ bundle, snapshot, answers }) {
   const modes = normalizeModes(answers.modes);
   const installation = snapshot.installation ?? null;
+  const releaseUpdate = Boolean(installation && answers.releaseUpdate === true);
+  const operation = releaseUpdate ? "release-update" : installation ? "configuration-update" : "setup";
   const policySource = installation?.policySource ?? bundle.contents[`policies/${answers.preset}.json`];
   if (!PRESET_IDS.includes(answers.preset)) throw new InstallerError(`Unsupported preset: ${answers.preset}`, { code: "PLAN_INVALID" });
   const baselinePolicy = upgradePolicy(JSON.parse(policySource));
+  const validationBaselinePolicy = releaseUpdate
+    ? upgradePolicy(JSON.parse(bundle.contents[`policies/${answers.preset}.json`]))
+    : baselinePolicy;
+  validationBaselinePolicy.repository.defaultBranch = snapshot.defaultBranch;
   const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
     installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
@@ -357,7 +402,8 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     policySource: answers.policy ? policySource : JSON.stringify(inputPolicy),
     profileSources,
     enforceBundledDefaults: !installation,
-    policyOverride: answers.policy ?? null
+    policyOverride: answers.policy ?? null,
+    refreshReleaseBoundaries: releaseUpdate
   });
   const effectivePolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
   validateEditableSettings({
@@ -365,7 +411,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     modes,
     enabled: answers.enabled !== false,
     profiles: answers.profiles ?? profileDefaults
-  }, baselinePolicy);
+  }, validationBaselinePolicy);
   const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, effectivePolicy.automation.ownerRequests);
   const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
   if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
@@ -377,6 +423,20 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   if (installation) {
     for (const mode of installation.modes.filter((mode) => !modes.includes(mode))) {
       const target = MODES[mode].target;
+      changedFiles.push({
+        path: target,
+        contents: null,
+        bytes: 0,
+        sha256: null,
+        previousSha256: sha256(installation.contents[target]),
+        delete: true
+      });
+    }
+    const nextReleaseManifest = JSON.parse(files.find((file) => file.path === RELEASE_MANIFEST_TARGET).contents);
+    const nextManagedTargets = new Set(Object.keys(nextReleaseManifest.managedFiles));
+    const changedTargets = new Set(changedFiles.map((file) => file.path));
+    for (const target of Object.keys(installation.releaseManifest?.managedFiles ?? {})) {
+      if (nextManagedTargets.has(target) || changedTargets.has(target)) continue;
       changedFiles.push({
         path: target,
         contents: null,
@@ -406,6 +466,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))
     : requiredSecrets;
   const plan = {
+    packageVersion: PACKAGE_VERSION,
     source: {
       repository: bundle.metadata.source.repository,
       commit: bundle.metadata.source.commit
@@ -427,8 +488,15 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     variables,
     secrets: secretNames.map((name) => ({ name })),
     branch: installation ? snapshot.updateBranch : SETUP_BRANCH,
-    commitMessage: installation ? "chore(codekeeper): update configuration" : SETUP_COMMIT_MESSAGE,
-    pullRequest: { title: installation ? "chore(codekeeper): update configuration" : SETUP_PR_TITLE },
+    commitMessage: operation === "release-update"
+      ? "chore(codekeeper): update release"
+      : operation === "configuration-update" ? "chore(codekeeper): update configuration" : SETUP_COMMIT_MESSAGE,
+    pullRequest: {
+      title: operation === "release-update"
+        ? "chore(codekeeper): update release"
+        : operation === "configuration-update" ? "chore(codekeeper): update configuration" : SETUP_PR_TITLE
+    },
+    operation,
     update: Boolean(installation),
     settingsOnly: Boolean(installation && !changedFiles.length)
   };
@@ -457,23 +525,20 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
   });
   if (!repositoryConfirmed) throw new InstallerError("Setup was cancelled before any mutation.", { code: "USER_CANCELLED" });
   if (prompt?.kind === "ink" && typeof prompt.editSettings === "function") {
-    const preset = installation?.policy.ai.agents.issue?.provider === "deepseek" ? "mixed" : "openai";
-    const policy = installation?.policy
-      ? structuredClone(installation.policy)
-      : upgradePolicy(JSON.parse(bundle.contents[`policies/${preset}.json`]));
+    const installed = installation ? editableSettingsForInstallation(snapshot, bundle) : null;
+    const preset = installed?.preset ?? "openai";
+    const policy = installed?.settings.policy
+      ?? upgradePolicy(JSON.parse(bundle.contents[`policies/${preset}.json`]));
     if (!installation) {
       policy.repository.displayName = snapshot.displayName;
       policy.repository.ownerLogins = [snapshot.viewerLogin.toLowerCase()];
       policy.merge.allowedUserAuthors = [...policy.repository.ownerLogins];
     }
-    const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
-      installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
-    ]));
-    const settings = createEditableSettings({
+    const settings = installed?.settings ?? createEditableSettings({
       policy,
-      modes: installation?.modes ?? RECOMMENDED_MODES,
-      enabled: installation ? snapshot.existingSettings.enabled : true,
-      profiles
+      modes: RECOMMENDED_MODES,
+      enabled: true,
+      profiles: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]))
     });
     const edited = await prompt.editSettings({
       settings,

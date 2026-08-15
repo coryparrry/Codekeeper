@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparry/Codekeeper";
-export const SOURCE_COMMIT = "a3d8d6d82e666bb75504549695eccab929bcd5f5";
+export const SOURCE_COMMIT = "a504ba130c68a1dc10de1b153b0bc1cdf2fbad7a";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -142,8 +142,10 @@ export const MODEL_OPTIONS = Object.freeze({
 });
 export const ALL_MODEL_OPTIONS = Object.freeze(Object.values(MODEL_OPTIONS).flat());
 export const POLICY_TARGET = ".github/codekeeper.json";
+export const RELEASE_MANIFEST_TARGET = ".github/codekeeper-release.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
+  RELEASE_MANIFEST_TARGET,
   ASSISTANT_WORKFLOW.target,
   ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].target),
   ...MODE_IDS.map((mode) => MODES[mode].target)

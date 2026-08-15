@@ -10,12 +10,15 @@ import {
   MODE_IDS,
   MODEL_PROVIDER_SECRETS,
   MODES,
+  PACKAGE_NAME,
+  PACKAGE_VERSION,
   POLICY_TARGET,
+  RELEASE_MANIFEST_TARGET,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
-import { upgradePolicy } from "./policy.mjs";
+import { applyReleasePolicyBoundaries, upgradePolicy } from "./policy.mjs";
 
 const DEFAULT_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FULL_SHA = /^[0-9a-f]{40}$/;
@@ -116,7 +119,8 @@ export function renderPolicy(policySource, {
   tracing = true,
   enforceBundledDefaults = true,
   requiredPolicySource = policySource,
-  policyOverride = null
+  policyOverride = null,
+  refreshReleaseBoundaries = false
 }) {
   let policy;
   try {
@@ -135,6 +139,7 @@ export function renderPolicy(policySource, {
   if (!policy.repository || !policy.merge || !Array.isArray(policy.merge.allowedUserAuthors)) {
     throw new InstallerError("Bundled policy cannot be tailored safely.", { code: "ASSET_POLICY_INVALID" });
   }
+  if (refreshReleaseBoundaries) applyReleasePolicyBoundaries(policy, requiredPolicy);
   policy.repository.displayName = displayName;
   policy.repository.defaultBranch = defaultBranch;
   policy.repository.ownerLogins = [...ownerLogins];
@@ -276,7 +281,8 @@ export function renderInstallFiles(bundle, {
   policySource = bundle.contents[`policies/${preset}.json`],
   profileSources = bundle.contents,
   enforceBundledDefaults = true,
-  policyOverride = null
+  policyOverride = null,
+  refreshReleaseBoundaries = false
 }) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
   const policyContents = renderPolicy(policySource, {
@@ -288,7 +294,8 @@ export function renderInstallFiles(bundle, {
     tracing,
     enforceBundledDefaults,
     requiredPolicySource: bundle.contents[`policies/${preset}.json`],
-    policyOverride
+    policyOverride,
+    refreshReleaseBoundaries
   });
   const renderedPolicy = JSON.parse(policyContents);
   const rendered = [{
@@ -323,6 +330,18 @@ export function renderInstallFiles(bundle, {
       })
     });
   }
+  const managedFiles = Object.fromEntries(rendered
+    .filter((file) => file.path === ASSISTANT_WORKFLOW.target || MODE_IDS.some((mode) => MODES[mode].target === file.path))
+    .map((file) => [file.path, sha256(file.contents)]));
+  rendered.push({
+    path: RELEASE_MANIFEST_TARGET,
+    contents: `${JSON.stringify({
+      version: 1,
+      package: { name: PACKAGE_NAME, version: PACKAGE_VERSION },
+      source: { repository: sourceRepository, commit: sourceCommit },
+      managedFiles
+    }, null, 2)}\n`
+  });
   return rendered.map((file) => deepFreeze({
     ...file,
     bytes: Buffer.byteLength(file.contents),

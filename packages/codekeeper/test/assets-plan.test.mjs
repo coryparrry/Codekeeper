@@ -23,6 +23,7 @@ import {
   OPENROUTER_SECRET,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
+  RELEASE_MANIFEST_TARGET,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY,
   TRACE_SECRET
@@ -446,7 +447,8 @@ test("renderInstallFiles emits policy, every profile, and only selected callers 
     ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
-    ".github/workflows/codekeeper-issues.yml"
+    ".github/workflows/codekeeper-issues.yml",
+    ".github/codekeeper-release.json"
   ]);
   for (const file of files) {
     assert.equal(file.bytes, Buffer.byteLength(file.contents));
@@ -608,7 +610,8 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
-    ".github/workflows/codekeeper-maintain.yml"
+    ".github/workflows/codekeeper-maintain.yml",
+    ".github/codekeeper-release.json"
   ]);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [
     "OPENAI_API_KEY",
@@ -931,7 +934,8 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
   assert.deepEqual(providerUpdate.secrets, [{ name: DEEPSEEK_SECRET }]);
   assert.deepEqual(providerUpdate.files.map((file) => file.path), [
     ".github/codekeeper.json",
-    ".github/workflows/codekeeper-review.yml"
+    ".github/workflows/codekeeper-review.yml",
+    ".github/codekeeper-release.json"
   ]);
   assert.match(providerUpdate.files[1].contents, /secrets\.DEEPSEEK_API_KEY/);
 
@@ -947,6 +951,45 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
   assert.equal(disabled.settingsOnly, true);
   assert.deepEqual(disabled.files, []);
   assert.deepEqual(disabled.variables, [{ name: "CODEKEEPER_ENABLED", value: "false" }]);
+});
+
+test("a release update removes retired generated workflows recorded by the installed release", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: ["review"], preset: "openai" })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const retiredTarget = ".github/workflows/codekeeper-retired.yml";
+  contents[retiredTarget] = contents[".github/workflows/codekeeper-assistant.yml"];
+  const installedRelease = JSON.parse(contents[RELEASE_MANIFEST_TARGET]);
+  installedRelease.managedFiles[retiredTarget] = sha256(contents[retiredTarget]);
+  contents[RELEASE_MANIFEST_TARGET] = `${JSON.stringify(installedRelease, null, 2)}\n`;
+  const releaseUpdate = buildInstallPlan({
+    bundle,
+    snapshot: {
+      ...snapshot(),
+      installation: {
+        policy: JSON.parse(contents[".github/codekeeper.json"]),
+        policySource: contents[".github/codekeeper.json"],
+        modes: ["review"],
+        contents,
+        releaseManifest: installedRelease
+      },
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-acme[bot]"
+      },
+      updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+    },
+    answers: { ...answers({ modes: ["review"], preset: "openai" }), releaseUpdate: true }
+  });
+  assert.equal(releaseUpdate.operation, "release-update");
+  assert.deepEqual(releaseUpdate.files.map((file) => file.path), [RELEASE_MANIFEST_TARGET, retiredTarget]);
+  assert.equal(releaseUpdate.files[1].delete, true);
+  assert.equal(releaseUpdate.files[1].previousSha256, sha256(contents[retiredTarget]));
 });
 
 test("optional disabled installation keeps Codekeeper off after merge", async () => {

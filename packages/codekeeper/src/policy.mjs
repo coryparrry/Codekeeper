@@ -1,5 +1,49 @@
 export const POLICY_VERSION = 3;
 
+const POLICY_AGENT_IDS = Object.freeze(["review", "audit", "issue", "fix"]);
+
+export const RELEASE_OWNED_POLICY_PATHS = Object.freeze([
+  "repository.automationBranchPrefix",
+  "ai.providers",
+  "ai.tracing.includeSensitiveData",
+  "audit.repair.protectedPaths",
+  "audit.repair.validationCommands",
+  "merge.allowUserPullRequests",
+  "merge.blockedPaths",
+  ...POLICY_AGENT_IDS.flatMap((agentId) => [
+    `ai.agents.${agentId}.maxTurns`,
+    `ai.agents.${agentId}.workspace.allowWrites`
+  ])
+]);
+
+function policyPathParts(policyPath) {
+  return policyPath.split(".");
+}
+
+function policyValue(policy, policyPath) {
+  return policyPathParts(policyPath).reduce((value, key) => value?.[key], policy);
+}
+
+function setPolicyValue(policy, policyPath, value) {
+  const parts = policyPathParts(policyPath);
+  const leaf = parts.pop();
+  const parent = parts.reduce((current, key) => current[key], policy);
+  parent[leaf] = structuredClone(value);
+}
+
+export function isReleaseOwnedPolicyPath(policyPath) {
+  return RELEASE_OWNED_POLICY_PATHS.some((ownedPath) =>
+    policyPath === ownedPath || (ownedPath === "ai.providers" && policyPath.startsWith("ai.providers."))
+  );
+}
+
+export function applyReleasePolicyBoundaries(policy, requiredPolicy) {
+  for (const policyPath of RELEASE_OWNED_POLICY_PATHS) {
+    setPolicyValue(policy, policyPath, policyValue(requiredPolicy, policyPath));
+  }
+  return policy;
+}
+
 export const AUTOMATION_DEFAULTS = Object.freeze({
   automaticPrReview: true,
   reviewFeedbackTriage: true,

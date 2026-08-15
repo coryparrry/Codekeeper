@@ -168,6 +168,13 @@ async function findRepositoryRoot(cwd, fsImpl) {
   }
 }
 
+export async function resolveRepositoryBoundary({
+  cwd = process.cwd(),
+  fsImpl = DEFAULT_TRUSTED_COMMAND_FILE_SYSTEM
+} = {}) {
+  return (await findRepositoryRoot(cwd, fsImpl)).repositoryRoot;
+}
+
 function originalRepositoryRoot(cwd, resolvedCwd, repositoryRoot) {
   const suffix = path.relative(repositoryRoot, resolvedCwd);
   if (suffix === "" || suffix === "." || suffix === ".." || suffix.startsWith(`..${path.sep}`) || path.isAbsolute(suffix)) {

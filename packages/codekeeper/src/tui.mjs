@@ -446,6 +446,7 @@ function reviewData(plan) {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
     preset: `${plan.preset} starting models`,
+    release: `Codekeeper ${plan.packageVersion} · ${plan.source.repository}@${plan.source.commit}`,
     workflows: workflowMap(plan.modes).map((item) => `${item.label} — ${item.trigger}`),
     models: modelAssignments(plan.modes).map(({ key, label, workflow }) => {
       const selection = plan.models[key];
@@ -472,6 +473,28 @@ function reviewData(plan) {
   };
 }
 
+function operationCopy(plan) {
+  if (plan.operation === "release-update") {
+    return {
+      noun: "release update",
+      completionTitle: "Update ready",
+      description: "Review the release-owned files and settings that will advance."
+    };
+  }
+  if (plan.operation === "configuration-update") {
+    return {
+      noun: "configuration",
+      completionTitle: "Configuration ready",
+      description: "Review the repository configuration and settings that will change."
+    };
+  }
+  return {
+    noun: "setup",
+    completionTitle: "Setup complete",
+    description: "The App key is selected. Its path and contents stay hidden."
+  };
+}
+
 function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [confirmed, setConfirmed] = useState(false);
   const [page, setPage] = useState(0);
@@ -480,6 +503,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const pagedDetail = usesPagedDetailLayout(stdout);
   const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
+  const operation = operationCopy(spec.plan);
   const pagedPages = useMemo(() => [
     "overview",
     "models",
@@ -518,12 +542,14 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     Shell,
     {
       step: "final review",
-      title: `Review the setup · ${page + 1} of ${lastPage + 1}`,
+      title: `Review the ${operation.noun} · ${page + 1} of ${lastPage + 1}`,
       description: pagedDetail
-        ? [page === 0 ? "The App key is selected. Its path and contents stay hidden." : "Nothing has changed yet."]
+        ? [page === 0
+          ? operation.description
+          : "Nothing has changed yet."]
         : [
-          "The App key file is selected. Its path and contents are not shown.",
-          "Nothing has changed. Select Create setup to apply these choices."
+          operation.description,
+          `Nothing has changed. Select Create ${operation.noun} to apply these choices.`
         ],
       footer: page < lastPage
         ? "←/→ page  •  Enter next  •  Esc cancel"
@@ -537,6 +563,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       h(Text, null, data.repository),
       h(Text, { dimColor: true }, data.identity),
       h(Text, { dimColor: true }, data.preset),
+      h(Text, { dimColor: true }, data.release),
       section("Workflows", data.workflows),
       section("Models (editable in .github/codekeeper.json)", data.models)
     ) : null,
@@ -555,7 +582,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       h(
         Box,
         { flexDirection: "column", marginTop: 1 },
-        h(Text, { bold: confirmed, inverse: confirmed }, `${confirmed ? "›" : " "} Create setup`),
+        h(Text, { bold: confirmed, inverse: confirmed }, `${confirmed ? "›" : " "} Create ${operation.noun}`),
         h(Text, { bold: !confirmed, inverse: !confirmed }, `${!confirmed ? "›" : " "} Cancel`)
       )
     ) : null,
@@ -565,6 +592,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       h(Text, null, data.repository),
       h(Text, { dimColor: true }, data.identity),
       h(Text, { dimColor: true }, data.preset),
+      h(Text, { dimColor: true }, data.release),
       section("Workflows", data.workflows, 0)
     ) : null,
     pagedDetail && pageKind === "models" ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
@@ -582,7 +610,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       h(
         Box,
         { flexDirection: "column", marginTop: 1 },
-        h(Text, { bold: confirmed, inverse: confirmed }, `${confirmed ? "›" : " "} Create setup`),
+        h(Text, { bold: confirmed, inverse: confirmed }, `${confirmed ? "›" : " "} Create ${operation.noun}`),
         h(Text, { bold: !confirmed, inverse: !confirmed }, `${!confirmed ? "›" : " "} Cancel`)
       )
     ) : null
@@ -595,8 +623,8 @@ function ProgressScreen({ state, colorEnabled }) {
     Shell,
     {
       step: "installing",
-      title: "Creating the Codekeeper setup",
-      description: ["Keep this terminal open until the setup pull request is ready."],
+      title: "Creating the Codekeeper pull request",
+      description: ["Keep this terminal open until the pull request is ready."],
       footer: state.paused ? "GitHub CLI has the terminal. Complete its secret prompt to return." : "Please keep this terminal open.",
       colorEnabled
     },
@@ -627,6 +655,7 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.return) onSubmit(true);
   });
   const guidance = completionGuidance(spec.plan.modes, spec.plan.enabled, spec.plan.update);
+  const operation = operationCopy(spec.plan);
   const completedSteps = spec.receipt.settingsOnly
     ? DEFAULT_PROGRESS_STEPS.filter((step) => ["repository:verify", "settings:disable", "variables:configure"].includes(step.id))
     : DEFAULT_PROGRESS_STEPS;
@@ -634,7 +663,7 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     Shell,
     {
       step: "complete",
-      title: "Setup complete",
+      title: operation.completionTitle,
       description: [spec.receipt.pullRequestUrl],
       footer: "Enter finish  •  Esc close",
       colorEnabled
@@ -643,11 +672,11 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       Box,
       { flexDirection: "column" },
       ...completedSteps.map((step) => h(Text, { key: step.id, dimColor: true }, `✓ ${step.label}`)),
-      compact ? null : h(Text, { dimColor: true }, `Source: ${spec.plan.source.repository}@${spec.plan.source.commit}`),
+      compact ? null : h(Text, { dimColor: true }, `Release: Codekeeper ${spec.plan.packageVersion} · ${spec.plan.source.repository}@${spec.plan.source.commit}`),
       h(Text, { dimColor: true }, spec.plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge."),
       compact ? null : h(Text, { dimColor: true }, `OpenAI traces: ${spec.plan.tracing ? "enabled" : "disabled"}.`),
       !compact && guidance.reviewGateWarning ? h(Text, { dimColor: true }, guidance.reviewGateWarning) : null,
-      h(Text, { dimColor: true }, compact ? "Review the setup pull request." : guidance.closing)
+      h(Text, { dimColor: true }, compact ? `Review the ${operation.noun} pull request.` : guidance.closing)
     )
   );
 }

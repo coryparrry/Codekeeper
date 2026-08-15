@@ -1,5 +1,6 @@
 import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODEL_OPTIONS, MODEL_PROVIDER_SECRETS, MODES, SOURCE_COMMIT, SOURCE_REPOSITORY } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
+import { isReleaseOwnedPolicyPath, RELEASE_OWNED_POLICY_PATHS } from "./policy.mjs";
 import { validatePolicy } from "./policy-validator.mjs";
 
 const AGENT_IDS = Object.freeze(["review", "audit", "issue", "fix"]);
@@ -50,17 +51,8 @@ function setPath(object, path, value) {
 function readOnlyPolicyPath(path) {
   return path === "version"
     || path === "repository.defaultBranch"
-    || path === "repository.automationBranchPrefix"
-    || path === "ai.tracing.includeSensitiveData"
-    || path === "ai.providers"
-    || path.startsWith("ai.providers.")
-    || /^ai\.agents\.[^.]+\.maxTurns$/.test(path)
-    || /^ai\.agents\.[^.]+\.workspace\.allowWrites$/.test(path)
-    || path === "audit.repair.protectedPaths"
-    || path === "audit.repair.validationCommands"
-    || path === "merge.allowUserPullRequests"
-    || path === "merge.allowedUserAuthors"
-    || path === "merge.blockedPaths";
+    || isReleaseOwnedPolicyPath(path)
+    || path === "merge.allowedUserAuthors";
 }
 
 function enumChoices(path, policy) {
@@ -238,11 +230,7 @@ export function validateEditableSettings(settings, baselinePolicy) {
   }
   const policy = settings.policy;
   if (policy?.version !== 3) throw new InstallerError("Policy version is read-only.", { code: "SETTING_INVALID" });
-  for (const path of [
-    "repository.defaultBranch", "repository.automationBranchPrefix", "ai.providers",
-    "ai.tracing.includeSensitiveData", "audit.repair.protectedPaths", "audit.repair.validationCommands",
-    "merge.allowUserPullRequests", "merge.blockedPaths"
-  ]) {
+  for (const path of ["repository.defaultBranch", ...RELEASE_OWNED_POLICY_PATHS]) {
     if (!equal(getPath(policy, path), getPath(baselinePolicy, path))) throw new InstallerError(`${path} is a read-only safety boundary.`, { code: "SETTING_INVALID" });
   }
   if (policy.projectInvariants === undefined) policy.projectInvariants = [];
@@ -264,9 +252,6 @@ export function validateEditableSettings(settings, baselinePolicy) {
     const agent = policy.ai.agents[agentId];
     if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, agent.provider) || !policy.ai.providers[agent.provider]) {
       throw new InstallerError(`${agentId} must use an installable provider.`, { code: "SETTING_INVALID" });
-    }
-    if (!equal(agent.workspace.allowWrites, baselinePolicy.ai.agents[agentId].workspace.allowWrites)) {
-      throw new InstallerError(`${agentId} workspace boundary is invalid.`, { code: "SETTING_INVALID" });
     }
   }
   if (policy.review.createDeferredIssues && !settings.modes.includes("issues")) {

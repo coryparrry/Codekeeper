@@ -12,7 +12,8 @@
     "bin/",
     "src/",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "npm-shrinkwrap.json"
   ],
   "engines": {
     "node": ">=22"
