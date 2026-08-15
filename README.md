@@ -72,7 +72,7 @@ Every run reads the applicable profile from the trusted default-branch checkout,
 - Repair patches are checked again in a fresh credential-free checkout before sealing and publication.
 - Review labels, sticky comments, issue fingerprints, repair PRs, and same-PR repair commits trust only the configured GitHub App bot identity.
 - Auto-merge remains opt-in and is independently limited by author, branch, risk, tests, paths, files, changed lines, and complete frozen diff context.
-- Agents SDK tracing is enabled by the starter policy with `includeSensitiveData=false`. It requires a separate OpenAI `trace_api_key` even when the selected model provider is DeepSeek; traces appear in [OpenAI Platform Traces](https://platform.openai.com/traces) under **Logs > Traces**.
+- Agents SDK tracing is enabled by the starter policy with `includeSensitiveData=false`. OpenAI remains the default exporter and requires a separate `trace_api_key`; the review caller can instead select the isolated Braintrust exporter with `CODEKEEPER_TRACE_EXPORTER=braintrust` and a dedicated `BRAINTRUST_API_KEY`.
 
 See [the architecture](docs/ARCHITECTURE.md) and [installation guide](INSTALL.md) for the exact boundaries.
 

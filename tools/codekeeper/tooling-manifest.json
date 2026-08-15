@@ -18,12 +18,24 @@
       "sha256": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208"
     },
     {
+      "path": "integrations/braintrust/package-lock.json",
+      "sha256": "149401c77a8028f9150ddc716b77a863b735c54b828da532966a071173e51a35"
+    },
+    {
+      "path": "integrations/braintrust/package.json",
+      "sha256": "e91dcf8eda321939fc13d8ffe19619ea9f882425df0ae35379c308c5a5bb65e7"
+    },
+    {
+      "path": "integrations/braintrust/run-agent.mjs",
+      "sha256": "1c628eef31a8aba017e89c1ea13b05f46d3143e2f2b0ef6d7a0306946479ec3c"
+    },
+    {
       "path": "package-lock.json",
       "sha256": "47bc0424fee05d9be41ef0d02d1f45fc3d103fec73d325d592cb691e14b31bb2"
     },
     {
       "path": "package.json",
-      "sha256": "328010024c5c462c1a2705df433721287bff70dd5b498b0df7c817a3e4f264ba"
+      "sha256": "799ded9c2a6b71398f1fac6c41f5cdf12dc5c0b41b33541004b44f0d334af13c"
     },
     {
       "path": "presets/catalogue.mjs",
@@ -43,7 +55,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "2d88e4d123689cf31c15418ed7d58d4b27968b6ef6ce0f89d9cfc3ce5bff87b0"
+      "sha256": "3fbcb880c56fefe893c3e5e33fd79a1a18fac08a442d0eff0ab126b8875a33be"
     },
     {
       "path": "src/lib/commands.mjs",
@@ -99,7 +111,7 @@
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "0127b66bf614d7bbdfc7ac17bef203667b9c167d9e1f69f9e01691d068e8011e"
+      "sha256": "25cd442686201bac53d3a809499886f3a2afc85c50996f4c3f7153e2ac23d478"
     },
     {
       "path": "src/lib/publish.mjs",
@@ -119,7 +131,7 @@
     },
     {
       "path": "src/lib/schemas.mjs",
-      "sha256": "04abceb1ea5751c181fbd6e52f907050383c491505d8d51ecd306a10adaf871a"
+      "sha256": "826fd874f8ec544a74d72a4cd5b889b7fef6a672cc772cdf832bcd0ada834ac3"
     },
     {
       "path": "src/lib/validate.mjs",

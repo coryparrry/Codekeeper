@@ -370,7 +370,8 @@ export function validateReviewResult(result, config) {
   assert(!result.tests.adequate || result.tests.missingTest === null, "adequate tests cannot name a missing test");
   assertNullableString(result.diagram, "diagram", LIMITS.diagram);
   if (result.diagram !== null) {
-    assert(/^(?:flowchart|sequenceDiagram|stateDiagram|classDiagram|erDiagram|gantt|pie|mindmap|timeline|gitGraph)\b/.test(result.diagram.trim()), "diagram must start with a supported Mermaid diagram type");
+    result.diagram = result.diagram.trim().replace(/^graph\s+LR\b/, "flowchart LR");
+    assert(/^flowchart\s+LR\b/.test(result.diagram), "diagram must use a left-to-right Mermaid flowchart");
     assert(!/```|%%\{|\bclick\b|\bhref\b|javascript:/i.test(result.diagram), "diagram contains unsupported Mermaid content");
   }
   assertEnum(result.mergeRecommendation, ["block", "manual", "auto"], "mergeRecommendation");

@@ -28,7 +28,7 @@ async function copyProductionTooling(target) {
     path.join(packageRoot, "scripts", "verify-tooling-artifact.mjs"),
     path.join(target, "scripts", "verify-tooling-artifact.mjs")
   );
-  for (const directory of ["agents", "presets", "src"]) {
+  for (const directory of ["agents", "integrations/braintrust", "presets", "src"]) {
     await cp(path.join(packageRoot, directory), path.join(target, directory), { recursive: true, force: false, errorOnExist: true });
   }
   return target;
@@ -97,6 +97,8 @@ test("canonical tooling manifest exactly covers the production runtime payload",
   assert.ok(paths.includes("src/lib/agents-runtime.mjs"));
   assert.ok(paths.includes("agents/pr-reviewer.md"));
   assert.ok(paths.includes("presets/catalogue.mjs"));
+  assert.ok(paths.includes("integrations/braintrust/run-agent.mjs"));
+  assert.ok(paths.includes("integrations/braintrust/package-lock.json"));
   assert.ok(paths.includes("package-lock.json"));
   assert.ok(paths.includes("scripts/verify-tooling-artifact.mjs"));
   assert.ok(paths.every((entry) => !entry.startsWith("test/") && !entry.startsWith("evals/")));
@@ -114,7 +116,7 @@ test("composite staging script accepts a clean action path and rejects hidden or
   const target = path.join(clean.stagingRoot, "tooling", "tools", "codekeeper");
   assert.deepEqual(
     (await readdir(target)).sort(),
-    ["agents", "package-lock.json", "package.json", "presets", "scripts", "src", "tooling-manifest.json"]
+    ["agents", "integrations", "package-lock.json", "package.json", "presets", "scripts", "src", "tooling-manifest.json"]
   );
   await verifyToolingArtifact({ root: target, expectedManifestSha256: await expectedManifestSha256() });
 

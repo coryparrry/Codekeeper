@@ -18,7 +18,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "6824ce71ff1c9bb1de957914b221176f36fecdb6b450bc921710199d8786efc1";
+const toolingManifestSha256 = "5b7ed384ca2149e1ce0f42a153ba2c5156e798fd15c738be0353a4357b3bcdbe";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -131,6 +131,7 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
   assert.equal(parsedManifest.version, 1);
   assert.ok(parsedManifest.files.some((entry) => entry.path === "src/cli.mjs"));
   assert.ok(parsedManifest.files.some((entry) => entry.path === "scripts/verify-tooling-artifact.mjs"));
+  assert.ok(parsedManifest.files.some((entry) => entry.path === "integrations/braintrust/run-agent.mjs"));
   assert.ok(parsedManifest.files.every((entry) => !entry.path.startsWith("test/") && !entry.path.startsWith("evals/")));
 
   const expectedConsumers = { maintain: 5, fix: 5, issues: 4, review: 4 };
@@ -214,7 +215,7 @@ test("private-action bootstrap stages only the production runtime and retains it
   assert.match(action, /using: composite/);
   assert.match(action, /ACTION_PATH: \$\{\{ github\.action_path \}\}/);
   assert.match(action, /for file in package\.json package-lock\.json tooling-manifest\.json/);
-  assert.match(action, /for directory in agents presets src/);
+  assert.match(action, /for directory in agents integrations\/braintrust presets src/);
   assert.match(action, /scripts\/verify-tooling-artifact\.mjs/);
   assert.match(action, /find "\$target" -type l/);
   assert.match(action, /if find "\$target" -type l -print -quit \| grep -q \.; then/);
@@ -672,6 +673,26 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
   const selfTest = await workflow("self-test");
   assert.match(selfTest, /npm ci --ignore-scripts --no-audit --no-fund/);
   assert.match(selfTest, /npm run check/);
+});
+
+test("review tracing keeps OpenAI as the default and supports an isolated Braintrust choice", async () => {
+  const source = await workflow("review");
+  const caller = await repositoryFile("examples/workflows/codekeeper-review.yml.example");
+  const workspace = jobSection(source, "workspace", "analyze");
+  const analyze = jobSection(source, "analyze", "seal");
+
+  assert.match(source, /trace_exporter:\n\s+description: Trace exporter for the coordinator\. Supported values are openai and braintrust\.\n\s+required: false\n\s+default: openai\n\s+type: string/);
+  assert.match(source, /braintrust_api_key:\n\s+description: Dedicated Braintrust API key used only when trace_exporter=braintrust\.\n\s+required: false/);
+  assert.doesNotMatch(workspace, /braintrust_api_key|BRAINTRUST_API_KEY/);
+  assert.match(analyze, /name: Validate coordinator trace exporter[\s\S]*openai\|braintrust/);
+  assert.match(analyze, /name: Install pinned Braintrust trace exporter\n\s+if: inputs\.trace_exporter == 'braintrust'[\s\S]*integrations\/braintrust/);
+  assert.match(analyze, /name: Finalize review with configured Agents SDK model\n\s+if: inputs\.trace_exporter == 'openai'/);
+  assert.match(analyze, /name: Finalize review with Braintrust tracing\n\s+if: inputs\.trace_exporter == 'braintrust'/);
+  assert.match(analyze, /BRAINTRUST_API_KEY: \$\{\{ secrets\.braintrust_api_key \}\}/);
+  assert.match(analyze, /BRAINTRUST_INCLUDE_SENSITIVE_DATA: \$\{\{ inputs\.braintrust_include_sensitive_data \}\}/);
+  assert.match(analyze, /integrations\/braintrust\/run-agent\.mjs/);
+  assert.match(caller, /trace_exporter: \$\{\{ vars\.CODEKEEPER_TRACE_EXPORTER \|\| 'openai' \}\}/);
+  assert.match(caller, /braintrust_api_key: \$\{\{ secrets\.BRAINTRUST_API_KEY \}\}/);
 });
 
 test("self-test reports through annotations with read-only repository permissions", async () => {
