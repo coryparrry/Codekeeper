@@ -1290,7 +1290,7 @@ test("seal produces the only manifest and embeds the frozen policy", async () =>
   assert.equal(manifest.patchSha256, null);
 });
 
-test("review findings must cite a changed line hunk", async () => {
+test("review findings outside a changed hunk fall back to file-level evidence", async () => {
   const root = await createRepository();
   await writeFile(path.join(root, "README.md"), "one\ntwo\nthree\n", "utf8");
   run("git", ["add", "README.md"], root);
@@ -1357,10 +1357,23 @@ test("review findings must cite a changed line hunk", async () => {
     ...review,
     nonBlockingFindings: [{ ...review.nonBlockingFindings[0], line: 1 }]
   }), "utf8");
+  const fallbackArtifact = bundle(root, "file-level-review-candidate");
+  run(
+    "node",
+    [cli, "validate-review", "--config", ".github/codekeeper.json", "--directory", directory, "--result", path.join(directory, "codex-result.json"), "--artifact", fallbackArtifact],
+    root,
+    { GITHUB_REPOSITORY: "acme/example" }
+  );
+  assert.equal(JSON.parse(await readFile(path.join(fallbackArtifact, "result.json"), "utf8")).nonBlockingFindings[0].line, null);
+
+  await writeFile(path.join(directory, "codex-result.json"), JSON.stringify({
+    ...review,
+    nonBlockingFindings: [{ ...review.nonBlockingFindings[0], file: "outside.md", line: null }]
+  }), "utf8");
   assert.throws(
     () => run(
       "node",
-      [cli, "validate-review", "--config", ".github/codekeeper.json", "--directory", directory, "--result", path.join(directory, "codex-result.json"), "--artifact", bundle(root, "invalid-review-candidate")],
+      [cli, "validate-review", "--config", ".github/codekeeper.json", "--directory", directory, "--result", path.join(directory, "codex-result.json"), "--artifact", bundle(root, "outside-diff-review-candidate")],
       root,
       { GITHUB_REPOSITORY: "acme/example" }
     ),

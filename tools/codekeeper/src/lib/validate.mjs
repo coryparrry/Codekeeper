@@ -188,7 +188,7 @@ function reviewResult(context, result) {
     if (finding.line !== null) {
       const ranges = changedHunks.get(finding.file) ?? [];
       if (!ranges.some(({ start, end }) => finding.line >= start && finding.line <= end)) {
-        throw new Error(`Review finding line is outside the changed hunk: ${finding.file}:${finding.line}`);
+        finding.line = null;
       }
     }
   }

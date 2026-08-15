@@ -36,6 +36,19 @@ BRAINTRUST_API_URL=https://api-eu.braintrust.dev npm run eval:braintrust -- --pr
 
 The synthetic adapter remains isolated under `evals/braintrust`. The verified tooling artifact also carries a minimal pinned adapter under `integrations/braintrust`; the review workflow installs it only when its trusted caller selects `trace_exporter=braintrust`. OpenAI remains the default for review and every other mode.
 
+For release-relevant response evaluation, repeat a complete GitHub review against one immutable pull-request head, retain each sealed result, and grade the runs with the answer key kept outside the adopter repository:
+
+```bash
+cd tools/codekeeper
+npm run eval:live-review -- \
+  --manifest /secure/local/answer-key.json \
+  --runs-directory /secure/local/runs \
+  --json-output /secure/local/report.json \
+  --markdown-output /secure/local/report.md
+```
+
+See [evaluating Codekeeper reviews](docs/EVALUATIONS.md) for fixture design, repeat strategy, artifact layout, metrics, Braintrust interpretation, and the boundary between an intentional blocking gate failure and an infrastructure failure.
+
 For an authorized OpenAI issue-triage release decision, run the same OpenAI matrix with one candidate at a time and select the first all-pass result deliberately. These commands are evaluation overrides only; they do not change the shipped policy:
 
 ```bash
