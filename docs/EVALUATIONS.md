@@ -129,6 +129,22 @@ The contrastive decision-quality case now requires a current, reproducible, pull
 
 This small three-run sample shows no latency regression from the classification change: the coordinator stayed inside the pre-calibration range and the workflow maximum was five seconds lower. It is not a performance benchmark. A separate optimization phase should measure the Luna workspace job first because it is both the longest stage and the largest source of run-to-run variance. Braintrust currently times only the final coordinator span, so GitHub job timing remains necessary for that analysis.
 
+## Braintrust reasoning-effort calibration
+
+The Braintrust playground `Codekeeper Luna reasoning calibration` replays one frozen four-defect coordinator input through three otherwise identical GPT-5.6 Luna tasks. Only `reasoning_effort` changes: `low`, `medium`, or `high`. Braintrust's playground does not currently expose Luna's `max` effort, so comparing `max` requires a code-based evaluation rather than this UI experiment.
+
+The custom TypeScript scorer `Codekeeper review contract` is deterministic. It assigns equal weight to eight contract checks: the review decision, exact blocking-file set, current high-confidence classification, severity mapping, finding titles, the low-severity defect remaining blocking, clean supporting fields, and the left-to-right diagram policy. The pass threshold is `1.0`. A diagram passes only when it is absent or begins with `graph LR` or `flowchart LR`; `TD` and `TB` fail. This avoids adding the latency, cost, and variance of an LLM judge to the model comparison.
+
+The first immutable experiment snapshot for each effort produced the following successful results. The first medium attempt returned a transient `502 Bad Gateway` before scoring; its failed experiment was retained, and the separately named medium retry below succeeded.
+
+| Effort | Contract score | Duration | LLM duration | Time to first token | Prompt tokens | Cached prompt tokens | Completion tokens | Reasoning tokens | Total tokens | Estimated cost |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Low | 100% | 5.12s | 4.86s | 0.737s | 2,752 | 2,749 | 856 | 49 | 3,608 | $0.001 |
+| Medium retry | 100% | 5.38s | 4.91s | 0.594s | 2,752 | 2,749 | 902 | 95 | 3,654 | $0.001 |
+| High | 100% | 14.47s | 14.02s | 3.17s | 2,752 | 2,749 | 899 | 92 | 3,651 | $0.001 |
+
+This is a calibration smoke test, not evidence that low is generally equivalent or that high is always slower. The mutable playground run also scored all three efforts at 100%, but its observed durations were 8.3, 5.4, and 6.3 seconds respectively. That variance, plus the transient gateway failure, means optimization decisions should use at least three immutable repeats per effort, run sequentially against the same dataset version. Compare correctness first, then error rate, latency percentiles, reasoning and total tokens, cache use, and cost. Keep GitHub workflow timing alongside Braintrust because this experiment covers the final coordinator only, not Luna's repository workspace analysis.
+
 ## Interpret Braintrust traces
 
 The Braintrust span captures the final coordinator input and response, including the authoritative Luna workspace result. It does not currently expose Luna's internal workspace tool-call spans. Use the trace to inspect evidence handoff, token use, latency, retries, and the structured final response; use the sealed artifact and GitHub run for end-to-end authority and publication evidence.
