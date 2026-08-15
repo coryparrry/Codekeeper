@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, "../../..");
 const workflowDirectory = path.join(repositoryRoot, ".github/workflows");
 const modes = ["review", "maintain", "issues", "fix"];
+const execFileAsync = promisify(execFile);
 const actionPins = {
   "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
   "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
@@ -39,6 +42,19 @@ function jobSection(source, name, nextName) {
   const next = nextName ? source.indexOf(`  ${nextName}:\n`, start + 1) : source.length;
   assert.notEqual(next, -1, `missing ${nextName} job after ${name}`);
   return source.slice(start, next);
+}
+
+function stepRunScript(source, stepName) {
+  const step = source.indexOf(`      - name: ${stepName}\n`);
+  assert.notEqual(step, -1, `missing ${stepName} step`);
+  const run = source.indexOf("        run: |\n", step);
+  assert.notEqual(run, -1, `missing ${stepName} run script`);
+  const next = source.indexOf("\n      - name:", run + 1);
+  return source
+    .slice(run + "        run: |\n".length, next === -1 ? source.length : next)
+    .split("\n")
+    .map((line) => line.length === 0 ? line : line.replace(/^ {10}/, ""))
+    .join("\n");
 }
 
 test("self-test runs for every tracked-file change", async () => {
@@ -475,6 +491,57 @@ test("review and issue-triage retain mandatory App credentials", async () => {
     assert.match(caller, /app_client_id: \$\{\{ vars\.CODEKEEPER_APP_CLIENT_ID \}\}/);
     assert.match(caller, /app_private_key: \$\{\{ secrets\.CODEKEEPER_APP_PRIVATE_KEY \}\}/);
   }
+});
+
+test("merged review gate executes the same fail-closed publication contract", async () => {
+  const script = stepRunScript(await workflow("review"), "Fail closed unless a current review was published");
+  const baseEnvironment = {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    ENABLED: "true",
+    AUTO_REVIEW: "true",
+    AUTO_REVIEW_FEEDBACK: "true",
+    IS_AUTOMATION_REPLY: "false",
+    IS_REVIEW_FEEDBACK: "false",
+    IS_COMMAND_REVIEW: "false",
+    IS_OWNER_COMMAND_REVIEW: "false",
+    IS_DRAFT: "false",
+    HEAD_REPOSITORY: "octo/example",
+    REPOSITORY: "octo/example",
+    BASE_REF: "main",
+    DEFAULT_BRANCH: "main",
+    ACTOR: "maintainer",
+    AUTOMATION_BOT_LOGIN: "codekeeper[bot]",
+    ANALYZE_RESULT: "success",
+    SEAL_RESULT: "success",
+    PUBLISH_RESULT: "success"
+  };
+  const runGate = (overrides = {}) => execFileAsync("bash", ["-c", script], {
+    env: { ...baseEnvironment, ...overrides },
+    maxBuffer: 16 * 1024
+  });
+
+  const passed = await runGate();
+  assert.equal(passed.stdout, "");
+
+  for (const overrides of [
+    { PUBLISH_RESULT: "skipped" },
+    { PUBLISH_RESULT: "failure" },
+    { ANALYZE_RESULT: "skipped" },
+    { SEAL_RESULT: "failure" }
+  ]) {
+    await assert.rejects(
+      () => runGate(overrides),
+      (error) => error.code === 1 && /Codekeeper did not publish a passing current review\./.test(error.stdout)
+    );
+  }
+
+  const ignoredAutomationReply = await runGate({
+    IS_AUTOMATION_REPLY: "true",
+    ANALYZE_RESULT: "skipped",
+    SEAL_RESULT: "skipped",
+    PUBLISH_RESULT: "skipped"
+  });
+  assert.match(ignoredAutomationReply.stdout, /Codekeeper-authored review feedback is intentionally ignored\./);
 });
 
 test("review uses a PR-native fail-closed gate instead of a reusable commit status", async () => {
