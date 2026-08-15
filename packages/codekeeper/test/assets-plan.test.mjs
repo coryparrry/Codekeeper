@@ -51,7 +51,7 @@ import {
 const EXPECTED_ASSETS = Object.freeze({
   "agents/fixer.md": "6770753275c0df9a6546cfe0453b82e6bae985819ddb57998eeb94b14c6ae38a",
   "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
-  "agents/pr-reviewer.md": "2432af8cca474962d50a764af894639716ad5ae1076bc60ae811d34e4e2a4a1f",
+  "agents/pr-reviewer.md": "c8fa4b31be4fad1b3535d24137853edee6ce875a06036f4f30b20e0fc9f20d51",
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
   "policies/mixed.json": "f27e4a9672f3f17973f0b9611c25a6eb4abe66aaac86dd12cd31fc28995c89f3",
   "policies/openai.json": "ff25fd252f894a1e90dea44650b730cd03dd534c1ce2e1df38aafb8a051c240f",
