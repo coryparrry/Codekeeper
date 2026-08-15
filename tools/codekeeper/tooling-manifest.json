@@ -11,7 +11,7 @@
     },
     {
       "path": "agents/pr-reviewer.md",
-      "sha256": "c8fa4b31be4fad1b3535d24137853edee6ce875a06036f4f30b20e0fc9f20d51"
+      "sha256": "edcb2d24d78c39290129ae8e80931eca067a0175568a6a72eb13e8c7c001af41"
     },
     {
       "path": "agents/repository-auditor.md",

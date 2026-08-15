@@ -2,13 +2,28 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import {
+  ROUTING_POLICY,
+  fuseExperimentRows,
+  mergeReviewOutputs,
+  shouldRouteSecondPass,
+  summarizeFusedRows,
+} from "./analyze-qodo-pr-review-optimization-v2.mjs";
 
 const SELECTION_URL = new URL(
   "./qodo-pr-review-selection-v1.json",
   import.meta.url,
 );
 const PROMPT_URL = new URL("./qodo-pr-review-prompt-v1.md", import.meta.url);
+const SYSTEMATIC_PROMPT_URL = new URL(
+  "./qodo-pr-review-prompt-v2.md",
+  import.meta.url,
+);
 const SCORER_URL = new URL("./qodo-pr-review-scorer-v1.ts", import.meta.url);
+const OPTIMIZATION_URL = new URL(
+  "./qodo-pr-review-optimization-v2.json",
+  import.meta.url,
+);
 
 async function scorer() {
   const source = await readFile(SCORER_URL, "utf8");
@@ -108,6 +123,107 @@ test("Qodo prompt fixes the evidence and output boundaries", async () => {
   assert.match(prompt, /Do not report pre-existing problems/);
   assert.match(prompt, /Return at most 15 findings/);
   assert.match(prompt, /one compact JSON object and no Markdown/);
+});
+
+test("systematic Medium prompt requires complete bounded review passes", async () => {
+  const prompt = await readFile(SYSTEMATIC_PROMPT_URL, "utf8");
+  assert.match(prompt, /Do not stop after the first obvious defect/);
+  assert.match(prompt, /Compile and contract/);
+  assert.match(prompt, /Control and data flow/);
+  assert.match(prompt, /Safety and lifecycle/);
+  assert.match(prompt, /Integration and platform behavior/);
+  assert.match(prompt, /every added or modified hunk/);
+  assert.match(prompt, /Return at most 15 findings/);
+});
+
+test("retained Medium optimization results preserve the experiment boundary", async () => {
+  const result = JSON.parse(await readFile(OPTIMIZATION_URL, "utf8"));
+  assert.equal(result.version, 2);
+  assert.equal(result.model, "gpt-5.6-luna");
+  assert.equal(result.reasoningEffort, "medium");
+  assert.equal(result.maxConcurrency, 1);
+  assert.equal(result.singlePass.runs.length, 2);
+  assert.ok(result.singlePass.runs.every((run) => run.errors === 0));
+  assert.equal(result.selectiveFusion.routedCases, 21);
+  assert.equal(result.selectiveFusion.mean.functionalRecall, 0.6028);
+  assert.match(result.selectiveFusion.status, /not a single Braintrust pipeline experiment/);
+  assert.match(result.proposedMaxEscalation.status, /Max requires a remote code-based Braintrust evaluation/);
+  assert.equal(result.proposedMaxEscalation.highIsNotAProxy, true);
+});
+
+test("selective Medium fusion routes large diffs and suppresses nearby duplicates", () => {
+  assert.equal(shouldRouteSecondPass({ changedFiles: 6, additions: 1, deletions: 1 }), true);
+  assert.equal(shouldRouteSecondPass({ changedFiles: 2, additions: 300, deletions: 100 }), true);
+  assert.equal(shouldRouteSecondPass({ changedFiles: 5, additions: 300, deletions: 99 }), false);
+  assert.deepEqual(ROUTING_POLICY, {
+    minimumChangedFiles: 6,
+    minimumChangedLines: 400,
+    duplicateLineDistance: 6,
+    maximumFindings: 15,
+  });
+
+  const primary = {
+    caseId: "qodo-test-1",
+    findings: [
+      { file: "src/a.ts", line: 20, title: "Primary defect" },
+      { file: "src/b.ts", line: 4, title: "Separate primary defect" },
+    ],
+  };
+  const secondary = {
+    caseId: "qodo-test-1",
+    findings: [
+      { file: "src/a.ts", line: 26, title: "Nearby duplicate" },
+      { file: "src/a.ts", line: 27, title: "Distinct defect" },
+      { file: "src/c.ts", line: 20, title: "Same line, different file" },
+    ],
+  };
+  assert.deepEqual(mergeReviewOutputs(primary, secondary).findings.map((finding) => finding.title), [
+    "Primary defect",
+    "Separate primary defect",
+    "Distinct defect",
+    "Same line, different file",
+  ]);
+});
+
+test("selective Medium fusion leaves small diffs on the primary pass", () => {
+  const primaryRows = [
+    {
+      input: { caseId: "small" },
+      output: { caseId: "small", findings: [] },
+      expected: { caseId: "small", issues: [] },
+      metadata: { changedFiles: 2, additions: 20, deletions: 10 },
+    },
+    {
+      input: { caseId: "large" },
+      output: { caseId: "large", findings: [] },
+      expected: { caseId: "large", issues: [] },
+      metadata: { changedFiles: 6, additions: 20, deletions: 10 },
+    },
+  ];
+  const secondaryRows = [
+    {
+      input: { caseId: "large" },
+      output: {
+        caseId: "large",
+        findings: [{ file: "src/a.ts", line: 1, title: "Found on second pass" }],
+      },
+      metrics: { llm_duration: 2, estimated_cost: 0.01 },
+    },
+  ];
+  const fused = fuseExperimentRows(primaryRows, secondaryRows);
+  assert.equal(fused[0].routed, false);
+  assert.deepEqual(fused[0].output.findings, []);
+  assert.equal(fused[1].routed, true);
+  assert.equal(fused[1].output.findings.length, 1);
+
+  const summary = summarizeFusedRows(fused, ({ output }) => [
+    { name: "finding count", score: output.findings.length },
+  ]);
+  assert.equal(summary.cases, 2);
+  assert.equal(summary.routedCases, 1);
+  assert.equal(summary.metrics["finding count"], 0.5);
+  assert.equal(summary.secondaryTotals.llmDuration, 2);
+  assert.equal(summary.secondaryTotals.estimatedCost, 0.01);
 });
 
 test("Qodo scorer emits perfect metrics for localized paraphrases", async () => {

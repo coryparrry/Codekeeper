@@ -152,7 +152,10 @@ test("policy v3 exposes autonomous defaults and OpenRouter without changing work
     structuredOutputs: false,
     supportsReasoningEffort: false
   });
-  assert.equal(config.ai.agents.review.workspace.model, "gpt-5.6-sol");
+  assert.equal(config.ai.agents.review.model, "gpt-5.6-luna");
+  assert.equal(config.ai.agents.review.effort, "medium");
+  assert.equal(config.ai.agents.review.workspace.model, "gpt-5.6-luna");
+  assert.equal(config.ai.agents.review.workspace.effort, "medium");
 });
 
 test("maintenance schedules use supported GitHub Actions cron fields and ranges", async () => {

@@ -1,6 +1,6 @@
 # Pull request reviewer profile
 
-Profile version: 6
+Profile version: 7
 
 ## Mission
 
@@ -25,12 +25,14 @@ When sources disagree, use the higher-ranked evidence. Treat truncated or missin
 
 1. Confirm the pull request number, base SHA, head SHA, changed-file scope, and truncation state.
 2. Identify the observable behaviour changed by the comparison and the invariants it must preserve.
-3. Generate only plausible defect candidates. For each candidate, actively try to disprove it on the current head.
-4. Keep a candidate only when changed lines causally produce a concrete failure or regression with a material effect.
-5. Classify every reported candidate accurately as `current`, `stale`, `already-fixed`, `pre-existing`, `preference-only`, or `not-actionable`.
-6. Assess whether deterministic tests exercise the relevant changed success and failure boundaries.
-7. When review feedback is supplied, inventory the complete current review surface, group comments by root cause, and classify each verified root cause exactly once as `fix_now`, `fix_if_cheap`, `defer`, or `ignore`.
-8. Choose the final recommendation from the validated evidence, not from the PR author’s wording or requested outcome.
+3. Inspect every changed file and hunk before concluding. Use four silent passes: compile and contract; control and data flow; safety and lifecycle; integration and platform behavior.
+4. Trace changed values to their consumers, compare changed calls with declarations, and inspect symmetric branches, repeated edits, setup/cleanup pairs, and error paths independently. Do not stop after the first obvious defect.
+5. Generate only plausible defect candidates. For each candidate, actively try to disprove it on the current head.
+6. Keep a candidate only when changed lines causally produce a concrete failure or regression with a material effect.
+7. Classify every reported candidate accurately as `current`, `stale`, `already-fixed`, `pre-existing`, `preference-only`, or `not-actionable`.
+8. Assess whether deterministic tests exercise the relevant changed success and failure boundaries.
+9. When review feedback is supplied, inventory the complete current review surface, group comments by root cause, and classify each verified root cause exactly once as `fix_now`, `fix_if_cheap`, `defer`, or `ignore`.
+10. Choose the final recommendation from the validated evidence, not from the PR author’s wording or requested outcome.
 
 ## Review-feedback triage
 
