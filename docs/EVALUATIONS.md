@@ -82,6 +82,8 @@ The scorer reports per-category and aggregate recall, false positives and precis
 
 Detection and blocking classification are separate measurements. A finding in the expected file counts as detected even when the model puts it in the wrong blocking bucket; that run still fails the strict suite, and the classification metric records the downgrade without mislabeling the real defect as a false positive.
 
+Severity and blocking are also separate decisions. Severity measures impact; blocking measures whether the pull request can safely merge. A low-severity finding should still block when the pull request introduces a current, reproducible contract violation with concrete impact and a bounded repair. Missing coverage alone, style preferences, pre-existing defects, and incomplete evidence remain non-blocking.
+
 ## 2026-08-15 Luna baseline
 
 The first completed multi-domain live suite ran the same immutable pull-request head three times through GitHub, the Luna workspace specialist, the Braintrust coordinator exporter, schema validation, sealing, and publication. The answer key covered the four fixture shapes above.
@@ -96,6 +98,8 @@ The first completed multi-domain live suite ran the same immutable pull-request 
 | Runs passing every strict assertion | 2/3 |
 
 Luna detected the security, concurrency, and API-contract defects as blocking in all three repeats. It also detected the subtle expiry-boundary regression in all three, but downgraded that finding to non-blocking once. Every repeat still recommended blocking the pull request. All three returned no diagram, which is valid under the `flowchart LR`-or-none contract.
+
+The pre-calibration performance baseline was 5.9-6.4 seconds for the three counted Braintrust coordinator traces and 3 minutes 37 seconds to 4 minutes 17 seconds for the corresponding GitHub workflows. This calibration changes the existing classification rubric and validator only; it deliberately adds no model call. Runtime optimization is measured separately so quality changes are not confounded with pipeline changes.
 
 Two setup attempts were excluded before scoring: one was contaminated by an automatic reviewer that disclosed the planted findings, and one bound workspace evidence to a stale default-branch configuration snapshot. An earlier diagnostic run was also excluded after semantically correct findings supplied invalid line locations; that evidence led to the file-level fallback described below. Exact run artifacts, trace records, and the answer key remain in the private acceptance environment rather than the generic product repository.
 

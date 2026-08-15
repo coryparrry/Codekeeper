@@ -437,7 +437,7 @@ test("trusted profiles reject missing files, symlinks, wrong-mode paths, and abb
 });
 
 test("each coordinator loads its versioned profile into the shared security instructions", async () => {
-  const versions = { review: 5, issue: 4, audit: 4, fix: 2 };
+  const versions = { review: 6, issue: 4, audit: 4, fix: 2 };
   const contracts = {
     review: [/Pull request reviewer profile/, /Evidence order/, /adequate deterministic tests/i],
     issue: [/Issue triager profile/, /Triage procedure/, /Duplicate rule/],

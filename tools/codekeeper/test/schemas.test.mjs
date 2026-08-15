@@ -139,6 +139,38 @@ test("review validator cannot promote a stale finding to the fixer", () => {
   }, config), /current validated finding/);
 });
 
+test("review validator allows a low-severity introduced contract failure to block", () => {
+  const result = validateReviewResult({
+    mode: "review",
+    summary: "The changed expiry boundary violates the documented cache contract.",
+    risk: "medium",
+    labels: ["bug"],
+    blockingFindings: [{
+      title: "Cache entry expires at its still-valid boundary",
+      explanation: "The changed comparison evicts the entry when now equals expiresAt.",
+      severity: "low",
+      confidence: "high",
+      classification: "current",
+      validation: "The current-head boundary test fails while the base comparison succeeds.",
+      preventionTest: "Keep an equality-boundary test that expects the cached value.",
+      file: "src/cache.mjs",
+      line: 1
+    }],
+    nonBlockingFindings: [],
+    tests: {
+      adequate: false,
+      notes: "The deterministic reproduction demonstrates the regression.",
+      missingTest: "Add an equality-boundary test that expects the cached value."
+    },
+    diagram: null,
+    mergeRecommendation: "block",
+    noActionReason: null
+  }, config);
+
+  assert.equal(result.blockingFindings[0].severity, "low");
+  assert.equal(result.mergeRecommendation, "block");
+});
+
 test("audit validator binds a requested repair to a finding", () => {
   const result = validateAuditResult(
     {

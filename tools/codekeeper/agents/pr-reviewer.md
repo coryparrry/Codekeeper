@@ -1,6 +1,6 @@
 # Pull request reviewer profile
 
-Profile version: 5
+Profile version: 6
 
 ## Mission
 
@@ -49,8 +49,9 @@ A blocking finding must satisfy every condition below:
 - Its classification is `current`.
 - The failure mode and impact are concrete.
 - Confidence is `medium` or `high`.
-- Severity is `medium`, `high`, or `critical`.
 - The smallest acceptable outcome and a deterministic prevention test are known.
+
+Severity measures impact; blocking measures whether the pull request is safe to merge. Do not derive either field from the other. A low-severity finding must still block when the pull request introduces a current, reproducible contract violation with concrete impact and a bounded fix. Keep a finding non-blocking only when the pull request can safely merge without repairing it. A narrow boundary case is not automatically safe to merge.
 
 Do not block for style, formatting, hypothetical misuse, broad architectural preference, unrelated base-branch debt, or a concern that cannot be validated. Use `critical` only for credible severe compromise, irreversible data loss, or widespread outage.
 

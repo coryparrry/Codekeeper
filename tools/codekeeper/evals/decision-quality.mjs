@@ -200,6 +200,35 @@ const SCENARIOS = Object.freeze([
     }
   }),
   Object.freeze({
+    name: "introduced-low-severity-contract-failure",
+    mode: "review",
+    context: {
+      evaluationScenario: "introduced-low-severity-contract-failure",
+      pullRequest: { number: 113, baseSha: "base113", headSha: "head113", changedFiles: ["src/cache.mjs"], diff: { truncated: false, text: "The cache expiry comparison changes from now > expiresAt to now >= expiresAt." } }
+    },
+    specialistResult: { evidence: "A deterministic equality-boundary test fails on the current head and succeeds on the base: the changed comparison evicts a value at the exact timestamp the documented contract still treats as valid. The effect is narrow and low impact, but it is an introduced, reproducible contract regression with a bounded one-line fix." },
+    fixture: {
+      mode: "review",
+      summary: "The PR evicts cache entries at a still-valid boundary.",
+      risk: "medium",
+      labels: ["bug"],
+      blockingFindings: [{ title: "Cache entry expires at its still-valid boundary", explanation: "The changed comparison evicts the entry when now equals expiresAt, violating the documented boundary contract.", severity: "low", confidence: "high", classification: "current", validation: "The current-head equality-boundary test fails while the base comparison succeeds.", preventionTest: "Keep an equality-boundary test that expects the cached value.", file: "src/cache.mjs", line: 1 }],
+      nonBlockingFindings: [],
+      tests: {
+        adequate: false,
+        notes: "The deterministic reproduction demonstrates the regression, but the pull request does not preserve the documented equality boundary.",
+        missingTest: "Add an equality-boundary test that expects the cached value."
+      },
+      mergeRecommendation: "block",
+      noActionReason: null
+    },
+    assert(output) {
+      assert(output.blockingFindings.length === 1, "an introduced deterministic contract failure must block even when its impact is low");
+      assert(output.blockingFindings[0].severity === "low", "narrow impact must remain low severity rather than being inflated to justify blocking");
+      assert(output.mergeRecommendation === "block", "an introduced contract failure requiring repair must block merge");
+    }
+  }),
+  Object.freeze({
     name: "protected-path-fix",
     mode: "fix",
     context: {
