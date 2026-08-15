@@ -97,7 +97,16 @@ function validateArtifactResult(mode, result, context, config) {
   throw new Error(`Unsupported artifact mode: ${mode}`);
 }
 
-async function loadArtifact(artifactDirectory, expectedMode, config, configSha256, expectedManifestSha256, agentProfilePath) {
+async function loadArtifact(
+  artifactDirectory,
+  expectedMode,
+  config,
+  configSha256,
+  expectedManifestSha256,
+  agentProfilePath,
+  agentProfileSource,
+  agentProfileSourceSha
+) {
   if (!/^[a-f0-9]{64}$/i.test(String(expectedManifestSha256 ?? ""))) {
     throw new Error("Publisher requires the trusted sealed manifest SHA-256");
   }
@@ -156,10 +165,17 @@ async function loadArtifact(artifactDirectory, expectedMode, config, configSha25
   }
   const liveProfile = await loadTrustedAgentProfile({
     mode: expectedMode,
+    source: agentProfileSource,
     sourcePath: agentProfilePath,
-    sourceSha: context.agentProfile?.sourceSha
+    sourceSha: agentProfileSourceSha ?? context.agentProfile?.sourceSha
   });
-  if (liveProfile.metadata.path !== context.agentProfile?.path || liveProfile.metadata.sha256 !== context.agentProfile?.sha256) {
+  const frozenSource = context.agentProfile?.source ?? "repository";
+  if (
+    liveProfile.metadata.source !== frozenSource ||
+    liveProfile.metadata.path !== context.agentProfile?.path ||
+    liveProfile.metadata.sourceSha !== context.agentProfile?.sourceSha ||
+    liveProfile.metadata.sha256 !== context.agentProfile?.sha256
+  ) {
     throw new Error("Agent profile changed after preparation; stale action will not publish");
   }
   if (manifest.patch?.valid) {
@@ -356,8 +372,8 @@ async function verifyAutoMergePostcondition({
   return verifiedDecision;
 }
 
-export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
-  const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256, agentProfilePath);
+export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource = agentProfilePath ? "repository" : "package", agentProfileSourceSha, token, dryRun = false }) {
+  const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource, agentProfileSourceSha);
   const github = new GitHubClient({ token, repository: context.repository });
   const pull = await github.beginPullMutation({
     repository: context.repository,
@@ -751,8 +767,8 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
   return published;
 }
 
-export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
-  const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256, agentProfilePath);
+export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource = agentProfilePath ? "repository" : "package", agentProfileSourceSha, token, dryRun = false }) {
+  const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource, agentProfileSourceSha);
   const github = new GitHubClient({ token, repository: context.repository });
   if (result.duplicateOf === context.issue.number) {
     throw new Error(`Issue #${context.issue.number} cannot be its own duplicate`);
@@ -1140,8 +1156,8 @@ async function publishPatchPullRequest({
     : { created: false, reason: "Existing repair PR", pullRequest: pull.number, url: pull.html_url };
 }
 
-export async function publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false }) {
-  const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", config, configSha256, expectedManifestSha256, agentProfilePath);
+export async function publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource = agentProfilePath ? "repository" : "package", agentProfileSourceSha, token, dryRun = false }) {
+  const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource, agentProfileSourceSha);
   if (typeof context.repairAuthorized !== "boolean") {
     throw new Error("Trusted audit artifact is missing explicit repair authorization");
   }
@@ -1195,8 +1211,8 @@ export async function publishAudit({ artifactDirectory, config, configSha256, ex
   return { findings, repair, dryRun };
 }
 
-export async function publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, token, dryRun = false, prRepairGit }) {
-  const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", config, configSha256, expectedManifestSha256, agentProfilePath);
+export async function publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource = agentProfilePath ? "repository" : "package", agentProfileSourceSha, token, dryRun = false, prRepairGit }) {
+  const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource, agentProfileSourceSha);
   const github = new GitHubClient({ token, repository: context.repository });
   if (context.target?.kind === "pull_request") {
     return publishPullRequestRepair({

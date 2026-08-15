@@ -89,9 +89,16 @@ function matches(pull) {
 }
 
 async function writeSealedArtifact(artifactDirectory, {
-  mode, context, result, configSha256, patch = null, validation = { checks: [] }, artifactConfig = config
+  mode,
+  context,
+  result,
+  configSha256,
+  patch = null,
+  validation = { checks: [] },
+  artifactConfig = config,
+  agentProfile: suppliedAgentProfile
 }) {
-  const agentProfile = profileBytes[mode];
+  const agentProfile = suppliedAgentProfile ?? profileBytes[mode];
   context.agentProfile ??= {
     path: AGENT_PROFILE_PATHS[mode],
     sha256: sha256(agentProfile),
@@ -2851,11 +2858,130 @@ test("publication rejects a changed trusted-default agent profile before GitHub 
       }),
       /Agent profile changed after preparation/
     );
+    await rm(liveProfile);
+    await assert.rejects(
+      publishIssueProduction({
+        artifactDirectory,
+        config,
+        configSha256,
+        ...integrity,
+        agentProfilePath: liveProfile,
+        agentProfileSource: "repository",
+        token: "token"
+      }),
+      /Trusted repository agent profile is missing/
+    );
     assert.equal(githubAccessed, false);
   } finally {
     restoreGitHub();
     await rm(artifactDirectory, { recursive: true, force: true });
     await rm(liveRoot, { recursive: true, force: true });
+  }
+});
+
+test("publication reloads the packaged default recorded during preparation", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-package-profile-artifact-"));
+  const configSha256 = "5".repeat(64);
+  const packagedProfile = await readFile(new URL("../agents/issue-triager.md", import.meta.url));
+  const sourceSha = "b".repeat(40);
+  const context = {
+    mode: "issue",
+    repository: "owner/repository",
+    configSha256,
+    runId: "7005",
+    runUrl: "https://github.com/owner/repository/actions/runs/7005",
+    issue: {
+      number: 7,
+      title: "Package profile",
+      updatedAt: "2026-08-05T10:00:00Z"
+    },
+    existingOpenIssues: [],
+    agentProfile: {
+      source: "package",
+      path: "runtime/agents/issue-triager.md",
+      sha256: sha256(packagedProfile),
+      sourceSha
+    }
+  };
+  const result = {
+    mode: "issue",
+    summary: "Ready for triage.",
+    type: "bug",
+    priority: "p3",
+    labels: [],
+    actionable: true,
+    missingInformation: [],
+    duplicateOf: null,
+    duplicateConfidence: "none",
+    implementationRecommendation: "manual",
+    decision: { required: false, question: "", rationale: "", options: [] },
+    comment: "Thanks."
+  };
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  const restoreGitHub = replaceGitHubMethods({
+    async beginIssueMutation() {
+      return { ...context.issue, body: "", labels: [] };
+    }
+  });
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, {
+      mode: "issue",
+      context,
+      result,
+      configSha256,
+      agentProfile: packagedProfile
+    });
+    await assert.rejects(
+      publishIssueProduction({
+        artifactDirectory,
+        config,
+        configSha256,
+        ...integrity,
+        agentProfileSource: "repository",
+        agentProfilePath: profilePaths.issue,
+        token: "unused",
+        dryRun: true
+      }),
+      /Agent profile changed after preparation/
+    );
+    await assert.rejects(
+      publishIssueProduction({
+        artifactDirectory,
+        config,
+        configSha256,
+        ...integrity,
+        agentProfileSource: "package",
+        agentProfileSourceSha: "c".repeat(40),
+        token: "unused",
+        dryRun: true
+      }),
+      /Agent profile changed after preparation/
+    );
+    const published = await publishIssueProduction({
+      artifactDirectory,
+      config,
+      configSha256,
+      ...integrity,
+      agentProfileSource: "package",
+      agentProfileSourceSha: sourceSha,
+      token: "unused",
+      dryRun: true
+    });
+    assert.deepEqual(published, {
+      issue: 7,
+      desiredLabels: ["bug", "priority p3"],
+      dryRun: true
+    });
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
   }
 });
 

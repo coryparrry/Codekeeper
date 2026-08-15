@@ -21,7 +21,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "3ea363282a1af5a35297acfe9b239529d4735603768a65c8e5c63c7a70d7d356";
+const toolingManifestSha256 = "38fde9462721af299d2be084460cdccccf326c9ac315b943c9c3097340a465f7";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -313,6 +313,20 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(workspace, /run-workspace-agent/);
     assert.match(workspace, /--result "\$BUNDLE\/workspace-result\.json"/);
     assert.match(workspace, /outputs:\n\s+context_sha256: \$\{\{ steps\.prepare\.outputs\.context_sha256 \}\}/);
+    for (const preparation of [workspace, analyze]) {
+      assert.match(
+        preparation,
+        /PROFILE_ARGS=\(--agent-profile-source package --agent-profile-source-sha "\$CODEKEEPER_TOOLING_SHA"\)/
+      );
+      assert.match(preparation, /\[\[ -L "\$AGENT_PROFILE" \]\]/);
+      assert.match(preparation, /\[\[ -e "\$AGENT_PROFILE" \]\]/);
+      assert.match(preparation, /\[\[ -f "\$AGENT_PROFILE" \]\]/);
+      assert.match(
+        preparation,
+        /--agent-profile-source repository[\s\S]*--agent-profile "\$AGENT_PROFILE"[\s\S]*--agent-profile-source-sha/
+      );
+      assert.match(preparation, /"\$\{PROFILE_ARGS\[@\]\}"/);
+    }
     if (repairMode) {
       assert.match(workspace, /capture-workspace-patch/);
       assert.match(workspace, /workspace\.patch/);
@@ -387,7 +401,19 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
       assert.match(publish, /CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/);
     }
     assert.match(publish, /--config "\$CONFIG"/);
-    assert.match(publish, /--agent-profile "\$AGENT_PROFILE"/);
+    assert.match(publish, /CODEKEEPER_TOOLING_SHA: \$\{\{ job\.workflow_sha \}\}/);
+    assert.match(
+      publish,
+      /PROFILE_ARGS=\(--agent-profile-source package --agent-profile-source-sha "\$CODEKEEPER_TOOLING_SHA"\)/
+    );
+    assert.match(publish, /\[\[ -L "\$AGENT_PROFILE" \]\]/);
+    assert.match(publish, /\[\[ -e "\$AGENT_PROFILE" \]\]/);
+    assert.match(publish, /\[\[ -f "\$AGENT_PROFILE" \]\]/);
+    assert.match(
+      publish,
+      /PROFILE_ARGS=\(--agent-profile-source repository --agent-profile "\$AGENT_PROFILE"\)/
+    );
+    assert.match(publish, /"\$\{PROFILE_ARGS\[@\]\}"/);
     assert.match(publish, /--expected-manifest-sha "\$MANIFEST_SHA256"/);
     assert.doesNotMatch(publish, /openai\/codex-action@|validate-|seal-/);
   }

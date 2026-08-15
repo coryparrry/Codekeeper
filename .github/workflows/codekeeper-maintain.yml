@@ -43,7 +43,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 3ea363282a1af5a35297acfe9b239529d4735603768a65c8e5c63c7a70d7d356
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 38fde9462721af299d2be084460cdccccf326c9ac315b943c9c3097340a465f7
 
 concurrency:
   group: codekeeper-maintenance-${{ github.repository }}
@@ -121,12 +121,22 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
-          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
+          PROFILE_ARGS=(--agent-profile-source package --agent-profile-source-sha "$CODEKEEPER_TOOLING_SHA")
+          if [[ -L "$AGENT_PROFILE" ]]; then
+            echo "Repository agent profile must not be a symlink"
+            exit 1
+          elif [[ -e "$AGENT_PROFILE" ]]; then
+            [[ -f "$AGENT_PROFILE" ]] || { echo "Repository agent profile must be a regular file"; exit 1; }
+            PROFILE_ARGS=(
+              --agent-profile-source repository
+              --agent-profile "$AGENT_PROFILE"
+              --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
+            )
+          fi
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-audit \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
-            --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
+            "${PROFILE_ARGS[@]}" \
             --actor "$GITHUB_ACTOR" \
             --repair-authorized "$REPAIR_AUTHORIZED" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
@@ -324,12 +334,22 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
-          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
+          PROFILE_ARGS=(--agent-profile-source package --agent-profile-source-sha "$CODEKEEPER_TOOLING_SHA")
+          if [[ -L "$AGENT_PROFILE" ]]; then
+            echo "Repository agent profile must not be a symlink"
+            exit 1
+          elif [[ -e "$AGENT_PROFILE" ]]; then
+            [[ -f "$AGENT_PROFILE" ]] || { echo "Repository agent profile must be a regular file"; exit 1; }
+            PROFILE_ARGS=(
+              --agent-profile-source repository
+              --agent-profile "$AGENT_PROFILE"
+              --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
+            )
+          fi
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-audit \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
-            --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
+            "${PROFILE_ARGS[@]}" \
             --actor "$GITHUB_ACTOR" \
             --repair-authorized "$REPAIR_AUTHORIZED" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
@@ -623,6 +643,7 @@ jobs:
       - name: Publish sealed maintenance output
         working-directory: repository
         env:
+          CODEKEEPER_TOOLING_SHA: ${{ job.workflow_sha }}
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -630,8 +651,16 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/repository-auditor.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
+          PROFILE_ARGS=(--agent-profile-source package --agent-profile-source-sha "$CODEKEEPER_TOOLING_SHA")
+          if [[ -L "$AGENT_PROFILE" ]]; then
+            echo "Repository agent profile must not be a symlink"
+            exit 1
+          elif [[ -e "$AGENT_PROFILE" ]]; then
+            [[ -f "$AGENT_PROFILE" ]] || { echo "Repository agent profile must be a regular file"; exit 1; }
+            PROFILE_ARGS=(--agent-profile-source repository --agent-profile "$AGENT_PROFILE")
+          fi
           node ../tooling/tools/codekeeper/src/cli.mjs publish-audit \
             --config "$CONFIG" \
-            --agent-profile "$AGENT_PROFILE" \
+            "${PROFILE_ARGS[@]}" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"

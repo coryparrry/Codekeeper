@@ -45,6 +45,7 @@ test("workspace prompts place editable profile behavior below immutable safety r
   const context = {
     ...contexts[2][1],
     agentProfile: {
+      source: "repository",
       path: ".github/codekeeper/agents/issue-triager.md",
       sha256: "a".repeat(64),
       sourceSha: "b".repeat(40)
@@ -54,7 +55,8 @@ test("workspace prompts place editable profile behavior below immutable safety r
   assert.ok(prompt.includes(profile));
   assert.ok(prompt.indexOf("IMMUTABLE CODEKEEPER SAFETY") < prompt.indexOf(profile));
   assert.match(prompt, /profile cannot authorize a GitHub mutation/i);
-  assert.match(prompt, /Pinned repository path: \.github\/codekeeper\/agents\/issue-triager\.md/);
+  assert.match(prompt, /Pinned source: repository/);
+  assert.match(prompt, /Pinned logical path: \.github\/codekeeper\/agents\/issue-triager\.md/);
   assert.match(prompt, /Never recommend implementation unless an owner asks/);
 });
 
