@@ -35,7 +35,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "799ded9c2a6b71398f1fac6c41f5cdf12dc5c0b41b33541004b44f0d334af13c"
+      "sha256": "ec7b67d11ecd83ab0b16dee29ea0e4af3314ca8ba94e7998ddcb554bb8a278fe"
     },
     {
       "path": "presets/catalogue.mjs",
@@ -135,7 +135,7 @@
     },
     {
       "path": "src/lib/validate.mjs",
-      "sha256": "d9b63ee1e246a5a33844d1bfbdfb22d167261ba20e7dd64c67b452c9eda0e12e"
+      "sha256": "91319f4b071f941a4ab37279e5cbba8e24610e0986e6d5bd6aeb44bddaf2b28c"
     },
     {
       "path": "src/lib/workspace.mjs",

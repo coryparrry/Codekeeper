@@ -100,7 +100,7 @@ node tools/codekeeper/src/cli.mjs check-config
 cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
 
-The package pins its Agents SDK dependencies and requires Node.js 22 or newer locally. The reusable workflows pin Node.js, npm dependencies, and the optional Codex CLI themselves.
+The package pins its Agents SDK dependencies and requires Node.js 22 or newer locally. The reusable workflows pin Node.js, npm dependencies, and the optional Codex CLI themselves. See [evaluating Codekeeper reviews](docs/EVALUATIONS.md) for synthetic gates, Braintrust traces, repeated live GitHub runs, answer-key isolation, and aggregate scoring.
 
 ## Source releases
 
