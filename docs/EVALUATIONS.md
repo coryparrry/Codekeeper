@@ -221,7 +221,10 @@ The versioned local artifacts are:
 - `tools/codekeeper/evals/braintrust/qodo-pr-review-selection-v1.json` — pinned source provenance and the exact 30-case selection.
 - `tools/codekeeper/evals/braintrust/prepare-qodo-pr-review-bench-v1.mjs` — checksum-verifying dataset generator.
 - `tools/codekeeper/evals/braintrust/qodo-pr-review-prompt-v1.md` — the shared diff-only review prompt.
+- `tools/codekeeper/evals/braintrust/qodo-pr-review-prompt-v2.md` — the retained systematic Medium prompt.
 - `tools/codekeeper/evals/braintrust/qodo-pr-review-scorer-v1.ts` — deterministic localization and semantic-overlap scorer.
+- `tools/codekeeper/evals/braintrust/analyze-qodo-pr-review-optimization-v2.mjs` — deterministic routing, duplicate suppression, and fused-export analysis.
+- `tools/codekeeper/evals/braintrust/qodo-pr-review-optimization-v2.json` — immutable experiment links, measurements, and pipeline status.
 - `tools/codekeeper/evals/braintrust/qodo-pr-review-calibration.test.mjs` — selection, prompt, and scorer contract tests.
 
 ### What the scores mean
@@ -254,18 +257,38 @@ The links below point to immutable Braintrust experiments. Duration and token va
 | Medium | [`medium isolated r1`](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/experiments/Codekeeper%20Qodo%20PR%20review%20medium%20isolated%20r1)           | 41.92% |            55.00% |        38.19% |         29.89% |    81.03% |            0 |             0 |      636.06s |          21.20s |            65,537 |           60,381 | $0.083 |
 | High   | [`high isolated r1 retry`](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/experiments/Codekeeper%20Qodo%20PR%20review%20high%20isolated%20r1%20retry) | 43.38% |            58.33% |        40.61% |         31.93% |    82.28% |            0 |   2, rescored |    2,069.10s |          68.97s |           272,898 |          267,742 | $0.332 |
 
-Medium is the selected Luna reasoning level for PR review. Relative to Low, it gains 5.56 percentage points of functional recall and 3.16 points of F1 while remaining above 81% precision, at 2.23 times the mean model latency. High gains only another 3.33 points of functional recall and 1.46 points of F1, but takes 3.25 times as long as Medium and costs 3.98 times as much. This selection does not replace the current production review model: the repository's shipped OpenAI policy still uses GPT-5.6 Sol at high effort, and Luna must beat that incumbent in live workflow acceptance before a product-default change.
+Medium is the selected Luna reasoning level for PR review. Relative to Low, it gains 5.56 percentage points of functional recall and 3.16 points of F1 while remaining above 81% precision, at 2.23 times the mean model latency. High gains only another 3.33 points of functional recall and 1.46 points of F1, but takes 3.25 times as long as Medium and costs 3.98 times as much. The repository and starter review policies now select GPT-5.6 Luna at Medium effort for both the review coordinator and read-only workspace specialist; other flows retain their existing assignments.
 
-### Improving recall without accepting High's latency
+### Medium optimization result
 
-The 55% functional recall is not a sufficient quality ceiling. The first improvement loop should keep Medium and change evidence and review strategy rather than spending more reasoning on the same diff-only prompt:
+The first improvement loop kept the model, effort, dataset, scorer, 8,192-token ceiling, and sequential execution fixed. It changed only the review strategy. The retained `v2` prompt requires four silent passes over every changed file and hunk: compile/contract, control/data flow, safety/lifecycle, and integration/platform behavior. A more elaborate semantic-delta `v3` prompt was worse and is retained as a rejected experiment rather than hidden.
 
-1. **Adjudicate misses before prompt tuning.** Medium scored zero functional recall on `qodo-dify-6`, `qodo-prefect-10`, and `qodo-tauri-5`. Dify returned no findings, which is a clear model miss. Prefect and Tauri returned plausible findings that did not match the answer key, so those rows need manual classification as a model miss, an answer-key omission, or an overly strict localization match.
-2. **Add bounded repository context.** Supply the changed symbols' callers, tests, types, configuration rules, and relevant implementation before asking for findings. The current task exposes only the unified diff, which hides many cross-file contracts represented in the answer key.
-3. **Use selective Medium passes.** Run one complete change-surface pass, then route only high-risk or weakly covered hunks through focused authorization, concurrency/resource-lifecycle, data-contract, and platform-behavior checks. Deduplicate and validate file/line evidence deterministically afterward. This spends extra latency where the first pass is most likely to miss a defect instead of applying High reasoning to every file.
-4. **Measure the pipeline, not only the final answer.** Record recall gained by each evidence source and specialist pass, plus p50/p95 latency, tokens, scorer errors, and false-positive adjudication. Retain clean pull requests so improved recall does not come from reporting more speculative findings.
+| Medium prompt | Run | Functional recall | F1 | Precision | Impact recall | LLM duration | Mean model time | Errors |
+| ------------- | --- | ----------------: | -: | --------: | ------------: | -----------: | --------------: | -----: |
+| Baseline | `isolated r1` | 55.00% | 41.92% | 81.03% | 38.19% | 636.06s | 21.20s | 0 |
+| Systematic `v2` | [`r1`](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/experiments/Codekeeper%20Luna%20Medium%20systematic%20v2%20r1) | 56.67% | 43.53% | 77.14% | 40.07% | 626.47s | 20.88s | 0 |
+| Systematic `v2` | [`r2`](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/experiments/Codekeeper%20Luna%20Medium%20systematic%20v2%20r2) | 56.11% | 43.64% | 78.25% | 40.67% | 684.20s | 22.81s | 0 |
+| Semantic delta `v3` | [`r1`, rejected](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/experiments/Codekeeper%20Luna%20Medium%20semantic%20delta%20v3%20r1) | 50.56% | 39.95% | 78.61% | 36.19% | 632.86s | 21.10s | 0 |
 
-The next Braintrust iteration should compare the current Medium prompt with one context-enriched Medium variant and one selectively routed Medium variant. Run them sequentially against the same immutable dataset and preserve each experiment, including unsuccessful variants. Do not optimize the scorer to reward the model; change it only when manual adjudication proves that a valid finding was undercounted.
+The systematic prompt's mean functional recall is 56.39%, 1.39 points above the baseline; mean F1 is 43.59%, 1.67 points higher. Precision falls by 3.34 points to 77.70%. This is a repeatable improvement, but not a large enough gain by itself.
+
+Manual miss inspection also found that the benchmark is not a perfect product-quality oracle. Some zero-scored outputs reported plausible defects absent from the answer key, some correct root causes were anchored more than the scorer's three-line tolerance from a label, and `qodo-dify-6` contains overlapping or questionable rule labels. Those rows remain scored exactly as published. The scorer was not loosened to reward the model.
+
+### Selective two-pass result
+
+The strongest measured configuration keeps the baseline Medium pass for all 30 cases and routes a second systematic Medium pass only when `changedFiles >= 6` or `additions + deletions >= 400`. This selects 21 cases. Fusion retains the primary finding when both passes report the same file within six lines and adds only distinct secondary findings, capped at the existing 15-finding contract.
+
+| Secondary run | Functional recall | F1 | Precision | Impact recall | Sequential model time | Mean per case |
+| ------------- | ----------------: | -: | --------: | ------------: | --------------------: | ------------: |
+| Systematic `v2 r1` | 60.00% | 44.47% | 79.37% | 41.76% | 1,080.61s | 36.02s |
+| Systematic `v2 r2` | 60.56% | 45.64% | 83.81% | 42.40% | 1,115.13s | 37.17s |
+| Two-run mean | 60.28% | 45.06% | 81.59% | 42.08% | — | 36.60s |
+
+The best fused run exceeds High by 2.23 points of functional recall and 2.26 points of F1 while also exceeding High precision by 1.53 points. Its 37.17-second mean model time is 46.1% lower than High's 68.97 seconds. With the cached `v2 r2` export, baseline plus routed second-pass cost is `$0.150`; this is 54.7% below High's `$0.332`.
+
+This fusion is an offline deterministic analysis of separate immutable Braintrust exports, not a single Braintrust multi-call experiment and not yet a production two-pass runtime. The checked-in analyzer reproduces it from the exported baseline, secondary, and scorer files. Production adopts the measured single-pass improvements now: Luna Medium plus the complete change-surface procedure. Shipping selective second-pass orchestration requires a separately validated runtime change so benchmark fusion is not mistaken for end-to-end GitHub evidence.
+
+The intended escalation tier is Max rather than High. It should be reserved for security or authorization boundaries, high-risk concurrency/lifecycle/migration/data paths, and exceptionally large or concentrated diffs; only the implicated files or hunks should be escalated. The current Braintrust playground exposes Luna reasoning only through High, so Max cannot be selected in this UI and High is not treated as its proxy. The Max tier remains unscored and unshipped until a remote code-based Braintrust experiment validates its recall, precision, latency, and cost.
 
 ## Interpret Braintrust traces
 
