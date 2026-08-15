@@ -141,6 +141,9 @@ test("reusable workflows consume only a source-manifest-bound bootstrap cache", 
     const source = await workflow(mode);
     assert.equal([...source.matchAll(/name: Restore bootstrap Codekeeper tooling cache/g)].length, count);
     assert.equal([...source.matchAll(/uses: actions\/cache\/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7/g)].length, count);
+    assert.equal([...source.matchAll(/continue-on-error: true/g)].length, count);
+    assert.equal([...source.matchAll(/name: Discard failed bootstrap cache restore/g)].length, count);
+    assert.equal([...source.matchAll(/steps\.tooling-cache\.outcome != 'success' \|\| steps\.tooling-cache\.outputs\.cache-hit != 'true'/g)].length, count);
     assert.equal([...source.matchAll(/name: Download legacy bootstrap Codekeeper tooling artifact/g)].length, count);
     assert.equal([...source.matchAll(/name: Verify bootstrap Codekeeper tooling against pinned manifest/g)].length, count);
     assert.equal([...source.matchAll(/name: Check out frozen maintainer tooling/g)].length, 0);
@@ -167,7 +170,7 @@ test("reusable workflows consume only a source-manifest-bound bootstrap cache", 
     assert.deepEqual(
       legacyArtifactNames,
       Array(count).fill(bootstrapToolingArtifactName),
-      `${mode} must retain the run-scoped artifact fallback until the cache callers are published`
+      `${mode} must retain the run-scoped artifact fallback when cache restore is unavailable`
     );
     const workspaceArtifactName = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-workspace-\${{ github.run_id }}`;
     const workspaceArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-workspace-[^\n]+)$/gm)]
@@ -221,7 +224,7 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
   }
 });
 
-test("private-action bootstrap keeps an exact artifact fallback for every cache miss", async () => {
+test("private-action bootstrap automatically caches exact tooling and always keeps an artifact fallback", async () => {
   const action = await repositoryFile("tools/codekeeper/action.yml");
   assert.match(action, /using: composite/);
   assert.match(action, /ACTION_PATH: \$\{\{ github\.action_path \}\}/);
@@ -236,15 +239,18 @@ test("private-action bootstrap keeps an exact artifact fallback for every cache 
   assert.match(action, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
   assert.match(action, /description: Exact run-scoped fallback artifact name derived from github\.run_id\./);
   assert.match(action, /artifact-name:\n\s+description:[^\n]+\n\s+required: true/);
-  assert.match(action, /description: Immutable cache key containing the pinned production tooling manifest digest\./);
   assert.match(action, /Codekeeper tooling bootstrap requires an artifact fallback/);
-  assert.match(action, /EXPECTED_MANIFEST_SHA256: \$\{\{ inputs\.manifest-sha256 \}\}/);
-  assert.match(action, /EXPECTED_CACHE_KEY: \$\{\{ inputs\.cache-key \}\}/);
+  assert.match(action, /cache-key=codekeeper-tooling-\$RUNNER_OS_NAME-\$source_manifest_sha256/);
+  assert.match(action, /EXPECTED_MANIFEST_SHA256: \$\{\{ steps\.transport\.outputs\.manifest-sha256 \}\}/);
+  assert.match(action, /EXPECTED_CACHE_KEY: \$\{\{ steps\.transport\.outputs\.cache-key \}\}/);
   assert.match(action, /codekeeper-tooling-\$RUNNER_OS_NAME-\$source_manifest_sha256/);
   assert.match(action, /cmp "\$ACTION_PATH\/tooling-manifest\.json" "\$TOOLING_ROOT\/tooling-manifest\.json"/);
+  assert.equal([...action.matchAll(/continue-on-error: true/g)].length, 2);
+  assert.match(action, /name: Discard failed tooling cache restore\n\s+if: steps\.tooling-cache\.outcome != 'success'/);
+  assert.match(action, /name: Stage pinned production tooling\n\s+if: steps\.tooling-cache\.outcome != 'success' \|\| steps\.tooling-cache\.outputs\.cache-hit != 'true'/);
   assert.match(action, /if: steps\.transport\.outputs\.mode == 'cache' && steps\.transport\.outputs\.cache-write == 'true' && steps\.tooling-cache\.outputs\.cache-hit != 'true'/);
-  assert.match(action, /name: Prepare pinned production tooling artifact fallback\n\s+if: steps\.transport\.outputs\.mode == 'cache' && steps\.tooling-cache\.outputs\.cache-hit != 'true'/);
-  assert.match(action, /if: steps\.transport\.outputs\.mode == 'artifact' \|\| steps\.tooling-cache\.outputs\.cache-hit != 'true'/);
+  assert.match(action, /name: Prepare pinned production tooling artifact fallback\n\s+shell: bash/);
+  assert.match(action, /name: Upload pinned production tooling artifact fallback\n\s+uses: actions\/upload-artifact/);
   assert.match(action, /name: \$\{\{ inputs\.artifact-name \}\}\n\s+path: \$\{\{ steps\.transport\.outputs\.artifact-root \}\}/);
   assert.match(action, /RUNNER_TEMP_ROOT: \$\{\{ runner\.temp \}\}/);
   assert.doesNotMatch(action, /secrets\.|GITHUB_TOKEN|GH_TOKEN|actions\/checkout/);

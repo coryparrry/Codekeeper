@@ -149,7 +149,7 @@ test("composite staging script accepts a clean action path and rejects hidden or
   );
 });
 
-test("composite transport always retains a run artifact and writes caches only from trusted events", async (context) => {
+test("composite transport derives an exact cache while retaining a run artifact", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-composite-transport-test-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const workspace = path.join(root, "workspace");
@@ -157,51 +157,39 @@ test("composite transport always retains a run artifact and writes caches only f
   await mkdir(workspace);
   await mkdir(runnerTemp);
 
-  const select = async ({ artifactName = "", cacheKey = "", manifestSha256 = "", eventName = "pull_request_target" }) => {
+  const select = async ({ artifactName = "", eventName = "pull_request_target" }) => {
     const output = path.join(root, `output-${randomUUID()}`);
     await writeFile(output, "", "utf8");
     await runActionStep("Select bootstrap transport", {
+      ACTION_PATH: packageRoot,
       ARTIFACT_NAME: artifactName,
-      CACHE_KEY: cacheKey,
       EVENT_NAME: eventName,
       GITHUB_OUTPUT: output,
       GITHUB_WORKSPACE_ROOT: workspace,
-      MANIFEST_SHA256: manifestSha256,
+      RUNNER_OS_NAME: "Linux",
       RUNNER_TEMP_ROOT: runnerTemp
     });
     return actionOutputs(await readFile(output, "utf8"));
   };
 
-  const artifact = await select({ artifactName: "codekeeper-tooling-1" });
-  assert.equal(artifact.mode, "artifact");
-  assert.equal(artifact.destination, path.join(runnerTemp, "codekeeper-tooling"));
-  assert.equal(artifact["artifact-root"], path.join(runnerTemp, "codekeeper-tooling"));
-
-  const lowTrustCache = await select({
-    artifactName: "codekeeper-tooling-2",
-    cacheKey: "codekeeper-tooling-Linux-digest",
-    manifestSha256: "digest"
-  });
+  const manifestSha256 = await expectedManifestSha256();
+  const lowTrustCache = await select({ artifactName: "codekeeper-tooling-1" });
   assert.equal(lowTrustCache.mode, "cache");
   assert.equal(lowTrustCache["cache-write"], "false");
+  assert.equal(lowTrustCache["cache-key"], `codekeeper-tooling-Linux-${manifestSha256}`);
+  assert.equal(lowTrustCache["manifest-sha256"], manifestSha256);
   assert.equal(lowTrustCache.destination, path.join(workspace, "tooling"));
   assert.equal(lowTrustCache["artifact-root"], path.join(runnerTemp, "codekeeper-tooling"));
 
   const trustedCache = await select({
-    artifactName: "codekeeper-tooling-3",
-    cacheKey: "codekeeper-tooling-Linux-digest",
-    manifestSha256: "digest",
+    artifactName: "codekeeper-tooling-2",
     eventName: "workflow_dispatch"
   });
   assert.equal(trustedCache["cache-write"], "true");
 
   await assert.rejects(
-    () => select({ cacheKey: "codekeeper-tooling-Linux-digest", manifestSha256: "digest" }),
+    () => select({}),
     /requires an artifact fallback/
-  );
-  await assert.rejects(
-    () => select({ artifactName: "codekeeper-tooling-4", cacheKey: "codekeeper-tooling-Linux-digest" }),
-    /requires both cache-key and manifest-sha256/
   );
 });
 
@@ -230,7 +218,7 @@ test("composite cache verification binds the exact key and manifest before reuse
   );
 });
 
-test("cache misses create the same artifact layout consumed by legacy jobs", async (context) => {
+test("every bootstrap creates the same artifact layout used when cache restore fails", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-cache-fallback-test-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const workspace = path.join(root, "workspace");
