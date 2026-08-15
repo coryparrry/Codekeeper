@@ -475,6 +475,7 @@ test("real Git integration reruns can change configuration and remove a workflow
   assert.match(commit, /^[0-9a-f]{40}$/);
   assert.equal(git(root, ["branch", "--show-current"]).trim(), `codekeeper/update-${installedHead.slice(0, 12)}`);
   assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [
+    ".github/codekeeper-release.json",
     ".github/codekeeper.json",
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-maintain.yml"

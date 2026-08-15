@@ -446,6 +446,7 @@ function reviewData(plan) {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
     preset: `${plan.preset} starting models`,
+    release: `Codekeeper ${plan.packageVersion} · ${plan.source.repository}@${plan.source.commit}`,
     workflows: workflowMap(plan.modes).map((item) => `${item.label} — ${item.trigger}`),
     models: modelAssignments(plan.modes).map(({ key, label, workflow }) => {
       const selection = plan.models[key];
@@ -562,6 +563,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       h(Text, null, data.repository),
       h(Text, { dimColor: true }, data.identity),
       h(Text, { dimColor: true }, data.preset),
+      h(Text, { dimColor: true }, data.release),
       section("Workflows", data.workflows),
       section("Models (editable in .github/codekeeper.json)", data.models)
     ) : null,
@@ -590,6 +592,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       h(Text, null, data.repository),
       h(Text, { dimColor: true }, data.identity),
       h(Text, { dimColor: true }, data.preset),
+      h(Text, { dimColor: true }, data.release),
       section("Workflows", data.workflows, 0)
     ) : null,
     pagedDetail && pageKind === "models" ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
@@ -669,7 +672,7 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       Box,
       { flexDirection: "column" },
       ...completedSteps.map((step) => h(Text, { key: step.id, dimColor: true }, `✓ ${step.label}`)),
-      compact ? null : h(Text, { dimColor: true }, `Source: ${spec.plan.source.repository}@${spec.plan.source.commit}`),
+      compact ? null : h(Text, { dimColor: true }, `Release: Codekeeper ${spec.plan.packageVersion} · ${spec.plan.source.repository}@${spec.plan.source.commit}`),
       h(Text, { dimColor: true }, spec.plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge."),
       compact ? null : h(Text, { dimColor: true }, `OpenAI traces: ${spec.plan.tracing ? "enabled" : "disabled"}.`),
       !compact && guidance.reviewGateWarning ? h(Text, { dimColor: true }, guidance.reviewGateWarning) : null,

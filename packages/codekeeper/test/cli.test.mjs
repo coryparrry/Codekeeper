@@ -62,9 +62,50 @@ test("CLI accepts only the documented commands", () => {
   assert.deepEqual(parseCliArgs(["--version"]), { command: "version" });
   assert.deepEqual(parseCliArgs(["init"]), { command: "init" });
   assert.deepEqual(parseCliArgs(["update"]), { command: "update" });
+  assert.deepEqual(parseCliArgs(["update", "--current-package"]), { command: "update", currentPackage: true });
   assert.throws(() => parseCliArgs(["init", "--force"]), (error) => error.code === "CLI_USAGE");
   assert.throws(() => parseCliArgs(["verify"]), (error) => error.code === "CLI_USAGE");
   assert.throws(() => parseCliArgs("init"), TypeError);
+});
+
+test("update bootstraps the latest CLI before loading assets or inspecting the repository", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  let launchOptions;
+  const status = await runCli({
+    argv: ["update"],
+    cwd: "/tmp/widget",
+    output,
+    errorOutput,
+    environment: { TERM: "xterm-256color" },
+    platform: "linux",
+    launchLatestUpdate: async (options) => {
+      launchOptions = options;
+      return 7;
+    },
+    loadAssets: async () => { throw new Error("the old package must not load assets"); },
+    inspect: async () => { throw new Error("the old package must not inspect the repository"); }
+  });
+  assert.equal(status, 7);
+  assert.equal(launchOptions.cwd, "/tmp/widget");
+  assert.equal(launchOptions.output, output);
+  assert.equal(launchOptions.environment.TERM, "xterm-256color");
+  assert.equal(launchOptions.platform, "linux");
+  assert.equal(errorOutput.toString(), "");
+});
+
+test("the npm bootstrap fails closed when it launches the wrong package version", async () => {
+  const errorOutput = textSink();
+  const status = await runCli({
+    argv: ["update", "--current-package"],
+    output: textSink(),
+    errorOutput,
+    environment: { CODEKEEPER_UPDATE_EXPECTED_VERSION: "9.9.9" },
+    loadAssets: async () => { throw new Error("mismatched packages must fail before loading assets"); },
+    inspect: async () => { throw new Error("mismatched packages must fail before preflight"); }
+  });
+  assert.equal(status, 1);
+  assert.match(errorOutput.toString(), /different Codekeeper version than requested/);
 });
 
 test("help, version, and rejected arguments perform no installer side effects", async () => {
@@ -444,7 +485,7 @@ test("update requires an existing installation before prompting or mutation", as
     throw new Error("update must reject before mutation");
   });
   const status = await runCli({
-    argv: ["update"],
+    argv: ["update", "--current-package"],
     output,
     errorOutput,
     prompt,
@@ -558,7 +599,7 @@ test("update advances release-owned files while preserving adopter configuration
   const output = textSink();
   const errorOutput = textSink();
   const status = await runCli({
-    argv: ["update"],
+    argv: ["update", "--current-package"],
     output,
     errorOutput,
     prompt,
@@ -626,7 +667,7 @@ test("update exits successfully when the bundled release is already installed", 
   const output = Object.assign(textSink(), { isTTY: true, columns: 80, rows: 24 });
   let rawModeCalls = 0;
   const status = await runCli({
-    argv: ["update"],
+    argv: ["update", "--current-package"],
     input: {
       isTTY: true,
       setRawMode() { rawModeCalls += 1; }
@@ -853,6 +894,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.deepEqual(
     git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(),
     [
+      ".github/codekeeper-release.json",
       ".github/codekeeper.json",
       ".github/codekeeper/agents/fixer.md",
       ".github/codekeeper/agents/issue-triager.md",

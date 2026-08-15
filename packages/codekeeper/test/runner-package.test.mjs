@@ -170,6 +170,7 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "assets/workflows/maintain.yml",
     "assets/workflows/review.yml",
     "bin/codekeeper.mjs",
+    "npm-shrinkwrap.json",
     "package.json",
     "src/assets.mjs",
     "src/cli.mjs",
@@ -187,7 +188,8 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "src/settings-tui.mjs",
     "src/settings.mjs",
     "src/shell-command.mjs",
-    "src/tui.mjs"
+    "src/tui.mjs",
+    "src/updater.mjs"
   ].sort();
   assert.equal(report.name, "codekeeper");
   assert.equal(report.version, "0.2.0");
@@ -200,7 +202,9 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   assert.deepEqual(packed.files.map((file) => file.path).sort(), expected);
   const tarball = path.join(packDestination, packed.filename);
   const packageLock = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package-lock.json"), "utf8"));
+  const shrinkwrap = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "npm-shrinkwrap.json"), "utf8"));
   const packageManifest = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
+  assert.deepEqual(shrinkwrap, packageLock);
   assert.deepEqual(packageLock.packages[""].dependencies, packageManifest.dependencies);
   const installerLock = structuredClone(packageLock);
   for (const [index, [packagePath, metadata]] of Object.entries(installerLock.packages).entries()) {

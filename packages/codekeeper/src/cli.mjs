@@ -20,15 +20,18 @@ import { configureRepositorySettings, installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
 import { MODES, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
 import { formatCommand } from "./shell-command.mjs";
+import { runLatestUpdate } from "./updater.mjs";
 
 export const USAGE = `Usage:
   codekeeper init
   codekeeper update
+  codekeeper update --current-package
   codekeeper --help
   codekeeper --version
 
 Codekeeper init creates a setup pull request for GitHub.com.
-Run npx --yes codekeeper@latest update to refresh the CLI dependencies and an existing installation.
+Codekeeper update refreshes the CLI, dependencies, and every release-owned installation file.
+Use --current-package only to exercise an exact local release tarball without contacting npm.
 `;
 
 export function parseCliArgs(argv) {
@@ -37,6 +40,9 @@ export function parseCliArgs(argv) {
   if (argv.length === 1 && argv[0] === "--version") return Object.freeze({ command: "version" });
   if (argv.length === 1 && argv[0] === "init") return Object.freeze({ command: "init" });
   if (argv.length === 1 && argv[0] === "update") return Object.freeze({ command: "update" });
+  if (argv.length === 2 && argv[0] === "update" && argv[1] === "--current-package") {
+    return Object.freeze({ command: "update", currentPackage: true });
+  }
   throw new InstallerError("Unsupported command or option.", { code: "CLI_USAGE" });
 }
 
@@ -85,6 +91,7 @@ function preview(plan, output) {
   output.write(`  Comment display name: ${plan.displayName}\n`);
   output.write(`  Owner-command users: ${plan.ownerLogins.join(", ")}\n`);
   output.write(`  Starting model set: ${plan.preset}\n`);
+  output.write(`  Release: Codekeeper ${plan.packageVersion} · ${plan.source.repository}@${plan.source.commit}\n`);
   output.write(`  ${operation} branch: ${plan.settingsOnly ? "not needed for this settings change" : plan.branch}\n`);
   output.write("  Workflows:\n");
   for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);
@@ -115,6 +122,7 @@ function printCompletion(plan, receipt, output) {
     ? "\nUpdated the Codekeeper repository settings. No pull request was needed.\n"
     : `\nCreated ${operationLabel(plan)} pull request: ${receipt.pullRequestUrl}\n`);
   output.write(`Pinned source: ${plan.source.repository}@${plan.source.commit}\n`);
+  output.write(`CLI release: ${plan.packageVersion}\n`);
   output.write("\nDocument map\n");
   for (const item of documentMap(plan.files)) output.write(`  - ${item.path}: ${item.purpose}\n`);
   const guidance = completionGuidance(plan.modes, plan.enabled, plan.update);
@@ -138,7 +146,8 @@ export async function runCli({
   openUrl = null,
   loadAssets = loadVerifiedAssets,
   inspect = inspectRepository,
-  resumeCommand = null
+  resumeCommand = null,
+  launchLatestUpdate = runLatestUpdate
 } = {}) {
   let parsed;
   try {
@@ -154,6 +163,22 @@ export async function runCli({
   if (parsed.command === "version") {
     output.write(`${PACKAGE_VERSION}\n`);
     return 0;
+  }
+  if (parsed.command === "update" && parsed.currentPackage !== true) {
+    try {
+      return await launchLatestUpdate({ cwd, output, environment, platform });
+    } catch (error) {
+      errorOutput.write(`${formatInstallerError(error)}\n`);
+      return 1;
+    }
+  }
+  if (
+    parsed.command === "update"
+    && typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
+    && environment.CODEKEEPER_UPDATE_EXPECTED_VERSION !== PACKAGE_VERSION
+  ) {
+    errorOutput.write(`${formatInstallerError(new InstallerError("npm launched a different Codekeeper version than requested.", { code: "UPDATE_VERSION_MISMATCH" }))}\n`);
+    return 1;
   }
   resumeCommand ??= currentResumeCommand(process.execPath, process.argv[1], platform, parsed.command);
 

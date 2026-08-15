@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadVerifiedAssets } from "../src/assets.mjs";
+import { loadVerifiedAssets, sha256 } from "../src/assets.mjs";
 import { SOURCE_COMMIT, SOURCE_REPOSITORY } from "../src/constants.mjs";
 import {
   assertNodeVersion,
@@ -236,6 +236,35 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     await writeFile(path.join(root, ".github", "codekeeper", "agents", "team-notes.md"), "# Notes\n");
     await assertNoInstallationFiles(root);
   });
+});
+
+test("release manifests admit only digest-bound retired Codekeeper workflows", async (t) => {
+  const root = await temporaryDirectory(t);
+  const bundle = await loadVerifiedAssets();
+  const retiredTarget = ".github/workflows/codekeeper-retired.yml";
+  const retiredSource = installedWorkflow(bundle.contents["workflows/review.yml"]);
+  await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
+  await writeFile(path.join(root, ...retiredTarget.split("/")), retiredSource);
+  const manifestPath = path.join(root, ".github", "codekeeper-release.json");
+  const manifest = {
+    version: 1,
+    package: { name: "codekeeper", version: "0.2.0" },
+    source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+    managedFiles: { [retiredTarget]: sha256(retiredSource) }
+  };
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await assertNoInstallationFiles(root, { allowExisting: true });
+  await writeFile(path.join(root, ...retiredTarget.split("/")), `${retiredSource}\n# edited\n`);
+  await assert.rejects(
+    assertNoInstallationFiles(root, { allowExisting: true }),
+    assertInstallerCode(assert, "EXISTING_INSTALLATION_INVALID")
+  );
+  manifest.managedFiles = { "README.md": sha256("unsafe") };
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await assert.rejects(
+    assertNoInstallationFiles(root, { allowExisting: true }),
+    assertInstallerCode(assert, "EXISTING_INSTALLATION_INVALID")
+  );
 });
 
 test("existing generated files are recognized as a rerunnable installation", async (t) => {

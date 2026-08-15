@@ -15,9 +15,11 @@ import {
   MODES,
   MODEL_PROVIDER_SECRETS,
   OPENAI_SECRET,
+  PACKAGE_VERSION,
   PRESET_IDS,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
+  RELEASE_MANIFEST_TARGET,
   SECRET_PURPOSES,
   SETUP_BRANCH,
   SETUP_COMMIT_MESSAGE,
@@ -220,6 +222,8 @@ export function documentMap(files) {
     path: file.path,
     purpose: file.delete === true
       ? "Remove this installed workflow"
+      : file.path === RELEASE_MANIFEST_TARGET
+        ? "Release version and managed generated-file inventory"
       : file.path.endsWith("codekeeper.json")
       ? "Policy, model choices, protected paths, and startup controls"
       : AGENT_PROFILES[AGENT_PROFILE_IDS.find((profile) => AGENT_PROFILES[profile].target === file.path)]?.purpose
@@ -321,7 +325,7 @@ export function setupPullRequestBody(plan) {
   ].filter(Boolean).join("\n\n");
   return `## Summary
 
-Codekeeper uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. ${plan.update && plan.enabled ? "It is enabled now with the current default-branch configuration; this update applies after the pull request merges." : plan.update ? `It will be ${plan.enabled ? "enabled" : "disabled"} after this update pull request merges.` : `It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.`}
+Codekeeper CLI release **${plan.packageVersion}** uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. ${plan.update && plan.enabled ? "It is enabled now with the current default-branch configuration; this update applies after the pull request merges." : plan.update ? `It will be ${plan.enabled ? "enabled" : "disabled"} after this update pull request merges.` : `It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.`}
 
 OpenAI traces are **${plan.tracing ? "enabled" : "disabled"}**.
 
@@ -428,6 +432,20 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
         delete: true
       });
     }
+    const nextReleaseManifest = JSON.parse(files.find((file) => file.path === RELEASE_MANIFEST_TARGET).contents);
+    const nextManagedTargets = new Set(Object.keys(nextReleaseManifest.managedFiles));
+    const changedTargets = new Set(changedFiles.map((file) => file.path));
+    for (const target of Object.keys(installation.releaseManifest?.managedFiles ?? {})) {
+      if (nextManagedTargets.has(target) || changedTargets.has(target)) continue;
+      changedFiles.push({
+        path: target,
+        contents: null,
+        bytes: 0,
+        sha256: null,
+        previousSha256: sha256(installation.contents[target]),
+        delete: true
+      });
+    }
   }
   const enabled = answers.enabled !== false;
   const variables = installation
@@ -448,6 +466,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))
     : requiredSecrets;
   const plan = {
+    packageVersion: PACKAGE_VERSION,
     source: {
       repository: bundle.metadata.source.repository,
       commit: bundle.metadata.source.commit

@@ -10,7 +10,10 @@ import {
   MODE_IDS,
   MODEL_PROVIDER_SECRETS,
   MODES,
+  PACKAGE_NAME,
+  PACKAGE_VERSION,
   POLICY_TARGET,
+  RELEASE_MANIFEST_TARGET,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
@@ -327,6 +330,18 @@ export function renderInstallFiles(bundle, {
       })
     });
   }
+  const managedFiles = Object.fromEntries(rendered
+    .filter((file) => file.path === ASSISTANT_WORKFLOW.target || MODE_IDS.some((mode) => MODES[mode].target === file.path))
+    .map((file) => [file.path, sha256(file.contents)]));
+  rendered.push({
+    path: RELEASE_MANIFEST_TARGET,
+    contents: `${JSON.stringify({
+      version: 1,
+      package: { name: PACKAGE_NAME, version: PACKAGE_VERSION },
+      source: { repository: sourceRepository, commit: sourceCommit },
+      managedFiles
+    }, null, 2)}\n`
+  });
   return rendered.map((file) => deepFreeze({
     ...file,
     bytes: Buffer.byteLength(file.contents),

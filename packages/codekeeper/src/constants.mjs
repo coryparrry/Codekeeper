@@ -142,8 +142,10 @@ export const MODEL_OPTIONS = Object.freeze({
 });
 export const ALL_MODEL_OPTIONS = Object.freeze(Object.values(MODEL_OPTIONS).flat());
 export const POLICY_TARGET = ".github/codekeeper.json";
+export const RELEASE_MANIFEST_TARGET = ".github/codekeeper-release.json";
 export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
+  RELEASE_MANIFEST_TARGET,
   ASSISTANT_WORKFLOW.target,
   ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].target),
   ...MODE_IDS.map((mode) => MODES[mode].target)
