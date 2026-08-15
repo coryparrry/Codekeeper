@@ -63,6 +63,7 @@ test("package stage contains the complete approved product and one closed depend
     "runtime/scripts/verify-tooling-artifact.mjs",
     "runtime/src/cli.mjs",
     "runtime/src/lib/agents-runtime.mjs",
+    "runtime/src/lib/runtime-paths.mjs",
     "release/workflows/codekeeper-assistant.yml",
     "release/workflows/codekeeper-fix.yml",
     "release/workflows/codekeeper-issues.yml",

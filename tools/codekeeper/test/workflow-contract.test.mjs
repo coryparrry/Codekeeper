@@ -21,7 +21,7 @@ const actionPins = {
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283"
 };
 const toolingManifestPath = "tools/codekeeper/tooling-manifest.json";
-const toolingManifestSha256 = "9fcaf66d3a6c29c7a9cb659aea478819b6f09ae78398ab9dd36f1475ed1549dc";
+const toolingManifestSha256 = "3ea363282a1af5a35297acfe9b239529d4735603768a65c8e5c63c7a70d7d356";
 const bootstrapToolingArtifactName = "codekeeper-tooling-${{ github.run_id }}";
 
 function sha256(bytes) {
@@ -189,6 +189,12 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
     assert.doesNotMatch(source, /job\.workflow_repository/);
     assert.doesNotMatch(source, /repository: \$\{\{ job\.workflow_repository \}\}/);
   }
+  const assistant = await workflow("assistant");
+  assert.match(assistant, new RegExp(`CODEKEEPER_TOOLING_MANIFEST_SHA256: ${toolingManifestSha256}`));
+  assert.equal(
+    [...assistant.matchAll(/name: Verify bootstrap Codekeeper tooling against pinned manifest/g)].length,
+    1,
+  );
 });
 
 test("reusable workflows default to GitHub runners and allow a trusted caller override", async () => {

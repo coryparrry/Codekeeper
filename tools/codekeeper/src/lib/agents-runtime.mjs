@@ -2,18 +2,17 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { fileURLToPath } from "node:url";
 import { agentProfilePathForMode, loadFrozenAgentProfile, pinnedAgentProfileSection } from "./agent-profiles.mjs";
 import { getAgentConfig, getAgentRuntimeSettings } from "./config.mjs";
 import { readJson, readOptionalRegularJson, writeJson } from "./io.mjs";
 import { sha256 } from "./markers.mjs";
+import { CODEX_BIN } from "./runtime-paths.mjs";
 import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 
 export { providerCompatibleJsonSchema } from "./schemas.mjs";
 
 const DEFAULT_PROVIDER_TURN_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_CODEX_MCP_TIMEOUT_SECONDS = 20 * 60;
-const CODEX_BIN = fileURLToPath(new URL("../../node_modules/@openai/codex/bin/codex.js", import.meta.url));
 export const PROVIDER_CLEANUP_TIMEOUT_CODE = "CODEKEEPER_PROVIDER_CLEANUP_TIMEOUT";
 
 export function isProviderCleanupTimeout(error) {

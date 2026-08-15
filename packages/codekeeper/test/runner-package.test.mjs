@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { access, cp, readFile, writeFile } from "node:fs/promises";
+import { access, cp, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildCodekeeperPackageStage } from "../../../scripts/build-codekeeper-package.mjs";
@@ -260,6 +260,13 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "src",
     "tui.mjs"
   )).href);
+  const installedRuntimePaths = await import(pathToFileURL(path.join(
+    installedRoot,
+    "runtime",
+    "src",
+    "lib",
+    "runtime-paths.mjs"
+  )).href);
   assert.match(help, /^Usage:\n  codekeeper init/m);
   assert.match(help, /^  codekeeper update$/m);
   assert.match(npmInstallHelp, /^Usage:\n  codekeeper init/m);
@@ -270,6 +277,10 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   assert.match(npxHelp, /^  codekeeper update$/m);
   assert.equal(version, "0.2.0\n");
   assert.equal(npmInstallVersion, "0.2.0\n");
+  assert.equal(
+    await realpath(installedRuntimePaths.CODEX_BIN),
+    await realpath(path.join(npmInstallRoot, "node_modules", "@openai", "codex", "bin", "codex.js"))
+  );
   assert.equal(typeof installedTui.createInkPrompter, "function");
   assert.equal(installedTui.shouldUseInkTui({
     interactive: true,
