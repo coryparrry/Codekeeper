@@ -10,6 +10,7 @@ const repositoryRoot = path.resolve(testDirectory, "../../..");
 const workflowDirectory = path.join(repositoryRoot, ".github/workflows");
 const modes = ["review", "maintain", "issues", "fix"];
 const actionPins = {
+  "actions/cache/restore": "668228422ae6a00e4ad889ee87cd7109ec5666a7",
   "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
   "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
   "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
@@ -46,6 +47,7 @@ test("self-test runs for every tracked-file change", async () => {
   const triggers = source.slice(0, source.indexOf("\npermissions:"));
   assert.match(triggers, /on:\n  pull_request:\n  push:\n  workflow_dispatch:/);
   assert.doesNotMatch(triggers, /\n\s+paths(?:-ignore)?:/);
+  assert.match(source, /concurrency:\n  group: codekeeper-checks-\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \|\| github\.repository \}\}-\$\{\{ github\.event\.pull_request\.head\.ref \|\| github\.ref_name \}\}\n  cancel-in-progress: true/);
 });
 
 test("source CI stays generic while repository settings select its runner", async () => {
@@ -124,7 +126,7 @@ test("caller bootstrap fetches the same immutable private action release as its 
   }
 });
 
-test("reusable workflows consume only a source-manifest-bound bootstrap artifact", async () => {
+test("reusable workflows consume only a source-manifest-bound bootstrap cache", async () => {
   const manifest = await readFile(path.join(repositoryRoot, toolingManifestPath));
   assert.equal(sha256(manifest), toolingManifestSha256);
   const parsedManifest = JSON.parse(manifest);
@@ -137,7 +139,9 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
   const expectedConsumers = { maintain: 5, fix: 5, issues: 4, review: 4 };
   for (const [mode, count] of Object.entries(expectedConsumers)) {
     const source = await workflow(mode);
-    assert.equal([...source.matchAll(/name: Download bootstrap Codekeeper tooling/g)].length, count);
+    assert.equal([...source.matchAll(/name: Restore bootstrap Codekeeper tooling cache/g)].length, count);
+    assert.equal([...source.matchAll(/uses: actions\/cache\/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7/g)].length, count);
+    assert.equal([...source.matchAll(/name: Download legacy bootstrap Codekeeper tooling artifact/g)].length, count);
     assert.equal([...source.matchAll(/name: Verify bootstrap Codekeeper tooling against pinned manifest/g)].length, count);
     assert.equal([...source.matchAll(/name: Check out frozen maintainer tooling/g)].length, 0);
     assert.match(source, new RegExp(`CODEKEEPER_TOOLING_MANIFEST_SHA256: ${toolingManifestSha256}`));
@@ -151,12 +155,19 @@ test("reusable workflows consume only a source-manifest-bound bootstrap artifact
     );
     assert.doesNotMatch(source, /^\s*import \{ join \} from "node:path";$/m);
     assert.doesNotMatch(source, /\$\{(?:root|label)\}/);
-    const bootstrapArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-tooling-[^\n]+)$/gm)]
+    const bootstrapCacheKeys = [...source.matchAll(/^ {10}key: (codekeeper-tooling-[^\n]+)$/gm)]
       .map((match) => match[1]);
     assert.deepEqual(
-      bootstrapArtifactNames,
+      bootstrapCacheKeys,
+      Array(count).fill("codekeeper-tooling-${{ runner.os }}-${{ env.CODEKEEPER_TOOLING_MANIFEST_SHA256 }}"),
+      `${mode} must consume the immutable source-manifest-bound bootstrap cache`
+    );
+    const legacyArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-tooling-[^\n]+)$/gm)]
+      .map((match) => match[1]);
+    assert.deepEqual(
+      legacyArtifactNames,
       Array(count).fill(bootstrapToolingArtifactName),
-      `${mode} must consume the caller bootstrap artifact by run ID only so failed-job reruns reuse verified tooling`
+      `${mode} must retain the run-scoped artifact fallback until the cache callers are published`
     );
     const workspaceArtifactName = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-workspace-\${{ github.run_id }}`;
     const workspaceArtifactNames = [...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-workspace-[^\n]+)$/gm)]
@@ -210,7 +221,7 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
   }
 });
 
-test("private-action bootstrap stages only the production runtime and retains it for one day", async () => {
+test("private-action bootstrap stages and verifies only the production runtime for cache and legacy callers", async () => {
   const action = await repositoryFile("tools/codekeeper/action.yml");
   assert.match(action, /using: composite/);
   assert.match(action, /ACTION_PATH: \$\{\{ github\.action_path \}\}/);
@@ -220,10 +231,16 @@ test("private-action bootstrap stages only the production runtime and retains it
   assert.match(action, /find "\$target" -type l/);
   assert.match(action, /if find "\$target" -type l -print -quit \| grep -q \.; then/);
   assert.doesNotMatch(action, /grep -q \. &&/);
+  assert.match(action, /actions\/cache\/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7/);
+  assert.match(action, /actions\/cache\/save@668228422ae6a00e4ad889ee87cd7109ec5666a7/);
   assert.match(action, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/);
-  assert.match(action, /description: Exact run-scoped bootstrap artifact name derived from github\.run_id; reruns replace this verified tooling artifact\./);
-  assert.match(action, /name: \$\{\{ inputs\.artifact-name \}\}\n\s+path: \$\{\{ runner\.temp \}\}\/codekeeper-tooling\n\s+retention-days: 1\n\s+if-no-files-found: error\n\s+overwrite: true/);
-  assert.match(action, /retention-days: 1/);
+  assert.match(action, /description: Immutable cache key containing the pinned production tooling manifest digest\./);
+  assert.match(action, /EXPECTED_MANIFEST_SHA256: \$\{\{ inputs\.manifest-sha256 \}\}/);
+  assert.match(action, /cmp "\$ACTION_PATH\/tooling-manifest\.json" "\$TOOLING_ROOT\/tooling-manifest\.json"/);
+  assert.match(action, /if: steps\.transport\.outputs\.mode == 'cache' && steps\.tooling-cache\.outputs\.cache-hit != 'true'/);
+  assert.match(action, /if: steps\.transport\.outputs\.mode == 'artifact'/);
+  assert.match(action, /name: \$\{\{ inputs\.artifact-name \}\}\n\s+path: \$\{\{ github\.workspace \}\}\/tooling/);
+  assert.doesNotMatch(action, /runner\.temp/);
   assert.doesNotMatch(action, /secrets\.|GITHUB_TOKEN|GH_TOKEN|actions\/checkout/);
 });
 
@@ -276,8 +293,8 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     const workspace = jobSection(source, "workspace", "analyze");
     const analyze = jobSection(source, "analyze", repairMode ? "verify" : "seal");
     const verify = repairMode ? jobSection(source, "verify", "seal") : null;
-    const seal = jobSection(source, "seal", "publish");
-    const publish = jobSection(source, "publish", mode === "review" ? "gate" : undefined);
+    const seal = jobSection(source, "seal", mode === "review" ? "gate" : "publish");
+    const publish = mode === "review" ? jobSection(source, "gate") : jobSection(source, "publish");
 
     assert.match(workspace, /codekeeper-bundle/);
     assert.match(workspace, /codekeeper-config\.json/);
@@ -486,6 +503,7 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(gate, /if: always\(\)/);
   assert.match(gate, /fails closed/);
   assert.match(gate, /exit 1/);
+  assert.match(gate, /PUBLISH_RESULT: \$\{\{ steps\.publish\.outcome \}\}/);
   assert.match(source, /auto_review:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(source, /feedback_triage:\n\s+description:[^\n]*\n\s+required: false\n\s+default: true\n\s+type: boolean/);
   assert.match(source, /owner_command:\n\s+description:[^\n]*\n\s+required: false\n\s+default: false\n\s+type: boolean/);
