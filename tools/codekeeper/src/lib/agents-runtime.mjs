@@ -752,6 +752,14 @@ function validatorForBundle(mode, config, context) {
   throw new Error(`Unknown agent mode: ${mode}`);
 }
 
+function omitInvalidOptionalWorkspaceDiagram(mode, output) {
+  if (mode !== "review" || !isPlainObject(output) || typeof output.diagram !== "string") return output;
+  const diagram = output.diagram.trim().replace(/^graph\s+LR\b/, "flowchart LR");
+  const supportedType = /^flowchart\s+LR\b/.test(diagram);
+  const unsupportedContent = /```|%%\{|\bclick\b|\bhref\b|javascript:/i.test(diagram);
+  return supportedType && !unsupportedContent ? { ...output, diagram } : { ...output, diagram: null };
+}
+
 export async function runWorkspaceAgentFromBundle({
   mode,
   directory,
@@ -826,7 +834,8 @@ export async function runWorkspaceAgentFromBundle({
     });
     if (response?.isError === true) throw new Error("Codex MCP tool reported failure");
     const content = codexMcpOutput(response);
-    const output = validatorForBundle(mode, config, context)(parseAgentOutput(content));
+    const parsedOutput = parseAgentOutput(content);
+    const output = validatorForBundle(mode, config, context)(omitInvalidOptionalWorkspaceDiagram(mode, parsedOutput));
     await writeJson(resultPath, output);
     return { completed: true };
   } finally {

@@ -22,6 +22,27 @@ test("review validator keeps Mermaid optional for ordinary changes", () => {
   assert.equal(result.diagram, null);
 });
 
+test("review validator canonicalizes graph LR and rejects vertical Mermaid diagrams", () => {
+  const review = {
+    mode: "review",
+    summary: "The changed flow is valid.",
+    risk: "medium",
+    labels: [],
+    blockingFindings: [],
+    nonBlockingFindings: [],
+    reviewFeedback: [],
+    tests: { adequate: true, notes: "The flow is covered.", missingTest: null },
+    diagram: "graph LR\nCatalog --> Pricing --> Checkout",
+    mergeRecommendation: "manual",
+    noActionReason: null
+  };
+  assert.equal(validateReviewResult(structuredClone(review), config).diagram, "flowchart LR\nCatalog --> Pricing --> Checkout");
+  assert.throws(
+    () => validateReviewResult({ ...structuredClone(review), diagram: "flowchart TD\nCatalog --> Pricing --> Checkout" }, config),
+    /left-to-right Mermaid flowchart/
+  );
+});
+
 test("review validator keeps missing tests explicit and separate from unknown evidence", () => {
   assert.match(reviewSchema(config).properties.tests.properties.missingTest.description, /repository-local test/);
   assert.match(reviewSchema(config).properties.tests.properties.missingTest.description, /null for unavailable external-source evidence/);

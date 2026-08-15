@@ -183,6 +183,78 @@ test("workspace execution runs one Codex MCP session through the Agents SDK", as
   assert.deepEqual(metadata, { completed: true });
 });
 
+test("workspace review keeps only normalized left-to-right diagrams without losing validated findings", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-workspace-review-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const resultPath = path.join(directory, "workspace-result.json");
+  await Promise.all([
+    writeFile(path.join(directory, "workspace-prompt.md"), "Review the pull request.\n"),
+    writeFile(path.join(directory, "schema.json"), JSON.stringify({ type: "object" })),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "review" }))
+  ]);
+
+  const review = {
+    mode: "review",
+    summary: "The changed calculation has a validated defect.",
+    risk: "high",
+    labels: [],
+    blockingFindings: [{
+      title: "Incorrect total",
+      explanation: "The changed calculation returns the wrong total.",
+      severity: "high",
+      confidence: "high",
+      classification: "current",
+      validation: "The focused regression test fails on the current head.",
+      preventionTest: "Run the focused total regression test.",
+      file: "src/total.mjs",
+      line: 12
+    }],
+    nonBlockingFindings: [],
+    reviewFeedback: [],
+    tests: { adequate: false, notes: "The regression is not covered.", missingTest: "Add a total regression test for the failing input and expect the correct total." },
+    diagram: "graph LR\nCatalog --> Pricing --> Checkout",
+    mergeRecommendation: "block",
+    noActionReason: null
+  };
+  class FakeMCPServerStdio {
+    async connect() {}
+    async close() {}
+    async listTools() { return [{ name: "codex" }]; }
+    async callToolResult() {
+      return { structuredContent: { content: JSON.stringify(review) }, content: [] };
+    }
+  }
+  const workspaceConfig = withoutTracing();
+  workspaceConfig.ai.agents.review.workspace.enabled = true;
+  await runWorkspaceAgentFromBundle({
+    mode: "review",
+    directory,
+    config: workspaceConfig,
+    resultPath,
+    apiKey: "workspace-secret",
+    environment: { CODEX_HOME: path.join(directory, "codex-home"), PATH: "/usr/bin" },
+    sdkLoader: async () => ({ MCPServerStdio: FakeMCPServerStdio }),
+    codexAuthenticator: async () => {}
+  });
+
+  const result = JSON.parse(await readFile(resultPath, "utf8"));
+  assert.equal(result.diagram, "flowchart LR\nCatalog --> Pricing --> Checkout");
+  assert.deepEqual(result.blockingFindings, review.blockingFindings);
+
+  review.diagram = "flowchart TD\nCatalog --> Pricing --> Checkout";
+  await runWorkspaceAgentFromBundle({
+    mode: "review",
+    directory,
+    config: workspaceConfig,
+    resultPath,
+    apiKey: "workspace-secret",
+    environment: { CODEX_HOME: path.join(directory, "codex-home"), PATH: "/usr/bin" },
+    sdkLoader: async () => ({ MCPServerStdio: FakeMCPServerStdio }),
+    codexAuthenticator: async () => {}
+  });
+  assert.equal(JSON.parse(await readFile(resultPath, "utf8")).diagram, null);
+});
+
 test("model settings retain provider-specific fields while adding supported reasoning effort", () => {
   assert.deepEqual(
     modelSettingsFor(
