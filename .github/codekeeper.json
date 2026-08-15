@@ -254,7 +254,41 @@
     ],
     "maximumDiffBytes": 262144,
     "maximumChangedFiles": 500,
-    "includeDiffInAgentContext": true
+    "includeDiffInAgentContext": true,
+    "reasoningEscalation": {
+      "enabled": true,
+      "model": "gpt-5.6-luna",
+      "effort": "max",
+      "labels": [
+        "security",
+        "risk high"
+      ],
+      "pathPatterns": [
+        ".github/actions/**",
+        ".github/codekeeper.json",
+        ".github/workflows/**",
+        "SECURITY.md",
+        "**/auth/**",
+        "**/authentication/**",
+        "**/authorization/**",
+        "**/billing/**",
+        "**/crypto/**",
+        "**/migration/**",
+        "**/migrations/**",
+        "**/payments/**",
+        "**/permissions/**",
+        "**/release/**",
+        "**/schema/**",
+        "**/schemas/**",
+        "**/secrets/**",
+        "**/security/**",
+        "**/*auth*.*",
+        "**/*migration*.*",
+        "**/*permission*.*"
+      ],
+      "minimumChangedLines": 5000,
+      "minimumSingleFileChangedLines": 1000
+    }
   },
   "audit": {
     "maximumIssuesPerRun": 5,

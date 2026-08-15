@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { getAgentRuntimeSettings, loadConfig, validatePolicy } from "../src/lib/config.mjs";
+import { getAgentRuntimeSettings, loadConfig, reviewReasoningEscalation, validatePolicy } from "../src/lib/config.mjs";
 
 const source = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -39,6 +39,13 @@ test("configuration validator rejects unsafe or incomplete policy values", async
     /audit\.repair\.maximumPatchBytes must be a positive integer/
   );
 
+  const unknownEscalationLabel = structuredClone(source);
+  unknownEscalationLabel.review.reasoningEscalation.labels.push("undefined-label");
+  await assert.rejects(
+    loadConfig(await writeConfig(unknownEscalationLabel)),
+    /review\.reasoningEscalation references undefined label undefined-label/
+  );
+
   await assert.rejects(
     loadConfig(await writeConfig({
       ...source,
@@ -69,6 +76,45 @@ test("configuration validator rejects unsafe or incomplete policy values", async
     })),
     /automationBranchPrefix must end with/
   );
+});
+
+test("review reasoning escalates only security, high-risk, and exceptional diffs", () => {
+  const context = (overrides = {}) => ({
+    mode: "review",
+    pullRequest: {
+      labels: [],
+      changedFiles: ["src/feature.mjs"],
+      changeSummary: { changedLines: 120, largestFileChangedLines: 80 },
+      ...overrides
+    }
+  });
+  assert.deepEqual(reviewReasoningEscalation(source, context()), {
+    escalated: false,
+    model: "gpt-5.6-luna",
+    effort: "medium",
+    reason: "standard review"
+  });
+  for (const [overrides, reason] of [
+    [{ labels: ["security"] }, "label:security"],
+    [{ labels: ["risk high"] }, "label:risk high"],
+    [{ changedFiles: ["src/auth/session.mjs"] }, "path:src/auth/session.mjs"],
+    [{ changeSummary: { changedLines: 5000, largestFileChangedLines: 400 } }, "changed-lines:5000"],
+    [{ changeSummary: { changedLines: 1200, largestFileChangedLines: 1000 } }, "single-file-changed-lines:1000"]
+  ]) {
+    assert.deepEqual(reviewReasoningEscalation(source, context(overrides)), {
+      escalated: true,
+      model: "gpt-5.6-luna",
+      effort: "max",
+      reason
+    });
+  }
+  const settings = getAgentRuntimeSettings(source, "review", {
+    context: context({ labels: ["security"] })
+  });
+  assert.equal(settings.model, "gpt-5.6-luna");
+  assert.equal(settings.effort, "max");
+  assert.equal(settings.workspaceModel, "gpt-5.6-luna");
+  assert.equal(settings.workspaceEffort, "max");
 });
 
 test("configuration rejects unsupported user auto-merge, unknown keys, and unsafe ref prefixes", async () => {

@@ -572,6 +572,7 @@ export async function runConfiguredAgent({
   diagnostic,
   profile = undefined,
   profileMetadata = undefined,
+  context = undefined,
   turnTimeoutMs = DEFAULT_PROVIDER_TURN_TIMEOUT_MS
 }) {
   if (!Number.isSafeInteger(turnTimeoutMs) || turnTimeoutMs <= 0) {
@@ -588,7 +589,7 @@ export async function runConfiguredAgent({
     }
     const modelApiKey = String(apiKey).trim();
     lastFailureStage = "configuration";
-    const { agent, provider, tracing } = getAgentConfig(config, mode);
+    const { agent, provider, tracing, escalation } = getAgentConfig(config, mode, { context });
     runtimeEnvironment(tracing);
 
     lastFailureStage = "sdk-load";
@@ -701,6 +702,7 @@ export async function runConfiguredAgent({
             outputBytes: Buffer.byteLength(JSON.stringify(output)),
             cacheKey,
             cacheMode: provider.api === "responses" ? "explicit" : "unsupported",
+            ...(escalation ? { reasoningEscalation: escalation } : {}),
             usage
           }
         };
@@ -788,7 +790,8 @@ export async function runWorkspaceAgentFromBundle({
     throw new Error(`Frozen context mode is ${context?.mode ?? "missing"}; expected ${mode}`);
   }
   const settings = getAgentRuntimeSettings(config, mode, {
-    mutationAuthorized: mode === "fix" || context.repairAuthorized === true
+    mutationAuthorized: mode === "fix" || context.repairAuthorized === true,
+    context
   });
   if (!settings.workspaceEnabled) {
     throw new Error(`Codekeeper ${mode} workspace specialist is disabled`);
@@ -965,7 +968,8 @@ export async function runAgentFromBundle({
     configureTracing,
     diagnostic,
     profile: frozenProfile.text,
-    profileMetadata: frozenProfile.metadata
+    profileMetadata: frozenProfile.metadata,
+    context
   });
   await writeJson(resultPath, result.output);
   await writeJson(path.join(directory, "runtime-metadata.json"), result.metadata);
