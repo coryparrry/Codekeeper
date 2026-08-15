@@ -20,6 +20,39 @@ export const DEFERRED_LABEL = Object.freeze({
   description: "Verified work deferred from a pull request"
 });
 
+export const REVIEW_REASONING_ESCALATION_DEFAULTS = Object.freeze({
+  enabled: true,
+  provider: "openai",
+  model: "gpt-5.6-luna",
+  effort: "max",
+  labels: Object.freeze(["security", "risk high"]),
+  pathPatterns: Object.freeze([
+    ".github/actions/**",
+    ".github/codekeeper.json",
+    ".github/workflows/**",
+    "SECURITY.md",
+    "**/auth/**",
+    "**/authentication/**",
+    "**/authorization/**",
+    "**/billing/**",
+    "**/crypto/**",
+    "**/migration/**",
+    "**/migrations/**",
+    "**/payments/**",
+    "**/permissions/**",
+    "**/release/**",
+    "**/schema/**",
+    "**/schemas/**",
+    "**/secrets/**",
+    "**/security/**",
+    "**/*auth*.*",
+    "**/*migration*.*",
+    "**/*permission*.*"
+  ]),
+  minimumChangedLines: 5000,
+  minimumSingleFileChangedLines: 1000
+});
+
 const LEGACY_LABEL_NAMES = Object.freeze({
   "codekeeper:reviewed": "reviewed",
   "codekeeper:maintenance": "maintenance",
@@ -90,6 +123,7 @@ export function upgradePolicy(input) {
     }
   }
   migrateLegacyLabels(policy);
+  policy.review.reasoningEscalation ??= structuredClone(REVIEW_REASONING_ESCALATION_DEFAULTS);
   policy.issues.closeResolvedIssues ??= true;
   return policy;
 }
