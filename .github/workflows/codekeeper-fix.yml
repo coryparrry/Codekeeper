@@ -94,23 +94,7 @@ jobs:
           target="${MANUAL_ISSUE:-$EVENT_ISSUE}"
           [[ "$target" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue or pull request number"; exit 1; }
           echo "target_number=$target" >> "$GITHUB_OUTPUT"
-      - name: Restore bootstrap Codekeeper tooling cache
-        id: tooling-cache
-        continue-on-error: true
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: ${{ github.workspace }}/tooling
-          key: codekeeper-tooling-${{ runner.os }}-${{ env.CODEKEEPER_TOOLING_MANIFEST_SHA256 }}
-      - name: Discard failed bootstrap cache restore
-        if: steps.tooling-cache.outcome != 'success'
-        shell: bash
-        run: |
-          set -euo pipefail
-          destination="$GITHUB_WORKSPACE/tooling"
-          test "$destination" = "${GITHUB_WORKSPACE%/}/tooling"
-          rm -rf -- "$destination"
-      - name: Download legacy bootstrap Codekeeper tooling artifact
-        if: steps.tooling-cache.outcome != 'success' || steps.tooling-cache.outputs.cache-hit != 'true'
+      - name: Download bootstrap Codekeeper tooling
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codekeeper-tooling-${{ github.run_id }}
@@ -328,23 +312,7 @@ jobs:
           target="${MANUAL_ISSUE:-$EVENT_ISSUE}"
           [[ "$target" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue or pull request number"; exit 1; }
           echo "target_number=$target" >> "$GITHUB_OUTPUT"
-      - name: Restore bootstrap Codekeeper tooling cache
-        id: tooling-cache
-        continue-on-error: true
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: ${{ github.workspace }}/tooling
-          key: codekeeper-tooling-${{ runner.os }}-${{ env.CODEKEEPER_TOOLING_MANIFEST_SHA256 }}
-      - name: Discard failed bootstrap cache restore
-        if: steps.tooling-cache.outcome != 'success'
-        shell: bash
-        run: |
-          set -euo pipefail
-          destination="$GITHUB_WORKSPACE/tooling"
-          test "$destination" = "${GITHUB_WORKSPACE%/}/tooling"
-          rm -rf -- "$destination"
-      - name: Download legacy bootstrap Codekeeper tooling artifact
-        if: steps.tooling-cache.outcome != 'success' || steps.tooling-cache.outputs.cache-hit != 'true'
+      - name: Download bootstrap Codekeeper tooling
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codekeeper-tooling-${{ github.run_id }}
@@ -513,23 +481,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Restore bootstrap Codekeeper tooling cache
-        id: tooling-cache
-        continue-on-error: true
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: ${{ github.workspace }}/tooling
-          key: codekeeper-tooling-${{ runner.os }}-${{ env.CODEKEEPER_TOOLING_MANIFEST_SHA256 }}
-      - name: Discard failed bootstrap cache restore
-        if: steps.tooling-cache.outcome != 'success'
-        shell: bash
-        run: |
-          set -euo pipefail
-          destination="$GITHUB_WORKSPACE/tooling"
-          test "$destination" = "${GITHUB_WORKSPACE%/}/tooling"
-          rm -rf -- "$destination"
-      - name: Download legacy bootstrap Codekeeper tooling artifact
-        if: steps.tooling-cache.outcome != 'success' || steps.tooling-cache.outputs.cache-hit != 'true'
+      - name: Download bootstrap Codekeeper tooling
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codekeeper-tooling-${{ github.run_id }}
@@ -604,23 +556,7 @@ jobs:
     outputs:
       manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
     steps:
-      - name: Restore bootstrap Codekeeper tooling cache
-        id: tooling-cache
-        continue-on-error: true
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: ${{ github.workspace }}/tooling
-          key: codekeeper-tooling-${{ runner.os }}-${{ env.CODEKEEPER_TOOLING_MANIFEST_SHA256 }}
-      - name: Discard failed bootstrap cache restore
-        if: steps.tooling-cache.outcome != 'success'
-        shell: bash
-        run: |
-          set -euo pipefail
-          destination="$GITHUB_WORKSPACE/tooling"
-          test "$destination" = "${GITHUB_WORKSPACE%/}/tooling"
-          rm -rf -- "$destination"
-      - name: Download legacy bootstrap Codekeeper tooling artifact
-        if: steps.tooling-cache.outcome != 'success' || steps.tooling-cache.outputs.cache-hit != 'true'
+      - name: Download bootstrap Codekeeper tooling
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codekeeper-tooling-${{ github.run_id }}
@@ -722,23 +658,7 @@ jobs:
           identity="$(curl --globoff --fail-with-body --silent --show-error --header "Authorization: Bearer $GITHUB_TOKEN" --header "Accept: application/vnd.github+json" "$GITHUB_API_URL/users/${APP_SLUG}[bot]")"
           echo "login=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).login))')" >> "$GITHUB_OUTPUT"
           echo "id=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).id))')" >> "$GITHUB_OUTPUT"
-      - name: Restore bootstrap Codekeeper tooling cache
-        id: tooling-cache
-        continue-on-error: true
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: ${{ github.workspace }}/tooling
-          key: codekeeper-tooling-${{ runner.os }}-${{ env.CODEKEEPER_TOOLING_MANIFEST_SHA256 }}
-      - name: Discard failed bootstrap cache restore
-        if: steps.tooling-cache.outcome != 'success'
-        shell: bash
-        run: |
-          set -euo pipefail
-          destination="$GITHUB_WORKSPACE/tooling"
-          test "$destination" = "${GITHUB_WORKSPACE%/}/tooling"
-          rm -rf -- "$destination"
-      - name: Download legacy bootstrap Codekeeper tooling artifact
-        if: steps.tooling-cache.outcome != 'success' || steps.tooling-cache.outputs.cache-hit != 'true'
+      - name: Download bootstrap Codekeeper tooling
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codekeeper-tooling-${{ github.run_id }}

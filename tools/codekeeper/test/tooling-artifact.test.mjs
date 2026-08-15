@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -44,14 +44,14 @@ async function stagedFixture(context) {
   return stageProductionTooling(root);
 }
 
-async function actionStepScript(name) {
+async function actionStagingScript() {
   const action = await readFile(path.join(packageRoot, "action.yml"), "utf8");
-  const stepStart = action.indexOf(`    - name: ${name}\n`);
-  assert.notEqual(stepStart, -1, `missing composite action step: ${name}`);
-  const runStart = action.indexOf("      run: |\n", stepStart);
+  const stageStart = action.indexOf("    - name: Stage pinned production tooling\n");
+  assert.notEqual(stageStart, -1, "missing composite action staging step");
+  const runStart = action.indexOf("      run: |\n", stageStart);
   const nextStep = action.indexOf("\n    - name:", runStart);
-  assert.notEqual(runStart, -1, `missing composite action script: ${name}`);
-  assert.notEqual(nextStep, -1, `missing step after composite action script: ${name}`);
+  assert.notEqual(runStart, -1, "missing composite action staging script");
+  assert.notEqual(nextStep, -1, "missing composite action upload step");
   const indentedScript = action.slice(runStart + "      run: |\n".length, nextStep);
   return indentedScript
     .split("\n")
@@ -68,24 +68,10 @@ async function actionPathFixture(context) {
 }
 
 async function runCompositeStaging({ actionPath, stagingRoot }) {
-  return execFileAsync("bash", ["-c", await actionStepScript("Stage pinned production tooling")], {
+  return execFileAsync("bash", ["-c", await actionStagingScript()], {
     env: { ACTION_PATH: actionPath, PATH: process.env.PATH ?? "/usr/bin:/bin", STAGING_ROOT: stagingRoot },
     maxBuffer: 32 * 1024
   });
-}
-
-async function runActionStep(name, env) {
-  return execFileAsync("bash", ["-c", await actionStepScript(name)], {
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...env },
-    maxBuffer: 32 * 1024
-  });
-}
-
-function actionOutputs(text) {
-  return Object.fromEntries(text.trim().split("\n").filter(Boolean).map((line) => {
-    const separator = line.indexOf("=");
-    return [line.slice(0, separator), line.slice(separator + 1)];
-  }));
 }
 
 async function expectedManifestSha256() {
@@ -147,92 +133,6 @@ test("composite staging script accepts a clean action path and rejects hidden or
     () => runCompositeStaging(linked),
     (error) => error.code === 1 && /refused a tooling symlink/.test(error.stderr)
   );
-});
-
-test("composite transport derives an exact cache while retaining a run artifact", async (context) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-composite-transport-test-"));
-  context.after(() => rm(root, { recursive: true, force: true }));
-  const workspace = path.join(root, "workspace");
-  const runnerTemp = path.join(root, "runner-temp");
-  await mkdir(workspace);
-  await mkdir(runnerTemp);
-
-  const select = async ({ artifactName = "", eventName = "pull_request_target" }) => {
-    const output = path.join(root, `output-${randomUUID()}`);
-    await writeFile(output, "", "utf8");
-    await runActionStep("Select bootstrap transport", {
-      ACTION_PATH: packageRoot,
-      ARTIFACT_NAME: artifactName,
-      EVENT_NAME: eventName,
-      GITHUB_OUTPUT: output,
-      GITHUB_WORKSPACE_ROOT: workspace,
-      RUNNER_OS_NAME: "Linux",
-      RUNNER_TEMP_ROOT: runnerTemp
-    });
-    return actionOutputs(await readFile(output, "utf8"));
-  };
-
-  const manifestSha256 = await expectedManifestSha256();
-  const lowTrustCache = await select({ artifactName: "codekeeper-tooling-1" });
-  assert.equal(lowTrustCache.mode, "cache");
-  assert.equal(lowTrustCache["cache-write"], "false");
-  assert.equal(lowTrustCache["cache-key"], `codekeeper-tooling-Linux-${manifestSha256}`);
-  assert.equal(lowTrustCache["manifest-sha256"], manifestSha256);
-  assert.equal(lowTrustCache.destination, path.join(workspace, "tooling"));
-  assert.equal(lowTrustCache["artifact-root"], path.join(runnerTemp, "codekeeper-tooling"));
-
-  const trustedCache = await select({
-    artifactName: "codekeeper-tooling-2",
-    eventName: "workflow_dispatch"
-  });
-  assert.equal(trustedCache["cache-write"], "true");
-
-  await assert.rejects(
-    () => select({}),
-    /requires an artifact fallback/
-  );
-});
-
-test("composite cache verification binds the exact key and manifest before reuse", async (context) => {
-  const fixture = await actionPathFixture(context);
-  const toolingRoot = await stageProductionTooling(fixture.stagingRoot);
-  const manifestSha256 = await expectedManifestSha256();
-  const verify = (overrides = {}) => runActionStep("Verify pinned production tooling", {
-    ACTION_PATH: fixture.actionPath,
-    EXPECTED_CACHE_KEY: `codekeeper-tooling-Linux-${manifestSha256}`,
-    EXPECTED_MANIFEST_SHA256: manifestSha256,
-    RUNNER_OS_NAME: "Linux",
-    TOOLING_ROOT: toolingRoot,
-    TRANSPORT_MODE: "cache",
-    ...overrides
-  });
-
-  await verify();
-  await assert.rejects(
-    () => verify({ EXPECTED_CACHE_KEY: `unbound-${manifestSha256}` }),
-    /cache key is not bound to this pinned manifest/
-  );
-  await assert.rejects(
-    () => verify({ EXPECTED_MANIFEST_SHA256: "0".repeat(64) }),
-    /cache manifest is not bound to this pinned action/
-  );
-});
-
-test("every bootstrap creates the same artifact layout used when cache restore fails", async (context) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-cache-fallback-test-"));
-  context.after(() => rm(root, { recursive: true, force: true }));
-  const workspace = path.join(root, "workspace");
-  const artifactRoot = path.join(root, "artifact");
-  await stageProductionTooling(workspace);
-
-  await runActionStep("Prepare pinned production tooling artifact fallback", {
-    ARTIFACT_ROOT: artifactRoot,
-    GITHUB_WORKSPACE: workspace
-  });
-  await verifyToolingArtifact({
-    root: path.join(artifactRoot, "tooling", "tools", "codekeeper"),
-    expectedManifestSha256: await expectedManifestSha256()
-  });
 });
 
 test("verifier rejects a substituted manifest before it can trust the artifact helper", async (context) => {
