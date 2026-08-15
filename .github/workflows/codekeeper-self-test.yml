@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: codekeeper-checks-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   maintainer-checks:
     runs-on: ${{ vars.CODEKEEPER_CI_RUNNER || 'ubuntu-latest' }}
