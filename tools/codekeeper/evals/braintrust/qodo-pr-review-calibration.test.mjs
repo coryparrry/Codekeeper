@@ -138,7 +138,7 @@ test("systematic Medium prompt requires complete bounded review passes", async (
 
 test("retained Medium optimization results preserve the experiment boundary", async () => {
   const result = JSON.parse(await readFile(OPTIMIZATION_URL, "utf8"));
-  assert.equal(result.version, 2);
+  assert.equal(result.version, 3);
   assert.equal(result.model, "gpt-5.6-luna");
   assert.equal(result.reasoningEffort, "medium");
   assert.equal(result.maxConcurrency, 1);
@@ -148,6 +148,8 @@ test("retained Medium optimization results preserve the experiment boundary", as
   assert.equal(result.selectiveFusion.mean.functionalRecall, 0.6028);
   assert.match(result.selectiveFusion.status, /not a single Braintrust pipeline experiment/);
   assert.match(result.maxEscalation.status, /without a separate Max evaluation/);
+  assert.match(result.maxEscalation.status, /qualifying blockers receive one focused Max replacement pass/);
+  assert.ok(result.maxEscalation.nonTriggers.includes("Medium overall risk high"));
   assert.equal(result.maxEscalation.evaluation, "not run");
   assert.equal(result.maxEscalation.highIsNotAProxy, true);
 });

@@ -400,7 +400,16 @@ test("preparation freezes one trusted profile for workspace and the coordinator 
       return { finalOutput: auditResult() };
     }
   }
-  await writeFile(path.join(directory, "workspace-result.json"), JSON.stringify(auditResult()), "utf8");
+  await Promise.all([
+    writeFile(path.join(directory, "workspace-result.json"), JSON.stringify(auditResult()), "utf8"),
+    writeFile(path.join(directory, "workspace-runtime-metadata.json"), JSON.stringify({
+      version: 1,
+      mode: "audit",
+      passes: [{ tier: "configured", model: "gpt-5.6-sol", effort: "high", durationMs: 25 }],
+      postReviewEscalation: null,
+      totalDurationMs: 25
+    }), "utf8")
+  ]);
   await runAgentFromBundle({
     mode: "audit",
     directory,

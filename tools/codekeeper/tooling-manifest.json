@@ -55,7 +55,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "73fcc9d9f9513b44ce55c06c84c5ee3783377e16af4c04b4362ae24a5e61eefd"
+      "sha256": "61216c523bd0139d4def3e19ee568373e2423424580ffa8f10efd1281607d37d"
     },
     {
       "path": "src/lib/commands.mjs",
