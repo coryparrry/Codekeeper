@@ -66,7 +66,6 @@ export function scoreReviewResult(manifestInput, result, metadata = {}) {
   const matchedIndexes = new Set();
   const cases = manifest.cases.map((entry) => {
     const findingIndex = findings.findIndex((finding, index) => !matchedIndexes.has(index)
-      && finding.blocking === entry.blocking
       && entry.expectedFiles.includes(String(finding.file ?? "").split(path.sep).join("/")));
     if (findingIndex >= 0) matchedIndexes.add(findingIndex);
     const finding = findingIndex >= 0 ? findings[findingIndex] : null;
@@ -74,6 +73,7 @@ export function scoreReviewResult(manifestInput, result, metadata = {}) {
       id: entry.id,
       category: entry.category,
       found: finding !== null,
+      blockingCorrect: finding !== null && finding.blocking === entry.blocking,
       expectedFiles: entry.expectedFiles,
       finding: finding ? {
         title: finding.title,
@@ -96,6 +96,7 @@ export function scoreReviewResult(manifestInput, result, metadata = {}) {
   const diagramValid = result.diagram === null || /^flowchart\s+LR\b/.test(result.diagram);
   const recommendationCorrect = result.mergeRecommendation === manifest.expectedRecommendation;
   const matched = cases.filter((entry) => entry.found).length;
+  const blockingCorrect = cases.filter((entry) => entry.blockingCorrect).length;
   return {
     runId: metadata.runId ?? null,
     runUrl: metadata.runUrl ?? null,
@@ -103,10 +104,12 @@ export function scoreReviewResult(manifestInput, result, metadata = {}) {
     matched,
     expected: cases.length,
     missed: cases.length - matched,
+    blockingCorrect,
+    blockingIncorrect: cases.length - blockingCorrect,
     falsePositiveCount: falsePositives.length,
     recommendationCorrect,
     diagramValid,
-    passed: matched === cases.length && falsePositives.length === 0 && recommendationCorrect && diagramValid,
+    passed: matched === cases.length && blockingCorrect === cases.length && falsePositives.length === 0 && recommendationCorrect && diagramValid,
     cases,
     falsePositives,
   };
@@ -117,11 +120,21 @@ export function aggregateReviewScores(manifestInput, runs) {
   assert(Array.isArray(runs) && runs.length > 0, "at least one scored run is required");
   const expected = manifest.cases.length * runs.length;
   const matched = runs.reduce((total, run) => total + run.matched, 0);
+  const blockingCorrect = runs.reduce((total, run) => total + run.blockingCorrect, 0);
   const falsePositives = runs.reduce((total, run) => total + run.falsePositiveCount, 0);
   const predicted = matched + falsePositives;
   const caseResults = manifest.cases.map((entry) => {
     const hits = runs.filter((run) => run.cases.find((candidate) => candidate.id === entry.id)?.found).length;
-    return { id: entry.id, category: entry.category, hits, runs: runs.length, recall: roundMetric(hits / runs.length) };
+    const blockingHits = runs.filter((run) => run.cases.find((candidate) => candidate.id === entry.id)?.blockingCorrect).length;
+    return {
+      id: entry.id,
+      category: entry.category,
+      hits,
+      blockingHits,
+      runs: runs.length,
+      recall: roundMetric(hits / runs.length),
+      blockingAccuracy: roundMetric(blockingHits / runs.length),
+    };
   });
   return {
     suite: manifest.name,
@@ -131,6 +144,8 @@ export function aggregateReviewScores(manifestInput, runs) {
     expectedFindings: expected,
     matchedFindings: matched,
     missedFindings: expected - matched,
+    blockingClassificationsCorrect: blockingCorrect,
+    blockingClassificationAccuracy: roundMetric(blockingCorrect / expected),
     falsePositives,
     recall: roundMetric(matched / expected),
     precision: predicted === 0 ? 1 : roundMetric(matched / predicted),
@@ -149,22 +164,23 @@ export function renderReviewSuiteMarkdown(report) {
     "",
     `- Recall: **${report.matchedFindings}/${report.expectedFindings} (${(report.recall * 100).toFixed(1)}%)**`,
     `- Precision: **${(report.precision * 100).toFixed(1)}%** with ${report.falsePositives} false positives`,
+    `- Blocking classification: **${report.blockingClassificationsCorrect}/${report.expectedFindings} (${(report.blockingClassificationAccuracy * 100).toFixed(1)}%)**`,
     `- Merge recommendation accuracy: **${(report.recommendationAccuracy * 100).toFixed(1)}%**`,
     `- Left-to-right diagram compliance: **${(report.diagramCompliance * 100).toFixed(1)}%**`,
     "",
     "## Category results",
     "",
-    "| Case | Category | Detected | Recall |",
+    "| Case | Category | Detected | Blocking classification |",
     "|---|---|---:|---:|",
-    ...report.caseResults.map((entry) => `| ${entry.id} | ${entry.category} | ${entry.hits}/${entry.runs} | ${(entry.recall * 100).toFixed(1)}% |`),
+    ...report.caseResults.map((entry) => `| ${entry.id} | ${entry.category} | ${entry.hits}/${entry.runs} | ${entry.blockingHits}/${entry.runs} |`),
     "",
     "## Runs",
     "",
-    "| Run | Result | Findings | False positives | Recommendation | Diagram |",
-    "|---|---|---:|---:|---|---|",
+    "| Run | Result | Findings | Blocking classification | False positives | Recommendation | Diagram |",
+    "|---|---|---:|---:|---:|---|---|",
     ...report.runs.map((run, index) => {
       const runLabel = run.runUrl ? `[${run.runId ?? index + 1}](${run.runUrl})` : String(run.runId ?? index + 1);
-      return `| ${runLabel} | ${run.passed ? "Pass" : "Fail"} | ${run.matched}/${run.expected} | ${run.falsePositiveCount} | ${run.recommendationCorrect ? "Correct" : "Wrong"} | ${run.diagramValid ? "LR or none" : "Invalid"} |`;
+      return `| ${runLabel} | ${run.passed ? "Pass" : "Fail"} | ${run.matched}/${run.expected} | ${run.blockingCorrect}/${run.expected} | ${run.falsePositiveCount} | ${run.recommendationCorrect ? "Correct" : "Wrong"} | ${run.diagramValid ? "LR or none" : "Invalid"} |`;
     }),
     "",
     "## Interpretation boundary",
