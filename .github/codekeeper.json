@@ -257,6 +257,7 @@
     "includeDiffInAgentContext": true,
     "reasoningEscalation": {
       "enabled": true,
+      "provider": "openai",
       "model": "gpt-5.6-luna",
       "effort": "max",
       "labels": [

@@ -90,6 +90,7 @@ test("review reasoning escalates only security, high-risk, and exceptional diffs
   });
   assert.deepEqual(reviewReasoningEscalation(source, context()), {
     escalated: false,
+    provider: "openai",
     model: "gpt-5.6-luna",
     effort: "medium",
     reason: "standard review"
@@ -103,6 +104,7 @@ test("review reasoning escalates only security, high-risk, and exceptional diffs
   ]) {
     assert.deepEqual(reviewReasoningEscalation(source, context(overrides)), {
       escalated: true,
+      provider: "openai",
       model: "gpt-5.6-luna",
       effort: "max",
       reason
@@ -115,6 +117,18 @@ test("review reasoning escalates only security, high-risk, and exceptional diffs
   assert.equal(settings.effort, "max");
   assert.equal(settings.workspaceModel, "gpt-5.6-luna");
   assert.equal(settings.workspaceEffort, "max");
+
+  const customCoordinator = structuredClone(source);
+  customCoordinator.ai.agents.review.provider = "openrouter";
+  customCoordinator.ai.agents.review.model = "anthropic/claude-sonnet";
+  customCoordinator.ai.agents.review.effort = "none";
+  assert.equal(getAgentRuntimeSettings(customCoordinator, "review", { context: context() }).provider, "openrouter");
+  const escalatedCustom = getAgentRuntimeSettings(customCoordinator, "review", {
+    context: context({ labels: ["security"] })
+  });
+  assert.equal(escalatedCustom.provider, "openai");
+  assert.equal(escalatedCustom.model, "gpt-5.6-luna");
+  assert.equal(escalatedCustom.effort, "max");
 });
 
 test("configuration rejects unsupported user auto-merge, unknown keys, and unsafe ref prefixes", async () => {
