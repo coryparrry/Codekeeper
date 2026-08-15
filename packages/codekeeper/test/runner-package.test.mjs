@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmod, cp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { access, cp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { buildCodekeeperPackageStage } from "../../../scripts/build-codekeeper-package.mjs";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
-import { PACKAGE_ROOT, PINNED_COMMIT, temporaryDirectory } from "./helpers.mjs";
+import { git, PACKAGE_ROOT, PINNED_COMMIT, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SECRET_CANARIES = Object.freeze({
   OPENAI_API_KEY: "sk-openai-canary-never-forward",
@@ -15,6 +16,15 @@ const SECRET_CANARIES = Object.freeze({
   CODEKEEPER_APP_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----canary",
   UNRELATED_SECRET: "unrelated-canary-never-forward"
 });
+
+async function pathExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test("sanitized command environments retain only terminal/GitHub configuration and force GitHub.com", () => {
   const environment = sanitizedEnvironment({
@@ -135,10 +145,16 @@ test("command runner bounds captured output and requireSuccess rejects failure, 
 test("npm tarball contains only the declared runtime and its local entrypoint works without registry access", async (t) => {
   const npmCache = await temporaryDirectory(t, "codekeeper-npm-cache-");
   const packDestination = await temporaryDirectory(t, "codekeeper-pack-");
-  const installRoot = await temporaryDirectory(t, "codekeeper-install-");
   const npmInstallRoot = await temporaryDirectory(t, "codekeeper-npm-install-");
   const dependencyStaging = await temporaryDirectory(t, "codekeeper-dependency-staging-");
-  const dependencyTarballs = await temporaryDirectory(t, "codekeeper-dependency-tarballs-");
+  const packageStageParent = await temporaryDirectory(t, "codekeeper-package-runner-stage-");
+  const packageStage = path.join(packageStageParent, "package");
+  const { manifest: releaseManifest } = await buildCodekeeperPackageStage({
+    repositoryRoot: REPOSITORY_ROOT,
+    destination: packageStage,
+    sourceCommit: git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim(),
+    requireClean: false
+  });
   const npmEnvironment = {
     ...process.env,
     npm_config_cache: npmCache,
@@ -149,95 +165,63 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   };
   const npmOptions = { encoding: "utf8", env: npmEnvironment, timeout: 60_000 };
   const output = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-    cwd: PACKAGE_ROOT,
+    cwd: packageStage,
     ...npmOptions
   });
   const report = JSON.parse(output)[0];
   const files = report.files.map((file) => file.path).sort();
-  const expected = [
-    "LICENSE",
-    "README.md",
-    "assets/agents/fixer.md",
-    "assets/agents/issue-triager.md",
-    "assets/agents/pr-reviewer.md",
-    "assets/agents/repository-auditor.md",
-    "assets/metadata.json",
-    "assets/policies/mixed.json",
-    "assets/policies/openai.json",
-    "assets/workflows/assistant.yml",
-    "assets/workflows/fix.yml",
-    "assets/workflows/issues.yml",
-    "assets/workflows/maintain.yml",
-    "assets/workflows/review.yml",
-    "bin/codekeeper.mjs",
-    "npm-shrinkwrap.json",
-    "package.json",
-    "src/assets.mjs",
-    "src/cli.mjs",
-    "src/command-runner.mjs",
-    "src/constants.mjs",
-    "src/errors.mjs",
-    "src/install.mjs",
-    "src/input-safety.mjs",
-    "src/plan.mjs",
-    "src/policy.mjs",
-    "src/policy-validator.mjs",
-    "src/preflight.mjs",
-    "src/private-key-input.mjs",
-    "src/prompts.mjs",
-    "src/settings-tui.mjs",
-    "src/settings.mjs",
-    "src/shell-command.mjs",
-    "src/tui.mjs",
-    "src/updater.mjs"
-  ].sort();
+  const expected = [...releaseManifest.files.map((file) => file.path), "release/manifest.json"].sort();
   assert.equal(report.name, "codekeeper");
   assert.equal(report.version, "0.2.0");
   assert.deepEqual(files, expected);
-  assert.ok(files.every((file) => !file.startsWith("test/") && !file.includes("package-lock")));
+  assert.ok(files.every((file) => !file.includes("/test/") && !file.includes("package-lock")));
 
   const packed = JSON.parse(execFileSync("npm", [
     "pack", "--json", "--ignore-scripts", "--pack-destination", packDestination
-  ], { cwd: PACKAGE_ROOT, ...npmOptions }))[0];
+  ], { cwd: packageStage, ...npmOptions }))[0];
   assert.deepEqual(packed.files.map((file) => file.path).sort(), expected);
   const tarball = path.join(packDestination, packed.filename);
-  const packageLock = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package-lock.json"), "utf8"));
-  const shrinkwrap = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "npm-shrinkwrap.json"), "utf8"));
-  const packageManifest = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
-  assert.deepEqual(shrinkwrap, packageLock);
-  assert.deepEqual(packageLock.packages[""].dependencies, packageManifest.dependencies);
-  const installerLock = structuredClone(packageLock);
+  const shrinkwrap = JSON.parse(await readFile(path.join(packageStage, "npm-shrinkwrap.json"), "utf8"));
+  const packageManifest = JSON.parse(await readFile(path.join(packageStage, "package.json"), "utf8"));
+  assert.deepEqual(shrinkwrap.packages[""].dependencies, packageManifest.dependencies);
+  const installerLock = structuredClone(shrinkwrap);
   for (const [index, [packagePath, metadata]] of Object.entries(installerLock.packages).entries()) {
     if (!packagePath.startsWith("node_modules/")) continue;
     assert.equal(typeof metadata.version, "string", `${packagePath} is version-locked`);
     assert.match(metadata.integrity, /^sha512-/, `${packagePath} is integrity-locked`);
-    const packageName = packagePath.slice("node_modules/".length);
-    const stagedPackagePath = path.join(dependencyStaging, `${index}`);
-    await cp(path.join(PACKAGE_ROOT, packagePath), stagedPackagePath, { recursive: true });
-    const stagedManifestPath = path.join(stagedPackagePath, "package.json");
-    const stagedManifest = JSON.parse(await readFile(stagedManifestPath, "utf8"));
-    assert.equal(stagedManifest.name, packageName, `${packagePath} has the locked package name`);
-    assert.equal(stagedManifest.version, metadata.version, `${packagePath} has the locked version`);
-    delete stagedManifest.scripts;
-    await writeFile(stagedManifestPath, JSON.stringify(stagedManifest));
-    const dependencyTarball = JSON.parse(execFileSync("npm", [
-      "pack", "--json", "--ignore-scripts", "--pack-destination", dependencyTarballs
-    ], { cwd: stagedPackagePath, ...npmOptions }))[0];
+    const installedDependencyPath = path.join(PACKAGE_ROOT, packagePath);
+    if (!(await pathExists(installedDependencyPath))) {
+      assert.equal(metadata.optional, true, `${packagePath} is absent only when optional for this platform`);
+      continue;
+    }
+    const installedManifestPath = path.join(installedDependencyPath, "package.json");
+    const installedManifest = JSON.parse(await readFile(installedManifestPath, "utf8"));
+    const hasLifecycleScript = ["preinstall", "install", "postinstall", "prepare"].some(
+      (name) => typeof installedManifest.scripts?.[name] === "string"
+    );
+    let resolvedPath = installedDependencyPath;
+    if (hasLifecycleScript) {
+      resolvedPath = path.join(dependencyStaging, String(index));
+      await cp(installedDependencyPath, resolvedPath, { recursive: true });
+      delete installedManifest.scripts;
+      await writeFile(path.join(resolvedPath, "package.json"), JSON.stringify(installedManifest));
+    }
     delete metadata.integrity;
-    metadata.resolved = `file:${path.join(dependencyTarballs, dependencyTarball.filename)}`;
+    metadata.resolved = `file:${resolvedPath}`;
   }
-  installerLock.packages[""] = {
+  const installerManifest = {
     name: "codekeeper-install-test",
     private: true,
     dependencies: { codekeeper: `file:${tarball}` }
   };
+  installerLock.packages[""] = installerManifest;
   installerLock.packages["node_modules/codekeeper"] = {
     version: packageManifest.version,
     resolved: `file:${tarball}`,
     bin: packageManifest.bin,
     dependencies: packageManifest.dependencies
   };
-  await writeFile(path.join(npmInstallRoot, "package.json"), JSON.stringify(installerLock.packages[""]));
+  await writeFile(path.join(npmInstallRoot, "package.json"), JSON.stringify(installerManifest));
   await writeFile(path.join(npmInstallRoot, "package-lock.json"), JSON.stringify(installerLock));
   execFileSync("npm", [
     "install", "--offline", "--ignore-scripts", "--prefix", npmInstallRoot
@@ -245,35 +229,14 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   const npmInstalledRoot = path.join(npmInstallRoot, "node_modules", "codekeeper");
   const npmInstalledPackage = JSON.parse(await readFile(path.join(npmInstalledRoot, "package.json"), "utf8"));
   assert.deepEqual(npmInstalledPackage.bin, { codekeeper: "bin/codekeeper.mjs" });
-  assert.deepEqual(npmInstalledPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
+  assert.deepEqual(npmInstalledPackage.dependencies, packageManifest.dependencies);
   const npmShim = path.join(npmInstallRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper.cmd" : "codekeeper");
-  const modulesRoot = path.join(installRoot, "node_modules");
-  const installedRoot = path.join(modulesRoot, "codekeeper");
-  await mkdir(installedRoot, { recursive: true });
-  execFileSync("tar", ["-xzf", tarball, "-C", installedRoot, "--strip-components=1"], {
-    encoding: "utf8",
-    timeout: 10_000
-  });
-  for (const dependency of ["ink", "react"]) {
-    await symlink(
-      path.join(PACKAGE_ROOT, "node_modules", dependency),
-      path.join(modulesRoot, dependency),
-      process.platform === "win32" ? "junction" : "dir"
-    );
-  }
-  const binDirectory = path.join(modulesRoot, ".bin");
-  await mkdir(binDirectory);
-  const shim = path.join(binDirectory, process.platform === "win32" ? "codekeeper.cmd" : "codekeeper");
-  if (process.platform === "win32") {
-    await writeFile(shim, `@ECHO off\r\n"${process.execPath}" "%~dp0\\..\\codekeeper\\bin\\codekeeper.mjs" %*\r\n`);
-  } else {
-    await symlink("../codekeeper/bin/codekeeper.mjs", shim);
-    await chmod(path.join(installedRoot, "bin", "codekeeper.mjs"), 0o755);
-  }
+  const installedRoot = npmInstalledRoot;
+  const shim = npmShim;
   const installedPackage = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8"));
   const installedReadme = await readFile(path.join(installedRoot, "README.md"), "utf8");
   assert.deepEqual(installedPackage.bin, { codekeeper: "bin/codekeeper.mjs" });
-  assert.deepEqual(installedPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
+  assert.deepEqual(installedPackage.dependencies, packageManifest.dependencies);
   assert.deepEqual([...new Set(installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? [])], [PINNED_COMMIT]);
   const shimEnvironment = Object.fromEntries(Object.entries({
     PATH: process.env.PATH,
@@ -287,11 +250,11 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   const npmInstallHelp = invoke(npmShim, ["--help"]);
   const npmInstallVersion = invoke(npmShim, ["--version"]);
   const npmExecHelp = execFileSync("npm", [
-    "exec", "--prefix", installRoot, "--", "codekeeper", "--help"
-  ], { cwd: installRoot, ...npmOptions });
+    "exec", "--prefix", npmInstallRoot, "--", "codekeeper", "--help"
+  ], { cwd: npmInstallRoot, ...npmOptions });
   const npxHelp = execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", [
-    "--offline", "--prefix", installRoot, "--", "codekeeper", "--help"
-  ], { cwd: installRoot, ...npmOptions });
+    "--offline", "--prefix", npmInstallRoot, "--", "codekeeper", "--help"
+  ], { cwd: npmInstallRoot, ...npmOptions });
   const installedTui = await import(pathToFileURL(path.join(
     installedRoot,
     "src",
