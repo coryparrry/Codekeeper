@@ -13,12 +13,12 @@ Use a private disposable adopter repository. Create one pull request that contai
 
 Disable competing automatic reviewers for the fixture, or remove their comments before the first counted run. Their findings contaminate the review context, and feedback events can also replace an in-progress run through the repository's concurrency policy. Exclude any interrupted or contaminated attempt from model scoring and record why it was excluded.
 
-| Category | Fixture shape | Expected review behavior |
-|---|---|---|
-| Security | Untrusted archive entry escapes its extraction root | Blocking finding at the containment boundary |
-| Concurrency | Two overlapping reservations both pass a check-before-write race | Blocking finding at the atomicity boundary |
-| API contract | A continuation cursor is serialized under the wrong public parameter | Blocking finding at the request builder |
-| Subtle regression | An expiry check evicts a value at the exact still-valid boundary | Blocking finding at the boundary comparison |
+| Category          | Fixture shape                                                        | Expected review behavior                     |
+| ----------------- | -------------------------------------------------------------------- | -------------------------------------------- |
+| Security          | Untrusted archive entry escapes its extraction root                  | Blocking finding at the containment boundary |
+| Concurrency       | Two overlapping reservations both pass a check-before-write race     | Blocking finding at the atomicity boundary   |
+| API contract      | A continuation cursor is serialized under the wrong public parameter | Blocking finding at the request builder      |
+| Subtle regression | An expiry check evicts a value at the exact still-valid boundary     | Blocking finding at the boundary comparison  |
 
 Keep one deterministic failing test for each planted defect and passing tests for nearby behavior. Do not put category names, expected files, or explanations in the pull-request title or description.
 
@@ -88,14 +88,14 @@ Severity and blocking are also separate decisions. Severity measures impact; blo
 
 The first completed multi-domain live suite ran the same immutable pull-request head three times through GitHub, the Luna workspace specialist, the Braintrust coordinator exporter, schema validation, sealing, and publication. The answer key covered the four fixture shapes above.
 
-| Measurement | Result |
-|---|---:|
-| Defect detection | 12/12 (100%) |
-| Blocking classification | 11/12 (91.7%) |
-| Unrelated findings | 0 |
-| Correct merge recommendation | 3/3 (100%) |
-| Left-to-right diagram compliance | 3/3 (100%) |
-| Runs passing every strict assertion | 2/3 |
+| Measurement                         |        Result |
+| ----------------------------------- | ------------: |
+| Defect detection                    |  12/12 (100%) |
+| Blocking classification             | 11/12 (91.7%) |
+| Unrelated findings                  |             0 |
+| Correct merge recommendation        |    3/3 (100%) |
+| Left-to-right diagram compliance    |    3/3 (100%) |
+| Runs passing every strict assertion |           2/3 |
 
 Luna detected the security, concurrency, and API-contract defects as blocking in all three repeats. It also detected the subtle expiry-boundary regression in all three, but downgraded that finding to non-blocking once. Every repeat still recommended blocking the pull request. All three returned no diagram, which is valid under the `flowchart LR`-or-none contract.
 
@@ -107,25 +107,25 @@ Two setup attempts were excluded before scoring: one was contaminated by an auto
 
 After separating impact severity from merge blocking, the identical pull-request head was reviewed three more times through the complete GitHub workflow. The low-severity expiry-boundary defect remained blocking in every repeat without changing the other classifications.
 
-| Measurement | Before | After |
-|---|---:|---:|
-| Defect detection | 12/12 (100%) | 12/12 (100%) |
-| Blocking classification | 11/12 (91.7%) | 12/12 (100%) |
-| Unrelated findings | 0 | 0 |
-| Correct merge recommendation | 3/3 (100%) | 3/3 (100%) |
-| Left-to-right diagram compliance | 3/3 (100%) | 3/3 (100%) |
-| Runs passing every strict assertion | 2/3 | 3/3 |
+| Measurement                         |        Before |        After |
+| ----------------------------------- | ------------: | -----------: |
+| Defect detection                    |  12/12 (100%) | 12/12 (100%) |
+| Blocking classification             | 11/12 (91.7%) | 12/12 (100%) |
+| Unrelated findings                  |             0 |            0 |
+| Correct merge recommendation        |    3/3 (100%) |   3/3 (100%) |
+| Left-to-right diagram compliance    |    3/3 (100%) |   3/3 (100%) |
+| Runs passing every strict assertion |           2/3 |          3/3 |
 
 The contrastive decision-quality case now requires a current, reproducible, pull-request-introduced contract violation to remain blocking even when its impact is low. A mutation test moves that supported defect into the non-blocking bucket and proves that the semantic evaluator rejects the downgrade. The schema accepts this independent classification instead of coupling every blocker to medium-or-higher severity.
 
-| Post-calibration stage | Three-run observation |
-|---|---:|
-| Braintrust coordinator trace | 5.9-6.4 seconds |
-| Complete GitHub workflow | 3 minutes 37 seconds-4 minutes 12 seconds |
-| Luna workspace analysis job | 1 minute 19 seconds-1 minute 56 seconds |
-| Coordinator analysis job | 28-32 seconds |
-| Seal job | 15-18 seconds |
-| Publication job | 17-18 seconds |
+| Post-calibration stage       |                     Three-run observation |
+| ---------------------------- | ----------------------------------------: |
+| Braintrust coordinator trace |                           5.9-6.4 seconds |
+| Complete GitHub workflow     | 3 minutes 37 seconds-4 minutes 12 seconds |
+| Luna workspace analysis job  |   1 minute 19 seconds-1 minute 56 seconds |
+| Coordinator analysis job     |                             28-32 seconds |
+| Seal job                     |                             15-18 seconds |
+| Publication job              |                             17-18 seconds |
 
 This small three-run sample shows no latency regression from the classification change: the coordinator stayed inside the pre-calibration range and the workflow maximum was five seconds lower. It is not a performance benchmark. A separate optimization phase should measure the Luna workspace job first because it is both the longest stage and the largest source of run-to-run variance. Braintrust currently times only the final coordinator span, so GitHub job timing remains necessary for that analysis.
 
@@ -137,11 +137,11 @@ The custom TypeScript scorer `Codekeeper review contract` is deterministic. It a
 
 The first immutable experiment snapshot for each effort produced the following successful results. The first medium attempt returned a transient `502 Bad Gateway` before scoring; its failed experiment was retained, and the separately named medium retry below succeeded.
 
-| Effort | Contract score | Duration | LLM duration | Time to first token | Prompt tokens | Cached prompt tokens | Completion tokens | Reasoning tokens | Total tokens | Estimated cost |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Low | 100% | 5.12s | 4.86s | 0.737s | 2,752 | 2,749 | 856 | 49 | 3,608 | $0.001 |
-| Medium retry | 100% | 5.38s | 4.91s | 0.594s | 2,752 | 2,749 | 902 | 95 | 3,654 | $0.001 |
-| High | 100% | 14.47s | 14.02s | 3.17s | 2,752 | 2,749 | 899 | 92 | 3,651 | $0.001 |
+| Effort       | Contract score | Duration | LLM duration | Time to first token | Prompt tokens | Cached prompt tokens | Completion tokens | Reasoning tokens | Total tokens | Estimated cost |
+| ------------ | -------------: | -------: | -----------: | ------------------: | ------------: | -------------------: | ----------------: | ---------------: | -----------: | -------------: |
+| Low          |           100% |    5.12s |        4.86s |              0.737s |         2,752 |                2,749 |               856 |               49 |        3,608 |         $0.001 |
+| Medium retry |           100% |    5.38s |        4.91s |              0.594s |         2,752 |                2,749 |               902 |               95 |        3,654 |         $0.001 |
+| High         |           100% |   14.47s |       14.02s |               3.17s |         2,752 |                2,749 |               899 |               92 |        3,651 |         $0.001 |
 
 This is a calibration smoke test, not evidence that low is generally equivalent or that high is always slower. The mutable playground run also scored all three efforts at 100%, but its observed durations were 8.3, 5.4, and 6.3 seconds respectively. That variance, plus the transient gateway failure, means optimization decisions should use at least three immutable repeats per effort, run sequentially against the same dataset version. Compare correctness first, then error rate, latency percentiles, reasoning and total tokens, cache use, and cost. Keep GitHub workflow timing alongside Braintrust because this experiment covers the final coordinator only, not Luna's repository workspace analysis.
 
@@ -158,20 +158,20 @@ The versioned local artifacts are:
 
 The live [Codekeeper Luna flow calibration v1 dataset](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/datasets/codekeeper-luna-flow-calibration-v1) and [Codekeeper Luna flow contract scorer](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/scorers/61013cd0-2f7f-4a21-8ca9-f9accbb1f6f7) mirror those files.
 
-| Case | Flow | Difficulty | Behavior under test | Source anchor |
-|---|---|---|---|---|
-| `issue-missing-repro-injection` | Issue | Easy | Reject instruction injection and request a reproducible boundary | `tools/codekeeper/src/lib/prompts.mjs` |
-| `issue-exact-duplicate-stale-publication` | Issue | Medium | Match an exact stale-head duplicate without using component similarity | `tools/codekeeper/src/lib/publish.mjs` |
-| `issue-related-pagination-not-duplicate` | Issue | Hard | Separate a query-key defect from a related pagination-bound defect | `acceptance/src/harness.mjs` |
-| `issue-unresolved-policy-choice` | Issue | Hard | Require a maintainer decision when mutation authority is ambiguous | `tools/codekeeper/src/lib/publish.mjs`, `docs/CONFIGURATION.md` |
-| `review-query-key-regression` | Review | Easy | Block a current API-contract regression and reject a disproved distractor | `tools/codekeeper/evals/decision-quality.mjs` |
-| `review-stale-head-publication` | Review | Hard | Detect use of an earlier pull snapshot after exact-head revalidation | `tools/codekeeper/src/lib/publish.mjs` |
-| `review-bounded-pagination-completeness` | Review | Hard | Fail closed at a full 1,000-row inventory boundary | `acceptance/src/harness.mjs` |
-| `review-clean-cache-refactor` | Review | Hard | Approve a constrained optimization despite plausible false positives | `tools/codekeeper/src/lib/config.mjs` |
-| `fix-expiry-equality-boundary` | Fix | Easy | Preserve the proven equality boundary with the smallest patch | `tools/codekeeper/evals/decision-quality.mjs` |
-| `fix-archive-path-containment` | Fix | Medium | Reject traversal, root-self, absolute, and prefix-sibling paths | `tools/codekeeper/src/lib/workspace.mjs` |
-| `fix-concurrent-reservation-atomicity` | Fix | Hard | Make same-key reservation atomic while retaining retry and key independence | `tools/codekeeper/src/lib/publish.mjs` |
-| `fix-protected-workflow-request` | Fix | Medium | Refuse an owner-authored request outside the controlled edit boundary | `tools/codekeeper/src/lib/prompts.mjs` |
+| Case                                      | Flow   | Difficulty | Behavior under test                                                         | Source anchor                                                   |
+| ----------------------------------------- | ------ | ---------- | --------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `issue-missing-repro-injection`           | Issue  | Easy       | Reject instruction injection and request a reproducible boundary            | `tools/codekeeper/src/lib/prompts.mjs`                          |
+| `issue-exact-duplicate-stale-publication` | Issue  | Medium     | Match an exact stale-head duplicate without using component similarity      | `tools/codekeeper/src/lib/publish.mjs`                          |
+| `issue-related-pagination-not-duplicate`  | Issue  | Hard       | Separate a query-key defect from a related pagination-bound defect          | `acceptance/src/harness.mjs`                                    |
+| `issue-unresolved-policy-choice`          | Issue  | Hard       | Require a maintainer decision when mutation authority is ambiguous          | `tools/codekeeper/src/lib/publish.mjs`, `docs/CONFIGURATION.md` |
+| `review-query-key-regression`             | Review | Easy       | Block a current API-contract regression and reject a disproved distractor   | `tools/codekeeper/evals/decision-quality.mjs`                   |
+| `review-stale-head-publication`           | Review | Hard       | Detect use of an earlier pull snapshot after exact-head revalidation        | `tools/codekeeper/src/lib/publish.mjs`                          |
+| `review-bounded-pagination-completeness`  | Review | Hard       | Fail closed at a full 1,000-row inventory boundary                          | `acceptance/src/harness.mjs`                                    |
+| `review-clean-cache-refactor`             | Review | Hard       | Approve a constrained optimization despite plausible false positives        | `tools/codekeeper/src/lib/config.mjs`                           |
+| `fix-expiry-equality-boundary`            | Fix    | Easy       | Preserve the proven equality boundary with the smallest patch               | `tools/codekeeper/evals/decision-quality.mjs`                   |
+| `fix-archive-path-containment`            | Fix    | Medium     | Reject traversal, root-self, absolute, and prefix-sibling paths             | `tools/codekeeper/src/lib/workspace.mjs`                        |
+| `fix-concurrent-reservation-atomicity`    | Fix    | Hard       | Make same-key reservation atomic while retaining retry and key independence | `tools/codekeeper/src/lib/publish.mjs`                          |
+| `fix-protected-workflow-request`          | Fix    | Medium     | Refuse an owner-authored request outside the controlled edit boundary       | `tools/codekeeper/src/lib/prompts.mjs`                          |
 
 ### Controlled comparison
 
@@ -188,27 +188,84 @@ Three early immutable repetitions named `r1` through `r3` are deliberately exclu
 
 Durations are Braintrust sums across 12 model calls, not wall-clock batch time. `LLM duration` excludes evaluation overhead. High `r4` produced the correct output on 11 rows; `review-clean-cache-refactor` reached the 512-token completion ceiling before emitting output, which Braintrust represented as two errors and no score for that row.
 
-| Effort | Run | Exact passes | Errors | Duration | LLM duration | TTFT sum | Completion tokens | Reasoning tokens |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| Low | `r4` | 12/12 | 0 | 27.71s | 19.61s | 8.06s | 659 | 145 |
-| Low | `r5` | 12/12 | 0 | 15.52s | 13.68s | 4.11s | 615 | 101 |
-| Low | `r6` | 12/12 | 0 | 18.70s | 16.97s | 4.41s | 626 | 112 |
-| Medium | `r4` | 12/12 | 0 | 24.14s | 16.83s | 4.77s | 848 | 322 |
-| Medium | `r5` | 12/12 | 0 | 22.09s | 16.62s | 4.62s | 861 | 337 |
-| Medium | `r6` | 12/12 | 0 | 20.61s | 19.06s | 4.39s | 1,088 | 560 |
-| High | `r4` | 11/12 | 2 | 28.41s | 22.41s | 4.92s | 1,452 | 960 |
-| High | `r5` | 12/12 | 0 | 20.86s | 17.34s | 5.32s | 977 | 447 |
-| High | `r6` | 12/12 | 0 | 22.47s | 20.92s | 5.17s | 1,171 | 641 |
+| Effort | Run  | Exact passes | Errors | Duration | LLM duration | TTFT sum | Completion tokens | Reasoning tokens |
+| ------ | ---- | -----------: | -----: | -------: | -----------: | -------: | ----------------: | ---------------: |
+| Low    | `r4` |        12/12 |      0 |   27.71s |       19.61s |    8.06s |               659 |              145 |
+| Low    | `r5` |        12/12 |      0 |   15.52s |       13.68s |    4.11s |               615 |              101 |
+| Low    | `r6` |        12/12 |      0 |   18.70s |       16.97s |    4.41s |               626 |              112 |
+| Medium | `r4` |        12/12 |      0 |   24.14s |       16.83s |    4.77s |               848 |              322 |
+| Medium | `r5` |        12/12 |      0 |   22.09s |       16.62s |    4.62s |               861 |              337 |
+| Medium | `r6` |        12/12 |      0 |   20.61s |       19.06s |    4.39s |             1,088 |              560 |
+| High   | `r4` |        11/12 |      2 |   28.41s |       22.41s |    4.92s |             1,452 |              960 |
+| High   | `r5` |        12/12 |      0 |   20.86s |       17.34s |    5.32s |               977 |              447 |
+| High   | `r6` |        12/12 |      0 |   22.47s |       20.92s |    5.17s |             1,171 |              641 |
 
 | Effort | Production-gate result | Errors | Duration | LLM duration | Mean LLM/case | Completion tokens | Reasoning tokens |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Low | 36/36 (100%) | 0 | 61.93s | 50.26s | 1.40s | 1,900 | 358 |
-| Medium | 36/36 (100%) | 0 | 66.84s | 52.51s | 1.46s | 2,797 | 1,219 |
-| High | 35/36 (97.2%) | 2 | 71.74s | 60.67s | 1.69s | 3,600 | 2,048 |
+| ------ | ---------------------: | -----: | -------: | -----------: | ------------: | ----------------: | ---------------: |
+| Low    |           36/36 (100%) |      0 |   61.93s |       50.26s |         1.40s |             1,900 |              358 |
+| Medium |           36/36 (100%) |      0 |   66.84s |       52.51s |         1.46s |             2,797 |            1,219 |
+| High   |          35/36 (97.2%) |      2 |   71.74s |       60.67s |         1.69s |             3,600 |            2,048 |
 
-Low is the current Luna default for all three evaluated flows. It tied medium on exact correctness, had no errors, used 7.3% less end-to-end time, 4.3% less model time, and 70.6% fewer reasoning tokens. High failed the hard reliability gate once; low used 13.7% less end-to-end time and 82.5% fewer reasoning tokens than high. Medium had a lower aggregate time-to-first-token than low because of low `r4` variance, but did not convert its extra reasoning into better accuracy or lower total latency.
+For this 12-case flow suite, Low remains the strongest issue-and-fix calibration result. It tied medium on exact correctness, had no errors, used 7.3% less end-to-end time, 4.3% less model time, and 70.6% fewer reasoning tokens. High failed the hard reliability gate once; low used 13.7% less end-to-end time and 82.5% fewer reasoning tokens than high. Medium had a lower aggregate time-to-first-token than low because of low `r4` variance, but did not convert its extra reasoning into better accuracy or lower total latency. The larger review-specific benchmark below supersedes this suite's PR-review reasoning selection.
 
-This result selects a reasoning level within Luna; it does not yet justify replacing the current per-flow production models. The cases reason over frozen repository evidence without workspace tools, patch application, GitHub API calls, or end-to-end publication. The next evaluation layer should compare Luna low with each incumbent model on live issue, review, and fix orchestration while recording workspace duration, tool calls, retries, patch/test outcomes, and GitHub workflow time.
+This result selects a reasoning level within Luna; it does not yet justify replacing the current per-flow production models. The cases reason over frozen repository evidence without workspace tools, patch application, GitHub API calls, or end-to-end publication. The next evaluation layer should compare the selected Luna effort for each flow with its incumbent model on live issue, review, and fix orchestration while recording workspace duration, tool calls, retries, patch/test outcomes, and GitHub workflow time.
+
+## Qodo PR review calibration v1
+
+The [Codekeeper Qodo PR review calibration v1 playground](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/playgrounds/Codekeeper%20Qodo%20PR%20review%20calibration%20v1) measures review quality on substantially larger, multi-file pull requests than the 12-case flow suite. Its [Braintrust dataset](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/datasets/codekeeper-qodo-pr-review-calibration-v1) contains 30 frozen cases selected from [Qodo PR-Review-Bench](https://huggingface.co/datasets/Qodo/PR-Review-Bench): 179 labelled issues, 334 changed files, and 891,201 diff bytes across eight repositories.
+
+The source is pinned to revision `a73957c450a70693a743260e5637fffc44625f16`. The raw `git_code_review_bench_100_w_open_prs.jsonl` file is MIT licensed and has SHA-256 `2f0448ed1f9a55bea14039961d8d9e610ee8885b37559b80f5821f3f70cfe64d`. The repository distribution is Ghost, ASP.NET Core, Cal.com, Dify, Firefox iOS, and Prefect with four cases each, plus Redis and Tauri with three each.
+
+The versioned local artifacts are:
+
+- `tools/codekeeper/evals/braintrust/qodo-pr-review-selection-v1.json` — pinned source provenance and the exact 30-case selection.
+- `tools/codekeeper/evals/braintrust/prepare-qodo-pr-review-bench-v1.mjs` — checksum-verifying dataset generator.
+- `tools/codekeeper/evals/braintrust/qodo-pr-review-prompt-v1.md` — the shared diff-only review prompt.
+- `tools/codekeeper/evals/braintrust/qodo-pr-review-scorer-v1.ts` — deterministic localization and semantic-overlap scorer.
+- `tools/codekeeper/evals/braintrust/qodo-pr-review-calibration.test.mjs` — selection, prompt, and scorer contract tests.
+
+### What the scores mean
+
+Qodo labels 88 issues as functional defects and 91 as repository-rule violations. `Qodo functional recall` is the percentage of labelled functional defects found. `Qodo precision` is the percentage of model findings matched to the answer key. `Qodo F1` balances overall recall with precision. `Qodo impact recall` is a Codekeeper metric that weights functional defects twice as heavily as rule violations; Qodo does not provide native severity labels, so this must not be described as severity-weighted recall.
+
+The scorer requires the exact normalized file, a line inside or within three lines of the labelled range, and sufficient semantic overlap. It performs one-to-one matching so one finding cannot claim multiple answer-key issues. This makes the result deterministic, but it can undercount a useful finding when the answer key is incomplete or the model anchors a real defect outside the narrow labelled range.
+
+### Run controls and exclusions
+
+Every retained experiment used GPT-5.6 Luna, `verbosity: low`, the same prompt, dataset version, and [Qodo metrics scorer](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/scorers/d638bd93-5acc-45e9-a27b-1d1d6c54e0b5). Output ceilings differed because High consumed its reasoning budget before producing JSON: Low used 2,048 tokens, Medium 8,192, and High 32,768. None of the retained model calls reached its ceiling.
+
+The following attempts are excluded:
+
+- The first mutable playground execution launched 90 calls together and reached the organization's 200,000-token-per-minute limit.
+- The first Medium and High immutable experiments ran at the same time and used a 2,048-token ceiling. Their capped rows and cross-level concurrency invalidate both accuracy and latency comparisons.
+- A subsequent isolated High attempt still capped at 8,192 tokens and was deleted after the failure was confirmed.
+
+Low `r1` completed 30 calls with no errors and is retained. Medium and High were then rerun strictly one experiment at a time with `max concurrency: 1`. Low was not rerun, so its latency was observed while the discarded experiments also existed; the quality scores are complete, but the first-round latency comparison remains preliminary.
+
+High's retained experiment completed all 30 model calls with zero LLM errors and no token-cap failures. The custom scorer failed transiently on `qodo-ghost-1` and `qodo-ghost-2`; both valid JSON outputs were rescored successfully. Braintrust retains the two historical scorer errors in the experiment metrics even though all 30 rows now have all six scores.
+
+### Retained first-round results
+
+The links below point to immutable Braintrust experiments. Duration and token values are sums from the exported 30-row experiment data. Mean model time is `LLM duration / 30`.
+
+| Effort | Experiment                                                                                                                                                    |     F1 | Functional recall | Impact recall | Overall recall | Precision | Model errors | Scorer errors | LLM duration | Mean model time | Completion tokens | Reasoning tokens |   Cost |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----: | ----------------: | ------------: | -------------: | --------: | -----------: | ------------: | -----------: | --------------: | ----------------: | ---------------: | -----: |
+| Low    | [`low r1`](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/experiments/Codekeeper%20Qodo%20PR%20review%20low%20r1)                                     | 38.77% |            49.44% |        34.56% |         27.28% |    81.59% |            0 |             0 |      284.71s |           9.49s |            26,465 |           21,431 | $0.065 |
+| Medium | [`medium isolated r1`](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/experiments/Codekeeper%20Qodo%20PR%20review%20medium%20isolated%20r1)           | 41.92% |            55.00% |        38.19% |         29.89% |    81.03% |            0 |             0 |      636.06s |          21.20s |            65,537 |           60,381 | $0.083 |
+| High   | [`high isolated r1 retry`](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/experiments/Codekeeper%20Qodo%20PR%20review%20high%20isolated%20r1%20retry) | 43.38% |            58.33% |        40.61% |         31.93% |    82.28% |            0 |   2, rescored |    2,069.10s |          68.97s |           272,898 |          267,742 | $0.332 |
+
+Medium is the selected Luna reasoning level for PR review. Relative to Low, it gains 5.56 percentage points of functional recall and 3.16 points of F1 while remaining above 81% precision, at 2.23 times the mean model latency. High gains only another 3.33 points of functional recall and 1.46 points of F1, but takes 3.25 times as long as Medium and costs 3.98 times as much. This selection does not replace the current production review model: the repository's shipped OpenAI policy still uses GPT-5.6 Sol at high effort, and Luna must beat that incumbent in live workflow acceptance before a product-default change.
+
+### Improving recall without accepting High's latency
+
+The 55% functional recall is not a sufficient quality ceiling. The first improvement loop should keep Medium and change evidence and review strategy rather than spending more reasoning on the same diff-only prompt:
+
+1. **Adjudicate misses before prompt tuning.** Medium scored zero functional recall on `qodo-dify-6`, `qodo-prefect-10`, and `qodo-tauri-5`. Dify returned no findings, which is a clear model miss. Prefect and Tauri returned plausible findings that did not match the answer key, so those rows need manual classification as a model miss, an answer-key omission, or an overly strict localization match.
+2. **Add bounded repository context.** Supply the changed symbols' callers, tests, types, configuration rules, and relevant implementation before asking for findings. The current task exposes only the unified diff, which hides many cross-file contracts represented in the answer key.
+3. **Use selective Medium passes.** Run one complete change-surface pass, then route only high-risk or weakly covered hunks through focused authorization, concurrency/resource-lifecycle, data-contract, and platform-behavior checks. Deduplicate and validate file/line evidence deterministically afterward. This spends extra latency where the first pass is most likely to miss a defect instead of applying High reasoning to every file.
+4. **Measure the pipeline, not only the final answer.** Record recall gained by each evidence source and specialist pass, plus p50/p95 latency, tokens, scorer errors, and false-positive adjudication. Retain clean pull requests so improved recall does not come from reporting more speculative findings.
+
+The next Braintrust iteration should compare the current Medium prompt with one context-enriched Medium variant and one selectively routed Medium variant. Run them sequentially against the same immutable dataset and preserve each experiment, including unsuccessful variants. Do not optimize the scorer to reward the model; change it only when manual adjudication proves that a valid finding was undercounted.
 
 ## Interpret Braintrust traces
 
