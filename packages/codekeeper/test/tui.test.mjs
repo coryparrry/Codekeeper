@@ -663,7 +663,7 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
     assert.deepEqual(result.modes, ["review", "maintain"]);
     assert.equal(result.preset, "openai");
     assert.deepEqual(result.models, {
-      review: { provider: "openai", model: "gpt-5.6-sol", effort: "high" },
+      review: { provider: "openai", model: "gpt-5.6-luna", effort: "medium" },
       maintain: { provider: "openai", model: "gpt-5.6-sol", effort: "high" }
     });
     assert.equal(result.displayName, "widget");

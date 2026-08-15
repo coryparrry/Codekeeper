@@ -51,10 +51,10 @@ import {
 const EXPECTED_ASSETS = Object.freeze({
   "agents/fixer.md": "6770753275c0df9a6546cfe0453b82e6bae985819ddb57998eeb94b14c6ae38a",
   "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
-  "agents/pr-reviewer.md": "c8fa4b31be4fad1b3535d24137853edee6ce875a06036f4f30b20e0fc9f20d51",
+  "agents/pr-reviewer.md": "edcb2d24d78c39290129ae8e80931eca067a0175568a6a72eb13e8c7c001af41",
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
-  "policies/mixed.json": "f27e4a9672f3f17973f0b9611c25a6eb4abe66aaac86dd12cd31fc28995c89f3",
-  "policies/openai.json": "ff25fd252f894a1e90dea44650b730cd03dd534c1ce2e1df38aafb8a051c240f",
+  "policies/mixed.json": "1578ef87ded86abcfa818ced3e0e8e828cdd1b1a98b2eea5ca15618567f3bfcd",
+  "policies/openai.json": "97af2683254fe1d3f8ed3ca81d1e35f8650872955109ccf496933cb01d4d049b",
   "workflows/assistant.yml": "bef52c224e85cb593f4d6f484d8811879197ebe797fcd79a462650eaf45ea2d7",
   "workflows/fix.yml": "e388c51db33f6803f87a2695a6b98473f0760c659348ef48d4854b49e00981be",
   "workflows/issues.yml": "a97b251d7918b0033983a6009d468b2a1aa038fec3d95082b21749b222c38463",
@@ -581,7 +581,7 @@ test("recommended starter plan selects review and maintenance with separate Open
   const policy = JSON.parse(plan.files[0].contents);
   assert.deepEqual(
     [policy.ai.agents.review.provider, policy.ai.agents.review.model, policy.ai.agents.review.effort],
-    ["openai", "gpt-5.6-sol", "high"]
+    ["openai", "gpt-5.6-luna", "medium"]
   );
   assert.deepEqual(
     [policy.ai.agents.audit.provider, policy.ai.agents.audit.model, policy.ai.agents.audit.effort],
@@ -615,8 +615,8 @@ test("model choices update the selected agent and optional tracing needs no trac
   const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
   assert.equal(policy.ai.agents.review.model, "gpt-5.6-terra");
   assert.equal(policy.ai.agents.review.effort, "medium");
-  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-sol");
-  assert.equal(policy.ai.agents.review.workspace.effort, "high");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
+  assert.equal(policy.ai.agents.review.workspace.effort, "medium");
   assert.equal(policy.ai.tracing.enabled, false);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, APP_SECRET]);
   assert.match(plan.pullRequest.body, /OpenAI traces are \*\*disabled\*\*/);
@@ -642,7 +642,7 @@ test("each role can use any supported provider and model", async () => {
   assert.equal(policy.ai.agents.review.provider, "deepseek");
   assert.equal(policy.ai.agents.review.model, "deepseek-v4-flash");
   assert.equal(policy.ai.agents.review.workspace.enabled, true);
-  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-sol");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
   assert.equal(policy.ai.agents.issue.provider, "openai");
   assert.equal(policy.ai.agents.issue.model, "gpt-5.6-luna");
   assert.match(reviewWorkflow, /secrets\.DEEPSEEK_API_KEY/);
@@ -681,7 +681,7 @@ test("arbitrary OpenRouter coordinator models preserve the OpenAI workspace spec
   assert.equal(policy.ai.agents.review.provider, "openrouter");
   assert.equal(policy.ai.agents.review.model, "anthropic/claude-sonnet-4.5");
   assert.equal(policy.ai.agents.review.workspace.enabled, true);
-  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-sol");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
   assert.equal(policy.ai.providers.openrouter.api, "chat_completions");
   assert.equal(policy.ai.providers.openrouter.structuredOutputs, false);
   assert.match(workflow, /secrets\.OPENROUTER_API_KEY/);
@@ -832,7 +832,7 @@ test("OpenAI model choices include Luna, Terra, and Sol and map Luna to one agen
     choice: "luna-max"
   });
   assert.equal(policy.ai.agents.review.model, "gpt-5.6-luna");
-  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-sol");
+  assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
 });
 
 test("a rerun creates a configuration-only update and preserves edited profiles", async () => {

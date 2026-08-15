@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparry/Codekeeper";
-export const SOURCE_COMMIT = "07044384891abb6c87e4fc8638ec002e970e0642";
+export const SOURCE_COMMIT = "922d3f4b1d44d8bd27f7228e60d37bb2fbaae4c9";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -127,6 +127,7 @@ export const CAPABILITIES = Object.freeze({
 export const CAPABILITY_IDS = Object.freeze(Object.keys(CAPABILITIES));
 export const MODEL_OPTIONS = Object.freeze({
   openai: Object.freeze([
+    Object.freeze({ id: "luna-medium", provider: "openai", model: "gpt-5.6-luna", effort: "medium", label: "OpenAI · GPT-5.6 Luna · medium effort" }),
     Object.freeze({ id: "luna-max", provider: "openai", model: "gpt-5.6-luna", effort: "max", label: "OpenAI · GPT-5.6 Luna · max effort" }),
     Object.freeze({ id: "sol-high", provider: "openai", model: "gpt-5.6-sol", effort: "high", label: "OpenAI · GPT-5.6 Sol · high effort" }),
     Object.freeze({ id: "terra-high", provider: "openai", model: "gpt-5.6-terra", effort: "high", label: "OpenAI · GPT-5.6 Terra · high effort" }),

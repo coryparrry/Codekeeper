@@ -160,7 +160,7 @@ test("recommended setup explains consequences and returns review plus maintenanc
     modes: ["review", "maintain"],
     preset: "openai",
     models: {
-      review: "sol-high",
+      review: "luna-medium",
       maintain: "sol-high"
     },
     tracing: true,
@@ -270,7 +270,7 @@ test("an existing installation reuses its workflows, identity, and settings", as
   assert.deepEqual(answers, {
     modes: ["review", "maintain"],
     preset: "openai",
-    models: { review: "sol-high", maintain: "sol-high" },
+    models: { review: "luna-medium", maintain: "sol-high" },
     tracing: true,
     displayName: "Existing Widget",
     ownerLogins: ["alice", "cory"],
