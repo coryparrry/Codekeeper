@@ -46,7 +46,7 @@ test("self-test runs for every tracked-file change", async () => {
   const triggers = source.slice(0, source.indexOf("\npermissions:"));
   assert.match(triggers, /on:\n  pull_request:\n  push:\n  workflow_dispatch:/);
   assert.doesNotMatch(triggers, /\n\s+paths(?:-ignore)?:/);
-  assert.match(source, /concurrency:\n  group: codekeeper-checks-\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \|\| github\.repository \}\}-\$\{\{ github\.event\.pull_request\.head\.ref \|\| github\.ref_name \}\}\n  cancel-in-progress: true/);
+  assert.match(source, /concurrency:\n  group: codekeeper-checks-\$\{\{ github\.event_name \}\}-\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \|\| github\.repository \}\}-\$\{\{ github\.event\.pull_request\.head\.ref \|\| github\.ref_name \}\}\n  cancel-in-progress: true/);
 });
 
 test("source CI stays generic while repository settings select its runner", async () => {
