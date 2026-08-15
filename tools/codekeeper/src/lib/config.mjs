@@ -9,6 +9,7 @@ export function reviewReasoningEscalation(config, context) {
   const routing = config.review.reasoningEscalation;
   const base = {
     escalated: false,
+    provider: config.ai.agents.review.provider,
     model: config.ai.agents.review.model,
     effort: config.ai.agents.review.effort,
     reason: "standard review"
@@ -31,6 +32,7 @@ export function reviewReasoningEscalation(config, context) {
   if (!reason) return base;
   return {
     escalated: true,
+    provider: routing.provider,
     model: routing.model,
     effort: routing.effort,
     reason
@@ -44,6 +46,7 @@ export function getAgentConfig(config, mode, { context } = {}) {
   const agent = escalation?.escalated
     ? {
         ...configuredAgent,
+        provider: escalation.provider,
         model: escalation.model,
         effort: escalation.effort,
         workspace: {

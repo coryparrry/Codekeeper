@@ -584,6 +584,7 @@ test("security-facing review coordination uses Luna Max from frozen context", as
   assert.equal(result.metadata.model, "gpt-5.6-luna");
   assert.deepEqual(result.metadata.reasoningEscalation, {
     escalated: true,
+    provider: "openai",
     model: "gpt-5.6-luna",
     effort: "max",
     reason: "label:security"
