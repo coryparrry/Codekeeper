@@ -145,6 +145,71 @@ The first immutable experiment snapshot for each effort produced the following s
 
 This is a calibration smoke test, not evidence that low is generally equivalent or that high is always slower. The mutable playground run also scored all three efforts at 100%, but its observed durations were 8.3, 5.4, and 6.3 seconds respectively. That variance, plus the transient gateway failure, means optimization decisions should use at least three immutable repeats per effort, run sequentially against the same dataset version. Compare correctness first, then error rate, latency percentiles, reasoning and total tokens, cache use, and cost. Keep GitHub workflow timing alongside Braintrust because this experiment covers the final coordinator only, not Luna's repository workspace analysis.
 
+## Luna flow latency calibration v1
+
+The [Codekeeper Luna flow latency v1 playground](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/playgrounds/Codekeeper%20Luna%20flow%20latency%20v1) extends the single coordinator smoke test into 12 frozen, source-backed cases across issue triage, pull-request review, and controlled fixes. Each case includes enough trusted contract, source, diff, or test evidence to make one exact decision while retaining realistic distractors, untrusted instructions, authority boundaries, and easy-to-miss edge cases.
+
+The versioned local artifacts are:
+
+- `tools/codekeeper/evals/braintrust/luna-flow-dataset-v1.json` — the portable 12-case source of truth.
+- `tools/codekeeper/evals/braintrust/luna-flow-prompt-v1.md` — the shared compact prompt used by every effort.
+- `tools/codekeeper/evals/braintrust/luna-flow-scorer-v1.ts` — the deterministic six-field contract scorer.
+- `tools/codekeeper/evals/braintrust/luna-flow-calibration.test.mjs` — dataset, prompt, and scorer mutation tests.
+
+The live [Codekeeper Luna flow calibration v1 dataset](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/datasets/codekeeper-luna-flow-calibration-v1) and [Codekeeper Luna flow contract scorer](https://www.braintrust.dev/app/CodeKeeper/p/CodeKeeper/scorers/61013cd0-2f7f-4a21-8ca9-f9accbb1f6f7) mirror those files.
+
+| Case | Flow | Difficulty | Behavior under test | Source anchor |
+|---|---|---|---|---|
+| `issue-missing-repro-injection` | Issue | Easy | Reject instruction injection and request a reproducible boundary | `tools/codekeeper/src/lib/prompts.mjs` |
+| `issue-exact-duplicate-stale-publication` | Issue | Medium | Match an exact stale-head duplicate without using component similarity | `tools/codekeeper/src/lib/publish.mjs` |
+| `issue-related-pagination-not-duplicate` | Issue | Hard | Separate a query-key defect from a related pagination-bound defect | `acceptance/src/harness.mjs` |
+| `issue-unresolved-policy-choice` | Issue | Hard | Require a maintainer decision when mutation authority is ambiguous | `tools/codekeeper/src/lib/publish.mjs`, `docs/CONFIGURATION.md` |
+| `review-query-key-regression` | Review | Easy | Block a current API-contract regression and reject a disproved distractor | `tools/codekeeper/evals/decision-quality.mjs` |
+| `review-stale-head-publication` | Review | Hard | Detect use of an earlier pull snapshot after exact-head revalidation | `tools/codekeeper/src/lib/publish.mjs` |
+| `review-bounded-pagination-completeness` | Review | Hard | Fail closed at a full 1,000-row inventory boundary | `acceptance/src/harness.mjs` |
+| `review-clean-cache-refactor` | Review | Hard | Approve a constrained optimization despite plausible false positives | `tools/codekeeper/src/lib/config.mjs` |
+| `fix-expiry-equality-boundary` | Fix | Easy | Preserve the proven equality boundary with the smallest patch | `tools/codekeeper/evals/decision-quality.mjs` |
+| `fix-archive-path-containment` | Fix | Medium | Reject traversal, root-self, absolute, and prefix-sibling paths | `tools/codekeeper/src/lib/workspace.mjs` |
+| `fix-concurrent-reservation-atomicity` | Fix | Hard | Make same-key reservation atomic while retaining retry and key independence | `tools/codekeeper/src/lib/publish.mjs` |
+| `fix-protected-workflow-request` | Fix | Medium | Refuse an owner-authored request outside the controlled edit boundary | `tools/codekeeper/src/lib/prompts.mjs` |
+
+### Controlled comparison
+
+All tasks use GPT-5.6 Luna, `max_tokens: 512`, `verbosity: low`, the same prompt, the same dataset snapshot, and the same deterministic scorer. The only model parameter that changes is `reasoning_effort`: `low`, `medium`, or `high`. An exact pass requires all six output fields to match. An errored or unscored row fails the production gate even if Braintrust reports a 100% average over the remaining scored rows.
+
+Prompt calibration found two output-contract ambiguities before the retained repetitions:
+
+1. A one-row smoke run showed that every effort could omit `caseId`; the prompt now requires copying the exact non-empty `CASE ID:` value.
+2. The first 12-case run produced 10/12 exact passes at low, 11/12 at medium, and 10/12 at high. The decisions and patch choices were correct, but some controlled-fix outputs invented PR-style finding keys. The prompt now states that only PR review emits finding and blocking keys; issue and fix arrays must remain empty. The next mutable run passed all 36 calls.
+
+Three early immutable repetitions named `r1` through `r3` are deliberately excluded. Their frozen snapshots each contained only 11 unique case IDs, duplicated `review-stale-head-publication`, and omitted the clean control `review-clean-cache-refactor`; high `r3` also exhausted the completion ceiling on one row. This came from asynchronous saves during manual dataset entry. The authoritative dataset page was repaired and verified as 12 rows, 12 unique IDs, no missing IDs, and no duplicates before the retained runs below.
+
+### Retained immutable results
+
+Durations are Braintrust sums across 12 model calls, not wall-clock batch time. `LLM duration` excludes evaluation overhead. High `r4` produced the correct output on 11 rows; `review-clean-cache-refactor` reached the 512-token completion ceiling before emitting output, which Braintrust represented as two errors and no score for that row.
+
+| Effort | Run | Exact passes | Errors | Duration | LLM duration | TTFT sum | Completion tokens | Reasoning tokens |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Low | `r4` | 12/12 | 0 | 27.71s | 19.61s | 8.06s | 659 | 145 |
+| Low | `r5` | 12/12 | 0 | 15.52s | 13.68s | 4.11s | 615 | 101 |
+| Low | `r6` | 12/12 | 0 | 18.70s | 16.97s | 4.41s | 626 | 112 |
+| Medium | `r4` | 12/12 | 0 | 24.14s | 16.83s | 4.77s | 848 | 322 |
+| Medium | `r5` | 12/12 | 0 | 22.09s | 16.62s | 4.62s | 861 | 337 |
+| Medium | `r6` | 12/12 | 0 | 20.61s | 19.06s | 4.39s | 1,088 | 560 |
+| High | `r4` | 11/12 | 2 | 28.41s | 22.41s | 4.92s | 1,452 | 960 |
+| High | `r5` | 12/12 | 0 | 20.86s | 17.34s | 5.32s | 977 | 447 |
+| High | `r6` | 12/12 | 0 | 22.47s | 20.92s | 5.17s | 1,171 | 641 |
+
+| Effort | Production-gate result | Errors | Duration | LLM duration | Mean LLM/case | Completion tokens | Reasoning tokens |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Low | 36/36 (100%) | 0 | 61.93s | 50.26s | 1.40s | 1,900 | 358 |
+| Medium | 36/36 (100%) | 0 | 66.84s | 52.51s | 1.46s | 2,797 | 1,219 |
+| High | 35/36 (97.2%) | 2 | 71.74s | 60.67s | 1.69s | 3,600 | 2,048 |
+
+Low is the current Luna default for all three evaluated flows. It tied medium on exact correctness, had no errors, used 7.3% less end-to-end time, 4.3% less model time, and 70.6% fewer reasoning tokens. High failed the hard reliability gate once; low used 13.7% less end-to-end time and 82.5% fewer reasoning tokens than high. Medium had a lower aggregate time-to-first-token than low because of low `r4` variance, but did not convert its extra reasoning into better accuracy or lower total latency.
+
+This result selects a reasoning level within Luna; it does not yet justify replacing the current per-flow production models. The cases reason over frozen repository evidence without workspace tools, patch application, GitHub API calls, or end-to-end publication. The next evaluation layer should compare Luna low with each incumbent model on live issue, review, and fix orchestration while recording workspace duration, tool calls, retries, patch/test outcomes, and GitHub workflow time.
+
 ## Interpret Braintrust traces
 
 The Braintrust span captures the final coordinator input and response, including the authoritative Luna workspace result. It does not currently expose Luna's internal workspace tool-call spans. Use the trace to inspect evidence handoff, token use, latency, retries, and the structured final response; use the sealed artifact and GitHub run for end-to-end authority and publication evidence.

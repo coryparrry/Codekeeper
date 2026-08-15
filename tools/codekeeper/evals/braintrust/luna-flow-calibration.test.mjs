@@ -63,7 +63,9 @@ test("Luna flow dataset covers each complex flow with stable exact contracts", a
 test("Luna flow prompt requires compact source-bounded output", async () => {
   const prompt = await readFile(PROMPT_URL, "utf8");
   assert.match(prompt, /\{\{input\.case\}\}/);
-  assert.match(prompt, /exact sorted set of current defects/);
+  assert.match(prompt, /Copy the exact non-empty value after `CASE ID:`/);
+  assert.match(prompt, /Only PR review emits `findingKeys` or `blockingKeys`/);
+  assert.match(prompt, /both arrays must be empty/);
   assert.match(prompt, /smallest complete safe patch option/);
   assert.match(prompt, /Return exactly one compact JSON object/);
 });
