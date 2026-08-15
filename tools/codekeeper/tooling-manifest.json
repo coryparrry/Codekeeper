@@ -23,7 +23,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "9c9288c3e125afdcdeba0316bc02c2851855e79a3a0a91494cb4f4b43a610fc0"
+      "sha256": "328010024c5c462c1a2705df433721287bff70dd5b498b0df7c817a3e4f264ba"
     },
     {
       "path": "presets/catalogue.mjs",
@@ -43,7 +43,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "1be556986d776f2b090f07913e45312f0f3a5cf39965609256cccc59102a8a30"
+      "sha256": "2d88e4d123689cf31c15418ed7d58d4b27968b6ef6ce0f89d9cfc3ce5bff87b0"
     },
     {
       "path": "src/lib/commands.mjs",

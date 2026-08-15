@@ -26,6 +26,16 @@ cd tools/codekeeper && npm run eval:live -- --preset mixed --repeat 3
 cd tools/codekeeper && npm run eval:live -- --preset openai --repeat 3
 ```
 
+To inspect the same synthetic live scenarios in Braintrust without changing adopter or production tracing, install the isolated evaluation adapter once and run the dedicated command. The adapter replaces tracing only inside that evaluation process, captures scenario prompts and structured model responses, and flushes every trace before exit. It requires `BRAINTRUST_API_KEY` and defaults to the `CodeKeeper` project. `BRAINTRUST_PROJECT` can select another project by name, while `BRAINTRUST_PROJECT_ID` targets an existing project unambiguously and takes precedence. Provider credentials remain the same as the corresponding live gate. Do not pass any credential on the command line. For the EU data plane selected during Braintrust onboarding, also set `BRAINTRUST_API_URL=https://api-eu.braintrust.dev`:
+
+```bash
+cd tools/codekeeper
+npm run eval:braintrust:setup
+BRAINTRUST_API_URL=https://api-eu.braintrust.dev npm run eval:braintrust -- --preset openai --repeat 3
+```
+
+Braintrust packages live under `evals/braintrust` and are not installed by reusable production workflows. OpenAI remains the default runtime trace exporter.
+
 For an authorized OpenAI issue-triage release decision, run the same OpenAI matrix with one candidate at a time and select the first all-pass result deliberately. These commands are evaluation overrides only; they do not change the shipped policy:
 
 ```bash
