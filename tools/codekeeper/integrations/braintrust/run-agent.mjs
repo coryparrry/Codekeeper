@@ -30,6 +30,12 @@ function bundleFile(directory, filePath, flag) {
   return resolved;
 }
 
+function runnerFile(filePath) {
+  const resolved = path.resolve(filePath);
+  assertRunnerOwnedDirectory(path.dirname(resolved));
+  return resolved;
+}
+
 function optionalBoolean(value, name) {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (!normalized) return undefined;
@@ -82,11 +88,9 @@ export async function runBraintrustAgent({
   if (!MODES.has(mode)) throw new Error(`Unknown agent mode: ${mode}`);
   const directory = assertRunnerOwnedDirectory(args.require("directory"));
   const resultPath = bundleFile(directory, args.require("result"), "result");
-  const workspaceResultPath = bundleFile(
-    directory,
-    args.get("workspace-result", path.join(directory, "workspace-result.json")),
-    "workspace-result",
-  );
+  const workspaceResultPath = args.get("workspace-result")
+    ? runnerFile(args.get("workspace-result"))
+    : path.join(directory, "workspace-result.json");
   const { config } = await loadPolicy(args.require("config"));
   const tracedConfig = structuredClone(config);
   tracedConfig.ai.tracing.enabled = true;

@@ -27,7 +27,7 @@
     },
     {
       "path": "integrations/braintrust/run-agent.mjs",
-      "sha256": "b952e55ad1e5dd3ed1a863564b20342b6a89740157c7e62734ae7c598a794683"
+      "sha256": "1c628eef31a8aba017e89c1ea13b05f46d3143e2f2b0ef6d7a0306946479ec3c"
     },
     {
       "path": "package-lock.json",

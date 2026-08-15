@@ -36,7 +36,7 @@ function argv() {
     "--mode",
     "review",
     "--workspace-result",
-    "/private/tmp/codekeeper-braintrust-bundle/workspace-result.json",
+    "/private/tmp/codekeeper-braintrust-workspace/workspace-result.json",
     "--result",
     "/private/tmp/codekeeper-braintrust-bundle/result.json",
   ];
@@ -114,6 +114,10 @@ test("Braintrust integration traces the real agent bundle and flushes", async ()
   assert.deepEqual(events.processors, [events.processor]);
   assert.equal(events.flushes, 1);
   assert.equal(agentOptions.apiKey, "model-secret");
+  assert.equal(
+    agentOptions.workspaceResultPath,
+    "/private/tmp/codekeeper-braintrust-workspace/workspace-result.json",
+  );
   assert.equal(agentOptions.config.ai.tracing.enabled, true);
   assert.equal(agentOptions.config.ai.tracing.includeSensitiveData, true);
   assert.equal(typeof agentOptions.configureTracing, "function");
