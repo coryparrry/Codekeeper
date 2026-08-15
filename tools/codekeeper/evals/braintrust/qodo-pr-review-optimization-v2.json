@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "date": "2026-08-15",
   "model": "gpt-5.6-luna",
   "reasoningEffort": "medium",
@@ -79,9 +79,17 @@
       "security or risk high label",
       "configured security, authorization, workflow, migration, schema, release, billing, or payment path",
       "5000 or more changed lines",
-      "1000 or more changed lines in one file"
+      "1000 or more changed lines in one file",
+      "validated Medium blocking high or critical finding with current classification, high confidence, and a positive line in a frozen changed file"
     ],
-    "status": "shipped by explicit product decision without a separate Max evaluation; ordinary reviews remain on Medium",
+    "nonTriggers": [
+      "Medium overall risk high",
+      "Medium-proposed security or risk high label",
+      "security wording or feedback without a qualifying blocker",
+      "non-blocking or lower-confidence finding",
+      "finding without a concrete changed-file line"
+    ],
+    "status": "shipped by explicit product decision without a separate Max evaluation; ordinary reviews remain on one Medium pass and qualifying blockers receive one focused Max replacement pass",
     "evaluation": "not run",
     "highIsNotAProxy": true
   }
