@@ -1,0 +1,342 @@
+{
+  "version": 1,
+  "source": {
+    "dataset": "Qodo/PR-Review-Bench",
+    "revision": "a73957c450a70693a743260e5637fffc44625f16",
+    "file": "git_code_review_bench_100_w_open_prs.jsonl",
+    "sha256": "2f0448ed1f9a55bea14039961d8d9e610ee8885b37559b80f5821f3f70cfe64d",
+    "license": "MIT"
+  },
+  "cases": [
+    {
+      "id": "qodo-ghost-1",
+      "repo": "Ghost",
+      "pr": 1,
+      "base": "18c03d2522d44f458b717120ceb3caa3521ee751",
+      "head": "d3184872c4837be0457b6311bc9113538d871db1",
+      "issues": 4,
+      "changedFiles": 4,
+      "additions": 3,
+      "deletions": 419
+    },
+    {
+      "id": "qodo-ghost-2",
+      "repo": "Ghost",
+      "pr": 2,
+      "base": "889f71bb7aee73c3c0f223044af1e0f79907e6c5",
+      "head": "e01e8b11898c942dfc81ef28851e2c2f9e9a1cce",
+      "issues": 4,
+      "changedFiles": 3,
+      "additions": 78,
+      "deletions": 12
+    },
+    {
+      "id": "qodo-ghost-3",
+      "repo": "Ghost",
+      "pr": 3,
+      "base": "91d969440b995ff050c46f37e795700f20105050",
+      "head": "71f56480360617f8632fda9cc062723f5b0f03bd",
+      "issues": 4,
+      "changedFiles": 3,
+      "additions": 130,
+      "deletions": 65
+    },
+    {
+      "id": "qodo-ghost-10",
+      "repo": "Ghost",
+      "pr": 10,
+      "base": "9b6ba0fc89a738ca4b650a10d4de58fefd37d065",
+      "head": "92f3514d5ea12edd52184c74100692362d7dff7c",
+      "issues": 6,
+      "changedFiles": 6,
+      "additions": 248,
+      "deletions": 99
+    },
+    {
+      "id": "qodo-aspnetcore-2",
+      "repo": "aspnetcore",
+      "pr": 2,
+      "base": "07803ab5e98eb8adc5535f8173428a04a4c5e4f6",
+      "head": "b71ad44079ecd98463942a9aa067667a7639ac3a",
+      "issues": 9,
+      "changedFiles": 11,
+      "additions": 49,
+      "deletions": 34
+    },
+    {
+      "id": "qodo-aspnetcore-3",
+      "repo": "aspnetcore",
+      "pr": 3,
+      "base": "5a0c9bd7a6c6fd528f35d65fb094c26d69ddb5ca",
+      "head": "07d6e09522dd756070464b64728ed9cb8ca1099f",
+      "issues": 5,
+      "changedFiles": 3,
+      "additions": 71,
+      "deletions": 10
+    },
+    {
+      "id": "qodo-aspnetcore-7",
+      "repo": "aspnetcore",
+      "pr": 7,
+      "base": "505a3640dd513895a8b088dfe102b63bf24c5a38",
+      "head": "7bb6a08b45aaa16e27bd0ac736717998e086cd7f",
+      "issues": 4,
+      "changedFiles": 6,
+      "additions": 38,
+      "deletions": 61
+    },
+    {
+      "id": "qodo-aspnetcore-8",
+      "repo": "aspnetcore",
+      "pr": 8,
+      "base": "89422f4166e54b982b5c241a14e23e64a3a456c2",
+      "head": "45b170b7b4b6ba7372feab33a91cf0936060aadd",
+      "issues": 9,
+      "changedFiles": 11,
+      "additions": 676,
+      "deletions": 15
+    },
+    {
+      "id": "qodo-cal-com-1",
+      "repo": "cal.com",
+      "pr": 1,
+      "base": "cb600a81cedca3bf8556411419f71cc8b2253662",
+      "head": "544a43bf4fd5e7e7fb086682ebd4362baf73ce14",
+      "issues": 8,
+      "changedFiles": 6,
+      "additions": 623,
+      "deletions": 128
+    },
+    {
+      "id": "qodo-cal-com-6",
+      "repo": "cal.com",
+      "pr": 6,
+      "base": "23333875ed8066eee814e7cb69bff93480a1f72e",
+      "head": "505197c4057c173f9a87e84412d825a3a9f240b0",
+      "issues": 8,
+      "changedFiles": 6,
+      "additions": 305,
+      "deletions": 4
+    },
+    {
+      "id": "qodo-cal-com-10",
+      "repo": "cal.com",
+      "pr": 10,
+      "base": "b3ecd4c4a62db8fa86f7e23d3ac29fdc36e76115",
+      "head": "0626d90923ccb63d9a708b7a743dbf70fbb233cc",
+      "issues": 6,
+      "changedFiles": 26,
+      "additions": 1812,
+      "deletions": 415
+    },
+    {
+      "id": "qodo-cal-com-11",
+      "repo": "cal.com",
+      "pr": 11,
+      "base": "bf1d5dac9dce4603be17f5a3a2521570ba6b62f8",
+      "head": "f1abf5dccc73e2c1db44ad3a935d12354ff43c01",
+      "issues": 7,
+      "changedFiles": 13,
+      "additions": 114,
+      "deletions": 55
+    },
+    {
+      "id": "qodo-dify-3",
+      "repo": "dify",
+      "pr": 3,
+      "base": "917af6d2115ca60eb07cf1cec77fad6572fee766",
+      "head": "24297d2668d91516cbd6d506ff7d55409cd85e6b",
+      "issues": 7,
+      "changedFiles": 4,
+      "additions": 849,
+      "deletions": 33
+    },
+    {
+      "id": "qodo-dify-6",
+      "repo": "dify",
+      "pr": 6,
+      "base": "2b1c59db20af13caf17e8cae397f15c470ca0055",
+      "head": "6facade85c2723292b4d8585dfa587921059a5b7",
+      "issues": 5,
+      "changedFiles": 8,
+      "additions": 35,
+      "deletions": 20
+    },
+    {
+      "id": "qodo-dify-11",
+      "repo": "dify",
+      "pr": 11,
+      "base": "55eeb1d870d290d3732f7da656757dec001be3e1",
+      "head": "52096912714ff82a551ae147eec85534fdb94cde",
+      "issues": 6,
+      "changedFiles": 3,
+      "additions": 86,
+      "deletions": 55
+    },
+    {
+      "id": "qodo-dify-12",
+      "repo": "dify",
+      "pr": 12,
+      "base": "f699718da6d49180c26477f553d89c6cef2224b9",
+      "head": "fe99d63a964df8696252d6d51e7de0b4c8521a43",
+      "issues": 5,
+      "changedFiles": 18,
+      "additions": 650,
+      "deletions": 36
+    },
+    {
+      "id": "qodo-firefox-ios-3",
+      "repo": "firefox-ios",
+      "pr": 3,
+      "base": "38423271437ae7387c087f105f70383b555684de",
+      "head": "54d158bad7d156aa23a3a07ad8791faa9cf66990",
+      "issues": 9,
+      "changedFiles": 11,
+      "additions": 71,
+      "deletions": 49
+    },
+    {
+      "id": "qodo-firefox-ios-7",
+      "repo": "firefox-ios",
+      "pr": 7,
+      "base": "325933132c40c39a68a9f983ca67313d035f717a",
+      "head": "5183c2719f603b478c75f587b27bd093f817b665",
+      "issues": 8,
+      "changedFiles": 40,
+      "additions": 85,
+      "deletions": 86
+    },
+    {
+      "id": "qodo-firefox-ios-8",
+      "repo": "firefox-ios",
+      "pr": 8,
+      "base": "b76284f7d67500ce0a100fe99781bd2076241f7e",
+      "head": "410be41423dcdcb11de011133cb93e617376ba25",
+      "issues": 4,
+      "changedFiles": 57,
+      "additions": 271,
+      "deletions": 298
+    },
+    {
+      "id": "qodo-firefox-ios-11",
+      "repo": "firefox-ios",
+      "pr": 11,
+      "base": "254313b9d338e68ed7a2f2d1f9403bd636044f6a",
+      "head": "89f8cbc4f9f8c530d546f65287b8fb07a681a5e7",
+      "issues": 5,
+      "changedFiles": 4,
+      "additions": 55,
+      "deletions": 34
+    },
+    {
+      "id": "qodo-prefect-3",
+      "repo": "prefect",
+      "pr": 3,
+      "base": "025c503f88ccdecd918c38b60c60b52ed54aefab",
+      "head": "b51b02c25575b508e203b297c2cd32b8331310dc",
+      "issues": 4,
+      "changedFiles": 6,
+      "additions": 1433,
+      "deletions": 16
+    },
+    {
+      "id": "qodo-prefect-4",
+      "repo": "prefect",
+      "pr": 4,
+      "base": "ce5d682800ba796339e2fa00d579380bcbc109de",
+      "head": "18b14dce7a06d6650e47b3aad56c201416b3f8cf",
+      "issues": 4,
+      "changedFiles": 12,
+      "additions": 954,
+      "deletions": 1
+    },
+    {
+      "id": "qodo-prefect-7",
+      "repo": "prefect",
+      "pr": 7,
+      "base": "86468ecca046b412392bacb5f576d7bed77f7fe0",
+      "head": "8c360ef80fc9a49274b60a7473f761ff484b6ca7",
+      "issues": 5,
+      "changedFiles": 3,
+      "additions": 198,
+      "deletions": 8
+    },
+    {
+      "id": "qodo-prefect-10",
+      "repo": "prefect",
+      "pr": 10,
+      "base": "61b7f8fc29757e6d38f1949fbae90dfc2e90ccf3",
+      "head": "0bc01a435076c95c4c001445b9c179f3816470b2",
+      "issues": 8,
+      "changedFiles": 8,
+      "additions": 455,
+      "deletions": 35
+    },
+    {
+      "id": "qodo-redis-3",
+      "repo": "redis",
+      "pr": 3,
+      "base": "77a250951f757ae92ec9e15ffa32105dbd5c6f2e",
+      "head": "cfae1193e603a05cacb52b3841ff977e7cbade50",
+      "issues": 5,
+      "changedFiles": 8,
+      "additions": 37,
+      "deletions": 45
+    },
+    {
+      "id": "qodo-redis-6",
+      "repo": "redis",
+      "pr": 6,
+      "base": "a5747eb95a1e431747989a531ed5bfe5a3df19e1",
+      "head": "3d3ed35ce84585af8d0d2998eb5c8cd557412788",
+      "issues": 6,
+      "changedFiles": 6,
+      "additions": 138,
+      "deletions": 33
+    },
+    {
+      "id": "qodo-redis-8",
+      "repo": "redis",
+      "pr": 8,
+      "base": "11f1f8895e076fdba430d3823a7ff55c8fc574d6",
+      "head": "01bf0c033ff4f73a05f088db910db8e5313cde12",
+      "issues": 5,
+      "changedFiles": 4,
+      "additions": 93,
+      "deletions": 12
+    },
+    {
+      "id": "qodo-tauri-4",
+      "repo": "tauri",
+      "pr": 4,
+      "base": "15c999bffdd4ddf6bae288d90dc79f8cd2a3412d",
+      "head": "4a5366abf2748da9c1562c19dd118ffc2c78aa75",
+      "issues": 5,
+      "changedFiles": 4,
+      "additions": 50,
+      "deletions": 158
+    },
+    {
+      "id": "qodo-tauri-5",
+      "repo": "tauri",
+      "pr": 5,
+      "base": "50901ebda46033346b1b11bf6e453dad2d51479e",
+      "head": "26a6cebd57ddb4621fb4fd3cbae556dd12d672be",
+      "issues": 7,
+      "changedFiles": 36,
+      "additions": 683,
+      "deletions": 761
+    },
+    {
+      "id": "qodo-tauri-10",
+      "repo": "tauri",
+      "pr": 10,
+      "base": "41fe83d5324bff78ee13b027d50beea337d3aa71",
+      "head": "eca39593e85c5c2e8ddd4ba50afc262e7940e313",
+      "issues": 7,
+      "changedFiles": 4,
+      "additions": 33,
+      "deletions": 34
+    }
+  ]
+}
