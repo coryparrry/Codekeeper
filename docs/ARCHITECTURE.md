@@ -69,7 +69,7 @@ Every Codex workspace uses a fresh runner-owned `CODEX_HOME` with `project_doc_m
 | Repository auditor | `tools/codekeeper/agents/repository-auditor.md` | `.github/codekeeper/agents/repository-auditor.md` |
 | Fixer | `tools/codekeeper/agents/fixer.md` | `.github/codekeeper/agents/fixer.md` |
 
-The selected provider’s `model_api_key` is required for analysis and never falls back to an OpenAI key. Codex may use `workspace_api_key` or its legacy `openai_api_key` compatibility fallback because it requires OpenAI. OpenAI trace export uses a distinct `trace_api_key` that exists only in the fresh coordinator job, never the Codex workspace or publication job. The trace exporter may not reuse a model-provider key. The starter policy keeps sensitive trace data off by default.
+The selected provider’s `model_api_key` is required for analysis and never falls back to an OpenAI key. Codex may use `workspace_api_key` or its legacy `openai_api_key` compatibility fallback because it requires OpenAI. OpenAI is the default trace exporter and uses a distinct `trace_api_key`. The review caller can choose Braintrust instead; that key and pinned adapter exist only in the fresh coordinator job, never the Codex workspace or publication job. Neither exporter may reuse a model-provider key. The starter policy keeps sensitive trace data off by default.
 
 Labels and sticky comments are owned only when both their marker and configured App bot identity match. Maintenance fingerprints and repair-PR markers use the same identity check, avoiding a separate state store.
 

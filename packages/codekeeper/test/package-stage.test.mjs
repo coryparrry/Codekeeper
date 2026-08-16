@@ -119,7 +119,16 @@ test("package stage contains one release with separate closed installer and runt
   const canonicalRuntimeManifest = JSON.parse(
     await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/package.json"), "utf8"),
   );
-  const runtimeDependencies = canonicalRuntimeManifest.dependencies;
+  const canonicalBraintrustManifest = JSON.parse(
+    await readFile(
+      path.join(REPOSITORY_ROOT, "tools/codekeeper/integrations/braintrust/package.json"),
+      "utf8",
+    ),
+  );
+  const runtimeDependencies = {
+    ...canonicalRuntimeManifest.dependencies,
+    ...canonicalBraintrustManifest.dependencies,
+  };
   assert.deepEqual(Object.keys(packageManifest.dependencies).sort(), [...INSTALLER_DEPENDENCIES]);
   assert.deepEqual(stagedRuntimeManifest.dependencies, runtimeDependencies);
   for (const [name, version] of Object.entries(runtimeDependencies)) {
@@ -139,8 +148,7 @@ test("package stage contains one release with separate closed installer and runt
   assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/braintrust"), false);
   assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@openai/agents"));
   assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@openai/codex"));
-  assert.equal(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@braintrust/openai-agents"), false);
-  assert.equal(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/braintrust"), false);
+  assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/braintrust"));
 
   const toolingManifest = JSON.parse(
     await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/tooling-manifest.json"), "utf8"),

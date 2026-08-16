@@ -151,6 +151,6 @@ Version 3 auto-merge is intentionally limited to a same-repository pull request 
 
 ## Tracing
 
-Tracing is enabled by default with `includeSensitiveData=false`. OpenAI trace export requires a separate `trace_api_key`, including modes that use DeepSeek or another model provider.
+Tracing is enabled by default with `includeSensitiveData=false`. OpenAI remains the default exporter and requires a separate `trace_api_key`, including modes that use DeepSeek or another provider. The review caller can instead set `CODEKEEPER_TRACE_EXPORTER=braintrust` and map a dedicated `BRAINTRUST_API_KEY`; optional project and regional API URL variables select its destination. Braintrust dependencies are installed only for that selected review run. Other modes continue using OpenAI tracing.
 
-View runs at [OpenAI Platform Traces](https://platform.openai.com/traces), under **Logs > Traces**. Treat trace access as operationally sensitive.
+View default runs at [OpenAI Platform Traces](https://platform.openai.com/traces), under **Logs > Traces**, or selected review runs in the configured Braintrust project. Treat trace access as operationally sensitive. `CODEKEEPER_BRAINTRUST_INCLUDE_SENSITIVE_DATA=true` includes review prompts and responses for that exporter only; do not enable it without an explicit data-handling review.
