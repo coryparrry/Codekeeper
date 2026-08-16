@@ -1,8 +1,9 @@
 # Evaluating Codekeeper reviews
 
-Codekeeper has two evaluation layers:
+Codekeeper has three evaluation layers:
 
 - `eval:offline` checks deterministic decision scenarios without provider calls.
+- `eval:live` runs the same bounded scenarios through configured providers.
 - `eval:live-review` grades sealed results from complete GitHub review workflows.
 
 The live layer is release-relevant. A prompt-only pass does not prove that checkout, tests, workspace analysis, schema validation, sealing, or publication work together.
@@ -19,9 +20,6 @@ Include these fixture types:
 | Concurrency | Overlapping reservations pass a check-before-write race | Block at the atomicity boundary |
 | API contract | A public request uses the wrong parameter | Block at the request builder |
 | Boundary regression | An expiry check rejects an exact still-valid value | Block at the comparison |
-| Clean control | A bounded refactor changes no behavior | Report no findings |
-| Large change | A pull request changes more than 5,000 lines | Use the configured high-risk review path |
-
 Keep a deterministic failing test for every planted defect and passing tests for nearby behavior. Do not name the expected files or defects in the pull-request title or description.
 
 Disable competing automatic reviewers for the fixture. Their comments can contaminate the review context or replace an in-progress run. Exclude interrupted or contaminated attempts and record the reason.
@@ -49,6 +47,7 @@ Store the answer key outside the fixture repository:
   "version": 1,
   "name": "multi-domain-review",
   "repeat": 3,
+  "expectedHeadSha": "0123456789abcdef0123456789abcdef01234567",
   "expectedRecommendation": "block",
   "cases": [
     {
@@ -77,7 +76,7 @@ runs/
     run.json
 ```
 
-`run.json` is optional. It can contain `runId`, `runUrl`, and `headSha`.
+Every directory must contain `run.json` with the same full `headSha` as `manifest.expectedHeadSha`. It can also contain `runId` and `runUrl`. The scorer rejects a missing or different head before aggregation.
 
 ## Score the suite
 
@@ -91,6 +90,8 @@ npm run eval:live-review -- \
 ```
 
 The scorer reports detection, false positives, precision, blocking classification, merge-recommendation accuracy, and optional left-to-right diagram compliance. Output files use create-only semantics so a later run cannot overwrite earlier evidence.
+
+The command writes both reports and exits non-zero unless all requested repeats exist and every run passes. Keep the reports from a failed command as diagnostic evidence.
 
 Detection and blocking are separate measurements. A finding counts as detected when it identifies the expected file, even if it is placed in the wrong blocking bucket. The strict suite still fails that run and records the classification error.
 
@@ -115,4 +116,18 @@ Do not treat one successful run as release evidence. Do not compare concurrent r
 
 Review validation keeps a finding only when its file belongs to the pull-request diff. A line outside the changed hunks is reduced to file-level evidence instead of being moved to a guessed line.
 
-Three consistent runs across several defect categories are useful release evidence, but they do not prove general reliability. Expand the suite with clean pull requests, missing-test cases, platform-specific behavior, large diffs, hidden high-risk changes, deferred review work, issue implementation, and issue closure.
+Three consistent runs across several defect categories are useful release evidence, but they do not prove general reliability. Expand automated review scoring with missing-test cases, platform-specific behavior, and misleading but non-defective changes.
+
+## Manual E2E controls
+
+The review scorer accepts only review results with one non-empty answer key. Test these separate flows as distinct pull requests or issues and retain their GitHub state as manual acceptance evidence:
+
+| Flow | Evidence to retain |
+| --- | --- |
+| Clean pull request under 5,000 changed lines | Exact head, no unsupported findings, expected review tier, and final gate result |
+| Pull request over 5,000 changed lines | Exact head, changed-line count, high-risk routing metadata, and review result |
+| Hidden high-risk change under 5,000 lines | Exact head, planted risk boundary, blocking finding, and review result |
+| Deferred review work | Review comment, created issue, source pull request, and exact deferred finding |
+| Issue implementation and closure | Original issue, fixer pull request, merged commit, closing reference, and final closed state |
+
+Do not place these different heads in one `eval:live-review` runs directory. They test workflow routing and GitHub mutation boundaries that the review-result scorer does not grade.

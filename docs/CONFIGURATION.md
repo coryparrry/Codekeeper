@@ -153,4 +153,6 @@ Version 3 auto-merge is intentionally limited to a same-repository pull request 
 
 Tracing is enabled by default with `includeSensitiveData=false`. OpenAI trace export requires a separate `trace_api_key`, including modes that use DeepSeek or another model provider.
 
+An installation migrating from the retired alternate exporter must set this key or disable tracing before the update merges. Old alternate-exporter variables and secrets are ignored and can be removed after merge.
+
 View runs at [OpenAI Platform Traces](https://platform.openai.com/traces), under **Logs > Traces**. Treat trace access as operationally sensitive.

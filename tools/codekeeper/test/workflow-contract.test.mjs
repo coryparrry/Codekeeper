@@ -824,11 +824,9 @@ test("review tracing uses the OpenAI exporter without alternate exporter credent
   const caller = await repositoryFile(
     "examples/workflows/codekeeper-review.yml.example",
   );
-  const workspace = jobSection(source, "workspace", "analyze");
   const analyze = jobSection(source, "analyze", "seal");
 
   assert.doesNotMatch(source, /trace_exporter/i);
-  assert.doesNotMatch(workspace, /trace_exporter/i);
   assert.doesNotMatch(analyze, /trace_exporter/i);
   assert.match(
     analyze,

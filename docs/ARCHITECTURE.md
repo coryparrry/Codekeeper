@@ -47,7 +47,7 @@ Installations created before the package-execution release may still call a hist
 The release has three explicit delivery planes:
 
 1. The npm package recursively carries the CLI, TUI, package assets, verification code, and lightweight dependency graph.
-2. The package's nested runtime recursively carries production source, agent tools and Markdown, presets, integrations, reusable workflows, and the locked runtime dependency graph.
+2. The package's nested runtime recursively carries production source, agent tools and Markdown, presets, reusable workflows, and the locked runtime dependency graph.
 3. [`repository-artifacts.mjs`](../packages/codekeeper/src/repository-artifacts.mjs) declares every managed payload file that the installer may place in an adopter repository. The generated `.github/codekeeper-release.json` control record is the separate ledger envelope for that payload.
 
 The first two planes use closed manifests, so an added production file inside an approved root enters the next package automatically and an omitted, extra, changed, hidden, or symlinked file fails verification. The repository plane cannot safely infer destinations from source paths. Each payload artifact therefore has one reviewed stable ID, fixed target, ownership class, activation rule, registered renderer, validation rule, and purpose. The renderer, release-ledger contents, preflight, planner, and TUI consume that same catalog; the ledger envelope itself remains fixed control metadata rather than claiming ownership over itself.

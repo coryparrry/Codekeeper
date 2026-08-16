@@ -24,10 +24,12 @@ export function validateSuiteManifest(value) {
   assert(manifest.version === 1, "manifest.version must equal 1");
   assert(typeof manifest.name === "string" && manifest.name.trim(), "manifest.name is required");
   assert(Number.isSafeInteger(manifest.repeat) && manifest.repeat >= 1 && manifest.repeat <= 10, "manifest.repeat must be a whole number from 1 through 10");
+  assert(typeof manifest.expectedHeadSha === "string" && /^[0-9a-f]{40}$/i.test(manifest.expectedHeadSha), "manifest.expectedHeadSha must be a full commit SHA");
   assert(Array.isArray(manifest.cases) && manifest.cases.length > 0, "manifest.cases must be a non-empty array");
   const ids = new Set();
   const files = new Set();
   manifest.name = manifest.name.trim();
+  manifest.expectedHeadSha = manifest.expectedHeadSha.toLowerCase();
   manifest.cases = manifest.cases.map((candidate, index) => {
     const entry = asObject(candidate, `manifest.cases[${index}]`);
     assert(typeof entry.id === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.id), `manifest.cases[${index}].id must be kebab-case`);
@@ -191,18 +193,23 @@ export function renderReviewSuiteMarkdown(report) {
 }
 
 export async function loadReviewSuiteRuns(runsDirectory, manifestInput) {
+  const manifest = validateSuiteManifest(manifestInput);
   const entries = (await readdir(runsDirectory, { withFileTypes: true })).filter((entry) => entry.isDirectory()).sort((left, right) => left.name.localeCompare(right.name));
   const runs = [];
   for (const entry of entries) {
     const directory = path.join(runsDirectory, entry.name);
     const result = JSON.parse(await readFile(path.join(directory, "result.json"), "utf8"));
-    let metadata = {};
+    let metadata;
     try {
       metadata = JSON.parse(await readFile(path.join(directory, "run.json"), "utf8"));
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      if (error?.code === "ENOENT") throw new Error(`${entry.name}/run.json is required for immutable-head evaluation`);
+      throw error;
     }
-    runs.push(scoreReviewResult(manifestInput, result, metadata));
+    metadata = asObject(metadata, `${entry.name}/run.json`);
+    assert(typeof metadata.headSha === "string" && /^[0-9a-f]{40}$/i.test(metadata.headSha), `${entry.name}/run.json headSha must be a full commit SHA`);
+    assert(metadata.headSha.toLowerCase() === manifest.expectedHeadSha, `${entry.name}/run.json headSha does not match manifest.expectedHeadSha`);
+    runs.push(scoreReviewResult(manifest, result, { ...metadata, headSha: metadata.headSha.toLowerCase() }));
   }
   return runs;
 }
@@ -222,6 +229,12 @@ export async function runLiveReviewSuite({ argv = process.argv.slice(2), report 
     mkdir(path.dirname(markdownOutput), { recursive: true }).then(() => writeFile(markdownOutput, renderReviewSuiteMarkdown(aggregate), { flag: "wx" })),
   ]);
   report(`LIVE_EVAL suite=${aggregate.suite} passed=${aggregate.passedRuns}/${aggregate.completedRuns} recall=${aggregate.matchedFindings}/${aggregate.expectedFindings} false_positives=${aggregate.falsePositives}`);
+  if (aggregate.completedRuns !== aggregate.requestedRepeats) {
+    throw new Error(`Live review evaluation completed ${aggregate.completedRuns}/${aggregate.requestedRepeats} requested runs`);
+  }
+  if (aggregate.passedRuns !== aggregate.requestedRepeats) {
+    throw new Error(`Live review evaluation failed because only ${aggregate.passedRuns}/${aggregate.requestedRepeats} runs passed`);
+  }
   return aggregate;
 }
 
