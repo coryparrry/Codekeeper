@@ -10,7 +10,7 @@ import {
   inspectPrivateKeyTextInput,
   PRIVATE_KEY_INPUT_ERROR
 } from "./input-safety.mjs";
-import { parseSettingValue, resetProfileOverride, setSetting, settingsRows, validateEditableSettings } from "./settings.mjs";
+import { parseSettingValue, resetProfileOverride, SETTINGS_SECTIONS, setSetting, settingsRows, validateEditableSettings } from "./settings.mjs";
 
 const h = React.createElement;
 const CUSTOM_MODEL_CHOICE = "Type another model ID…";
@@ -27,17 +27,13 @@ function valueText(row) {
 }
 
 function controlText(row) {
-  if (row.kind === "boolean") return "Press Space or Enter to turn this setting on or off.";
-  if (row.kind === "enum") return "Press Enter to see every choice. You can also use Left and Right.";
-  if (row.kind === "model") return "Press Enter to choose a model or type another model ID.";
+  if (row.kind === "boolean") return "Press Space to turn this setting on or off.";
+  if (row.kind === "enum") return "Use Left or Right to change this choice. Space also moves to the next choice.";
+  if (row.kind === "model") return "Use Left or Right to change model. Press Enter to see all models or type another ID.";
   if (row.kind === "profile") return "Press Enter to edit these instructions here. Press R to restore the Codekeeper default.";
   if (["string", "number", "json"].includes(row.kind)) return "Press Enter to type a new value.";
-  if (row.kind === "submit") return "Press Enter to review every change before Codekeeper applies it.";
+  if (row.kind === "submit") return "Press Enter to open one short summary before Codekeeper changes anything.";
   return "";
-}
-
-function sectionIcon(section) {
-  return section === "workflows" ? "⚡" : " ";
 }
 
 export function settingInputText(row) {
@@ -102,6 +98,7 @@ function parseEditorCommand(command) {
 export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [settings, setSettings] = useState(spec.settings);
   const [advanced, setAdvanced] = useState(false);
+  const [sectionIndex, setSectionIndex] = useState(0);
   const [index, setIndex] = useState(0);
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
@@ -112,21 +109,30 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const { stdout } = useStdout();
   const compact = Number.isFinite(stdout?.columns) && stdout.columns < 60;
   const lineWidth = Math.max(16, (stdout?.columns ?? 80) - (compact ? 1 : 8));
-  const rows = useMemo(() => [
-    ...settingsRows(settings, { advanced }),
-    {
+  const allRows = useMemo(() => settingsRows(settings, { advanced }), [advanced, settings]);
+  const sections = [
+    ...SETTINGS_SECTIONS.filter((section) => allRows.some((row) => row.section === section.id)),
+    { id: "continue", label: "Continue", icon: "✓" }
+  ];
+  const activeSectionIndex = Math.min(sectionIndex, sections.length - 1);
+  const activeSection = sections[activeSectionIndex];
+  const rows = activeSection.id === "continue"
+    ? [{
       id: "apply",
-      section: "review",
+      section: "continue",
       label: "Review and create the setup pull request",
-      description: "Check the workflows, models, files, credentials, and safety limits on five short pages.",
+      description: "See one short summary, return here if needed, or create the pull request.",
       kind: "submit",
-      value: "continue"
-    }
-  ], [advanced, settings]);
-  const visibleCount = compact ? 5 : Math.max(5, Math.min(16, (stdout?.rows ?? 24) - 14));
-  const start = Math.max(0, Math.min(index - Math.floor(visibleCount / 2), rows.length - visibleCount));
+      value: "ready"
+    }]
+    : allRows.filter((row) => row.section === activeSection.id);
+  const selectedIndex = Math.min(index, Math.max(0, rows.length - 1));
+  const visibleCount = compact ? 4 : Math.max(5, Math.min(14, (stdout?.rows ?? 24) - 16));
+  const start = Math.max(0, Math.min(selectedIndex - Math.floor(visibleCount / 2), rows.length - visibleCount));
   const visible = rows.slice(start, start + visibleCount);
-  const selectedRow = rows[index] ?? rows[0];
+  const selectedRow = rows[selectedIndex] ?? rows[0];
+  const groupWidth = activeSection.id === "ai" ? Math.min(24, Math.max(18, Math.floor(lineWidth * 0.27))) : 0;
+  const labelWidth = Math.min(36, Math.max(12, ...rows.map((row) => row.label.length)));
   const changedCount = useMemo(() => {
     const initial = new Map(settingsRows(spec.settings, { advanced: true }).map((row) => [row.id, JSON.stringify(row.value)]));
     return settingsRows(settings, { advanced: true })
@@ -179,8 +185,8 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         setChoosing(null);
         return;
       }
-      if (key.upArrow || input === "k") setChoosing((current) => ({ ...current, index: (current.index - 1 + current.choices.length) % current.choices.length }));
-      if (key.downArrow || input === "j" || key.tab) setChoosing((current) => ({ ...current, index: (current.index + 1) % current.choices.length }));
+      if (key.upArrow || key.leftArrow || input === "k" || input === "h") setChoosing((current) => ({ ...current, index: (current.index - 1 + current.choices.length) % current.choices.length }));
+      if (key.downArrow || key.rightArrow || input === "j" || input === "l" || key.tab) setChoosing((current) => ({ ...current, index: (current.index + 1) % current.choices.length }));
       if (key.return) {
         const value = choosing.choices[choosing.index];
         setChoosing(null);
@@ -233,21 +239,32 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.escape || (key.ctrl && input.toLowerCase() === "c")) return onCancel(cancelled());
     if (input.toLowerCase() === "a") {
       setAdvanced((value) => !value);
+      setSectionIndex(0);
       setIndex(0);
       setError("");
       return;
     }
     if (input === "G" || key.end) {
-      setIndex(rows.length - 1);
-      return;
-    }
-    if (input === "g" || key.home) {
+      setSectionIndex(sections.length - 1);
       setIndex(0);
       return;
     }
+    if (input === "g" || key.home) {
+      setSectionIndex(0);
+      setIndex(0);
+      return;
+    }
+    if (key.tab || input === "]" || input === "[") {
+      const direction = input === "[" || (key.tab && key.shift) ? -1 : 1;
+      setSectionIndex((value) => (value + direction + sections.length) % sections.length);
+      setIndex(0);
+      setError("");
+      setNotice("");
+      return;
+    }
     if (key.upArrow || input === "k") setIndex((value) => (value - 1 + rows.length) % rows.length);
-    if (key.downArrow || input === "j" || key.tab) setIndex((value) => (value + 1) % rows.length);
-    const row = rows[index];
+    if (key.downArrow || input === "j") setIndex((value) => (value + 1) % rows.length);
+    const row = rows[selectedIndex];
     if (!row) return;
     if (input.toLowerCase() === "r" && row.kind === "profile") {
       setSettings((current) => resetProfileOverride(current, row.profile));
@@ -258,7 +275,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       return;
     }
     if (input === " " && row.kind === "boolean") requestValue(row, !row.value);
-    if ((key.leftArrow || key.rightArrow) && row.kind === "enum") {
+    if ((key.leftArrow || key.rightArrow || input === " ") && ["enum", "model"].includes(row.kind)) {
       const direction = key.leftArrow ? -1 : 1;
       const current = row.choices.indexOf(row.value);
       requestValue(row, row.choices[(current + direction + row.choices.length) % row.choices.length]);
@@ -271,8 +288,6 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       } catch (cause) {
         setError(cause.message);
       }
-    } else if (row.kind === "boolean") {
-      requestValue(row, !row.value);
     } else if (["enum", "model"].includes(row.kind)) {
       const choices = row.kind === "model" ? [...row.choices, CUSTOM_MODEL_CHOICE] : row.choices;
       setChoosing({ row, choices, index: Math.max(0, choices.indexOf(row.value)) });
@@ -298,7 +313,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         ...color(colorEnabled && choiceIndex === choosing.index, "cyan")
       }, `${choiceIndex === choosing.index ? "›" : " "} ${choice}`))
     ),
-    h(Text, { dimColor: true }, "↑/↓ move  •  Enter select  •  Esc back")
+    h(Text, { dimColor: true }, "Arrow keys move  •  Enter select  •  Esc back")
   );
 
   if (editing) return h(
@@ -326,23 +341,34 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     },
     h(Box, compact ? { flexDirection: "column" } : { justifyContent: "space-between" },
       h(Text, { bold: true, ...color(colorEnabled, "cyan") }, compact ? "CODEKEEPER SETTINGS" : "CODEKEEPER"),
-      h(Text, { bold: true }, advanced ? "[ STANDARD ]  [● ADVANCED ]" : "[● STANDARD ]  [ ADVANCED ]")
+      h(Text, { bold: true }, advanced ? "[ SIMPLE ]  [● ADVANCED ]" : "[● SIMPLE ]  [ ADVANCED ]")
     ),
     h(Text, { bold: true }, "Choose how Codekeeper works"),
-    h(Text, { dimColor: true }, fitLine(`${spec.repository}  •  ${rows.length - 1} editable settings  •  ${changedCount} changed`, lineWidth)),
+    h(Text, { dimColor: true }, fitLine(`${spec.repository}  •  ${allRows.length} editable settings  •  ${changedCount} changed`, lineWidth)),
+    h(Box, { flexWrap: "wrap", marginTop: 1 },
+      ...sections.map((section, candidateIndex) => h(Text, {
+        key: section.id,
+        bold: candidateIndex === activeSectionIndex,
+        inverse: candidateIndex === activeSectionIndex,
+        ...color(colorEnabled && candidateIndex === activeSectionIndex, "cyan")
+      }, `${candidateIndex === activeSectionIndex ? "[" : " "}${section.icon} ${section.label}${candidateIndex === activeSectionIndex ? "]" : " "}  `))
+    ),
+    h(Text, { bold: true, ...color(colorEnabled, "cyan") }, `${activeSection.icon} ${activeSection.label}`),
     h(Box, { flexDirection: "column", marginTop: 1 },
       ...visible.map((row, offset) => {
-        const selected = start + offset === index;
+        const selected = start + offset === selectedIndex;
         const rendered = valueText(row);
+        const group = groupWidth ? fitLine(row.group ?? "", groupWidth - 1).padEnd(groupWidth) : "";
+        const label = fitLine(row.label, labelWidth).padEnd(labelWidth);
         return h(Text, {
           key: row.id,
           bold: selected,
           inverse: selected,
           ...color(colorEnabled && selected, "cyan")
-        }, fitLine(`${selected ? "›" : " "} ${sectionIcon(row.section)} ${row.label}: ${rendered}`, lineWidth));
+        }, fitLine(`${selected ? "›" : " "} ${group}${label}  ${rendered}`, lineWidth));
       })
     ),
-    h(Text, { dimColor: true }, `${start + 1}–${Math.min(rows.length, start + visibleCount)} of ${rows.length}`),
+    rows.length > visibleCount ? h(Text, { dimColor: true }, `${start + 1}–${Math.min(rows.length, start + visibleCount)} of ${rows.length}`) : null,
     h(Box, { flexDirection: "column", borderStyle: compact ? undefined : "single", borderColor: colorEnabled ? "gray" : undefined, paddingX: compact ? 0 : 1, marginTop: 1 },
       compact ? null : h(Text, { bold: true }, selectedRow.label),
       h(Text, { dimColor: true }, fitLine(selectedRow.description, Math.max(8, lineWidth - 4))),
@@ -350,7 +376,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     ),
     notice ? h(Text, color(colorEnabled, "cyan"), notice) : null,
     error ? h(Text, color(colorEnabled, "red"), error) : null,
-    h(Text, { dimColor: true }, fitLine("↑/↓ move  •  Enter use  •  A switch view  •  G end  •  Esc cancel", lineWidth))
+    h(Text, { dimColor: true }, fitLine("Tab section  •  ↑/↓ setting  •  ←/→ choice  •  Space toggle  •  A simple/advanced  •  Esc", lineWidth))
   );
 }
 

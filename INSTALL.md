@@ -12,7 +12,7 @@ cd /absolute/path/to/adopter-repository
 npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.2.0.tgz -- codekeeper init
 ```
 
-The installer opens one Settings command centre and generates a setup or configuration PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Standard mode covers workflows, autonomy, schedules, models, workspaces, tracing, and profiles. Advanced mode exposes every editable policy field while keeping deterministic safety and release boundaries read-only. Review the effective behavior, changed files, variables, and secrets at the final mutation boundary. If the installer cannot be used, the numbered steps below remain the manual fallback.
+The installer opens one tabbed Settings screen and generates a setup or configuration PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Simple mode puts provider, model, and effort choices first. Advanced mode uses the same sections and exposes every editable policy field while keeping deterministic safety and release boundaries read-only. Review the short summary or return to Settings at the final mutation boundary. If the installer cannot be used, the numbered steps below remain the manual fallback.
 
 If you are unsure which options to choose, accept the recommended starter setup: pull-request review plus repository maintenance, the `openai` preset, the repository name as the comment display name, and your authenticated GitHub login as the owner-command user. Issue triage and the separately gated fix path can be added later through a reviewed policy/workflow change.
 

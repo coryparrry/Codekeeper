@@ -312,7 +312,7 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
     { message: "Enable OpenAI traces?", defaultValue: true },
     { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
     { message: "Continue with these safety settings?", defaultValue: false },
-    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: false },
+    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: true },
     { message: "Create this setup?", defaultValue: false }
   ]);
   assert.match(output.toString(), /Setup preview/);
@@ -408,6 +408,66 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
   const observable = `${JSON.stringify(reviewedPlan)}\n${output.toString()}\n${errorOutput.toString()}\n${notices.toString()}`;
   assert.doesNotMatch(observable, new RegExp(privateKeyPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(errorOutput.toString(), /cancelled before repository mutation/);
+});
+
+test("Ink final review returns to the same settings without inventing an OpenRouter credential", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  const notices = textSink();
+  const reviewedPlans = [];
+  let settingsVisits = 0;
+  let privateKeyVisits = 0;
+  const prompt = {
+    kind: "ink",
+    notices,
+    progress: {
+      start() { throw new Error("progress must not start after review cancellation"); },
+      update() { throw new Error("progress must not update after review cancellation"); }
+    },
+    async confirm() { return true; },
+    async editSettings({ settings }) {
+      settingsVisits += 1;
+      return settings;
+    },
+    async inputText({ message, defaultValue }) {
+      if (message.startsWith("GitHub App Client")) return "Iv123456789012345678";
+      if (message.startsWith("Paste the GitHub App")) return "https://github.com/settings/apps/codekeeper-widget";
+      return defaultValue;
+    },
+    async selectPrivateKey() {
+      privateKeyVisits += 1;
+      return "/private/tmp/private-key-path-canary.pem";
+    },
+    async reviewInstallPlan(plan) {
+      reviewedPlans.push(plan);
+      return reviewedPlans.length === 1 ? "settings" : false;
+    },
+    async dispose() {}
+  };
+  const runner = createRecordingRunner(() => {
+    throw new Error("review cancellation must remain read-only");
+  });
+  const status = await runCli({
+    argv: ["init"],
+    output,
+    errorOutput,
+    runner,
+    prompt,
+    interactive: true,
+    inspect: async () => repositorySnapshot("/tmp/widget", HEAD_SHA),
+    openUrl: async () => true,
+    resumeCommand: "safe resume"
+  });
+
+  assert.equal(status, 1);
+  assert.equal(settingsVisits, 2);
+  assert.equal(privateKeyVisits, 1);
+  assert.equal(reviewedPlans.length, 2);
+  for (const plan of reviewedPlans) {
+    assert.equal(plan.models.review.provider, "openai");
+    assert.equal(plan.secrets.some((secret) => secret.name === "OPENROUTER_API_KEY"), false);
+  }
+  assert.deepEqual(runner.calls, []);
 });
 
 test("an existing installation rerun skips App setup and secret prompts", async () => {
@@ -846,7 +906,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.deepEqual(prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })), [
     { message: "Install into acme/widget on default branch main?", defaultValue: true },
     { message: "Continue with these safety settings?", defaultValue: false },
-    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: false },
+    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: true },
     { message: "Create this setup?", defaultValue: false }
   ]);
   assert.match(opened[0], /^https:\/\/github\.com\/settings\/apps\/new\?/);

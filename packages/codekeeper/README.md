@@ -38,9 +38,9 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 
 ## What `init` does
 
-The Settings screen controls new and existing installations. Standard mode covers workflows, automation, schedules, every role's model settings, workspace specialists, tracing, and all four default profiles. Each selected row shows its purpose and its controls. Press Enter on a model ID to choose a current provider model or type another supported ID. Press Enter on a provider or effort to see every choice.
+The Settings screen controls new and existing installations. Simple mode groups settings into tabs, with every role's provider, model, and effort on the first tab. Press `Tab` to change section, use Up and Down to move, use Left and Right for choices such as models and effort, and press Space for on/off settings. Press Enter on a model to see the full list or type another supported ID.
 
-Profile instructions stay inside the TUI. Editing a profile creates a repository override for that role. Untouched defaults do not create files. Press `R` on a profile to remove its override and resume packaged updates. Press `A` for Advanced mode. Advanced shows every editable policy field. Model settings offer current provider choices and a custom model ID field. Protected release and safety boundaries stay fixed and appear in the final review. Nothing changes until you accept the final review.
+Profile instructions stay inside the TUI. Editing a profile creates a repository override for that role. Untouched defaults do not create files. Press `R` on a profile to remove its override and resume packaged updates. Press `A` for Advanced mode. Advanced uses the same section tabs and gives common values, such as response detail, clear choices instead of raw JSON. Protected release and safety boundaries stay fixed. Nothing changes until you accept the final review.
 
 | Choice | What it adds |
 |---|---|
@@ -51,7 +51,7 @@ Profile instructions stay inside the TUI. Editing a profile creates a repository
 
 The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and accepts any model ID for each provider. Coordinator selection is independent from the optional OpenAI Codex workspace specialist. OpenAI traces are optional. When traces are on, the installer requests a separate OpenAI Platform trace-export key. A ChatGPT subscription is not an API key.
 
-After choosing the settings, the TUI shows a five-page final review. The pages group the setup, credentials, files, behavior, and confirmation. You can inspect every changed file without opening more review pages. The installer then:
+After choosing the settings, the TUI shows one short summary of the repository, workflows, models, required credential names, file count, and startup choice. Select **Back to settings** to make another change. The installer then:
 
 1. Generates `.github/codekeeper.json`, `.github/codekeeper-release.json`, the always-installed repository-assistant caller, and the selected role callers. It creates an `.github/codekeeper/agents/*.md` file only for a profile explicitly edited in Settings.
 2. Keeps every generated caller pinned to one exact package version and npm SHA-512 integrity. The bootstrap verifies the tarball before trusting its internal closed manifest or runtime.
@@ -124,7 +124,7 @@ The installer enables the selected workflows after merge by default. You can cho
 - automatic exact-duplicate closure;
 - automatic merge.
 
-Automatic review, feedback triage, issue triage, owner requests, and deferred-issue creation start on when their callers are installed. Automatic code repair, issue implementation, duplicate closure, and merge remain off until enabled separately. The final review shows effective automation, changed files, variables, and required secrets before the installer changes repository settings or files.
+Automatic review, feedback triage, issue triage, owner requests, and deferred-issue creation start on when their callers are installed. Automatic code repair, issue implementation, duplicate closure, and merge remain off until enabled separately. The final review gives a short summary of the selected workflows, models, file count, and required secret names before the installer changes repository settings or files.
 
 Review all triggers before you merge the setup pull request. If you chose a disabled installation, keep the `Codekeeper review gate` optional until Codekeeper is enabled.
 

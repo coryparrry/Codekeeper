@@ -7,6 +7,20 @@ const AGENT_IDS = Object.freeze(["review", "audit", "issue", "fix"]);
 const EFFORTS = Object.freeze(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
+export const SETTINGS_SECTIONS = Object.freeze([
+  Object.freeze({ id: "ai", label: "Models", icon: "🤖" }),
+  Object.freeze({ id: "workflows", label: "Workflows", icon: "⚡" }),
+  Object.freeze({ id: "automation", label: "Automation", icon: "⏱" }),
+  Object.freeze({ id: "review", label: "Pull requests", icon: "🔍" }),
+  Object.freeze({ id: "audit", label: "Maintenance", icon: "🛠" }),
+  Object.freeze({ id: "issues", label: "Issues", icon: "📌" }),
+  Object.freeze({ id: "merge", label: "Merge", icon: "🔀" }),
+  Object.freeze({ id: "profiles", label: "Instructions", icon: "📝" }),
+  Object.freeze({ id: "repository", label: "Repository", icon: "📦" }),
+  Object.freeze({ id: "labels", label: "Labels", icon: "🏷" }),
+  Object.freeze({ id: "projectInvariants", label: "Project rules", icon: "🧭" })
+]);
+
 const STANDARD_PATHS = Object.freeze([
   ["automation.automaticPrReview", "Automatic PR review"],
   ["automation.reviewFeedbackTriage", "Review feedback triage"],
@@ -58,6 +72,7 @@ function agentName(path) {
 }
 
 function advancedDescription(path) {
+  if (/^ai\.agents\.[^.]+\.modelSettings\.text\.verbosity$/.test(path)) return `Choose how detailed the ${agentName(path).toLowerCase()} response should be.`;
   if (path.startsWith("ai.agents.")) return `Set ${words(path.split(".").slice(3).join(" "))} for the ${agentName(path).toLowerCase()}.`;
   if (path.startsWith("labels.")) return "Set the name, color, or description for this GitHub label.";
   if (path.startsWith("review.")) return "Set a pull request review limit, label, or escalation rule.";
@@ -112,6 +127,7 @@ function enumChoices(path, policy) {
     return policy.ai.providers[provider]?.supportsReasoningEffort ? EFFORTS : ["none"];
   }
   if (/^ai\.agents\.[^.]+\.workspace\.effort$/.test(path)) return EFFORTS;
+  if (/^ai\.agents\.[^.]+\.modelSettings\.text\.verbosity$/.test(path)) return ["low", "medium", "high"];
   if (path === "merge.method") return ["MERGE", "SQUASH", "REBASE"];
   return null;
 }
@@ -138,6 +154,7 @@ function policyRow(policy, path, label = path, keys = pathParts(path)) {
     section: path.split(".")[0],
     label,
     description: STANDARD_DESCRIPTIONS[path] ?? advancedDescription(path),
+    ...(/^ai\.agents\.[^.]+\./.test(path) ? { group: agentName(path) } : {}),
     path,
     ...(keys.length === canonicalKeys.length && keys.every((key, index) => key === canonicalKeys[index]) ? {} : { keys }),
     value,
@@ -157,8 +174,8 @@ function flattenPolicy(policy, value = policy, prefix = "", rows = [], parentKey
   for (const [key, child] of Object.entries(value)) {
     const path = prefix ? `${prefix}.${key}` : key;
     const keys = [...parentKeys, key];
-    if (path === "ai.providers" || /^ai\.agents\.[^.]+\.modelSettings$/.test(path)) {
-      rows.push(policyRow(policy, path, path, keys));
+    if (path === "ai.providers") {
+      continue;
     } else if (child && typeof child === "object" && !Array.isArray(child)) {
       flattenPolicy(policy, child, path, rows, keys);
     } else {
@@ -216,7 +233,18 @@ export function createEditableSettings({
 }
 
 export function settingsRows(settings, { advanced = false } = {}) {
-  const rows = [
+  const rows = [];
+  for (const agent of AGENT_IDS) {
+    for (const [suffix, name] of [
+      ["provider", "Provider"],
+      ["model", "Model"],
+      ["effort", "Effort"],
+      ["workspace.enabled", "Workspace specialist"],
+      ["workspace.model", "Workspace model"],
+      ["workspace.effort", "Workspace effort"]
+    ]) rows.push(policyRow(settings.policy, `ai.agents.${agent}.${suffix}`, name));
+  }
+  rows.push(
     ...MODE_IDS.map((mode) => ({
       id: `workflow:${mode}`,
       section: "workflows",
@@ -234,18 +262,7 @@ export function settingsRows(settings, { advanced = false } = {}) {
       value: settings.enabled
     },
     ...STANDARD_PATHS.map(([path, label]) => policyRow(settings.policy, path, label))
-  ];
-  for (const agent of AGENT_IDS) {
-    const label = agent === "audit" ? "auditor" : agent === "issue" ? "issue triager" : agent;
-    for (const [suffix, name] of [
-      ["provider", "provider"],
-      ["model", "model ID"],
-      ["effort", "effort"],
-      ["workspace.enabled", "workspace specialist"],
-      ["workspace.model", "workspace model"],
-      ["workspace.effort", "workspace effort"]
-    ]) rows.push(policyRow(settings.policy, `ai.agents.${agent}.${suffix}`, `${label} ${name}`));
-  }
+  );
   for (const profile of AGENT_PROFILE_IDS) {
     rows.push({
       id: `profile:${profile}`,
@@ -266,7 +283,9 @@ export function settingsRows(settings, { advanced = false } = {}) {
     if (!seen.has(row.id) && !row.readOnly) {
       rows.push({
         ...row,
-        label: `${sentence(row.path.split(".").at(-1))} · ${sentence(row.path.split(".").slice(0, -1).join(" "))}`
+        label: /^ai\.agents\.[^.]+\.modelSettings\.text\.verbosity$/.test(row.path)
+          ? "Response detail"
+          : `${sentence(row.path.split(".").at(-1))} · ${sentence(row.path.split(".").slice(0, -1).join(" "))}`
       });
     }
   }

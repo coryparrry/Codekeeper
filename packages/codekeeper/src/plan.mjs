@@ -558,50 +558,66 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   return deepFreeze(plan);
 }
 
-export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) {
+export async function collectSetupAnswers({ prompt, snapshot, bundle, output, initialAnswers = null }) {
   const installation = snapshot.installation ?? null;
-  output.write(`Codekeeper guided setup\n\n`);
-  output.write(installation
-    ? "This edits the current Codekeeper installation through a new pull request.\n\n"
-    : "This creates a setup pull request. It does not run a model, merge the pull request, or put secrets in generated files.\n\n");
-  const repositoryConfirmed = await prompt.confirm({
-    message: `${installation ? "Edit Codekeeper in" : "Install into"} ${snapshot.repository} on default branch ${snapshot.defaultBranch}?`,
-    defaultValue: true,
-    ...(prompt?.kind === "ink" ? {
-      step: "repository",
-      description: [
-        "Codekeeper supports GitHub.com repositories with a clean, current default-branch checkout.",
-        "The installer is still read-only at this point."
-      ],
-      yesLabel: "Use this repository",
-      noLabel: "Cancel"
-    } : {})
-  });
-  if (!repositoryConfirmed) throw new InstallerError("Setup was cancelled before any mutation.", { code: "USER_CANCELLED" });
+  if (!initialAnswers) {
+    output.write(`Codekeeper guided setup\n\n`);
+    output.write(installation
+      ? "This edits the current Codekeeper installation through a new pull request.\n\n"
+      : "This creates a setup pull request. It does not run a model, merge the pull request, or put secrets in generated files.\n\n");
+    const repositoryConfirmed = await prompt.confirm({
+      message: `${installation ? "Edit Codekeeper in" : "Install into"} ${snapshot.repository} on default branch ${snapshot.defaultBranch}?`,
+      defaultValue: true,
+      ...(prompt?.kind === "ink" ? {
+        step: "repository",
+        description: [
+          "Codekeeper supports GitHub.com repositories with a clean, current default-branch checkout.",
+          "The installer is still read-only at this point."
+        ],
+        yesLabel: "Use this repository",
+        noLabel: "Cancel"
+      } : {})
+    });
+    if (!repositoryConfirmed) throw new InstallerError("Setup was cancelled before any mutation.", { code: "USER_CANCELLED" });
+  }
   if (prompt?.kind === "ink" && typeof prompt.editSettings === "function") {
     const installed = installation ? editableSettingsForInstallation(snapshot, bundle) : null;
-    const preset = installed?.preset ?? "openai";
-    const policy = installed?.settings.policy
+    const preset = initialAnswers?.preset ?? installed?.preset ?? "openai";
+    const baselinePolicy = installed?.settings.policy
       ?? upgradePolicy(JSON.parse(bundle.contents[`policies/${preset}.json`]));
     if (!installation) {
-      policy.repository.displayName = snapshot.displayName;
-      policy.repository.ownerLogins = [snapshot.viewerLogin.toLowerCase()];
-      policy.merge.allowedUserAuthors = [...policy.repository.ownerLogins];
+      baselinePolicy.repository.displayName = snapshot.displayName;
+      baselinePolicy.repository.ownerLogins = [snapshot.viewerLogin.toLowerCase()];
+      baselinePolicy.merge.allowedUserAuthors = [...baselinePolicy.repository.ownerLogins];
     }
-    const settings = installed?.settings ?? createEditableSettings({
-      policy,
-      modes: RECOMMENDED_MODES,
-      enabled: true,
-      profiles: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]))
-    });
+    const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+    const settings = initialAnswers
+      ? createEditableSettings({
+        policy: initialAnswers.policy,
+        modes: initialAnswers.modes,
+        enabled: initialAnswers.enabled,
+        profiles: initialAnswers.profiles,
+        profileDefaults,
+        profileSources: initialAnswers.profileSources
+      })
+      : installed?.settings ?? createEditableSettings({
+        policy: baselinePolicy,
+        modes: RECOMMENDED_MODES,
+        enabled: true,
+        profiles: profileDefaults
+      });
     const edited = await prompt.editSettings({
       settings,
-      baselinePolicy: policy,
+      baselinePolicy,
       repository: snapshot.repository,
       update: Boolean(installation)
     });
-    validateEditableSettings(edited, policy);
-    return Object.freeze({ ...settingsAnswers(edited), preset });
+    validateEditableSettings(edited, baselinePolicy);
+    return Object.freeze({
+      ...settingsAnswers(edited),
+      preset,
+      ...(initialAnswers?.releaseUpdate ? { releaseUpdate: true } : {})
+    });
   }
   if (!installation) output.write("Recommended starter setup\n");
   if (!installation) {
