@@ -19,7 +19,7 @@ import {
 } from "./input-safety.mjs";
 import { capabilitySummary, completionGuidance, documentMap, modelAssignments, workflowMap } from "./plan.mjs";
 import { createPrivateKeyPickerController } from "./private-key-input.mjs";
-import { editProfileWithEditor, SettingsScreen } from "./settings-tui.mjs";
+import { SettingsScreen } from "./settings-tui.mjs";
 
 const h = React.createElement;
 const DEFAULT_PROGRESS_STEPS = Object.freeze([
@@ -56,10 +56,21 @@ function colorProps(enabled, color) {
   return enabled ? { color } : {};
 }
 
-function usesPagedDetailLayout(stdout) {
-  const roomyWidth = Number.isFinite(stdout?.columns) && stdout.columns >= 100;
-  const roomyHeight = Number.isFinite(stdout?.rows) && stdout.rows >= 40;
-  return !(roomyWidth && roomyHeight);
+function useSpinner(active = true) {
+  const frames = ["◐", "◓", "◑", "◒"];
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (!active) return undefined;
+    const timer = globalThis.setInterval(() => setIndex((value) => (value + 1) % frames.length), 120);
+    return () => globalThis.clearInterval(timer);
+  }, [active, frames.length]);
+  return frames[index];
+}
+
+function fitText(value, width) {
+  const text = String(value).replace(/\s*\n\s*/g, " ↵ ");
+  if ([...text].length <= width) return text;
+  return `${[...text].slice(0, Math.max(1, width - 1)).join("")}…`;
 }
 
 function DetailLines({ lines = [] }) {
@@ -90,8 +101,8 @@ function Shell({ step, title, description = [], footer, colorEnabled, compactDet
       h(
         Box,
         compact ? { flexDirection: "column" } : { justifyContent: "space-between" },
-        h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, "CODEKEEPER"),
-        step ? h(Text, { dimColor: true }, step.toUpperCase()) : null
+        h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, "✦ CODEKEEPER"),
+        step ? h(Text, { bold: true, ...colorProps(colorEnabled, "magenta") }, step.toUpperCase()) : null
       ),
       h(Text, { bold: true }, title),
       h(DetailLines, { lines: description }),
@@ -99,7 +110,7 @@ function Shell({ step, title, description = [], footer, colorEnabled, compactDet
       h(
         Box,
         { marginTop: 1 },
-        h(Text, { dimColor: true }, isRawModeSupported ? footer : "This terminal does not support keyboard input. Run the installer in an interactive terminal.")
+        h(Text, { ...colorProps(colorEnabled, "cyan") }, isRawModeSupported ? footer : "This terminal does not support keyboard input. Run the installer in an interactive terminal.")
       )
     )
   );
@@ -171,7 +182,7 @@ function SelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
           bold: choiceIndex === index,
           ...colorProps(colorEnabled && choiceIndex === index, "cyan")
         },
-        `${choiceIndex === index ? "›" : " "} ${choice.label}`
+        `${choiceIndex === index ? "›" : " "} ${choiceIndex === index ? "●" : "○"} ${choice.label}`
       ))
     )
   );
@@ -222,7 +233,7 @@ function MultiSelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
           bold: choiceIndex === index,
           ...colorProps(colorEnabled && choiceIndex === index, "cyan")
         },
-        `${choiceIndex === index ? "›" : " "} [${selected.has(choice.value) ? "x" : " "}] ${choice.label}`
+        `${choiceIndex === index ? "›" : " "} [${selected.has(choice.value) ? "✓" : " "}] ${choice.label}`
       )),
       error ? h(Text, { color: colorEnabled ? "red" : undefined }, error) : null
     )
@@ -457,7 +468,7 @@ function reviewData(plan) {
     documents: documents.map((item) => `${item.path} — ${item.purpose}`),
     setupDocumentPaths: setupDocuments.map((item) => `${item.path} — ${item.purpose}`),
     profileDocumentPaths: profileDocuments.map((item) => `${item.path} — ${item.purpose}`),
-    secrets: plan.secrets.map((secret) => `${secret.name} — ${SECRET_PURPOSES[secret.name]}`),
+    secrets: plan.secrets.map((secret) => `${secret.name} — ${secret.purpose ?? SECRET_PURPOSES[secret.name]}`),
     variables: plan.variables.map((variable) => `${variable.name} → ${variable.value}`),
     automation: [
       `Automatic PR review: ${plan.policy.automation.automaticPrReview ? "on" : "off"}`,
@@ -468,7 +479,7 @@ function reviewData(plan) {
       `Maintenance schedule: ${plan.policy.automation.maintenanceSchedule}`
     ],
     startup: plan.update && plan.enabled
-      ? "Codekeeper starts now with the current configuration; this update applies after merge."
+      ? "Codekeeper starts now with the current settings. This update applies after merge."
       : plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge.",
     capabilities: capabilitySummary(plan.capabilities, plan.modes),
     reviewGateWarning: completionGuidance(plan.modes, plan.enabled, plan.update).reviewGateWarning
@@ -485,9 +496,9 @@ function operationCopy(plan) {
   }
   if (plan.operation === "configuration-update") {
     return {
-      noun: "configuration",
-      completionTitle: "Configuration ready",
-      description: "Review the repository configuration and settings that will change."
+      noun: "settings update",
+      completionTitle: "Settings update ready",
+      description: "Review the repository settings that will change."
     };
   }
   return {
@@ -500,40 +511,51 @@ function operationCopy(plan) {
 function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [confirmed, setConfirmed] = useState(false);
   const [page, setPage] = useState(0);
+  const [detailIndex, setDetailIndex] = useState(0);
   const cancel = useCancel(onCancel);
   const { stdout } = useStdout();
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
-  const documentPages = useMemo(() => {
-    const pages = [];
-    for (let index = 0; index < data.setupDocumentPaths.length; index += 4) {
-      pages.push(data.setupDocumentPaths.slice(index, index + 4));
-    }
-    return pages;
-  }, [data.setupDocumentPaths]);
-  const pagedDetail = usesPagedDetailLayout(stdout) || documentPages.length > 1;
-  const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
+  const compactDetail = Number.isFinite(stdout?.rows) && stdout.rows < 30;
   const operation = operationCopy(spec.plan);
-  const pagedPages = useMemo(() => [
-    "overview",
-    "models",
-    ...documentPages.map((_, index) => `documents-${index}`),
-    ...(data.profileDocumentPaths.length ? ["profiles"] : []),
-    ...(data.variables.length ? ["variables"] : []),
-    ...(data.secrets.length ? ["secrets"] : []),
-    "settings",
-    "capabilities",
-    "boundaries",
-    "confirm"
-  ], [data, documentPages]);
-  const lastPage = pagedDetail ? pagedPages.length - 1 : 2;
-  const pageKind = pagedPages[page];
+  const pages = ["setup", "credentials", "files", "behavior", "confirm"];
+  const lastPage = pages.length - 1;
+  const pageKind = pages[page];
+  const details = pageKind === "files"
+    ? (data.documents.length ? data.documents : ["No generated files will change."])
+    : pageKind === "behavior"
+      ? [
+        `Startup — ${data.startup}`,
+        ...data.automation.map((line) => `Automation — ${line}`),
+        ...data.capabilities.map((line) => `Capability — ${line}`),
+        ...CONSERVATIVE_BOUNDARIES.map((line) => `Fixed boundary — ${line}`)
+      ]
+      : [];
+  const visibleDetailCount = Math.max(3, Math.min(6, (stdout?.rows ?? 24) - 16));
+  const detailStart = Math.max(0, Math.min(detailIndex - Math.floor(visibleDetailCount / 2), details.length - visibleDetailCount));
+  const visibleDetails = details.slice(detailStart, detailStart + visibleDetailCount);
+  const lineWidth = Math.max(24, (stdout?.columns ?? 80) - 8);
   usePaste(() => {});
   useInput((input, key) => {
     cancel(input, key);
+    if (["files", "behavior"].includes(pageKind)) {
+      if (key.upArrow || input === "k") {
+        setDetailIndex((value) => Math.max(0, value - 1));
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        setDetailIndex((value) => Math.min(details.length - 1, value + 1));
+        return;
+      }
+    }
     if (page < lastPage) {
-      if (key.leftArrow || input === "h") setPage((value) => Math.max(0, value - 1));
-      if (key.rightArrow || input === "l" || key.tab) setPage((value) => Math.min(lastPage, value + 1));
-      if (key.return) setPage((value) => Math.min(lastPage, value + 1));
+      if (key.leftArrow || input === "h") {
+        setPage((value) => Math.max(0, value - 1));
+        setDetailIndex(0);
+      }
+      if (key.rightArrow || input === "l" || key.tab || key.return) {
+        setPage((value) => Math.min(lastPage, value + 1));
+        setDetailIndex(0);
+      }
       return;
     }
     if (key.leftArrow || key.upArrow || input === "h" || input === "k") setConfirmed(true);
@@ -545,83 +567,65 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     Box,
     { key: title, flexDirection: "column", marginTop },
     h(Text, { bold: true }, title),
-    ...lines.map((line, index) => h(Text, { key: `${title}-${index}`, dimColor: true }, `  ${line}`))
+    ...lines.map((line, index) => h(Text, { key: `${title}-${index}`, dimColor: true }, `  ${fitText(line, lineWidth)}`))
   );
   return h(
     Shell,
     {
       step: "final review",
       title: `Review the ${operation.noun} · ${page + 1} of ${lastPage + 1}`,
-      description: pagedDetail
-        ? [page === 0
-          ? operation.description
-          : "Nothing has changed yet."]
-        : [
-          operation.description,
-          `Nothing has changed. Select Create ${operation.noun} to apply these choices.`
-        ],
+      description: [page === 0 ? operation.description : "Nothing has changed yet."],
       footer: page < lastPage
-        ? "←/→ page  •  Enter next  •  Esc cancel"
+        ? ["files", "behavior"].includes(pageKind)
+          ? "↑/↓ inspect  •  ←/→ page  •  Enter next  •  Esc cancel"
+          : "←/→ page  •  Enter next  •  Esc cancel"
         : "←/→ choose  •  Backspace previous  •  Enter confirm  •  Esc cancel",
       colorEnabled,
       compactDetail
     },
-    !pagedDetail && page === 0 ? h(
+    pageKind === "setup" ? h(
       Box,
       { flexDirection: "column" },
-      h(Text, null, data.repository),
+      h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, `📦 ${data.repository}`),
       h(Text, { dimColor: true }, data.identity),
-      h(Text, { dimColor: true }, data.preset),
-      h(Text, { dimColor: true }, data.release),
-      section("Workflows", data.workflows),
-      section("Models (editable in .github/codekeeper.json)", data.models)
+      section("⚡ Workflows", data.workflows),
+      section("🤖 Models", data.models)
     ) : null,
-    !pagedDetail && page === 1 ? h(
+    pageKind === "credentials" ? h(
       Box,
       { flexDirection: "column" },
-      section("Document map", data.documents),
-      section("Repository variables", data.variables),
-      section("Secrets requested through GitHub CLI", data.secrets)
+      section("🔐 Credentials sent to GitHub", data.secrets.length ? data.secrets : ["No new credentials are needed."], 0),
+      section("⚙ Repository variables", data.variables.length ? data.variables : ["No repository variables will change."]),
+      h(Text, { dimColor: true }, "Codekeeper never writes credential values to generated files.")
     ) : null,
-    !pagedDetail && page === 2 ? h(
+    ["files", "behavior"].includes(pageKind) ? h(
       Box,
       { flexDirection: "column" },
-      section("Settings", [data.startup, ...data.automation, ...data.capabilities, ...CONSERVATIVE_BOUNDARIES]),
+      h(Text, { bold: true }, pageKind === "files" ? `📄 Files · ${details.length} total` : `🛡 Behavior and safety · ${details.length} items`),
+      ...visibleDetails.map((line, offset) => {
+        const selected = detailStart + offset === detailIndex;
+        return h(Text, {
+          key: `${pageKind}-${detailStart + offset}`,
+          bold: selected,
+          inverse: selected,
+          ...colorProps(colorEnabled && selected, "cyan")
+        }, fitText(`${selected ? "›" : " "} ${line}`, lineWidth));
+      }),
+      h(Text, { dimColor: true }, `${detailStart + 1}–${Math.min(details.length, detailStart + visibleDetailCount)} of ${details.length}`),
+      h(Text, { dimColor: true }, Number.isFinite(stdout?.columns) && stdout.columns < 60
+        ? fitText(details[detailIndex] ?? "", lineWidth * 2)
+        : (details[detailIndex] ?? ""))
+    ) : null,
+    pageKind === "confirm" ? h(
+      Box,
+      { flexDirection: "column" },
+      h(Text, { bold: true, ...colorProps(colorEnabled, "green") }, "✓ Ready to create the pull request"),
+      h(Text, { dimColor: true }, `Codekeeper will create ${data.documents.length} file changes.`),
       data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
       h(
         Box,
         { flexDirection: "column", marginTop: 1 },
-        h(Text, { bold: confirmed, inverse: confirmed }, `${confirmed ? "›" : " "} Create ${operation.noun}`),
-        h(Text, { bold: !confirmed, inverse: !confirmed }, `${!confirmed ? "›" : " "} Cancel`)
-      )
-    ) : null,
-    pagedDetail && pageKind === "overview" ? h(
-      Box,
-      { flexDirection: "column" },
-      h(Text, null, data.repository),
-      h(Text, { dimColor: true }, data.identity),
-      h(Text, { dimColor: true }, data.preset),
-      h(Text, { dimColor: true }, data.release),
-      section("Workflows", data.workflows, 0)
-    ) : null,
-    pagedDetail && pageKind === "models" ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
-    pagedDetail && pageKind?.startsWith("documents-")
-      ? section("Policy and caller documents", documentPages[Number(pageKind.slice("documents-".length))], 0)
-      : null,
-    pagedDetail && pageKind === "profiles" ? section("Repository profile overrides", data.profileDocumentPaths, 0) : null,
-    pagedDetail && pageKind === "variables" ? section("Repository variables", data.variables, 0) : null,
-    pagedDetail && pageKind === "secrets" ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
-    pagedDetail && pageKind === "settings" ? section("Settings", [data.startup, ...data.automation], 0) : null,
-    pagedDetail && pageKind === "capabilities" ? section("Capabilities", data.capabilities, 0) : null,
-    pagedDetail && pageKind === "boundaries" ? section("Fixed boundaries", CONSERVATIVE_BOUNDARIES, 0) : null,
-    pagedDetail && pageKind === "confirm" ? h(
-      Box,
-      { flexDirection: "column" },
-      data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
-      h(
-        Box,
-        { flexDirection: "column", marginTop: 1 },
-        h(Text, { bold: confirmed, inverse: confirmed }, `${confirmed ? "›" : " "} Create ${operation.noun}`),
+        h(Text, { bold: confirmed, inverse: confirmed }, `${confirmed ? "›" : " "} Create the ${operation.noun} pull request`),
         h(Text, { bold: !confirmed, inverse: !confirmed }, `${!confirmed ? "›" : " "} Cancel`)
       )
     ) : null
@@ -630,6 +634,10 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 
 function ProgressScreen({ state, colorEnabled }) {
   const statuses = new Map(state.events.map((event) => [event.id, event]));
+  const spinner = useSpinner(state.events.some((event) => event.status === "active"));
+  const completed = state.steps.filter((step) => statuses.get(step.id)?.status === "done").length;
+  const progressWidth = 16;
+  const filled = Math.round((completed / state.steps.length) * progressWidth);
   return h(
     Shell,
     {
@@ -642,9 +650,10 @@ function ProgressScreen({ state, colorEnabled }) {
     h(
       Box,
       { flexDirection: "column" },
+      h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, `[${"█".repeat(filled)}${"░".repeat(progressWidth - filled)}] ${completed}/${state.steps.length}`),
       ...state.steps.map((step) => {
         const event = statuses.get(step.id) ?? { status: "pending" };
-        const symbol = event.status === "done" ? "✓" : event.status === "active" ? "›" : event.status === "failed" ? "!" : "·";
+        const symbol = event.status === "done" ? "✓" : event.status === "active" ? spinner : event.status === "failed" ? "✕" : "·";
         const color = event.status === "done" ? "green" : event.status === "failed" ? "red" : event.status === "active" ? "cyan" : undefined;
         return h(
           Text,
@@ -675,7 +684,14 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     {
       step: "complete",
       title: operation.completionTitle,
-      description: [spec.receipt.pullRequestUrl],
+      description: spec.receipt.settingsOnly
+        ? ["No pull request was needed."]
+        : [
+          spec.receipt.pullRequestOpened
+            ? "The pull request opened in your browser."
+            : "Open the pull request with the link below.",
+          spec.receipt.pullRequestUrl
+        ],
       footer: "Enter finish  •  Esc close",
       colorEnabled
     },
@@ -693,16 +709,17 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 }
 
 function IdleScreen({ colorEnabled }) {
+  const spinner = useSpinner();
   return h(
     Shell,
     {
       step: "preparing",
       title: "Codekeeper guided setup",
       description: ["Checking the installer and repository before anything can change."],
-      footer: "Please wait…",
+      footer: `${spinner} Please wait…`,
       colorEnabled
     },
-    h(Text, { dimColor: true }, "No repository mutation occurs during setup questions.")
+    h(Text, { dimColor: true }, "🔒 Setup questions do not change the repository.")
   );
 }
 
@@ -835,7 +852,7 @@ export async function createInkPrompter({
       stderr: errorOutput,
       interactive: true,
       exitOnCtrlC: false,
-      alternateScreen: false,
+      alternateScreen: true,
       patchConsole: false,
       kittyKeyboard: { mode: "disabled" }
     }
@@ -876,18 +893,7 @@ export async function createInkPrompter({
       return present("multiselect", spec);
     },
     async editSettings(spec) {
-      return present("settings", {
-        ...spec,
-        editProfile: (profile, source) => editProfileWithEditor({
-          profile,
-          source,
-          environment,
-          suspendTerminal: async (callback) => {
-            await instance.waitUntilRenderFlush();
-            return session.suspendTerminal(callback);
-          }
-        })
-      });
+      return present("settings", spec);
     },
     async selectPrivateKey({ step = "private key" } = {}) {
       const picker = await createPrivateKeyPickerController({

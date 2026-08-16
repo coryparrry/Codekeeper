@@ -198,7 +198,7 @@ export async function configureRepositorySettings(plan, {
       output.write("\nRequired GitHub Actions secrets\n");
       output.write("Setup does not call a model. API keys go directly from this terminal to GitHub CLI. Codekeeper does not display or store them.\n");
       output.write("The selected App key file goes directly to GitHub CLI. Codekeeper does not read or display the key.\n");
-      for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
+      for (const secret of plan.secrets) output.write(`  - ${secret.name}: ${secret.purpose ?? SECRET_PURPOSES[secret.name]}\n`);
     }
 
     let providerProgressStarted = false;
@@ -229,7 +229,8 @@ export async function configureRepositorySettings(plan, {
         continue;
       }
       providerProgressStarted = true;
-      reportProgress(onProgress, "secret:provider", "active", `${secret.name} — ${SECRET_PURPOSES[secret.name]}`);
+      const purpose = secret.purpose ?? SECRET_PURPOSES[secret.name];
+      reportProgress(onProgress, "secret:provider", "active", `${secret.name} — ${purpose}`);
       if (typeof withSecretInput === "function") {
         await runMutation(
           runner,
@@ -242,7 +243,7 @@ export async function configureRepositorySettings(plan, {
             provideInput: (write) => withSecretInput({
               step: "credential",
               name: secret.name,
-              purpose: SECRET_PURPOSES[secret.name],
+              purpose,
               write
             })
           },
@@ -260,7 +261,7 @@ export async function configureRepositorySettings(plan, {
             `GitHub CLI did not set ${secret.name}.`,
             resumeCommand
           ),
-          Object.freeze({ name: secret.name, purpose: SECRET_PURPOSES[secret.name] })
+          Object.freeze({ name: secret.name, purpose })
         );
       }
     }

@@ -39,7 +39,7 @@ function guidedPrompt(confirmations = [true, true, true, true, true, true], { pr
       if (message.startsWith("Name to show")) return "Widget";
       if (message.startsWith("GitHub users")) return "cory";
       if (message.startsWith("GitHub App Client")) return "Iv123456789012345678";
-      if (message.startsWith("GitHub App name")) return "codekeeper-widget";
+      if (message.startsWith("Paste the GitHub App")) return "https://github.com/settings/apps/codekeeper-widget";
       if (message.startsWith("GitHub App bot")) return "codekeeper-widget[bot]";
       if (message.startsWith("Full absolute path")) return privateKeyPath;
       throw new Error(`Unexpected prompt: ${message}`);
@@ -222,7 +222,7 @@ test("declining the repository confirmation performs no mutation or App navigati
   assert.equal(status, 1);
   assert.equal(opens, 0);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: false }
+    { message: "Install into acme/widget on default branch main?", defaultValue: true }
   ]);
   assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
   assert.deepEqual(runner.calls, []);
@@ -252,7 +252,7 @@ test("declining conservative boundaries on the recommended path performs no muta
   assert.equal(status, 1);
   assert.equal(opens, 0);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: false },
+    { message: "Install into acme/widget on default branch main?", defaultValue: true },
     { message: "Use the recommended starter setup?", defaultValue: true },
     { message: "Enable OpenAI traces?", defaultValue: true },
     { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
@@ -307,7 +307,7 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   assert.equal(inspections, 1);
   assert.match(openedUrl, /^https:\/\/github\.com\/settings\/apps\/new\?/);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: false },
+    { message: "Install into acme/widget on default branch main?", defaultValue: true },
     { message: "Use the recommended starter setup?", defaultValue: true },
     { message: "Enable OpenAI traces?", defaultValue: true },
     { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
@@ -358,7 +358,7 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
     async inputText(options) {
       calls.push(["inputText", options.message]);
       if (options.message.startsWith("GitHub App Client")) return "Iv123456789012345678";
-      if (options.message.startsWith("GitHub App name")) return "codekeeper-widget";
+      if (options.message.startsWith("Paste the GitHub App")) return "https://github.com/settings/apps/codekeeper-widget";
       return options.defaultValue;
     },
     async selectPrivateKey() {
@@ -801,7 +801,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
     }
   };
   let inspections = 0;
-  let opened = null;
+  const opened = [];
   const output = textSink();
   const errorOutput = textSink();
   const prompt = guidedPrompt(undefined, { privateKeyPath });
@@ -835,7 +835,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
       return snapshot;
     },
     openUrl: async (url) => {
-      opened = url;
+      opened.push(url);
     },
     resumeCommand: "'node' 'codekeeper.mjs' 'init'",
     platform: "linux"
@@ -844,12 +844,13 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.equal(inspections, 3);
   assert.equal(progressStarted, 1);
   assert.deepEqual(prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })), [
-    { message: "Install into acme/widget on default branch main?", defaultValue: false },
+    { message: "Install into acme/widget on default branch main?", defaultValue: true },
     { message: "Continue with these safety settings?", defaultValue: false },
     { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: false },
     { message: "Create this setup?", defaultValue: false }
   ]);
-  assert.match(opened, /^https:\/\/github\.com\/settings\/apps\/new\?/);
+  assert.match(opened[0], /^https:\/\/github\.com\/settings\/apps\/new\?/);
+  assert.equal(opened.at(-1), "https://github.com/acme/widget/pull/42");
   assert.match(pushedCommit, /^[0-9a-f]{40}$/);
   assert.equal(git(root, ["rev-parse", "HEAD"]).trim(), pushedCommit);
   assert.equal(git(root, ["rev-parse", "HEAD^"]).trim(), head);
@@ -868,7 +869,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
   );
   assert.deepEqual(enteredSecrets.map(({ name }) => name), ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY"]);
   assert.deepEqual(enteredSecrets.map(({ purpose }) => purpose), [
-    "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key.",
+    "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key. Used by: Pull request reviewer, Repository auditor.",
     "Separate OpenAI Platform API key for trace export. Do not reuse the model API key."
   ]);
   assert.equal(enteredSecrets.some(({ name }) => name === "CODEKEEPER_APP_PRIVATE_KEY"), false);

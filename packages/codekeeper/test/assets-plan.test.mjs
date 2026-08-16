@@ -1054,7 +1054,10 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
       models: { review: "deepseek-v4-flash", maintain: "sol-high" }
     })
   });
-  assert.deepEqual(providerUpdate.secrets, [{ name: DEEPSEEK_SECRET }]);
+  assert.deepEqual(providerUpdate.secrets, [{
+    name: DEEPSEEK_SECRET,
+    purpose: "DeepSeek API key for each role assigned to DeepSeek. Used by: Pull request reviewer."
+  }]);
   assert.deepEqual(providerUpdate.files.map((file) => file.path), [
     ".github/codekeeper.json",
     ".github/workflows/codekeeper-review.yml",

@@ -19,10 +19,23 @@ function cancelled() {
 }
 
 function valueText(row) {
-  if (row.kind === "profile") return "edit in $EDITOR";
+  if (row.kind === "profile") return row.source === "repository" ? "custom" : "Codekeeper default";
   if (row.kind === "boolean") return row.value ? "on" : "off";
   if (row.kind === "json") return JSON.stringify(row.value);
   return String(row.value ?? "");
+}
+
+function controlText(row) {
+  if (row.kind === "boolean") return "Press Space or Enter to turn this setting on or off.";
+  if (row.kind === "enum") return "Press Enter to see every choice. You can also use Left and Right.";
+  if (row.kind === "profile") return "Press Enter to edit these instructions here. Press R to restore the Codekeeper default.";
+  if (["string", "number", "json"].includes(row.kind)) return "Press Enter to type a new value.";
+  if (row.kind === "submit") return "Press Enter to review every change before Codekeeper applies it.";
+  return "";
+}
+
+function sectionIcon(section) {
+  return ({ workflows: "⚡", automation: "⏱", review: "🔎", audit: "🛠", issues: "📌", merge: "🔀", ai: "🤖", profiles: "📝", labels: "🏷", repository: "📦" })[section] ?? "•";
 }
 
 export function settingInputText(row) {
@@ -91,30 +104,58 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [choosing, setChoosing] = useState(null);
+  const [pendingWarning, setPendingWarning] = useState(null);
+  const [warningConfirmed, setWarningConfirmed] = useState(false);
   const pendingPemMarkerRef = useRef("");
   const pemInputBlockedRef = useRef(false);
   const { stdout } = useStdout();
-  const lineWidth = Math.max(16, (stdout?.columns ?? 80) - 2);
+  const compact = Number.isFinite(stdout?.columns) && stdout.columns < 60;
+  const lineWidth = Math.max(16, (stdout?.columns ?? 80) - (compact ? 1 : 8));
   const rows = useMemo(() => [
     ...settingsRows(settings, { advanced }),
-    { id: "apply", section: "review", label: "Continue to final review", kind: "submit", value: "review changes" }
+    {
+      id: "apply",
+      section: "review",
+      label: "Review and create the setup pull request",
+      description: "Check the workflows, models, files, credentials, and safety limits on five short pages.",
+      kind: "submit",
+      value: "continue"
+    }
   ], [advanced, settings]);
-  const visibleCount = Math.max(6, Math.min(18, (stdout?.rows ?? 24) - 9));
+  const visibleCount = compact ? 5 : Math.max(5, Math.min(16, (stdout?.rows ?? 24) - 14));
   const start = Math.max(0, Math.min(index - Math.floor(visibleCount / 2), rows.length - visibleCount));
   const visible = rows.slice(start, start + visibleCount);
+  const selectedRow = rows[index] ?? rows[0];
+  const changedCount = useMemo(() => {
+    const initial = new Map(settingsRows(spec.settings, { advanced: true }).map((row) => [row.id, JSON.stringify(row.value)]));
+    return settingsRows(settings, { advanced: true })
+      .filter((row) => initial.get(row.id) !== JSON.stringify(row.value)).length;
+  }, [settings, spec.settings]);
 
   const applyValue = (row, value) => {
     try {
       setSettings((current) => setSetting(current, row, value));
       setError("");
-      setNotice("");
+      setNotice(`Updated ${row.label}.`);
       return true;
     } catch (cause) {
       setNotice("");
       setError(cause.message);
       return false;
     }
+  };
+
+  const requestValue = (row, value) => {
+    if (JSON.stringify(row.value) === JSON.stringify(value)) return true;
+    if (row.warning) {
+      setPendingWarning({ row, value });
+      setWarningConfirmed(false);
+      setNotice("");
+      setError("");
+      return false;
+    }
+    return applyValue(row, value);
   };
 
   const resetPemInput = () => {
@@ -130,14 +171,45 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       setError(PRIVATE_KEY_INPUT_ERROR);
       return;
     }
-    if (inspected.visible) setEditing((current) => ({ ...current, text: `${current.text}${inspected.visible}`.slice(0, 64 * 1024) }));
+    const visible = editing?.row.kind === "profile" && !inspected.pending
+      ? String(text).replace(/\r\n?/g, "\n")
+      : inspected.visible;
+    if (visible) setEditing((current) => ({ ...current, text: `${current.text}${visible}`.slice(0, 64 * 1024) }));
   };
 
   usePaste((text) => {
     if (editing) appendEditingText(text);
   });
   useInput((input, key) => {
-    if (busy) return;
+    if (pendingWarning) {
+      if (key.escape || input.toLowerCase() === "n") {
+        setPendingWarning(null);
+        setWarningConfirmed(false);
+        return;
+      }
+      if (input.toLowerCase() === "y" || key.leftArrow || key.upArrow) setWarningConfirmed(true);
+      if (key.rightArrow || key.downArrow || key.tab) setWarningConfirmed(false);
+      if (key.return) {
+        if (warningConfirmed) applyValue(pendingWarning.row, pendingWarning.value);
+        setPendingWarning(null);
+        setWarningConfirmed(false);
+      }
+      return;
+    }
+    if (choosing) {
+      if (key.escape) {
+        setChoosing(null);
+        return;
+      }
+      if (key.upArrow || input === "k") setChoosing((current) => ({ ...current, index: (current.index - 1 + current.row.choices.length) % current.row.choices.length }));
+      if (key.downArrow || input === "j" || key.tab) setChoosing((current) => ({ ...current, index: (current.index + 1) % current.row.choices.length }));
+      if (key.return) {
+        const value = choosing.row.choices[choosing.index];
+        setChoosing(null);
+        requestValue(choosing.row, value);
+      }
+      return;
+    }
     if (editing) {
       if (key.ctrl && input.toLowerCase() === "c") return onCancel(cancelled());
       if (key.escape) {
@@ -153,7 +225,8 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         }
         try {
           const value = parseSettingValue(editing.row, `${editing.text}${pendingPemMarkerRef.current}`);
-          if (applyValue(editing.row, value)) setEditing(null);
+          requestValue(editing.row, value);
+          setEditing(null);
         } catch (cause) {
           setError(cause.message);
         }
@@ -200,11 +273,11 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         : "This profile already uses the packaged default.");
       return;
     }
-    if (input === " " && row.kind === "boolean") applyValue(row, !row.value);
+    if (input === " " && row.kind === "boolean") requestValue(row, !row.value);
     if ((key.leftArrow || key.rightArrow) && row.kind === "enum") {
       const direction = key.leftArrow ? -1 : 1;
       const current = row.choices.indexOf(row.value);
-      applyValue(row, row.choices[(current + direction + row.choices.length) % row.choices.length]);
+      requestValue(row, row.choices[(current + direction + row.choices.length) % row.choices.length]);
     }
     if (!key.return) return;
     if (row.kind === "submit") {
@@ -214,40 +287,78 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       } catch (cause) {
         setError(cause.message);
       }
-    } else if (row.kind === "profile") {
-      setBusy(true);
-      spec.editProfile(row.profile, row.value)
-        .then((source) => applyValue(row, source))
-        .catch((cause) => setError(cause.message))
-        .finally(() => setBusy(false));
-    } else if (["string", "number", "json"].includes(row.kind)) {
+    } else if (row.kind === "boolean") {
+      requestValue(row, !row.value);
+    } else if (row.kind === "enum") {
+      setChoosing({ row, index: Math.max(0, row.choices.indexOf(row.value)) });
+      setError("");
+    } else if (["profile", "string", "number", "json"].includes(row.kind)) {
       resetPemInput();
       setEditing({ row, text: settingInputText(row) });
       setError("");
-    } else if (row.kind === "readonly") {
-      setError("This safety or release setting is read-only.");
     }
   });
 
+  if (pendingWarning) return h(
+    Box,
+    { flexDirection: "column", borderStyle: "round", borderColor: colorEnabled ? "yellow" : undefined, paddingX: 2, paddingY: 1, width: "100%" },
+    h(Text, { bold: true, ...color(colorEnabled, "yellow") }, "⚠  CHECK THIS CHANGE"),
+    h(Text, { bold: true }, pendingWarning.row.label),
+    h(Text, null, pendingWarning.row.warning),
+    h(Text, { dimColor: true }, `New value: ${valueText({ ...pendingWarning.row, value: pendingWarning.value })}`),
+    h(Box, { flexDirection: "column", marginTop: 1 },
+      h(Text, { bold: warningConfirmed, inverse: warningConfirmed }, `${warningConfirmed ? "›" : " "} Apply this change`),
+      h(Text, { bold: !warningConfirmed, inverse: !warningConfirmed }, `${!warningConfirmed ? "›" : " "} Keep the current value`)
+    ),
+    h(Text, { dimColor: true }, "←/→ choose  •  Enter confirm  •  Esc keep current value")
+  );
+
+  if (choosing) return h(
+    Box,
+    { flexDirection: "column", borderStyle: "round", borderColor: colorEnabled ? "cyan" : undefined, paddingX: 2, paddingY: 1, width: "100%" },
+    h(Text, { bold: true, ...color(colorEnabled, "cyan") }, "CODEKEEPER  ·  CHOOSE A VALUE"),
+    h(Text, { bold: true }, choosing.row.label),
+    h(Text, { dimColor: true }, choosing.row.description),
+    h(Box, { flexDirection: "column", marginTop: 1 },
+      ...choosing.row.choices.map((choice, choiceIndex) => h(Text, {
+        key: choice,
+        bold: choiceIndex === choosing.index,
+        inverse: choiceIndex === choosing.index,
+        ...color(colorEnabled && choiceIndex === choosing.index, "cyan")
+      }, `${choiceIndex === choosing.index ? "›" : " "} ${choice}`))
+    ),
+    h(Text, { dimColor: true }, "↑/↓ move  •  Enter select  •  Esc back")
+  );
+
   if (editing) return h(
     Box,
-    { flexDirection: "column", paddingX: 1 },
-    h(Text, { bold: true, ...color(colorEnabled, "cyan") }, "CODEKEEPER  SETTINGS"),
+    { flexDirection: "column", borderStyle: "round", borderColor: colorEnabled ? "cyan" : undefined, paddingX: 2, paddingY: 1, width: "100%" },
+    h(Text, { bold: true, ...color(colorEnabled, "cyan") }, "✦ CODEKEEPER  ·  EDIT SETTING"),
     h(Text, { bold: true }, editing.row.label),
-    h(Text, { dimColor: true }, fitLine(editing.row.kind === "json" ? "Edit valid JSON, then press Enter." : "Edit the value, then press Enter.", lineWidth)),
+    h(Text, { dimColor: true }, fitLine(editing.row.description, lineWidth)),
     h(Box, { borderStyle: "single", paddingX: 1, marginTop: 1 }, h(Text, null, fitLine(editing.text, Math.max(8, lineWidth - 4))), h(Text, color(colorEnabled, "cyan"), "▌")),
     error ? h(Text, color(colorEnabled, "red"), error) : null,
-    h(Text, { dimColor: true }, fitLine("Enter save  •  Ctrl-U clear  •  Esc back  •  Ctrl-C cancel", lineWidth))
+    h(Text, { dimColor: true }, fitLine(editing.row.kind === "profile"
+      ? "Paste multi-line text  •  Enter save  •  Ctrl-U clear  •  Esc back"
+      : "Enter save  •  Ctrl-U clear  •  Esc back", lineWidth))
   );
 
   return h(
     Box,
-    { flexDirection: "column", paddingX: 1 },
-    h(Box, { justifyContent: "space-between" },
-      h(Text, { bold: true, ...color(colorEnabled, "cyan") }, "CODEKEEPER  SETTINGS"),
-      h(Text, { bold: true }, advanced ? "ADVANCED" : "STANDARD")
+    {
+      flexDirection: "column",
+      borderStyle: compact ? undefined : "round",
+      borderColor: colorEnabled ? "cyan" : undefined,
+      paddingX: compact ? 0 : 2,
+      paddingY: compact ? 0 : 1,
+      width: "100%"
+    },
+    h(Box, compact ? { flexDirection: "column" } : { justifyContent: "space-between" },
+      h(Text, { bold: true, ...color(colorEnabled, "cyan") }, compact ? "✦ CODEKEEPER SETTINGS" : "✦ CODEKEEPER"),
+      h(Text, { bold: true }, advanced ? "[ STANDARD ]  [● ADVANCED ]" : "[● STANDARD ]  [ ADVANCED ]")
     ),
-    h(Text, { dimColor: true }, fitLine(`${spec.repository} · ${rows.length - 1} settings · no changes applied yet`, lineWidth)),
+    h(Text, { bold: true }, "Choose how Codekeeper works"),
+    h(Text, { dimColor: true }, fitLine(`${spec.repository}  •  ${rows.length - 1} editable settings  •  ${changedCount} changed`, lineWidth)),
     h(Box, { flexDirection: "column", marginTop: 1 },
       ...visible.map((row, offset) => {
         const selected = start + offset === index;
@@ -257,14 +368,18 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
           bold: selected,
           inverse: selected,
           ...color(colorEnabled && selected, "cyan")
-        }, fitLine(`${selected ? "›" : " "} ${row.section.padEnd(11).slice(0, 11)} ${row.label}: ${rendered}`, lineWidth));
+        }, fitLine(`${selected ? "›" : " "} ${sectionIcon(row.section)} ${row.label}: ${rendered}`, lineWidth));
       })
     ),
     h(Text, { dimColor: true }, `${start + 1}–${Math.min(rows.length, start + visibleCount)} of ${rows.length}`),
-    busy ? h(Text, color(colorEnabled, "cyan"), "Waiting for $EDITOR…") : null,
+    h(Box, { flexDirection: "column", borderStyle: compact ? undefined : "single", borderColor: colorEnabled ? "gray" : undefined, paddingX: compact ? 0 : 1, marginTop: 1 },
+      compact ? null : h(Text, { bold: true }, selectedRow.label),
+      h(Text, { dimColor: true }, fitLine(selectedRow.description, Math.max(8, lineWidth - 4))),
+      h(Text, color(colorEnabled, selectedRow.warning ? "yellow" : "cyan"), fitLine(`${selectedRow.warning ? "⚠ " : ""}${controlText(selectedRow)}`, Math.max(8, lineWidth - 4)))
+    ),
     notice ? h(Text, color(colorEnabled, "cyan"), notice) : null,
     error ? h(Text, color(colorEnabled, "red"), error) : null,
-    h(Text, { dimColor: true }, fitLine("↑/↓ move  •  Space toggle  •  ←/→ cycle  •  Enter edit  •  R reset profile  •  A Standard/Advanced  •  Esc cancel", lineWidth))
+    h(Text, { dimColor: true }, fitLine("↑/↓ move  •  Enter use  •  A switch view  •  G end  •  Esc cancel", lineWidth))
   );
 }
 

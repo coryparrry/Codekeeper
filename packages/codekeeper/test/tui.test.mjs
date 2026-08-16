@@ -11,7 +11,7 @@ import { buildInstallPlan, collectAppAnswers, collectSetupAnswers } from "../src
 import { upgradePolicy } from "../src/policy.mjs";
 import { createPrivateKeyPickerController, defaultPrivateKeyDirectory, listPrivateKeyChoices } from "../src/private-key-input.mjs";
 import { settingInputText } from "../src/settings-tui.mjs";
-import { createEditableSettings, settingsAnswers } from "../src/settings.mjs";
+import { createEditableSettings, settingsAnswers, settingsRows } from "../src/settings.mjs";
 import {
   DEFAULT_PROGRESS_STEPS,
   containsPrivateKeyPemEnvelope,
@@ -117,7 +117,9 @@ async function createTuiHarness(t, {
   const output = new TestOutput({ columns, rows });
   const errorOutput = new TestOutput({ columns, rows });
   let instance;
+  let renderOptions;
   const renderImpl = (tree, options) => {
+    renderOptions = options;
     instance = inkRender(tree, { ...options, debug: true, renderThrottleMs: 0 });
     return instance;
   };
@@ -164,7 +166,7 @@ async function createTuiHarness(t, {
     }
     assert.fail(`TUI did not render expected pattern: ${pattern}\n${output.lastSemanticFrame()}`);
   };
-  return { input, output, errorOutput, prompt, instance: () => instance, flush, send, waitForText, waitForPattern, dispose };
+  return { input, output, errorOutput, prompt, instance: () => instance, renderOptions: () => renderOptions, flush, send, waitForText, waitForPattern, dispose };
 }
 
 function assertFrameFits(frame, { columns, rows }) {
@@ -219,7 +221,7 @@ async function assertPagedScreenFits(tui, { kind, columns, rows, markers }) {
 
 function assertNamedPhase(tui, phase) {
   const frame = tui.output.lastSemanticFrame();
-  assert.ok(semanticText(frame).startsWith(`CODEKEEPER ${phase.toUpperCase()} `), `missing ${phase} phase label`);
+  assert.ok(semanticText(frame).startsWith(`✦ CODEKEEPER ${phase.toUpperCase()} `), `missing ${phase} phase label`);
   assert.doesNotMatch(frame, /\b(?:STEP|PHASE)\s+\d+\b/i);
 }
 
@@ -576,6 +578,7 @@ test("generic Ink text fields reject and redact PEM envelopes before rendering",
 
 test("Ink controls support arrows, j/k, checkboxes, text editing, Escape, and Ctrl-C", async (t) => {
   const tui = await createTuiHarness(t);
+  assert.equal(tui.renderOptions().alternateScreen, true);
   const confirmation = tui.prompt.confirm({ message: "Confirm repository", defaultValue: false });
   await tui.waitForText("Confirm repository");
   await tui.send("\u001b[D");
@@ -658,14 +661,14 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
     const answers = collectSetupAnswers({ prompt: tui.prompt, snapshot: repositorySnapshot(), bundle, output: tui.prompt.notices });
     await tui.waitForText("Install into acme/widget");
     assertNamedPhase(tui, "repository");
-    await tui.send("y");
+    assert.match(tui.output.lastSemanticFrame(), /› Use this repository/);
     await tui.send("\r");
-    await tui.waitForText("CODEKEEPER  SETTINGS");
+    await tui.waitForText("Choose how Codekeeper works");
     assert.match(tui.output.lastSemanticFrame(), /STANDARD/);
-    assert.match(tui.output.lastSemanticFrame(), /no changes applied yet/);
+    assert.match(tui.output.lastSemanticFrame(), /0 changed/);
     await tui.send("G");
     await tui.send("k");
-    await tui.waitForText("Packaged default");
+    await tui.waitForText("Implementation and repair rules");
     await tui.send("G");
     await tui.send("\r");
     const result = await answers;
@@ -688,19 +691,30 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
     const answers = collectSetupAnswers({ prompt: tui.prompt, snapshot: repositorySnapshot(), bundle, output: tui.prompt.notices });
     await tui.waitForText("Install into acme/widget");
     assertNamedPhase(tui, "repository");
-    await tui.send("y");
     await tui.send("\r");
-    await tui.waitForText("CODEKEEPER  SETTINGS");
-    await tui.send(" ");
+    await tui.waitForText("Choose how Codekeeper works");
+    const toggleWithWarning = async () => {
+      await tui.send(" ");
+      await tui.waitForText("CHECK THIS CHANGE");
+      await tui.send("\u001b[D");
+      await tui.send("\r");
+    };
+    await toggleWithWarning();
     await tui.send("j");
-    await tui.send(" ");
+    await toggleWithWarning();
     await tui.send("j");
-    await tui.send(" ");
+    await toggleWithWarning();
     await tui.send("j");
-    await tui.send(" ");
-    for (let index = 0; index < 28; index += 1) await tui.send("j");
-    await tui.send("\u001b[C");
-    await tui.send("\u001b[C");
+    await toggleWithWarning();
+    for (let index = 0; index < 27; index += 1) await tui.send("j");
+    await tui.send("\r");
+    await tui.waitForText("CHOOSE A VALUE");
+    await tui.send("j");
+    await tui.send("j");
+    await tui.send("\r");
+    await tui.waitForText("CHECK THIS CHANGE");
+    await tui.send("\u001b[D");
+    await tui.send("\r");
     await tui.send("j");
     await tui.send("\r");
     await tui.waitForText("issue triager model ID");
@@ -736,10 +750,10 @@ test("the Settings command centre resets a repository profile override", async (
   });
   const tui = await createTuiHarness(t);
   const edited = tui.prompt.editSettings({ settings, baselinePolicy: policy, repository: "acme/widget" });
-  await tui.waitForText("CODEKEEPER  SETTINGS");
+  await tui.waitForText("Choose how Codekeeper works");
   await tui.send("G");
   await tui.send("k");
-  await tui.waitForText("Repository override");
+  await tui.waitForText("custom");
   await tui.send("r");
   await tui.waitForText("Using the packaged default");
   await tui.send("G");
@@ -747,6 +761,68 @@ test("the Settings command centre resets a repository profile override", async (
   const result = await edited;
   assert.equal(result.profileSources.fixer, "package");
   assert.equal(result.profiles.fixer, bundle.contents[AGENT_PROFILES.fixer.asset]);
+});
+
+test("Standard and Advanced choices expose their real editors inside the TUI", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  const settings = createEditableSettings({ policy, modes: ["review", "maintain"], enabled: true, profiles });
+  const tui = await createTuiHarness(t);
+  const edited = tui.prompt.editSettings({ settings, baselinePolicy: policy, repository: "acme/widget" });
+  await tui.waitForText("Choose how Codekeeper works");
+
+  const standard = settingsRows(settings);
+  const effortIndex = standard.findIndex((row) => row.id === "policy:ai.agents.review.effort");
+  assert.ok(effortIndex >= 0);
+  for (let index = 0; index < effortIndex; index += 1) await tui.send("j");
+  await tui.send("\r");
+  await tui.waitForText("CHOOSE A VALUE");
+  assert.match(tui.output.lastSemanticFrame(), /none.*minimal.*low.*medium.*high/s);
+  await tui.send("j");
+  await tui.send("\r");
+
+  await tui.send("A");
+  await tui.waitForText("ADVANCED");
+  const advanced = settingsRows(settings, { advanced: true });
+  const limitIndex = advanced.findIndex((row) => row.id === "policy:review.maximumBlockingFindings");
+  assert.ok(limitIndex >= 0);
+  for (let index = 0; index < limitIndex; index += 1) await tui.send("j");
+  await tui.send("\r");
+  await tui.waitForText("Maximum Blocking Findings");
+  await tui.send("\u0015");
+  await tui.send("7");
+  await tui.send("\r");
+  await tui.send("G");
+  await tui.send("\r");
+
+  const result = await edited;
+  assert.equal(result.policy.ai.agents.review.effort, "high");
+  assert.equal(result.policy.review.maximumBlockingFindings, 7);
+});
+
+test("profile instructions stay inside the TUI and accept multi-line text", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  const settings = createEditableSettings({ policy, modes: ["review", "maintain"], enabled: true, profiles });
+  const tui = await createTuiHarness(t);
+  const edited = tui.prompt.editSettings({ settings, baselinePolicy: policy, repository: "acme/widget" });
+  await tui.waitForText("Choose how Codekeeper works");
+  const profileIndex = settingsRows(settings).findIndex((row) => row.id === "profile:fixer");
+  assert.ok(profileIndex >= 0);
+  for (let index = 0; index < profileIndex; index += 1) await tui.send("j");
+  await tui.send("\r");
+  await tui.waitForText("EDIT SETTING");
+  await tui.send("\u0015");
+  await tui.send("\u001b[200~Keep changes small.\nRun focused tests.\u001b[201~");
+  await tui.send("\r");
+  await tui.send("G");
+  await tui.send("\r");
+
+  const result = await edited;
+  assert.equal(result.profileSources.fixer, "repository");
+  assert.equal(result.profiles.fixer, "Keep changes small.\nRun focused tests.");
 });
 
 test("settings JSON fields reject PEM pastes without rendering or submitting them", async (t) => {
@@ -764,11 +840,13 @@ test("settings JSON fields reject PEM pastes without rendering or submitting the
     baselinePolicy: policy,
     repository: "acme/widget"
   });
-  await tui.waitForText("CODEKEEPER  SETTINGS");
+  await tui.waitForText("Choose how Codekeeper works");
   await tui.send("A");
-  for (let index = 0; index < 50; index += 1) await tui.send("j");
+  const ownerIndex = settingsRows(settings, { advanced: true }).findIndex((row) => row.id === "policy:repository.ownerLogins");
+  assert.ok(ownerIndex >= 0);
+  for (let index = 0; index < ownerIndex; index += 1) await tui.send("j");
   await tui.send("\r");
-  await tui.waitForText("repository.ownerLogins");
+  await tui.waitForText("Owner Logins");
   await tui.send(`\u001b[200~${pem}\u001b[201~`);
   await tui.waitForText("Private keys cannot be pasted here");
   for (const canary of [header, middle, footer]) assert.doesNotMatch(tui.output.transcript(), new RegExp(canary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -801,7 +879,7 @@ test("the Settings command centre stays bounded in a narrow terminal", async (t)
   await tui.waitForText("Install into acme/widget");
   await tui.send("y");
   await tui.send("\r");
-  await tui.waitForText("CODEKEEPER  SETTINGS");
+  await tui.waitForText("Choose how Codekeeper works");
   assertFrameFits(tui.output.lastSemanticFrame(), dimensions);
   await tui.send("A");
   await tui.waitForText("ADVANCED");
@@ -823,11 +901,11 @@ test("GitHub App TUI explains the App name and derives the bot login", async (t)
   await tui.send("\u0015");
   await tui.send("Iv123456789012345678");
   await tui.send("\r");
-  await tui.waitForText("GitHub App name from the settings URL");
+  await tui.waitForText("Paste the GitHub App settings URL");
   assertNamedPhase(tui, "GitHub App");
   assert.match(tui.output.lastSemanticFrame(), /settings URL/);
   assert.match(tui.output.lastSemanticFrame(), /my-codekeeper-app\[bot\]/);
-  await tui.send("codekeeper-widget");
+  await tui.send("https://github.com/settings/apps/codekeeper-widget");
   await tui.send("\r");
   assert.deepEqual(await answers, {
     appClientId: "Iv123456789012345678",
@@ -851,30 +929,30 @@ test("final review supports paged Back navigation and requires explicit creation
   });
   const tui = await createTuiHarness(t);
   const approved = tui.prompt.reviewInstallPlan(plan);
-  await tui.waitForText("Review the setup · 1 of 11");
+  await tui.waitForText("Review the setup · 1 of 5");
   assertNamedPhase(tui, "final review");
   assert.match(tui.output.lastSemanticFrame(), /App key is selected/);
   await tui.send("\r");
-  await tui.waitForText("Review the setup · 2 of 11");
+  await tui.waitForText("Review the setup · 2 of 5");
   await tui.send("\u001b[D");
-  await tui.waitForText("Review the setup · 1 of 11");
+  await tui.waitForText("Review the setup · 1 of 5");
   await tui.send("\u001b[C");
-  for (let page = 2; page < 11; page += 1) {
-    await tui.waitForText(`Review the setup · ${page} of 11`);
+  for (let page = 2; page < 5; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 5`);
     await tui.send("\r");
   }
-  await tui.waitForText("Review the setup · 11 of 11");
+  await tui.waitForText("Review the setup · 5 of 5");
   await tui.send("\u007f");
-  await tui.waitForText("Review the setup · 10 of 11");
+  await tui.waitForText("Review the setup · 4 of 5");
   await tui.send("\u001b[C");
-  await tui.waitForText("Review the setup · 11 of 11");
+  await tui.waitForText("Review the setup · 5 of 5");
   await tui.send("\u001b[D");
   await tui.send("\r");
   assert.equal(await approved, true);
 
   const cancelled = tui.prompt.reviewInstallPlan(plan);
   const cancellation = assert.rejects(cancelled, (error) => error.code === "PROMPT_ABORTED");
-  await tui.waitForText("Review the setup · 1 of 11");
+  await tui.waitForText("Review the setup · 1 of 5");
   await tui.send("\u001b");
   await cancellation;
 });
@@ -911,7 +989,7 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
     },
     updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
   };
-  for (const [releaseUpdate, title] of [[false, "configuration"], [true, "release update"]]) {
+  for (const [releaseUpdate, title] of [[false, "settings update"], [true, "release update"]]) {
     const plan = buildInstallPlan({
       bundle,
       snapshot,
@@ -933,17 +1011,17 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
     const review = tui.prompt.reviewInstallPlan(plan);
     const cancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
     const frames = [];
-    for (let page = 1; page <= 7; page += 1) {
-      await tui.waitForText(`Review the ${title} · ${page} of 7`);
+    for (let page = 1; page <= 5; page += 1) {
+      await tui.waitForText(`Review the ${title} · ${page} of 5`);
       frames.push(semanticText(tui.output.lastSemanticFrame()));
-      if (page < 7) await tui.send("\r");
+      if (page < 5) await tui.send("\r");
     }
     assert.match(frames.join("\n"), /Repository variables/);
-    assert.doesNotMatch(frames.join("\n"), /Policy and caller documents|Editable agent profiles|Secrets requested through GitHub CLI/);
+    assert.match(frames.join("\n"), /No generated files will change|No new credentials are needed/);
     await tui.send("\u001b");
     await cancellation;
     const completion = tui.prompt.showCompletion(plan, { settingsOnly: true, pullRequestUrl: "No pull request was needed." });
-    await tui.waitForText(releaseUpdate ? "Update ready" : "Configuration ready");
+    await tui.waitForText(releaseUpdate ? "Update ready" : "Settings update ready");
     await tui.send("\r");
     assert.equal(await completion, true);
   }
@@ -972,7 +1050,7 @@ test("final review shows the exact purpose of a managed artifact deletion", asyn
   const tui = await createTuiHarness(t, { columns: 80, rows: 24 });
   const review = tui.prompt.reviewInstallPlan(deletionPlan);
   const cancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  await tui.waitForText("Review the setup · 1 of 7");
+  await tui.waitForText("Review the setup · 1 of 5");
   await tui.send("\r");
   await tui.send("\r");
   await tui.waitForText(".github/workflows/codekeeper-runtime-fix.yml");
@@ -1027,18 +1105,11 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     }
   });
   const reviewMarkers = [
-    ["Workflows", "Pull request review"],
-    ["Models (editable", "gpt-5.6"],
-    ["Policy and caller documents", ".github/codekeeper.json", "Repository maintenance"],
-    ["Policy and caller documents", "Issue triage", "verified Codekeeper package"],
-    ["Policy and caller documents", "pull request review", "implementation and pull request repair"],
-    ["Policy and caller documents", ".github/codekeeper-release.json"],
-    ["Repository variables", "CODEKEEPER_ENABLED"],
-    ["Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
-    ["Settings", "Codekeeper starts after merge"],
-    ["Capabilities", "Repository repair"],
-    ["Fixed boundaries"],
-    ["Create setup", "› Cancel"]
+    ["Workflows", "Pull request review", "Models"],
+    ["Credentials sent to GitHub", "OPENAI_TRACE_API_KEY", "Repository variables", "CODEKEEPER_ENABLED"],
+    ["Files", ".github/codekeeper.json"],
+    ["Behavior and safety", "Codekeeper starts after merge"],
+    ["Create the setup pull request", "› Cancel"]
   ];
   const completionMarkers = [[
     "✓ Recheck the confirmed repository",
@@ -1079,16 +1150,23 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     });
   }
 
-  await t.test("100x40 pages the complete exact document inventory", async (t) => {
+  await t.test("100x40 lets the user inspect the complete exact document inventory", async (t) => {
     const dimensions = { columns: 100, rows: 40 };
     const tui = await createTuiHarness(t, dimensions);
     const review = tui.prompt.reviewInstallPlan(plan);
     const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-    await assertPagedScreenFits(tui, {
-      kind: "review",
-      markers: reviewMarkers,
-      ...dimensions
-    });
+    await tui.waitForText("Review the setup · 1 of 5");
+    await tui.send("\r");
+    await tui.send("\r");
+    await tui.waitForText("Review the setup · 3 of 5");
+    const transcript = [];
+    for (let index = 0; index < plan.files.length; index += 1) {
+      transcript.push(semanticText(tui.output.lastSemanticFrame()));
+      if (index < plan.files.length - 1) await tui.send("j");
+    }
+    const inspectedFiles = transcript.join("\n");
+    for (const file of plan.files) assert.match(inspectedFiles, new RegExp(file.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assertFrameFits(tui.output.lastSemanticFrame(), dimensions);
     await tui.send("\u001b");
     await reviewCancellation;
 
@@ -1226,7 +1304,7 @@ test("NO_COLOR and narrow terminals retain visible selection semantics without o
   const cancellation = assert.rejects(pending, (error) => error.code === "PROMPT_ABORTED");
   await tui.waitForText("Choose workflows");
   const frame = tui.output.lastSemanticFrame();
-  assert.match(frame, /› \[x\] Review/);
+  assert.match(frame, /› \[✓\] Review/);
   assert.match(frame, /\[ \] Maintenance/);
   assertFrameFits(frame, { columns: 34, rows: 40 });
   await tui.send("\u001b");
@@ -1247,13 +1325,13 @@ test("NO_COLOR and narrow terminals retain visible selection semantics without o
   });
   const review = tui.prompt.reviewInstallPlan(plan);
   const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  for (let page = 1; page <= 11; page += 1) {
-    await tui.waitForText(`Review the setup · ${page} of 11`);
-    if (page < 11) await tui.send("\r");
+  for (let page = 1; page <= 5; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 5`);
+    if (page < 5) await tui.send("\r");
   }
   assert.match(tui.output.lastSemanticFrame(), /› Cancel/);
   await tui.send("\u001b[D");
-  assert.match(tui.output.lastSemanticFrame(), /› Create setup/);
+  assert.match(tui.output.lastSemanticFrame(), /› Create the setup pull request/);
   await tui.send("\u001b");
   await reviewCancellation;
   assert.doesNotMatch(tui.output.transcript(), COLOR_SGR_SEQUENCE);
