@@ -52,6 +52,7 @@ test("the latest-release bootstrap resolves an exact receipt then runs that exac
     RELEASE_INTEGRITY,
   ]);
   assert.equal(calls[1].options.stdio, "inherit");
+  assert.equal(calls[1].options.timeoutMs, null);
   assert.equal(calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_VERSION, "1.4.2");
   assert.equal(calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY, RELEASE_INTEGRITY);
   assert.equal(calls[1].options.env.NPM_CONFIG_CACHE, "/tmp/npm-cache");

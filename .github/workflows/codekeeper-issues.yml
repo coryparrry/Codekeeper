@@ -190,7 +190,8 @@ jobs:
           test -n "$WORKSPACE_API_KEY" || {
             echo "workspace_api_key is required because ai.agents.issue.workspace.enabled=true"
             exit 1
-          }      - name: Isolate Codex from repository instruction surfaces
+          }
+      - name: Isolate Codex from repository instruction surfaces
         if: steps.settings.outputs.workspace_enabled == 'true'
         working-directory: repository
         env:

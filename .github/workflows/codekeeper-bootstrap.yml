@@ -70,6 +70,7 @@ jobs:
             cd "$download_root"
             npm pack --json --ignore-scripts --pack-destination "$download_root" "codekeeper@$CODEKEEPER_PACKAGE_VERSION" > "$report"
           )
+          # shellcheck disable=SC2016 -- JavaScript template literals are intentionally single-quoted from Bash.
           REPORT="$report" DOWNLOAD_ROOT="$download_root" node --input-type=module -e '
             import { createHash } from "node:crypto";
             import { appendFileSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -143,6 +144,7 @@ jobs:
           fi
           mkdir -p "$(dirname "$target")"
           cp -R "$INSTALLED_ROOT" "$target"
+          # shellcheck disable=SC2016 -- JavaScript template literals are intentionally single-quoted from Bash.
           TOOLING_ROOT="$target" RECEIPT_PATH="$receipt" node --input-type=module -e '
             import { createHash } from "node:crypto";
             import { appendFileSync } from "node:fs";

@@ -10,6 +10,8 @@ import { buildCodekeeperPackageStage } from "../../../scripts/build-codekeeper-p
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
 import { git, PACKAGE_ROOT, PINNED_COMMIT, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
+const RUNTIME_PACKAGE_ROOT = path.join(PACKAGE_ROOT, "runtime-package");
+
 const SECRET_CANARIES = Object.freeze({
   OPENAI_API_KEY: "sk-openai-canary-never-forward",
   OPENAI_TRACE_API_KEY: "sk-trace-canary-never-forward",
@@ -328,7 +330,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     if (!packagePath.startsWith("node_modules/")) continue;
     assert.equal(typeof metadata.version, "string", `${packagePath} is runtime-version-locked`);
     assert.match(metadata.integrity, /^sha512-/, `${packagePath} is runtime-integrity-locked`);
-    const installedDependencyPath = path.join(PACKAGE_ROOT, packagePath);
+    const installedDependencyPath = path.join(RUNTIME_PACKAGE_ROOT, packagePath);
     if (!(await pathExists(installedDependencyPath))) {
       assert.equal(metadata.optional, true, `${packagePath} is absent only when optional for this platform`);
       continue;

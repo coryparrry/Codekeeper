@@ -61,8 +61,8 @@
       "sourcePath": "examples/workflows/codekeeper-fix.yml.example"
     },
     "runtime-workflows/bootstrap.yml": {
-      "sha256": "51bbc32f391130d1f049f657e10145bd6117d6054d304bd368a7a6537014bb7f",
-      "bytes": 10598,
+      "sha256": "30392f2c66190e37ed6bd39d675476a01c99f6f8bb80061649e2ea492d984bd9",
+      "bytes": 10824,
       "sourcePath": ".github/workflows/codekeeper-bootstrap.yml",
       "packagePath": "release/workflows/codekeeper-bootstrap.yml"
     },
@@ -79,20 +79,20 @@
       "packagePath": "release/workflows/codekeeper-review.yml"
     },
     "runtime-workflows/maintain.yml": {
-      "sha256": "cecc237dec02000884cd2cd516ff60831470fc261d9b76f0bc9c58bbdfebae1f",
-      "bytes": 29003,
+      "sha256": "9565e7e174b989c5e30e6b77cdf0e11c7dc2aa4be6c0f41165e60e434a981e7c",
+      "bytes": 29004,
       "sourcePath": ".github/workflows/codekeeper-maintain.yml",
       "packagePath": "release/workflows/codekeeper-maintain.yml"
     },
     "runtime-workflows/issues.yml": {
-      "sha256": "7ff1b71bfd4e3c77fb6e84211bec3525caffbb456dda52f37dc1dc84816b9882",
-      "bytes": 25846,
+      "sha256": "da58328ec73df8e25dc4298a03233c425d76be473226117f42011680cc5fc2d1",
+      "bytes": 25847,
       "sourcePath": ".github/workflows/codekeeper-issues.yml",
       "packagePath": "release/workflows/codekeeper-issues.yml"
     },
     "runtime-workflows/fix.yml": {
-      "sha256": "7265604325e47cd8ea066fb5d328847ee0c82c4f3ec0fe980573cc0d08d56230",
-      "bytes": 34055,
+      "sha256": "555a6bb0f009ac2a189457f591c304769bc47cb4e5507e9902828f87dc9238f1",
+      "bytes": 34056,
       "sourcePath": ".github/workflows/codekeeper-fix.yml",
       "packagePath": "release/workflows/codekeeper-fix.yml"
     }

@@ -288,7 +288,7 @@ export async function runLatestCommand(command, {
       cwd,
       env: updateEnvironment(environment, platform, receipt.version, receipt.integrity),
       stdio: "inherit",
-      timeoutMs: NPM_TIMEOUT_MS
+      timeoutMs: null
     });
     if (commandResult.status !== 0 || commandResult.timedOut) {
       throw new InstallerError(`The latest Codekeeper CLI did not complete ${command}.`, {
