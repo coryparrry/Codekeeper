@@ -903,6 +903,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
     [
       ".github/codekeeper-release.json",
       ".github/codekeeper.json",
+      ".github/codekeeper/README.md",
       ".github/workflows/codekeeper-assistant.yml",
       ".github/workflows/codekeeper-bootstrap.yml",
       ".github/workflows/codekeeper-maintain.yml",

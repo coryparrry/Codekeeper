@@ -3,22 +3,19 @@ import { readFile, lstat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ASSISTANT_WORKFLOW,
-  AGENT_PROFILE_IDS,
-  AGENT_PROFILES,
-  ASSET_KEYS,
   MODE_IDS,
   MODEL_PROVIDER_SECRETS,
   MODES,
   PACKAGE_NAME,
-  POLICY_TARGET,
-  PACKAGE_BOOTSTRAP_WORKFLOW,
   RELEASE_MANIFEST_TARGET,
   RELEASE_WORKFLOW_ASSETS,
-  RUNTIME_WORKFLOWS,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
+import {
+  activeRepositoryArtifacts,
+  ASSET_KEYS,
+} from "./repository-artifacts.mjs";
 import { InstallerError } from "./errors.mjs";
 import { applyReleasePolicyBoundaries, upgradePolicy } from "./policy.mjs";
 import { normalizePackageRelease } from "./package-release.mjs";
@@ -333,48 +330,53 @@ export function renderInstallFiles(bundle, {
     refreshReleaseBoundaries
   });
   const renderedPolicy = JSON.parse(policyContents);
-  const rendered = [{
-    path: POLICY_TARGET,
-    contents: policyContents
-  }];
-  for (const profile of AGENT_PROFILE_IDS) {
-    const target = AGENT_PROFILES[profile].target;
-    if (!Object.hasOwn(profileSources, target)) continue;
-    rendered.push({
-      path: target,
-      contents: profileSources[target]
-    });
-  }
-  rendered.push({
-    path: ASSISTANT_WORKFLOW.target,
-    contents: renderAssistantWorkflow(bundle.contents[ASSISTANT_WORKFLOW.asset], {
-      packageRelease,
-      ownerRequests: renderedPolicy.automation.ownerRequests,
-      modes
-    })
+  const rendered = activeRepositoryArtifacts({ modes, profileSources }).map((artifact) => {
+    if (artifact.renderer === "policy") {
+      return { path: artifact.target, contents: policyContents, artifact };
+    }
+    if (artifact.renderer === "profile") {
+      return {
+        path: artifact.target,
+        contents: profileSources[artifact.target],
+        artifact
+      };
+    }
+    if (artifact.renderer === "assistant-workflow") {
+      return {
+        path: artifact.target,
+        contents: renderAssistantWorkflow(bundle.contents[artifact.asset], {
+          packageRelease,
+          ownerRequests: renderedPolicy.automation.ownerRequests,
+          modes
+        }),
+        artifact
+      };
+    }
+    if (artifact.renderer === "mode-workflow") {
+      const mode = artifact.activation.id;
+      return {
+        path: artifact.target,
+        contents: renderWorkflow(bundle.contents[artifact.asset], {
+          packageRelease,
+          mode,
+          provider: models[mode]?.provider,
+          preset,
+          policy: renderedPolicy
+        }),
+        artifact
+      };
+    }
+    if (artifact.renderer === "copy") {
+      return {
+        path: artifact.target,
+        contents: bundle.contents[artifact.asset],
+        artifact
+      };
+    }
+    throw new InstallerError(`Unknown repository artifact renderer: ${artifact.renderer}`, { code: "PLAN_INVALID" });
   });
-  for (const mode of modes) {
-    rendered.push({
-      path: MODES[mode].target,
-      contents: renderWorkflow(bundle.contents[MODES[mode].asset], {
-        packageRelease,
-        mode,
-        provider: models[mode]?.provider,
-        preset,
-        policy: renderedPolicy
-      })
-    });
-  }
-  rendered.push({
-    path: PACKAGE_BOOTSTRAP_WORKFLOW.target,
-    contents: bundle.contents[PACKAGE_BOOTSTRAP_WORKFLOW.asset]
-  });
-  for (const id of ["assistant", ...modes]) {
-    const workflow = RUNTIME_WORKFLOWS[id];
-    rendered.push({ path: workflow.target, contents: bundle.contents[workflow.asset] });
-  }
   const managedFiles = Object.fromEntries(rendered
-    .filter((file) => file.path.endsWith(".yml"))
+    .filter((file) => file.artifact.ownership === "release")
     .map((file) => [file.path, sha256(file.contents)]));
   rendered.push({
     path: RELEASE_MANIFEST_TARGET,
@@ -385,7 +387,7 @@ export function renderInstallFiles(bundle, {
       managedFiles
     }, null, 2)}\n`
   });
-  return rendered.map((file) => deepFreeze({
+  return rendered.map(({ artifact: _artifact, ...file }) => deepFreeze({
     ...file,
     bytes: Buffer.byteLength(file.contents),
     sha256: sha256(file.contents)

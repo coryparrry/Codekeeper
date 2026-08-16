@@ -949,7 +949,7 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
   }
 });
 
-test("final review shows an exact managed workflow deletion", async (t) => {
+test("final review shows the exact purpose of a managed artifact deletion", async (t) => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
     bundle,
@@ -976,7 +976,7 @@ test("final review shows an exact managed workflow deletion", async (t) => {
   await tui.send("\r");
   await tui.send("\r");
   await tui.waitForText(".github/workflows/codekeeper-runtime-fix.yml");
-  assert.match(semanticText(tui.output.lastSemanticFrame()), /Remove this installed workflow/);
+  assert.match(semanticText(tui.output.lastSemanticFrame()), /Remove this release-owned artifact\. Runs the issue implementation and pull request repair/);
   await tui.send("\u001b");
   await cancellation;
 });

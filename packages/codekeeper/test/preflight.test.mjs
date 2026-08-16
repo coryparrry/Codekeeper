@@ -4,6 +4,7 @@ import { mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256 } from "../src/assets.mjs";
 import { SOURCE_COMMIT, SOURCE_REPOSITORY } from "../src/constants.mjs";
+import { buildInstallPlan } from "../src/plan.mjs";
 import {
   assertNodeVersion,
   assertNoInstallationFiles,
@@ -21,6 +22,10 @@ import {
   result,
   temporaryDirectory
 } from "./helpers.mjs";
+import {
+  createReleaseManagedCatalog,
+  REPOSITORY_ARTIFACTS,
+} from "../src/repository-artifacts.mjs";
 
 const OTHER_SHA = "b".repeat(40);
 
@@ -291,6 +296,207 @@ test("release manifests admit only digest-bound retired Codekeeper workflows", a
   await assert.rejects(
     assertNoInstallationFiles(root, { allowExisting: true }),
     assertInstallerCode(assert, "EXISTING_INSTALLATION_INVALID")
+  );
+});
+
+test("release-owned Markdown is accepted only at its exact digest-bound catalog path", async (t) => {
+  const root = await temporaryDirectory(t);
+  const bundle = await loadVerifiedAssets();
+  const target = ".github/codekeeper/README.md";
+  const source = bundle.contents["repository/README.md"];
+  const manifest = {
+    version: 2,
+    package: bundle.packageRelease,
+    source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+    managedFiles: { [target]: sha256(source) },
+  };
+  await mkdir(path.join(root, ".github", "codekeeper"), { recursive: true });
+  await writeFile(path.join(root, ...target.split("/")), source);
+  await writeFile(
+    path.join(root, ".github", "codekeeper-release.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  await assertNoInstallationFiles(root, { allowExisting: true });
+
+  await writeFile(
+    path.join(root, ...target.split("/")),
+    `${source}\nEdited.\n`,
+  );
+  await assert.rejects(
+    assertNoInstallationFiles(root, { allowExisting: true }),
+    assertInstallerCode(assert, "EXISTING_INSTALLATION_INVALID"),
+  );
+
+  await rm(path.join(root, ".github", "codekeeper-release.json"));
+  await assert.rejects(
+    assertNoInstallationFiles(root, { allowExisting: true }),
+    assertInstallerCode(assert, "PATH_COLLISION"),
+  );
+});
+
+test("edited caller workflows retain semantic validation across catalog renames and retirement", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const target = ".github/workflows/codekeeper-router.yml";
+  const installedSource = bundle.contents["workflows/assistant.yml"];
+  const source = `${installedSource.replace(
+    "owner_requests: true",
+    "owner_requests: false",
+  )}\n# Repository setting retained.\n`;
+  const activeArtifact = {
+    id: "repository.workflow.assistant-v2",
+    target: ".github/workflows/codekeeper-assistant-v2.yml",
+    previousTargets: [target],
+    asset: "workflows/assistant.yml",
+    ownership: "release",
+    activation: { kind: "always" },
+    renderer: "assistant-workflow",
+    validation: "caller",
+    callerMode: "assistant",
+    purpose: "Repository assistant workflow",
+  };
+  const retiredArtifact = {
+    id: "repository.workflow.router-retired",
+    target,
+    ownership: "release",
+    validation: "caller",
+    callerMode: "assistant",
+    purpose: "Retired repository assistant workflow",
+  };
+
+  for (const [label, artifactCatalog] of [
+    [
+      "renamed",
+      createReleaseManagedCatalog({
+        artifacts: [activeArtifact],
+        retiredArtifacts: [],
+      }),
+    ],
+    [
+      "retired",
+      createReleaseManagedCatalog({
+        artifacts: [],
+        retiredArtifacts: [retiredArtifact],
+      }),
+    ],
+  ]) {
+    await t.test(label, async (t) => {
+      const root = await temporaryDirectory(t);
+      const manifest = {
+        version: 2,
+        package: bundle.packageRelease,
+        source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+        managedFiles: { [target]: sha256(installedSource) },
+      };
+      await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
+      await writeFile(path.join(root, ...target.split("/")), source);
+      await writeFile(
+        path.join(root, ".github", "codekeeper-release.json"),
+        `${JSON.stringify(manifest, null, 2)}\n`,
+      );
+      await assertNoInstallationFiles(root, {
+        allowExisting: true,
+        artifactCatalog,
+      });
+
+      await writeFile(
+        path.join(root, ...target.split("/")),
+        "name: Not Codekeeper\n",
+      );
+      await assert.rejects(
+        assertNoInstallationFiles(root, {
+          allowExisting: true,
+          artifactCatalog,
+        }),
+        assertInstallerCode(assert, "EXISTING_INSTALLATION_INVALID"),
+      );
+    });
+  }
+});
+
+test("installation inspection and planning migrate an edited caller from a catalog previous target", async (t) => {
+  const root = await temporaryDirectory(t);
+  const bundle = await loadVerifiedAssets();
+  const previousTarget = ".github/workflows/codekeeper-review-v1.yml";
+  const currentArtifact = REPOSITORY_ARTIFACTS.find(
+    ({ id }) => id === "repository.workflow.review",
+  );
+  const artifactCatalog = createReleaseManagedCatalog({
+    artifacts: REPOSITORY_ARTIFACTS.map((artifact) =>
+      artifact === currentArtifact
+        ? { ...artifact, previousTargets: [previousTarget] }
+        : artifact,
+    ),
+    retiredArtifacts: [],
+  });
+  const installedSource = installedWorkflow(bundle.contents["workflows/review.yml"]);
+  const editedSource = installedSource
+    .replace("auto_review: true", "auto_review: false")
+    .replace("feedback_triage: true", "feedback_triage: false");
+  const manifest = {
+    version: 2,
+    package: bundle.packageRelease,
+    source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+    managedFiles: { [previousTarget]: sha256(installedSource) },
+  };
+  await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
+  await writeFile(
+    path.join(root, ".github", "codekeeper.json"),
+    bundle.contents["policies/openai.json"],
+  );
+  await writeFile(path.join(root, ...previousTarget.split("/")), editedSource);
+  await writeFile(
+    path.join(root, ".github", "codekeeper-release.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+
+  const installation = await inspectInstallationFiles(root, { artifactCatalog });
+  assert.deepEqual(installation.modes, ["review"]);
+  assert.equal(installation.policy.automation.automaticPrReview, false);
+  assert.equal(installation.contents[previousTarget], editedSource);
+
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: {
+      root,
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: HEAD_SHA,
+      viewerLogin: "cory",
+      installation,
+      existingSettings: {
+        enabled: true,
+        appClientId: "Iv123456789012345678",
+        automationBotLogin: "codekeeper-widget[bot]",
+      },
+    },
+    answers: {
+      modes: ["review"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]",
+      enabled: true,
+      capabilities: [],
+      tracing: true,
+      releaseUpdate: true,
+    },
+  });
+  const migratedCaller = plan.files.find(
+    ({ path: target }) => target === currentArtifact.target,
+  );
+  assert.match(migratedCaller.contents, /auto_review: false/);
+  assert.match(migratedCaller.contents, /feedback_triage: false/);
+  assert.deepEqual(
+    plan.files.find(({ path: target }) => target === previousTarget),
+    {
+      path: previousTarget,
+      contents: null,
+      bytes: 0,
+      sha256: null,
+      previousSha256: sha256(editedSource),
+      delete: true,
+    },
   );
 });
 
