@@ -24,12 +24,12 @@ import { SettingsScreen } from "./settings-tui.mjs";
 const h = React.createElement;
 const DEFAULT_PROGRESS_STEPS = Object.freeze([
   Object.freeze({ id: "repository:verify", label: "Recheck the confirmed repository" }),
-  Object.freeze({ id: "settings:disable", label: "Set the startup choice" }),
+  Object.freeze({ id: "git:commit", label: "Create and verify the setup commit" }),
+  Object.freeze({ id: "git:push", label: "Push the setup branch" }),
   Object.freeze({ id: "secret:provider", label: "Store API keys" }),
   Object.freeze({ id: "secret:app", label: "Store the GitHub App key safely" }),
   Object.freeze({ id: "variables:configure", label: "Set non-secret repository variables" }),
-  Object.freeze({ id: "git:commit", label: "Create and verify the setup commit" }),
-  Object.freeze({ id: "git:push", label: "Push the setup branch" }),
+  Object.freeze({ id: "settings:disable", label: "Apply the startup choice last" }),
   Object.freeze({ id: "github:pull-request", label: "Open the setup pull request" })
 ]);
 
@@ -465,17 +465,81 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   );
 }
 
+function DoctorScreen({ spec, onSubmit, onCancel, colorEnabled }) {
+  const cancel = useCancel(onCancel);
+  const { stdout } = useStdout();
+  const compact = (stdout?.rows ?? 24) < 32;
+  const lineWidth = Math.max(24, (stdout?.columns ?? 80) - 8);
+  const problems = spec.report.checks.filter((check) => check.status !== "pass");
+  const checks = compact && problems.length
+    ? problems
+    : spec.report.checks;
+  usePaste(() => {});
+  useInput((input, key) => {
+    cancel(input, key);
+    if (key.return) onSubmit(spec.report.mutationAllowed);
+  });
+  return h(
+    Shell,
+    {
+      step: "doctor",
+      title: "Repository readiness",
+      description: [spec.report.mutationAllowed
+        ? "Every blocking prerequisite passed. Warnings still need your attention."
+        : "Fix every failed item before Codekeeper can continue."],
+      footer: `${spec.report.mutationAllowed ? "Enter continue" : "Enter close"}  •  Esc cancel`,
+      colorEnabled,
+      compactDetail: compact
+    },
+    ...checks.map((check) => {
+      const symbol = check.status === "pass" ? "✓" : check.status === "warning" ? "⚠" : check.status === "skipped" ? "·" : "✕";
+      const color = check.status === "pass" ? "green" : check.status === "warning" ? "yellow" : check.status === "fail" ? "red" : undefined;
+      return h(Text, { key: check.id, ...colorProps(colorEnabled, color) }, fitText(`${symbol} ${check.label}: ${check.detail}`, lineWidth));
+    }),
+    compact && problems.length
+      ? h(Text, { dimColor: true }, `${spec.report.counts.pass} additional checks passed.`)
+      : null,
+    h(Text, { bold: true }, `${spec.report.counts.pass} passed · ${spec.report.counts.warning} warnings · ${spec.report.counts.fail} failed`)
+  );
+}
+
 function reviewData(plan) {
+  const canModifyFiles = plan.capabilities.reviewRepair
+    || plan.capabilities.repair
+    || plan.capabilities.issueImplementation;
+  const state = (enabled) => enabled ? "ON" : "OFF";
   return {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
-    workflows: workflowMap(plan.modes).map((item) => `${item.label} — ${item.trigger}`),
-    models: modelAssignments(plan.modes).map(({ key, label, workflow }) => {
-      const selection = plan.models[key];
-      return `${label} (${workflow}): ${selection.provider} / ${selection.model} / ${selection.effort}`;
+    workflows: [
+      "Repository assistant — configured-owner comments",
+      ...workflowMap(plan.modes, { maintenanceScheduled: plan.maintenanceScheduled })
+        .map((item) => `${item.label} — ${item.trigger}`)
+    ],
+    authority: [
+      `${state(plan.enabled && plan.modes.includes("review") && plan.policy.automation.automaticPrReview)}  Review eligible pull requests automatically`,
+      `${state(plan.enabled && plan.modes.includes("review"))}  Post comments, labels, and a blocking result`,
+      `${state(plan.enabled && plan.modes.includes("maintain") && plan.maintenanceScheduled)}  Scheduled maintenance`,
+      `${state(canModifyFiles)}  Modify repository files`,
+      `${state(plan.capabilities.issueImplementation)}  Implement issues`,
+      `${state(plan.capabilities.autoMerge)}  Merge pull requests`,
+      `${state(plan.tracing)}  OpenAI tracing`
+    ],
+    models: modelAssignments(plan.modes).flatMap(({ key, label }) => {
+      const summary = plan.modelSummary[key];
+      const coordinator = `${label}: ${summary.coordinator.model} · ${summary.coordinator.effort}`;
+      if (!summary.workspace.enabled) return [coordinator, `${label} workspace: off`];
+      return [
+        coordinator,
+        `${label} workspace: ${summary.workspace.model} · ${summary.workspace.effort} · ${summary.workspace.allowWrites ? "write-enabled" : "read-only"}`
+      ];
     }),
     documentCount: plan.files.length,
     secrets: plan.secrets.map((secret) => secret.name),
+    variables: plan.variables.map((variable) => variable.name),
+    app: ["Contents: read/write", "Issues: read/write", "Pull requests: read/write", "Metadata: read-only", `Requested access: ${plan.repository} only`],
+    repair: `${(plan.policy.audit.repair.allowedPaths ?? []).length} allowed path rules · ${(plan.policy.audit.repair.protectedPaths ?? []).length} protected path rules`,
+    validation: plan.policy.audit.repair.validationCommands ?? [],
     startup: plan.update && plan.enabled
       ? "Codekeeper starts now with the current settings. This update applies after merge."
       : plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge.",
@@ -499,7 +563,7 @@ function operationCopy(plan) {
   }
   return {
     noun: "setup",
-    completionTitle: "Setup complete",
+    completionTitle: "Setup pull request ready",
     description: "The App key is selected. Its path and contents stay hidden."
   };
 }
@@ -510,7 +574,8 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
   const operation = operationCopy(spec.plan);
   const { stdout } = useStdout();
-  const compactDetail = (stdout?.rows ?? 24) < 32 || (stdout?.columns ?? 80) < 60;
+  const compactDetail = (stdout?.rows ?? 24) < 42 || (stdout?.columns ?? 80) < 60;
+  const short = (stdout?.rows ?? 24) < 30;
   const lineWidth = Math.max(20, (stdout?.columns ?? 80) - (compactDetail ? 6 : 10));
   const choices = [
     { value: true, label: `Create the ${operation.noun} pull request` },
@@ -524,24 +589,35 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.downArrow || key.rightArrow || input === "j" || input === "l" || key.tab) setSelection((value) => (value + 1) % choices.length);
     if (key.return) onSubmit(choices[selectionRef.current].value);
   });
-  const workflowSummary = data.workflows.map((workflow) => workflow.split(" — ")[0]).join(", ");
-  const modelSummary = data.models.map((model) => model.replace(/ \([^)]+\):/, ":"));
+  const workflowSummary = data.workflows.join(" · ");
+  const authoritySummary = data.authority.join(" · ");
+  const modelSummary = data.models.join(" · ");
   return h(
     Shell,
     {
       step: "final review",
       title: `Review the ${operation.noun}`,
-      description: ["Nothing has changed yet. Check the essentials or return to settings."],
+      description: short ? [] : ["Nothing has changed yet. Check the essentials or return to settings."],
       footer: "Arrow keys choose  •  Enter continue  •  Esc cancel",
       colorEnabled,
       compactDetail
     },
     h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, fitText(`${data.repository}  •  ${data.identity}`, lineWidth)),
-    h(Text, { dimColor: true }, fitText(`⚡ Workflows: ${workflowSummary}`, lineWidth)),
-    h(Text, { bold: true }, "🤖 Models"),
-    ...modelSummary.map((model, index) => h(Text, { key: `model-${index}`, dimColor: true }, fitText(`  ${model}`, lineWidth))),
-    h(Text, { dimColor: true }, fitText(`🔐 Credentials: ${data.secrets.length ? data.secrets.join(", ") : "none"}`, lineWidth)),
-    h(Text, { dimColor: true }, fitText(`📄 Files: ${data.documentCount} changes  •  ${data.startup}`, lineWidth)),
+    h(Text, { dimColor: true }, fitText(`⚡ ${workflowSummary}`, lineWidth)),
+    h(Text, { bold: true }, "AFTER MERGE"),
+    compactDetail
+      ? h(Text, { dimColor: true }, fitText(authoritySummary, lineWidth))
+      : data.authority.map((item, index) => h(Text, { key: `authority-${index}`, dimColor: true }, fitText(`  ${item}`, lineWidth))),
+    h(Text, { bold: true }, "MODELS"),
+    compactDetail
+      ? h(Text, { dimColor: true }, fitText(modelSummary, lineWidth))
+      : data.models.map((model, index) => h(Text, { key: `model-${index}`, dimColor: true }, fitText(`  ${model}`, lineWidth))),
+    h(Text, { bold: true }, "APP AUTHORITY REQUESTED"),
+    h(Text, { dimColor: true }, fitText(`  ${data.app.join(" · ")}`, lineWidth)),
+    h(Text, { dimColor: true }, fitText(`  Repair: ${data.repair} · Validate: ${data.validation.join(" · ")}`, lineWidth)),
+    h(Text, { dimColor: true }, fitText(`CREDENTIALS  ${data.secrets.length} created/replaced: ${data.secrets.join(", ") || "none"}`, lineWidth)),
+    h(Text, { dimColor: true }, fitText(`VARIABLES  ${data.variables.length} created/replaced: ${data.variables.join(", ") || "none"}`, lineWidth)),
+    h(Text, { dimColor: true }, fitText(`FILES  ${data.documentCount} changes · ${data.startup}`, lineWidth)),
     h(Box, { flexDirection: "column", marginTop: 1 },
       ...choices.map((choice, choiceIndex) => h(Text, {
         key: String(choice.value),
@@ -598,7 +674,7 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const guidance = completionGuidance(spec.plan.modes, spec.plan.enabled, spec.plan.update);
   const operation = operationCopy(spec.plan);
   const completedSteps = spec.receipt.settingsOnly
-    ? DEFAULT_PROGRESS_STEPS.filter((step) => ["repository:verify", "settings:disable", "variables:configure"].includes(step.id))
+    ? DEFAULT_PROGRESS_STEPS.filter((step) => ["repository:verify", "secret:provider", "secret:app", "variables:configure", "settings:disable"].includes(step.id))
     : DEFAULT_PROGRESS_STEPS;
   return h(
     Shell,
@@ -621,10 +697,12 @@ function CompletionScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       { flexDirection: "column" },
       ...completedSteps.map((step) => h(Text, { key: step.id, dimColor: true }, `✓ ${step.label}`)),
       compact ? null : h(Text, { dimColor: true }, `Release: Codekeeper ${spec.plan.packageVersion} · ${spec.plan.source.repository}@${spec.plan.source.commit}`),
-      h(Text, { dimColor: true }, spec.plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge."),
+      h(Text, { dimColor: true }, spec.receipt.settingsOnly
+        ? "Repository settings were updated; readiness is not yet proven."
+        : "The setup is not active or proven until its pull request merges."),
       compact ? null : h(Text, { dimColor: true }, `OpenAI traces: ${spec.plan.tracing ? "enabled" : "disabled"}.`),
       !compact && guidance.reviewGateWarning ? h(Text, { dimColor: true }, guidance.reviewGateWarning) : null,
-      h(Text, { dimColor: true }, compact ? `Review the ${operation.noun} pull request.` : guidance.closing)
+      h(Text, { dimColor: true }, compact ? "After merge, run codekeeper verify." : guidance.closing)
     )
   );
 }
@@ -698,6 +776,7 @@ function TuiRoot({ registerController, colorEnabled }) {
   if (screen.kind === "input") return h(TextInputScreen, common);
   if (screen.kind === "secret") return h(SecretInputScreen, common);
   if (screen.kind === "file") return h(FilePickerScreen, common);
+  if (screen.kind === "doctor") return h(DoctorScreen, common);
   if (screen.kind === "settings") return h(SettingsScreen, common);
   if (screen.kind === "review") return h(ReviewScreen, common);
   if (screen.kind === "completion") return h(CompletionScreen, common);
@@ -812,6 +891,9 @@ export async function createInkPrompter({
     },
     async multiselect(spec) {
       return present("multiselect", spec);
+    },
+    async showDoctor(report) {
+      return present("doctor", { report });
     },
     async editSettings(spec) {
       return present("settings", spec);

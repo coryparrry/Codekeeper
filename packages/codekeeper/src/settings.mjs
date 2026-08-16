@@ -27,7 +27,11 @@ export const SETTINGS_SECTIONS = Object.freeze([
   Object.freeze({ id: "profiles", label: "Instructions", icon: "📝" }),
   Object.freeze({ id: "repository", label: "Repository", icon: "📦" }),
   Object.freeze({ id: "labels", label: "Labels", icon: "🏷" }),
-  Object.freeze({ id: "projectInvariants", label: "Project rules", icon: "🧭" })
+  Object.freeze({
+    id: "projectInvariants",
+    label: "Project rules",
+    icon: "🧭"
+  })
 ]);
 
 const STANDARD_PATHS = Object.freeze([
@@ -77,7 +81,14 @@ function sentence(value) {
 
 function agentName(path) {
   const id = path.match(/^ai\.agents\.([^.]+)/)?.[1];
-  return ({ review: "Pull request reviewer", audit: "Repository auditor", issue: "Issue triager", fix: "Fixer" })[id] ?? "Agent";
+  return (
+    {
+      review: "Pull request reviewer",
+      audit: "Repository auditor",
+      issue: "Issue triager",
+      fix: "Fixer"
+    }[id] ?? "Agent"
+  );
 }
 
 function advancedDescription(path) {
@@ -341,7 +352,10 @@ export function settingsRows(settings, { advanced = false } = {}) {
 }
 
 export function setSetting(settings, row, value) {
-  if (row.readOnly || row.kind === "readonly") throw new InstallerError("That Codekeeper setting is read-only.", { code: "SETTING_READ_ONLY" });
+  if (row.readOnly || row.kind === "readonly")
+    throw new InstallerError("That Codekeeper setting is read-only.", {
+      code: "SETTING_READ_ONLY"
+    });
   const next = clone(settings);
   if (row.id === "enabled") next.enabled = value;
   else if (row.id === "maintenance-scheduled") next.maintenanceScheduled = value;
@@ -360,11 +374,18 @@ export function setSetting(settings, row, value) {
       const bundledModels = Object.hasOwn(MODEL_OPTIONS, value) ? MODEL_OPTIONS[value] : null;
       if (bundledModels) {
         next.policy.ai.agents[agent].model = bundledModels[0].model;
-        next.policy.ai.agents[agent].modelSettings = value === "openai"
-          ? { text: { verbosity: "low" } }
-          : value === "deepseek"
-            ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
-            : {};
+        next.policy.ai.agents[agent].modelSettings =
+          value === "openai"
+            ? { text: { verbosity: "low" } }
+            : value === "deepseek"
+              ? {
+                  temperature: 0.2,
+                  providerData: {
+                    thinking: { type: "disabled" },
+                    response_format: { type: "json_object" }
+                  }
+                }
+              : {};
       }
       if (!next.policy.ai.providers[value]?.supportsReasoningEffort) next.policy.ai.agents[agent].effort = "none";
     }
@@ -378,7 +399,10 @@ export function setSetting(settings, row, value) {
 }
 
 export function resetProfileOverride(settings, profile) {
-  if (!AGENT_PROFILE_IDS.includes(profile)) throw new InstallerError("That agent profile is invalid.", { code: "SETTING_INVALID" });
+  if (!AGENT_PROFILE_IDS.includes(profile))
+    throw new InstallerError("That agent profile is invalid.", {
+      code: "SETTING_INVALID"
+    });
   const next = clone(settings);
   next.profileSources[profile] = "package";
   next.profiles[profile] = next.profileDefaults[profile];
@@ -389,17 +413,26 @@ export function parseSettingValue(row, input) {
   const text = String(input ?? "").trim();
   if (row.kind === "number") {
     const value = Number(text);
-    if (!Number.isSafeInteger(value)) throw new InstallerError("Enter a whole number.", { code: "SETTING_INVALID" });
+    if (!Number.isSafeInteger(value))
+      throw new InstallerError("Enter a whole number.", {
+        code: "SETTING_INVALID"
+      });
     return value;
   }
   if (row.kind === "json") {
     try {
       return JSON.parse(text);
     } catch (cause) {
-      throw new InstallerError("Enter valid JSON.", { code: "SETTING_INVALID", cause });
+      throw new InstallerError("Enter valid JSON.", {
+        code: "SETTING_INVALID",
+        cause
+      });
     }
   }
-  if (!text) throw new InstallerError("Enter a non-empty value.", { code: "SETTING_INVALID" });
+  if (!text)
+    throw new InstallerError("Enter a non-empty value.", {
+      code: "SETTING_INVALID"
+    });
   return text;
 }
 
@@ -408,16 +441,30 @@ function equal(left, right) {
 }
 
 export function validateEditableSettings(settings, baselinePolicy) {
-  if (!settings || typeof settings !== "object" || typeof settings.enabled !== "boolean") throw new InstallerError("Codekeeper settings are invalid.", { code: "SETTING_INVALID" });
-  if (!Object.hasOwn(settings, "maintenanceScheduled")) settings.maintenanceScheduled = true;
-  if (typeof settings.maintenanceScheduled !== "boolean") throw new InstallerError("Scheduled maintenance setting is invalid.", { code: "SETTING_INVALID" });
+  if (!settings || typeof settings !== "object" || typeof settings.enabled !== "boolean")
+    throw new InstallerError("Codekeeper settings are invalid.", {
+      code: "SETTING_INVALID"
+    });
+  const maintenanceScheduled = settings.maintenanceScheduled ?? true;
+  if (typeof maintenanceScheduled !== "boolean")
+    throw new InstallerError("Scheduled maintenance setting is invalid.", {
+      code: "SETTING_INVALID"
+    });
   if (!Array.isArray(settings.modes) || !settings.modes.length || new Set(settings.modes).size !== settings.modes.length || settings.modes.some((mode) => !MODE_IDS.includes(mode))) {
-    throw new InstallerError("Select at least one installed workflow.", { code: "SETTING_INVALID" });
+    throw new InstallerError("Select at least one installed workflow.", {
+      code: "SETTING_INVALID"
+    });
   }
-  const policy = settings.policy;
-  if (policy?.version !== 3) throw new InstallerError("Policy version is read-only.", { code: "SETTING_INVALID" });
+  const policy = clone(settings.policy);
+  if (policy?.version !== 3)
+    throw new InstallerError("Policy version is read-only.", {
+      code: "SETTING_INVALID"
+    });
   for (const path of ["repository.defaultBranch", ...RELEASE_OWNED_POLICY_PATHS]) {
-    if (!equal(getPath(policy, path), getPath(baselinePolicy, path))) throw new InstallerError(`${path} is a read-only safety boundary.`, { code: "SETTING_INVALID" });
+    if (!equal(getPath(policy, path), getPath(baselinePolicy, path)))
+      throw new InstallerError(`${path} is a read-only safety boundary.`, {
+        code: "SETTING_INVALID"
+      });
   }
   if (policy.projectInvariants === undefined) policy.projectInvariants = [];
   for (const agent of Object.values(policy.ai?.agents ?? {})) agent.modelSettings ??= {};
@@ -427,17 +474,22 @@ export function validateEditableSettings(settings, baselinePolicy) {
     throw new InstallerError(cause.message, { code: "SETTING_INVALID", cause });
   }
   if (policy.repository.displayName.trim() !== policy.repository.displayName || policy.repository.displayName.length > 100) {
-    throw new InstallerError("repository.displayName is invalid.", { code: "SETTING_INVALID" });
+    throw new InstallerError("repository.displayName is invalid.", {
+      code: "SETTING_INVALID"
+    });
   }
   const normalizedOwnerLogins = canonicalOwnerLogins(policy.repository.ownerLogins);
-  if (normalizedOwnerLogins.some((login) => !LOGIN.test(login))
-    || !equal(policy.merge.allowedUserAuthors, normalizedOwnerLogins)) {
-    throw new InstallerError("Owner logins are invalid or out of sync.", { code: "SETTING_INVALID" });
+  if (normalizedOwnerLogins.some((login) => !LOGIN.test(login)) || !equal(policy.merge.allowedUserAuthors, normalizedOwnerLogins)) {
+    throw new InstallerError("Owner logins are invalid or out of sync.", {
+      code: "SETTING_INVALID"
+    });
   }
   for (const agentId of AGENT_IDS) {
     const agent = policy.ai.agents[agentId];
     if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, agent.provider) || !policy.ai.providers[agent.provider]) {
-      throw new InstallerError(`${agentId} must use an installable provider.`, { code: "SETTING_INVALID" });
+      throw new InstallerError(`${agentId} must use an installable provider.`, {
+        code: "SETTING_INVALID"
+      });
     }
   }
   if (policy.review.createDeferredIssues && !settings.modes.includes("issues")) {
@@ -457,8 +509,14 @@ export function validateEditableSettings(settings, baselinePolicy) {
   }
   for (const profile of AGENT_PROFILE_IDS) {
     const source = settings.profiles[profile];
-    if (typeof source !== "string" || !source.trim() || Buffer.byteLength(source) > 64 * 1024 || source.includes("\0")) throw new InstallerError(`${profile} profile is invalid.`, { code: "SETTING_INVALID" });
-    if (!["package", "repository"].includes(settings.profileSources?.[profile])) throw new InstallerError(`${profile} profile source is invalid.`, { code: "SETTING_INVALID" });
+    if (typeof source !== "string" || !source.trim() || Buffer.byteLength(source) > 64 * 1024 || source.includes("\0"))
+      throw new InstallerError(`${profile} profile is invalid.`, {
+        code: "SETTING_INVALID"
+      });
+    if (!["package", "repository"].includes(settings.profileSources?.[profile]))
+      throw new InstallerError(`${profile} profile source is invalid.`, {
+        code: "SETTING_INVALID"
+      });
     if (settings.profileSources[profile] === "package" && source !== settings.profileDefaults?.[profile]) {
       throw new InstallerError(`${profile} packaged profile must match the release default.`, { code: "SETTING_INVALID" });
     }
@@ -495,17 +553,20 @@ export function settingsAnswers(settings) {
     displayName: policy.repository.displayName,
     ownerLogins: [...policy.repository.ownerLogins],
     tracing: policy.ai.tracing.enabled,
-    capabilities: [
-      ...(settings.modes.includes("review") && settings.modes.includes("fix") && policy.review.autoRepair ? ["reviewRepair"] : []),
-      ...(settings.modes.includes("maintain") && policy.audit.repair.enabled ? ["repair"] : []),
-      ...(settings.modes.includes("issues") && settings.modes.includes("fix") && policy.issues.allowAiImplementation ? ["issueImplementation"] : []),
-      ...(settings.modes.includes("issues") && policy.issues.closeExactDuplicates ? ["duplicateClosure"] : []),
-      ...(settings.modes.includes("review") && settings.modes.some((mode) => mode === "maintain" || mode === "fix") && policy.merge.enabled ? ["autoMerge"] : [])
-    ],
-    models: Object.fromEntries(settings.modes.map((mode) => {
-      const agent = policy.ai.agents[MODES[mode].policyAgent];
-      return [mode, { provider: agent.provider, model: agent.model, effort: agent.effort }];
-    })),
+    capabilities: [...(settings.modes.includes("review") && settings.modes.includes("fix") && policy.review.autoRepair ? ["reviewRepair"] : []), ...(settings.modes.includes("maintain") && policy.audit.repair.enabled ? ["repair"] : []), ...(settings.modes.includes("issues") && settings.modes.includes("fix") && policy.issues.allowAiImplementation ? ["issueImplementation"] : []), ...(settings.modes.includes("issues") && policy.issues.closeExactDuplicates ? ["duplicateClosure"] : []), ...(settings.modes.includes("review") && settings.modes.some((mode) => mode === "maintain" || mode === "fix") && policy.merge.enabled ? ["autoMerge"] : [])],
+    models: Object.fromEntries(
+      settings.modes.map((mode) => {
+        const agent = policy.ai.agents[MODES[mode].policyAgent];
+        return [
+          mode,
+          {
+            provider: agent.provider,
+            model: agent.model,
+            effort: agent.effort
+          }
+        ];
+      })
+    ),
     modelSummary
   };
 }

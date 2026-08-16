@@ -428,7 +428,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     ),
     notice ? h(Text, color(colorEnabled, "cyan"), notice) : null,
     error ? h(Text, color(colorEnabled, "red"), error) : null,
-    h(Text, { dimColor: true }, fitLine("Tab section  •  ↑/↓ setting  •  ←/→ choice  •  Space toggle  •  A simple/advanced  •  Esc", lineWidth))
+    h(Text, { dimColor: true }, fitLine("Tab section  •  ↑/↓ setting  •  ←/→ choice  •  Space toggle  •  A simple/advanced  •  G/End continue  •  Esc", lineWidth))
   );
 }
 
