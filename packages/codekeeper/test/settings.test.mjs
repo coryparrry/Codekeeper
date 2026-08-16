@@ -52,7 +52,9 @@ test("standard and advanced settings expose only editable choices with clear con
     "gpt-5.3-codex"
   ]);
   assert.equal(standard.some((candidate) => Object.hasOwn(candidate, "warning")), false);
-  assert.equal(row(settings, "policy:ai.agents.review.modelSettings", true).kind, "json");
+  const responseDetail = row(settings, "policy:ai.agents.review.modelSettings.text.verbosity", true);
+  assert.equal(responseDetail.kind, "enum");
+  assert.deepEqual(responseDetail.choices, ["low", "medium", "high"]);
   assert.equal(advanced.some((candidate) => candidate.id === "policy:ai.providers"), false);
   assert.equal(advanced.some((candidate) => candidate.readOnly), false);
   assert.equal(advanced.some((candidate) => candidate.id === "policy:ai.agents.review.maxTurns"), false);

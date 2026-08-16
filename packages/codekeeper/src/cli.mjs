@@ -239,12 +239,15 @@ export async function runCli({
     if (parsed.command !== "update") await ensureActivePrompt();
     let presentationOutput = activePrompt?.kind === "ink" ? activePrompt.notices : output;
     const snapshot = await inspect({ runner, cwd, interactive });
-    const setupAnswers = parsed.command === "update"
+    let setupAnswers = parsed.command === "update"
       ? buildUpdateAnswers({ snapshot, bundle, output: presentationOutput })
       : await collectSetupAnswers({ prompt: activePrompt, snapshot, bundle, output: presentationOutput });
     let appAnswers;
     if (parsed.command === "update") {
-      appAnswers = {};
+      appAnswers = {
+        appClientId: snapshot.existingSettings.appClientId,
+        automationBotLogin: snapshot.existingSettings.automationBotLogin
+      };
     } else if (snapshot.installation) {
       appAnswers = {
         appClientId: snapshot.existingSettings.appClientId,
@@ -270,7 +273,7 @@ export async function runCli({
       }
       const appReady = await activePrompt.confirm({
         message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
-        defaultValue: false,
+        defaultValue: true,
         ...(activePrompt.kind === "ink" ? {
           step: "GitHub App",
           description: [
@@ -316,13 +319,35 @@ export async function runCli({
       ? await collectAppPrivateKeyPath({ prompt: activePrompt, output: presentationOutput })
       : null;
     let confirmed;
-    if (typeof activePrompt.reviewInstallPlan === "function") {
-      confirmed = await activePrompt.reviewInstallPlan(plan);
-    } else {
-      preview(plan, output);
-      confirmed = await activePrompt.confirm({
-        message: `Create this ${operationLabel(plan)}?`,
-        defaultValue: false
+    while (true) {
+      if (typeof activePrompt.reviewInstallPlan === "function") {
+        confirmed = await activePrompt.reviewInstallPlan(plan);
+      } else {
+        preview(plan, output);
+        confirmed = await activePrompt.confirm({
+          message: `Create this ${operationLabel(plan)}?`,
+          defaultValue: false
+        });
+      }
+      if (confirmed !== "settings") break;
+      setupAnswers = await collectSetupAnswers({
+        prompt: activePrompt,
+        snapshot,
+        bundle,
+        output: presentationOutput,
+        initialAnswers: setupAnswers
+      });
+      const ownerRequests = setupAnswers.policy?.automation.ownerRequests ?? true;
+      if (requiresAutomationBotLogin(setupAnswers.modes, setupAnswers.capabilities, ownerRequests) && !appAnswers.automationBotLogin) {
+        appAnswers = {
+          ...appAnswers,
+          automationBotLogin: await collectAutomationBotLogin({ prompt: activePrompt, output: presentationOutput })
+        };
+      }
+      plan = buildInstallPlan({
+        bundle,
+        snapshot,
+        answers: { ...setupAnswers, ...appAnswers }
       });
     }
     if (!confirmed) {

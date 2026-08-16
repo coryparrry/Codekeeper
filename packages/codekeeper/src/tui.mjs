@@ -10,14 +10,14 @@ import {
   useStdout
 } from "ink";
 import { InstallerError } from "./errors.mjs";
-import { CONSERVATIVE_BOUNDARIES, MODES, SECRET_PURPOSES } from "./constants.mjs";
+import { MODES } from "./constants.mjs";
 import {
   containsPrivateKeyPemEnvelope,
   inspectPrivateKeyTextInput,
   PRIVATE_KEY_INPUT_ERROR,
   sanitizeTextInput
 } from "./input-safety.mjs";
-import { capabilitySummary, completionGuidance, documentMap, modelAssignments, workflowMap } from "./plan.mjs";
+import { completionGuidance, modelAssignments, workflowMap } from "./plan.mjs";
 import { createPrivateKeyPickerController } from "./private-key-input.mjs";
 import { SettingsScreen } from "./settings-tui.mjs";
 
@@ -452,37 +452,19 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 }
 
 function reviewData(plan) {
-  const documents = documentMap(plan.files);
-  const profileDocuments = documents.filter((item) => item.path.includes("/agents/"));
-  const setupDocuments = documents.filter((item) => !item.path.includes("/agents/"));
   return {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
-    preset: `${plan.preset} starting models`,
-    release: `Codekeeper ${plan.packageVersion} · ${plan.source.repository}@${plan.source.commit}`,
     workflows: workflowMap(plan.modes).map((item) => `${item.label} — ${item.trigger}`),
     models: modelAssignments(plan.modes).map(({ key, label, workflow }) => {
       const selection = plan.models[key];
       return `${label} (${workflow}): ${selection.provider} / ${selection.model} / ${selection.effort}`;
     }),
-    documents: documents.map((item) => `${item.path} — ${item.purpose}`),
-    setupDocumentPaths: setupDocuments.map((item) => `${item.path} — ${item.purpose}`),
-    profileDocumentPaths: profileDocuments.map((item) => `${item.path} — ${item.purpose}`),
-    secrets: plan.secrets.map((secret) => `${secret.name} — ${secret.purpose ?? SECRET_PURPOSES[secret.name]}`),
-    variables: plan.variables.map((variable) => `${variable.name} → ${variable.value}`),
-    automation: [
-      `Automatic PR review: ${plan.policy.automation.automaticPrReview ? "on" : "off"}`,
-      `Review feedback triage: ${plan.policy.automation.reviewFeedbackTriage ? "on" : "off"}`,
-      `Issue triage: ${plan.policy.automation.issueTriage ? "on" : "off"}`,
-      `Owner requests: ${plan.policy.automation.ownerRequests ? "on" : "off"}`,
-      `Deferred issues: ${plan.policy.review.createDeferredIssues ? "on" : "off"}`,
-      `Maintenance schedule: ${plan.policy.automation.maintenanceSchedule}`
-    ],
+    documentCount: plan.files.length,
+    secrets: plan.secrets.map((secret) => secret.name),
     startup: plan.update && plan.enabled
       ? "Codekeeper starts now with the current settings. This update applies after merge."
       : plan.enabled ? "Codekeeper starts after merge." : "Codekeeper stays off after merge.",
-    capabilities: capabilitySummary(plan.capabilities, plan.modes),
-    reviewGateWarning: completionGuidance(plan.modes, plan.enabled, plan.update).reviewGateWarning
   };
 }
 
@@ -509,126 +491,51 @@ function operationCopy(plan) {
 }
 
 function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
-  const [confirmed, setConfirmed] = useState(false);
-  const [page, setPage] = useState(0);
-  const [detailIndex, setDetailIndex] = useState(0);
+  const [selection, setSelection] = useState(0);
   const cancel = useCancel(onCancel);
-  const { stdout } = useStdout();
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
-  const compactDetail = Number.isFinite(stdout?.rows) && stdout.rows < 30;
   const operation = operationCopy(spec.plan);
-  const pages = ["setup", "credentials", "files", "behavior", "confirm"];
-  const lastPage = pages.length - 1;
-  const pageKind = pages[page];
-  const details = pageKind === "files"
-    ? (data.documents.length ? data.documents : ["No generated files will change."])
-    : pageKind === "behavior"
-      ? [
-        `Startup — ${data.startup}`,
-        ...data.automation.map((line) => `Automation — ${line}`),
-        ...data.capabilities.map((line) => `Capability — ${line}`),
-        ...CONSERVATIVE_BOUNDARIES.map((line) => `Fixed boundary — ${line}`)
-      ]
-      : [];
-  const visibleDetailCount = Math.max(3, Math.min(6, (stdout?.rows ?? 24) - 16));
-  const detailStart = Math.max(0, Math.min(detailIndex - Math.floor(visibleDetailCount / 2), details.length - visibleDetailCount));
-  const visibleDetails = details.slice(detailStart, detailStart + visibleDetailCount);
-  const lineWidth = Math.max(24, (stdout?.columns ?? 80) - 8);
+  const { stdout } = useStdout();
+  const compactDetail = (stdout?.rows ?? 24) < 32 || (stdout?.columns ?? 80) < 60;
+  const lineWidth = Math.max(20, (stdout?.columns ?? 80) - (compactDetail ? 6 : 10));
+  const choices = [
+    { value: true, label: `Create the ${operation.noun} pull request` },
+    { value: "settings", label: "Back to settings" },
+    { value: false, label: "Cancel" }
+  ];
   usePaste(() => {});
   useInput((input, key) => {
     cancel(input, key);
-    if (["files", "behavior"].includes(pageKind)) {
-      if (key.upArrow || input === "k") {
-        setDetailIndex((value) => Math.max(0, value - 1));
-        return;
-      }
-      if (key.downArrow || input === "j") {
-        setDetailIndex((value) => Math.min(details.length - 1, value + 1));
-        return;
-      }
-    }
-    if (page < lastPage) {
-      if (key.leftArrow || input === "h") {
-        setPage((value) => Math.max(0, value - 1));
-        setDetailIndex(0);
-      }
-      if (key.rightArrow || input === "l" || key.tab || key.return) {
-        setPage((value) => Math.min(lastPage, value + 1));
-        setDetailIndex(0);
-      }
-      return;
-    }
-    if (key.leftArrow || key.upArrow || input === "h" || input === "k") setConfirmed(true);
-    if (key.rightArrow || key.downArrow || input === "l" || input === "j" || key.tab) setConfirmed(false);
-    if (key.backspace) setPage(Math.max(0, lastPage - 1));
-    if (key.return) onSubmit(confirmed);
+    if (key.upArrow || key.leftArrow || input === "k" || input === "h") setSelection((value) => (value - 1 + choices.length) % choices.length);
+    if (key.downArrow || key.rightArrow || input === "j" || input === "l" || key.tab) setSelection((value) => (value + 1) % choices.length);
+    if (key.return) onSubmit(choices[selection].value);
   });
-  const section = (title, lines, marginTop = 1) => h(
-    Box,
-    { key: title, flexDirection: "column", marginTop },
-    h(Text, { bold: true }, title),
-    ...lines.map((line, index) => h(Text, { key: `${title}-${index}`, dimColor: true }, `  ${fitText(line, lineWidth)}`))
-  );
+  const workflowSummary = data.workflows.map((workflow) => workflow.split(" — ")[0]).join(", ");
+  const modelSummary = data.models.map((model) => model.replace(/ \([^)]+\):/, ":"));
   return h(
     Shell,
     {
       step: "final review",
-      title: `Review the ${operation.noun} · ${page + 1} of ${lastPage + 1}`,
-      description: [page === 0 ? operation.description : "Nothing has changed yet."],
-      footer: page < lastPage
-        ? ["files", "behavior"].includes(pageKind)
-          ? "↑/↓ inspect  •  ←/→ page  •  Enter next  •  Esc cancel"
-          : "←/→ page  •  Enter next  •  Esc cancel"
-        : "←/→ choose  •  Backspace previous  •  Enter confirm  •  Esc cancel",
+      title: `Review the ${operation.noun}`,
+      description: ["Nothing has changed yet. Check the essentials or return to settings."],
+      footer: "Arrow keys choose  •  Enter continue  •  Esc cancel",
       colorEnabled,
       compactDetail
     },
-    pageKind === "setup" ? h(
-      Box,
-      { flexDirection: "column" },
-      h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, data.repository),
-      h(Text, { dimColor: true }, data.identity),
-      section("⚡ Workflows", data.workflows),
-      section("Models", data.models)
-    ) : null,
-    pageKind === "credentials" ? h(
-      Box,
-      { flexDirection: "column" },
-      section("🔐 Credentials sent to GitHub", data.secrets.length ? data.secrets : ["No new credentials are needed."], 0),
-      section("⚙ Repository variables", data.variables.length ? data.variables : ["No repository variables will change."]),
-      h(Text, { dimColor: true }, "Codekeeper never writes credential values to generated files.")
-    ) : null,
-    ["files", "behavior"].includes(pageKind) ? h(
-      Box,
-      { flexDirection: "column" },
-      h(Text, { bold: true }, pageKind === "files" ? `📄 Files · ${details.length} total` : `🛡 Behavior and safety · ${details.length} items`),
-      ...visibleDetails.map((line, offset) => {
-        const selected = detailStart + offset === detailIndex;
-        return h(Text, {
-          key: `${pageKind}-${detailStart + offset}`,
-          bold: selected,
-          inverse: selected,
-          ...colorProps(colorEnabled && selected, "cyan")
-        }, fitText(`${selected ? "›" : " "} ${line}`, lineWidth));
-      }),
-      h(Text, { dimColor: true }, `${detailStart + 1}–${Math.min(details.length, detailStart + visibleDetailCount)} of ${details.length}`),
-      h(Text, { dimColor: true }, Number.isFinite(stdout?.columns) && stdout.columns < 60
-        ? fitText(details[detailIndex] ?? "", lineWidth * 2)
-        : (details[detailIndex] ?? ""))
-    ) : null,
-    pageKind === "confirm" ? h(
-      Box,
-      { flexDirection: "column" },
-      h(Text, { bold: true, ...colorProps(colorEnabled, "green") }, "✓ Ready to create the pull request"),
-      h(Text, { dimColor: true }, `Codekeeper will create ${data.documents.length} file changes.`),
-      data.reviewGateWarning ? h(Text, { dimColor: true }, data.reviewGateWarning) : null,
-      h(
-        Box,
-        { flexDirection: "column", marginTop: 1 },
-        h(Text, { bold: confirmed, inverse: confirmed }, `${confirmed ? "›" : " "} Create the ${operation.noun} pull request`),
-        h(Text, { bold: !confirmed, inverse: !confirmed }, `${!confirmed ? "›" : " "} Cancel`)
-      )
-    ) : null
+    h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, fitText(`${data.repository}  •  ${data.identity}`, lineWidth)),
+    h(Text, { dimColor: true }, fitText(`⚡ Workflows: ${workflowSummary}`, lineWidth)),
+    h(Text, { bold: true }, "🤖 Models"),
+    ...modelSummary.map((model, index) => h(Text, { key: `model-${index}`, dimColor: true }, fitText(`  ${model}`, lineWidth))),
+    h(Text, { dimColor: true }, fitText(`🔐 Credentials: ${data.secrets.length ? data.secrets.join(", ") : "none"}`, lineWidth)),
+    h(Text, { dimColor: true }, fitText(`📄 Files: ${data.documentCount} changes  •  ${data.startup}`, lineWidth)),
+    h(Box, { flexDirection: "column", marginTop: 1 },
+      ...choices.map((choice, choiceIndex) => h(Text, {
+        key: String(choice.value),
+        bold: choiceIndex === selection,
+        inverse: choiceIndex === selection,
+        ...colorProps(colorEnabled && choiceIndex === selection, "cyan")
+      }, `${choiceIndex === selection ? "›" : " "} ${choice.label}`))
+    )
   );
 }
 
