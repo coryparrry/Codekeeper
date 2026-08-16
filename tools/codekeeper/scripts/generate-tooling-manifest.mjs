@@ -7,7 +7,6 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 
 export const TOOLING_DIRECTORIES = [
   "agents",
-  "integrations/braintrust",
   "presets",
   "src",
 ];
