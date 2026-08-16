@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@openai/agents": "0.14.3",
+    "@openai/agents": "0.15.0",
     "@openai/codex": "0.146.0",
     "zod": "4.4.3"
   },
