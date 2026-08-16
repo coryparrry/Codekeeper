@@ -47,11 +47,11 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "24475a790cd1a796bd586e061056714afde54fb6aec0681f6a474f50be7cbe60"
+      "sha256": "a480d490d1a54218e85d11bc92fa7e5e4324a5c29c5b6a858ed40feb80278cf7"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
-      "sha256": "c9fe5dac49398ebcad8e5112be9a97442ad99ae80c7e318eb50ace21e4e45cd7"
+      "sha256": "66be6585838af4a74f96056fb14b5ab86ca4840593854f421a98ea2d42289442"
     },
     {
       "path": "src/lib/agents-runtime.mjs",
@@ -103,7 +103,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "44d3c3f6ee6f5e9f1d1d567fffdd1bb8c7425e7726c2746f5c0fcbe1621423ac"
+      "sha256": "6a438bf6cb136bca4b97e005b5f46b20da8044a1a2955bb33f7a862fab2a1fdc"
     },
     {
       "path": "src/lib/process-supervisor.mjs",
@@ -115,7 +115,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "980ae4d7afb2a08f2f7b14bbe1fff24c6ac295afbc43a6ce1b4c30946291f1d7"
+      "sha256": "75c4d26335fb7bf86e662ccbed79a0ebf10756088e129fd5f591cc0eb2478b8c"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",

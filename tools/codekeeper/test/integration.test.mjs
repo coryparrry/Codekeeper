@@ -7,7 +7,7 @@ import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } fro
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
+import { AGENT_PROFILE_BUNDLE_FILE, agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
 import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
 import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
@@ -384,6 +384,7 @@ test("preparation freezes one trusted profile for workspace and the coordinator 
   const workspacePrompt = await readFile(path.join(directory, "workspace-prompt.md"), "utf8");
   assert.deepEqual(frozenBytes, Buffer.from(profile));
   assert.deepEqual(frozenContext.agentProfile, {
+    source: "repository",
     path: agentProfilePathForMode("audit"),
     sha256: digest(frozenBytes),
     sourceSha
@@ -421,6 +422,35 @@ test("preparation freezes one trusted profile for workspace and the coordinator 
   assert.match(calls.instructions, /first input text block contains trusted Codekeeper instructions/);
   assert.ok(calls.input[0].content[0].text.includes(profile));
   assert.ok(!calls.input[0].content[1].text.includes(profile));
+});
+
+test("preparation freezes the packaged default when the repository override is absent", async (context) => {
+  const root = await createRepository();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const repositoryProfile = path.join(root, agentProfilePathForMode("audit"));
+  await rm(repositoryProfile);
+  run("git", ["add", "--update"], root);
+  run("git", ["commit", "-qm", "use packaged audit profile"], root);
+  const directory = bundle(root, "package-profile");
+  const toolingSha = "b".repeat(40);
+  await prepareAuditBundle({
+    directory,
+    config: templateConfig,
+    toolingSha,
+    agentProfileSource: "package",
+    agentProfileSourceSha: toolingSha
+  });
+
+  const frozen = await readFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE));
+  const canonical = await readFile(path.join(projectRoot, "tools/codekeeper/agents/repository-auditor.md"));
+  const frozenContext = JSON.parse(await readFile(path.join(directory, "context.json"), "utf8"));
+  assert.deepEqual(frozen, canonical);
+  assert.deepEqual(frozenContext.agentProfile, {
+    source: "package",
+    path: "runtime/agents/repository-auditor.md",
+    sha256: digest(canonical),
+    sourceSha: toolingSha
+  });
 });
 
 test("failed-job reruns produce the same frozen context across run attempts", async (context) => {

@@ -55,7 +55,7 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 3ea363282a1af5a35297acfe9b239529d4735603768a65c8e5c63c7a70d7d356
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 83a8ab735e0c4b6e34ed1757b61b06c180ee7cbc6d059ffd1eb724276cfcd523
 
 concurrency:
   group: codekeeper-fix-${{ inputs.issue_number || github.event.issue.number || github.event.client_payload.number }}
@@ -82,7 +82,7 @@ jobs:
     outputs:
       context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
       base_sha: ${{ fromJSON(steps.prepare.outputs.result).baseSha }}
-      source_sha: ${{ fromJSON(steps.prepare.outputs.result).agentProfile.sourceSha }}
+      repository_sha: ${{ steps.repository-source.outputs.sha }}
       target_kind: ${{ fromJSON(steps.prepare.outputs.result).target.kind }}
     steps:
       - name: Resolve authorised repair target
@@ -132,6 +132,10 @@ jobs:
           fetch-depth: 0
           path: repository
           persist-credentials: false
+      - name: Record trusted repository source
+        id: repository-source
+        working-directory: repository
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Set up pinned Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -346,7 +350,7 @@ jobs:
       - name: Check out trusted default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.workspace.outputs.source_sha }}
+          ref: ${{ needs.workspace.outputs.repository_sha }}
           fetch-depth: 0
           path: repository
           persist-credentials: false
@@ -718,6 +722,7 @@ jobs:
       - name: Publish sealed owner-commanded repair
         working-directory: repository
         env:
+          CODEKEEPER_TOOLING_SHA: ${{ job.workflow_sha }}
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -728,5 +733,6 @@ jobs:
           node ../tooling/tools/codekeeper/src/cli.mjs publish-fix \
             --config "$CONFIG" \
             --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/policy" rev-parse HEAD)" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"

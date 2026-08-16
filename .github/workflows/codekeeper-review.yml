@@ -84,7 +84,7 @@ permissions:
   contents: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 3ea363282a1af5a35297acfe9b239529d4735603768a65c8e5c63c7a70d7d356
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 83a8ab735e0c4b6e34ed1757b61b06c180ee7cbc6d059ffd1eb724276cfcd523
 
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
@@ -194,12 +194,11 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
-          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-review \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
             --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
+            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
             --event "$GITHUB_EVENT_PATH" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {
@@ -415,12 +414,11 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
-          AGENT_PROFILE_SOURCE_SHA="$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)"
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-review \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
             --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$AGENT_PROFILE_SOURCE_SHA" \
+            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
             --event "$GITHUB_EVENT_PATH" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {
@@ -682,6 +680,7 @@ jobs:
         id: publish
         working-directory: tooling
         env:
+          CODEKEEPER_TOOLING_SHA: ${{ job.workflow_sha }}
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -692,6 +691,7 @@ jobs:
           node tools/codekeeper/src/cli.mjs publish-review \
             --config "$CONFIG" \
             --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"
 

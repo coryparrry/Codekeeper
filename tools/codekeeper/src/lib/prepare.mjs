@@ -67,9 +67,10 @@ async function writeBundle({ directory, context, prompt, workspacePrompt, schema
   await writeJson(path.join(directory, "schema.json"), providerCompatibleJsonSchema(schema));
 }
 
-function trustedAgentProfile(mode, agentProfilePath, agentProfileSourceSha) {
+function trustedAgentProfile(mode, agentProfilePath, agentProfileSourceSha, agentProfileSource) {
   return loadTrustedAgentProfile({
     mode,
+    source: agentProfileSource,
     sourcePath: agentProfilePath,
     sourceSha: agentProfileSourceSha
   });
@@ -134,8 +135,8 @@ function boundedOwnerComments(comments, config) {
     }));
 }
 
-export async function prepareReview({ eventPath, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
-  const agentProfile = await trustedAgentProfile("review", agentProfilePath, agentProfileSourceSha);
+export async function prepareReview({ eventPath, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
+  const agentProfile = await trustedAgentProfile("review", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   const event = await readJson(eventPath);
   const repository = repositoryFromEvent(event);
   if (!event.pull_request && event.action === "codekeeper_review") {
@@ -224,12 +225,12 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
   return context;
 }
 
-export async function prepareAudit({ directory, config, toolingSha, configSha256, actor, repairAuthorized = false, agentProfilePath, agentProfileSourceSha }) {
+export async function prepareAudit({ directory, config, toolingSha, configSha256, actor, repairAuthorized = false, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
   if (typeof repairAuthorized !== "boolean") throw new Error("Maintenance repair authorization must be a boolean");
   if (repairAuthorized && !config.audit.repair.enabled) {
     throw new Error("Maintenance repair was authorized while audit.repair.enabled=false");
   }
-  const agentProfile = await trustedAgentProfile("audit", agentProfilePath, agentProfileSourceSha);
+  const agentProfile = await trustedAgentProfile("audit", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   const repository = process.env.GITHUB_REPOSITORY;
   const context = {
     mode: "audit",
@@ -253,8 +254,8 @@ export async function prepareAudit({ directory, config, toolingSha, configSha256
   return context;
 }
 
-export async function prepareIssue({ eventPath, actor, triageMode, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
-  const agentProfile = await trustedAgentProfile("issue", agentProfilePath, agentProfileSourceSha);
+export async function prepareIssue({ eventPath, actor, triageMode, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
+  const agentProfile = await trustedAgentProfile("issue", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   if (triageMode !== "automatic" && triageMode !== "manual") {
     throw new Error("Issue triage mode must be automatic or manual");
   }
@@ -311,8 +312,8 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", reviewThreadIds = [], directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha }) {
-  const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha);
+export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", reviewThreadIds = [], directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
+  const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   if (!["owner", "policy"].includes(authorizationMode)) {
     throw new Error("Codekeeper fix authorization mode must be owner or policy");
   }

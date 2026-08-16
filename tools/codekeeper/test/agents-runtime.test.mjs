@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import {
   AGENT_PROFILE_BUNDLE_FILE,
   MAX_AGENT_PROFILE_BYTES,
   agentProfilePathForMode,
-  loadTrustedAgentProfile
+  loadTrustedAgentProfile,
+  resolveAgentProfileInputs
 } from "../src/lib/agent-profiles.mjs";
 import {
   authenticateCodexCli,
@@ -583,6 +585,7 @@ test("trusted profiles require bounded, nonempty, regular UTF-8 files at the fix
   const loaded = await loadTrustedAgentProfile({ mode: "review", sourcePath: profilePath, sourceSha: trustedSourceSha });
   assert.equal(loaded.text, "# Editable review behavior\n");
   assert.deepEqual(loaded.metadata, {
+    source: "repository",
     path: ".github/codekeeper/agents/pr-reviewer.md",
     sha256: sha256(loaded.bytes),
     sourceSha: trustedSourceSha
@@ -603,6 +606,89 @@ test("trusted profiles require bounded, nonempty, regular UTF-8 files at the fix
     loadTrustedAgentProfile({ mode: "review", sourcePath: profilePath, sourceSha: trustedSourceSha }),
     /exceeds the .*byte limit/
   );
+});
+
+test("absent repository profiles load the source-checkout packaged default with explicit provenance", async () => {
+  const loaded = await loadTrustedAgentProfile({
+    mode: "review",
+    source: "package",
+    sourceSha: trustedSourceSha
+  });
+  const canonical = await readFile(new URL("../agents/pr-reviewer.md", import.meta.url));
+  assert.deepEqual(loaded.bytes, canonical);
+  assert.deepEqual(loaded.metadata, {
+    source: "package",
+    path: "runtime/agents/pr-reviewer.md",
+    sha256: sha256(canonical),
+    sourceSha: trustedSourceSha
+  });
+  await assert.rejects(
+    loadTrustedAgentProfile({
+      mode: "review",
+      source: "package",
+      sourcePath: ".github/codekeeper/agents/pr-reviewer.md",
+      sourceSha: trustedSourceSha
+    }),
+    /cannot use a repository source path/
+  );
+});
+
+test("profile input resolution selects an optional repository override without weakening file checks", async (context) => {
+  const { root, profilePath } = await profileFixture("review", "# Repository override\n");
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const repositorySha = "a".repeat(40);
+  const packageSha = "b".repeat(40);
+  assert.deepEqual(await resolveAgentProfileInputs({
+    sourcePath: profilePath,
+    sourceSha: repositorySha,
+    packageSourceSha: packageSha
+  }), {
+    agentProfilePath: profilePath,
+    agentProfileSource: "repository",
+    agentProfileSourceSha: repositorySha
+  });
+
+  await rm(profilePath);
+  assert.deepEqual(await resolveAgentProfileInputs({
+    sourcePath: profilePath,
+    sourceSha: repositorySha,
+    packageSourceSha: packageSha
+  }), {
+    agentProfilePath: undefined,
+    agentProfileSource: "package",
+    agentProfileSourceSha: packageSha
+  });
+
+  await symlink("missing-profile.md", profilePath);
+  await assert.rejects(
+    resolveAgentProfileInputs({ sourcePath: profilePath, sourceSha: repositorySha, packageSourceSha: packageSha }),
+    /non-symlink regular file/
+  );
+});
+
+test("an offline installed runtime loads its colocated packaged profile", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-installed-profile-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const library = path.join(root, "runtime", "src", "lib");
+  const agents = path.join(root, "runtime", "agents");
+  await mkdir(library, { recursive: true });
+  await mkdir(agents, { recursive: true });
+  await Promise.all([
+    copyFile(new URL("../src/lib/agent-profiles.mjs", import.meta.url), path.join(library, "agent-profiles.mjs")),
+    copyFile(new URL("../src/lib/markers.mjs", import.meta.url), path.join(library, "markers.mjs")),
+    copyFile(new URL("../agents/fixer.md", import.meta.url), path.join(agents, "fixer.md"))
+  ]);
+  const installedModule = await import(
+    `${pathToFileURL(path.join(library, "agent-profiles.mjs")).href}?fixture=${Date.now()}`
+  );
+  const loaded = await installedModule.loadTrustedAgentProfile({
+    mode: "fix",
+    source: "package",
+    sourceSha: trustedSourceSha
+  });
+  assert.match(loaded.text, /^# Fixer profile/m);
+  assert.equal(loaded.metadata.source, "package");
+  assert.equal(loaded.metadata.path, "runtime/agents/fixer.md");
 });
 
 test("trusted profiles reject missing files, symlinks, wrong-mode paths, and abbreviated source SHAs", async (context) => {
