@@ -9,6 +9,7 @@ const manifest = {
   version: 1,
   name: "multi-domain-review",
   repeat: 2,
+  expectedHeadSha: "a".repeat(40),
   expectedRecommendation: "block",
   cases: [
     { id: "security", category: "Security", expectedFiles: ["src/archive.mjs"] },
@@ -39,6 +40,7 @@ function result(overrides = {}) {
 test("manifest validation rejects ambiguous or unsafe answer keys", () => {
   assert.equal(validateSuiteManifest(manifest).cases.length, 2);
   assert.throws(() => validateSuiteManifest({ ...manifest, repeat: 0 }), /manifest.repeat/);
+  assert.throws(() => validateSuiteManifest({ ...manifest, expectedHeadSha: "abc123" }), /expectedHeadSha/);
   assert.throws(() => validateSuiteManifest({ ...manifest, cases: [...manifest.cases, { id: "duplicate", category: "Duplicate", expectedFiles: ["src/archive.mjs"] }] }), /belongs to more than one case/);
   assert.throws(() => validateSuiteManifest({ ...manifest, cases: [{ id: "escape", category: "Unsafe", expectedFiles: ["../secret"] }] }), /escapes the repository/);
 });
@@ -87,7 +89,7 @@ test("CLI loads run directories and writes create-only JSON and Markdown reports
   await writeFile(manifestPath, JSON.stringify({ ...manifest, repeat: 1 }));
   await mkdir(path.join(runsDirectory, "001"), { recursive: true });
   await writeFile(path.join(runsDirectory, "001", "result.json"), JSON.stringify(result()));
-  await writeFile(path.join(runsDirectory, "001", "run.json"), JSON.stringify({ runId: 3187, runUrl: "https://example.invalid/run/3187" }));
+  await writeFile(path.join(runsDirectory, "001", "run.json"), JSON.stringify({ runId: 3187, runUrl: "https://example.invalid/run/3187", headSha: manifest.expectedHeadSha }));
   assert.equal((await loadReviewSuiteRuns(runsDirectory, { ...manifest, repeat: 1 }))[0].runId, 3187);
   const jsonOutput = path.join(root, "report", "result.json");
   const markdownOutput = path.join(root, "report", "result.md");
@@ -101,4 +103,46 @@ test("CLI loads run directories and writes create-only JSON and Markdown reports
   assert.equal(JSON.parse(await readFile(jsonOutput, "utf8")).matchedFindings, 2);
   assert.deepEqual(messages, ["LIVE_EVAL suite=multi-domain-review passed=1/1 recall=2/2 false_positives=0"]);
   await assert.rejects(() => runLiveReviewSuite({ argv: ["--manifest", manifestPath, "--runs-directory", runsDirectory, "--json-output", jsonOutput, "--markdown-output", markdownOutput] }), /EEXIST/);
+});
+
+test("run loading requires immutable metadata for the manifest head", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-live-eval-head-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const runsDirectory = path.join(root, "runs");
+  await mkdir(path.join(runsDirectory, "001"), { recursive: true });
+  await writeFile(path.join(runsDirectory, "001", "result.json"), JSON.stringify(result()));
+  await assert.rejects(() => loadReviewSuiteRuns(runsDirectory, manifest), /run.json is required/);
+  await writeFile(path.join(runsDirectory, "001", "run.json"), JSON.stringify({ headSha: "b".repeat(40) }));
+  await assert.rejects(() => loadReviewSuiteRuns(runsDirectory, manifest), /does not match manifest.expectedHeadSha/);
+});
+
+test("CLI writes evidence and then fails closed for incomplete or failing suites", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-live-eval-failure-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, "manifest.json");
+  const runsDirectory = path.join(root, "runs");
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await mkdir(path.join(runsDirectory, "001"), { recursive: true });
+  await writeFile(path.join(runsDirectory, "001", "result.json"), JSON.stringify(result()));
+  await writeFile(path.join(runsDirectory, "001", "run.json"), JSON.stringify({ headSha: manifest.expectedHeadSha }));
+  const jsonOutput = path.join(root, "incomplete.json");
+  const markdownOutput = path.join(root, "incomplete.md");
+  await assert.rejects(
+    () => runLiveReviewSuite({
+      argv: ["--manifest", manifestPath, "--runs-directory", runsDirectory, "--json-output", jsonOutput, "--markdown-output", markdownOutput],
+    }),
+    /completed 1\/2 requested runs/,
+  );
+  assert.equal(JSON.parse(await readFile(jsonOutput, "utf8")).completedRuns, 1);
+
+  await writeFile(path.join(runsDirectory, "001", "result.json"), JSON.stringify(result({ blockingFindings: [] })));
+  await mkdir(path.join(runsDirectory, "002"), { recursive: true });
+  await writeFile(path.join(runsDirectory, "002", "result.json"), JSON.stringify(result()));
+  await writeFile(path.join(runsDirectory, "002", "run.json"), JSON.stringify({ headSha: manifest.expectedHeadSha }));
+  await assert.rejects(
+    () => runLiveReviewSuite({
+      argv: ["--manifest", manifestPath, "--runs-directory", runsDirectory, "--json-output", path.join(root, "failing.json"), "--markdown-output", path.join(root, "failing.md")],
+    }),
+    /only 1\/2 runs passed/,
+  );
 });

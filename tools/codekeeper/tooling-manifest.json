@@ -23,7 +23,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "81f894d5b62624966e9ffa72161e8a1a82927edbf30aac1a9799a7920ca0dacf"
+      "sha256": "baebe1713a70d7a4b536289dd37e25271da68b9fa79f57c7d4f93325d8aa0646"
     },
     {
       "path": "presets/catalogue.mjs",

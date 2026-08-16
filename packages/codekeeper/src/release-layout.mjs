@@ -9,8 +9,6 @@ export const RELEASE_DIRECTORY_MAPPINGS = Object.freeze([
   ["tools/codekeeper/src", "runtime/src"],
 ]);
 
-export const RELEASE_DIRECTORY_EXCLUSIONS = Object.freeze(new Map());
-
 const STATIC_FILE_MAPPINGS = Object.freeze([
   ["packages/codekeeper/LICENSE", "LICENSE"],
   ["packages/codekeeper/README.md", "README.md"],

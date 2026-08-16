@@ -122,11 +122,8 @@ test("package stage contains one release with separate closed installer and runt
   }
   assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/@openai/agents"), false);
   assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/@openai/codex"), false);
-  assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/braintrust"), false);
   assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@openai/agents"));
   assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@openai/codex"));
-  assert.equal(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@braintrust/openai-agents"), false);
-  assert.equal(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/braintrust"), false);
 
   const toolingManifest = JSON.parse(
     await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/tooling-manifest.json"), "utf8"),

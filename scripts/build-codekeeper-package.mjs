@@ -18,7 +18,6 @@ import {
   PACKAGE_SOURCE_REPOSITORY_URL,
 } from "../packages/codekeeper/src/package-identity.mjs";
 import {
-  RELEASE_DIRECTORY_EXCLUSIONS,
   RELEASE_DIRECTORY_MAPPINGS,
   RELEASE_FILE_MAPPINGS,
   RELEASE_PUBLISHED_PATHS,
@@ -173,7 +172,6 @@ export async function buildCodekeeperPackageStage({
     for (const [sourceDirectory, stageDirectory] of RELEASE_DIRECTORY_MAPPINGS) {
       const sourceRoot = path.join(repositoryRoot, sourceDirectory);
       for (const relativePath of await collectDirectoryFiles(sourceRoot)) {
-        if (RELEASE_DIRECTORY_EXCLUSIONS.get(sourceDirectory)?.has(relativePath)) continue;
         files.push(
           await copyProductFile({
             repositoryRoot,

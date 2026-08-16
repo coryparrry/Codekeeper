@@ -105,6 +105,8 @@ gh secret set CODEKEEPER_APP_PRIVATE_KEY --app actions --repo OWNER/REPOSITORY <
 
 The App token is present only in publication jobs. Maintenance and fix callers may map empty App values for `dry_run=true`; their reusable contracts do not require an App client ID or private key until `dry_run=false` selects publication, where both are checked before token minting. Review and issue-triage always publish, so their App mappings remain required. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The starter policy enables Agents SDK tracing with `includeSensitiveData=false` and exports traces through OpenAI. Never reuse a model-provider key as an observability key.
 
+When updating an installation that used the retired alternate trace exporter, configure `OPENAI_TRACE_API_KEY` or disable tracing before merging the update. After merge, remove the now-ignored alternate-exporter variables and secrets.
+
 ## 4. Prove the configuration before making the gate required
 
 Commit the configuration, callers, and any intentional profile overrides to the default branch. Run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests, and does not require the maintenance App client ID or private-key mapping.

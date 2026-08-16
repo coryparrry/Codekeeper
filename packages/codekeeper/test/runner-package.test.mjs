@@ -240,7 +240,6 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   assert.deepEqual(npmInstalledPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
   assert.equal(await pathExists(path.join(npmInstallRoot, "node_modules", "@openai", "agents")), false);
   assert.equal(await pathExists(path.join(npmInstallRoot, "node_modules", "@openai", "codex")), false);
-  assert.equal(await pathExists(path.join(npmInstallRoot, "node_modules", "braintrust")), false);
   const npmShim = path.join(npmInstallRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper.cmd" : "codekeeper");
   const installedRoot = npmInstalledRoot;
   const shim = npmShim;
@@ -361,8 +360,6 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     await realpath(path.join(runtimeRoot, "node_modules", "@openai", "codex", "bin", "codex.js"))
   );
   assert.ok(await pathExists(path.join(runtimeRoot, "node_modules", "@openai", "agents")));
-  assert.equal(await pathExists(path.join(runtimeRoot, "node_modules", "@braintrust", "openai-agents")), false);
-  assert.equal(await pathExists(path.join(runtimeRoot, "node_modules", "braintrust")), false);
   const packagedProfile = await installedAgentProfiles.loadTrustedAgentProfile({
     mode: "review",
     source: installedAgentProfiles.AGENT_PROFILE_SOURCES.package,
