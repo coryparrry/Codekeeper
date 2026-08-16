@@ -2,6 +2,7 @@
 node_modules/
 coverage/
 .worktrees/
+.env.local
 
 # Local editor and macOS/profiler output; never source-release input.
 .claude/settings.local.json
