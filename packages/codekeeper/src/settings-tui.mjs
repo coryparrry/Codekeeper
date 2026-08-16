@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, usePaste, useStdout } from "ink";
 import { InstallerError } from "./errors.mjs";
 import {
@@ -42,6 +42,16 @@ export function settingInputText(row) {
 
 function color(enabled, name) {
   return enabled ? { color: name } : {};
+}
+
+function useCurrentState(initialValue) {
+  const [value, setValue] = useState(initialValue);
+  const valueRef = useRef(value);
+  const setCurrentValue = useCallback((nextValue) => {
+    valueRef.current = typeof nextValue === "function" ? nextValue(valueRef.current) : nextValue;
+    setValue(valueRef.current);
+  }, []);
+  return [value, setCurrentValue, valueRef];
 }
 
 function fitLine(value, width) {
@@ -96,14 +106,14 @@ function parseEditorCommand(command) {
 }
 
 export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
-  const [settings, setSettings] = useState(spec.settings);
-  const [advanced, setAdvanced] = useState(false);
-  const [sectionIndex, setSectionIndex] = useState(0);
-  const [index, setIndex] = useState(0);
-  const [editing, setEditing] = useState(null);
+  const [settings, setSettings, settingsRef] = useCurrentState(spec.settings);
+  const [advanced, setAdvanced, advancedRef] = useCurrentState(false);
+  const [sectionIndex, setSectionIndex, sectionIndexRef] = useCurrentState(0);
+  const [index, setIndex, indexRef] = useCurrentState(0);
+  const [editing, setEditing, editingRef] = useCurrentState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [choosing, setChoosing] = useState(null);
+  const [choosing, setChoosing, choosingRef] = useCurrentState(null);
   const pendingPemMarkerRef = useRef("");
   const pemInputBlockedRef = useRef(false);
   const { stdout } = useStdout();
@@ -139,6 +149,33 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       .filter((row) => initial.get(row.id) !== JSON.stringify(row.value)).length;
   }, [settings, spec.settings]);
 
+  const getNavigationSnapshot = () => {
+    const currentAllRows = settingsRows(settingsRef.current, { advanced: advancedRef.current });
+    const currentSections = [
+      ...SETTINGS_SECTIONS.filter((section) => currentAllRows.some((row) => row.section === section.id)),
+      { id: "continue", label: "Continue", icon: "✓" }
+    ];
+    const currentSectionIndex = Math.min(sectionIndexRef.current, currentSections.length - 1);
+    const currentSection = currentSections[currentSectionIndex];
+    const currentRows = currentSection.id === "continue"
+      ? [{
+        id: "apply",
+        section: "continue",
+        label: "Review and create the setup pull request",
+        description: "See one short summary, return here if needed, or create the pull request.",
+        kind: "submit",
+        value: "ready"
+      }]
+      : currentAllRows.filter((row) => row.section === currentSection.id);
+    const currentSelectedIndex = Math.min(indexRef.current, Math.max(0, currentRows.length - 1));
+    return {
+      allRows: currentAllRows,
+      sections: currentSections,
+      rows: currentRows,
+      selectedIndex: currentSelectedIndex
+    };
+  };
+
   const applyValue = (row, value) => {
     try {
       setSettings((current) => setSetting(current, row, value));
@@ -153,8 +190,9 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   };
 
   const requestValue = (row, value) => {
-    if (JSON.stringify(row.value) === JSON.stringify(value)) return true;
-    return applyValue(row, value);
+    const currentRow = getNavigationSnapshot().allRows.find((candidate) => candidate.id === row.id) ?? row;
+    if (JSON.stringify(currentRow.value) === JSON.stringify(value)) return true;
+    return applyValue(currentRow, value);
   };
 
   const resetPemInput = () => {
@@ -163,6 +201,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   };
   const appendEditingText = (text) => {
     if (pemInputBlockedRef.current) return;
+    const currentEditing = editingRef.current;
     const inspected = inspectPrivateKeyTextInput(pendingPemMarkerRef.current, text);
     pendingPemMarkerRef.current = inspected.pending;
     if (inspected.blocked) {
@@ -170,52 +209,57 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       setError(PRIVATE_KEY_INPUT_ERROR);
       return;
     }
-    const visible = editing?.row.kind === "profile" && !inspected.pending
+    const visible = currentEditing?.row.kind === "profile" && !inspected.pending
       ? String(text).replace(/\r\n?/g, "\n")
       : inspected.visible;
     if (visible) setEditing((current) => ({ ...current, text: `${current.text}${visible}`.slice(0, 64 * 1024) }));
   };
 
   usePaste((text) => {
-    if (editing) appendEditingText(text);
+    if (editingRef.current) appendEditingText(text);
   });
   useInput((input, key) => {
-    if (choosing) {
+    const inputWithoutReturn = input.replace(/[\r\n]/g, "");
+    const returnPressed = key.return || input !== inputWithoutReturn;
+    if (choosingRef.current) {
       if (key.escape) {
         setChoosing(null);
         return;
       }
-      if (key.upArrow || key.leftArrow || input === "k" || input === "h") setChoosing((current) => ({ ...current, index: (current.index - 1 + current.choices.length) % current.choices.length }));
-      if (key.downArrow || key.rightArrow || input === "j" || input === "l" || key.tab) setChoosing((current) => ({ ...current, index: (current.index + 1) % current.choices.length }));
-      if (key.return) {
-        const value = choosing.choices[choosing.index];
+      if (key.upArrow || key.leftArrow || inputWithoutReturn === "k" || inputWithoutReturn === "h") setChoosing((current) => ({ ...current, index: (current.index - 1 + current.choices.length) % current.choices.length }));
+      if (key.downArrow || key.rightArrow || inputWithoutReturn === "j" || inputWithoutReturn === "l" || key.tab) setChoosing((current) => ({ ...current, index: (current.index + 1) % current.choices.length }));
+      if (returnPressed) {
+        const currentChoosing = choosingRef.current;
+        const value = currentChoosing.choices[currentChoosing.index];
         setChoosing(null);
-        if (choosing.row.kind === "model" && value === CUSTOM_MODEL_CHOICE) {
+        if (currentChoosing.row.kind === "model" && value === CUSTOM_MODEL_CHOICE) {
           resetPemInput();
-          setEditing({ row: choosing.row, text: settingInputText(choosing.row) });
+          setEditing({ row: currentChoosing.row, text: settingInputText(currentChoosing.row) });
           setError("");
         } else {
-          requestValue(choosing.row, value);
+          requestValue(currentChoosing.row, value);
         }
       }
       return;
     }
-    if (editing) {
-      if (key.ctrl && input.toLowerCase() === "c") return onCancel(cancelled());
+    if (editingRef.current) {
+      if (key.ctrl && inputWithoutReturn.toLowerCase() === "c") return onCancel(cancelled());
       if (key.escape) {
         setEditing(null);
         resetPemInput();
         setError("");
         return;
       }
-      if (key.return) {
+      if (returnPressed) {
+        if (inputWithoutReturn) appendEditingText(inputWithoutReturn);
         if (pemInputBlockedRef.current) {
           setError(PRIVATE_KEY_INPUT_ERROR);
           return;
         }
         try {
-          const value = parseSettingValue(editing.row, `${editing.text}${pendingPemMarkerRef.current}`);
-          requestValue(editing.row, value);
+          const currentEditing = editingRef.current;
+          const value = parseSettingValue(currentEditing.row, `${currentEditing.text}${pendingPemMarkerRef.current}`);
+          requestValue(currentEditing.row, value);
           setEditing(null);
         } catch (cause) {
           setError(cause.message);
@@ -227,64 +271,72 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         else setEditing((current) => ({ ...current, text: current.text.slice(0, -1) }));
         return;
       }
-      if (key.ctrl && input.toLowerCase() === "u") {
+      if (key.ctrl && inputWithoutReturn.toLowerCase() === "u") {
         resetPemInput();
         setEditing((current) => ({ ...current, text: "" }));
         setError("");
         return;
       }
-      if (!key.ctrl && !key.meta && input) appendEditingText(input);
+      if (!key.ctrl && !key.meta && inputWithoutReturn) appendEditingText(inputWithoutReturn);
       return;
     }
-    if (key.escape || (key.ctrl && input.toLowerCase() === "c")) return onCancel(cancelled());
-    if (input.toLowerCase() === "a") {
+    if (key.escape || (key.ctrl && inputWithoutReturn.toLowerCase() === "c")) return onCancel(cancelled());
+    if (inputWithoutReturn.toLowerCase() === "a") {
       setAdvanced((value) => !value);
       setSectionIndex(0);
       setIndex(0);
       setError("");
-      return;
+      if (!returnPressed) return;
     }
-    if (input === "G" || key.end) {
-      setSectionIndex(sections.length - 1);
+    if (inputWithoutReturn === "G" || key.end) {
+      const { sections: currentSections } = getNavigationSnapshot();
+      setSectionIndex(currentSections.length - 1);
       setIndex(0);
-      return;
+      if (!returnPressed) return;
     }
-    if (input === "g" || key.home) {
+    if (inputWithoutReturn === "g" || key.home) {
       setSectionIndex(0);
       setIndex(0);
-      return;
+      if (!returnPressed) return;
     }
-    if (key.tab || input === "]" || input === "[") {
-      const direction = input === "[" || (key.tab && key.shift) ? -1 : 1;
-      setSectionIndex((value) => (value + direction + sections.length) % sections.length);
+    if (key.tab || inputWithoutReturn === "]" || inputWithoutReturn === "[") {
+      const direction = inputWithoutReturn === "[" || (key.tab && key.shift) ? -1 : 1;
+      const { sections: currentSections } = getNavigationSnapshot();
+      setSectionIndex((value) => (value + direction + currentSections.length) % currentSections.length);
       setIndex(0);
       setError("");
       setNotice("");
-      return;
+      if (!returnPressed) return;
     }
-    if (key.upArrow || input === "k") setIndex((value) => (value - 1 + rows.length) % rows.length);
-    if (key.downArrow || input === "j") setIndex((value) => (value + 1) % rows.length);
-    const row = rows[selectedIndex];
+    let currentNavigation = getNavigationSnapshot();
+    if (key.upArrow || inputWithoutReturn === "k") setIndex((value) => (value - 1 + currentNavigation.rows.length) % currentNavigation.rows.length);
+    if (key.downArrow || inputWithoutReturn === "j") setIndex((value) => (value + 1) % currentNavigation.rows.length);
+    currentNavigation = getNavigationSnapshot();
+    let row = currentNavigation.rows[currentNavigation.selectedIndex];
     if (!row) return;
-    if (input.toLowerCase() === "r" && row.kind === "profile") {
-      setSettings((current) => resetProfileOverride(current, row.profile));
+    if (inputWithoutReturn.toLowerCase() === "r" && row.kind === "profile") {
+      const currentRow = getNavigationSnapshot().allRows.find((candidate) => candidate.id === row.id) ?? row;
+      setSettings((current) => resetProfileOverride(current, currentRow.profile));
       setError("");
-      setNotice(row.source === "repository"
+      setNotice(currentRow.source === "repository"
         ? "Using the packaged default; the repository override will be removed after final review."
         : "This profile already uses the packaged default.");
       return;
     }
-    if ((key.leftArrow || key.rightArrow || input === " ") && row.kind === "boolean") requestValue(row, !row.value);
-    if ((key.leftArrow || key.rightArrow || input === " ") && ["enum", "model"].includes(row.kind)) {
+    if ((key.leftArrow || key.rightArrow || inputWithoutReturn === " ") && row.kind === "boolean") requestValue(row, !row.value);
+    if ((key.leftArrow || key.rightArrow || inputWithoutReturn === " ") && ["enum", "model"].includes(row.kind)) {
       const direction = key.leftArrow ? -1 : 1;
       const current = row.choices.indexOf(row.value);
       requestValue(row, row.choices[(current + direction + row.choices.length) % row.choices.length]);
     }
-    if (!key.return) return;
+    if (!returnPressed) return;
+    currentNavigation = getNavigationSnapshot();
+    row = currentNavigation.rows[currentNavigation.selectedIndex];
     if (row.kind === "submit") {
       try {
-        validateEditableSettings(settings, spec.baselinePolicy);
-        onSubmit(settings);
+        const currentSettings = settingsRef.current;
+        validateEditableSettings(currentSettings, spec.baselinePolicy);
+        onSubmit(currentSettings);
       } catch (cause) {
         setError(cause.message);
       }

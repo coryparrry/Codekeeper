@@ -122,8 +122,18 @@ function useCancel(onCancel) {
   }, [onCancel]);
 }
 
+function useCurrentState(initialValue) {
+  const [value, setValue] = useState(initialValue);
+  const valueRef = useRef(value);
+  const setCurrentValue = useCallback((nextValue) => {
+    valueRef.current = typeof nextValue === "function" ? nextValue(valueRef.current) : nextValue;
+    setValue(valueRef.current);
+  }, []);
+  return [value, setCurrentValue, valueRef];
+}
+
 function ConfirmScreen({ spec, onSubmit, onCancel, colorEnabled }) {
-  const [selected, setSelected] = useState(Boolean(spec.defaultValue));
+  const [selected, setSelected, selectedRef] = useCurrentState(Boolean(spec.defaultValue));
   const cancel = useCancel(onCancel);
   usePaste(() => {});
   useInput((input, key) => {
@@ -132,7 +142,7 @@ function ConfirmScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.rightArrow || key.downArrow || input === "l" || input === "j" || key.tab) setSelected(false);
     if (input.toLowerCase() === "y") setSelected(true);
     if (input.toLowerCase() === "n") setSelected(false);
-    if (key.return) onSubmit(selected);
+    if (key.return) onSubmit(selectedRef.current);
   });
   return h(
     Shell,
@@ -154,14 +164,14 @@ function ConfirmScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 
 function SelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const defaultIndex = Math.max(0, spec.choices.findIndex((choice) => choice.value === spec.defaultValue));
-  const [index, setIndex] = useState(defaultIndex);
+  const [index, setIndex, indexRef] = useCurrentState(defaultIndex);
   const cancel = useCancel(onCancel);
   usePaste(() => {});
   useInput((input, key) => {
     cancel(input, key);
     if (key.upArrow || input === "k") setIndex((value) => (value - 1 + spec.choices.length) % spec.choices.length);
     if (key.downArrow || input === "j" || key.tab) setIndex((value) => (value + 1) % spec.choices.length);
-    if (key.return) onSubmit(spec.choices[index].value);
+    if (key.return) onSubmit(spec.choices[indexRef.current].value);
   });
   return h(
     Shell,
@@ -189,8 +199,8 @@ function SelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 }
 
 function MultiSelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
-  const [index, setIndex] = useState(0);
-  const [selected, setSelected] = useState(() => new Set(spec.defaultValues ?? []));
+  const [index, setIndex, indexRef] = useCurrentState(0);
+  const [selected, setSelected, selectedRef] = useCurrentState(() => new Set(spec.defaultValues ?? []));
   const [error, setError] = useState("");
   const cancel = useCancel(onCancel);
   usePaste(() => {});
@@ -201,7 +211,7 @@ function MultiSelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (input === " ") {
       setSelected((current) => {
         const next = new Set(current);
-        const value = spec.choices[index].value;
+        const value = spec.choices[indexRef.current].value;
         if (next.has(value)) next.delete(value);
         else next.add(value);
         return next;
@@ -209,7 +219,7 @@ function MultiSelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       setError("");
     }
     if (key.return) {
-      const values = spec.choices.filter((choice) => selected.has(choice.value)).map((choice) => choice.value);
+      const values = spec.choices.filter((choice) => selectedRef.current.has(choice.value)).map((choice) => choice.value);
       if (!values.length && !spec.allowEmpty) setError("Select at least one workflow.");
       else onSubmit(values);
     }
@@ -241,7 +251,7 @@ function MultiSelectScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 }
 
 function TextInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
-  const [value, setValue] = useState("");
+  const [value, setValue, valueRef] = useCurrentState("");
   const [error, setError] = useState("");
   const pendingPemMarkerRef = useRef("");
   const pemInputBlockedRef = useRef(false);
@@ -255,7 +265,9 @@ function TextInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       setError(PRIVATE_KEY_INPUT_ERROR);
       return false;
     }
-    if (inspected.visible) setValue((current) => `${current}${inspected.visible}`.slice(0, spec.maxLength ?? 256));
+    if (inspected.visible) {
+      setValue((current) => `${current}${inspected.visible}`.slice(0, spec.maxLength ?? 256));
+    }
     return true;
   }, [spec.maxLength]);
   const paste = useCallback((text) => {
@@ -269,7 +281,7 @@ function TextInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         setError(PRIVATE_KEY_INPUT_ERROR);
         return;
       }
-      const typedValue = `${value}${pendingPemMarkerRef.current}`;
+      const typedValue = `${valueRef.current}${pendingPemMarkerRef.current}`;
       const candidate = typedValue || spec.defaultValue || "";
       const validation = spec.validate(candidate);
       if (validation === true) onSubmit(candidate);
@@ -282,7 +294,9 @@ function TextInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         return;
       }
       if (pendingPemMarkerRef.current) pendingPemMarkerRef.current = pendingPemMarkerRef.current.slice(0, -1);
-      else setValue((current) => current.slice(0, -1));
+      else {
+        setValue((current) => current.slice(0, -1));
+      }
       setError("");
       return;
     }
@@ -318,11 +332,11 @@ function TextInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 }
 
 function SecretInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
-  const [received, setReceived] = useState(false);
+  const [received, setReceived, receivedRef] = useCurrentState(false);
   const [error, setError] = useState("");
   const cancel = useCancel(onCancel);
   const accept = useCallback((text) => {
-    if (received) {
+    if (receivedRef.current) {
       setError("Secret already received. Press Enter to save it, or Esc to cancel and restart.");
       return;
     }
@@ -339,12 +353,12 @@ function SecretInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     } catch {
       setError("The credential failed to send safely. Cancel the setup and try again.");
     }
-  }, [received, spec]);
+  }, [spec]);
   usePaste(accept);
   useInput((input, key) => {
     cancel(input, key);
     if (key.return) {
-      if (received) onSubmit(true);
+      if (receivedRef.current) onSubmit(true);
       else setError("Paste the credential before continuing.");
       return;
     }
@@ -371,7 +385,7 @@ function SecretInputScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 
 function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [listing, setListing] = useState(null);
-  const [index, setIndex] = useState(0);
+  const [index, setIndex, indexRef] = useCurrentState(0);
   const [error, setError] = useState("");
   const activationRef = useRef(0);
   const cancel = useCancel(onCancel);
@@ -399,7 +413,7 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.upArrow || input === "k") setIndex((value) => (value - 1 + choices.length) % choices.length);
     if (key.downArrow || input === "j" || key.tab) setIndex((value) => (value + 1) % choices.length);
     if (key.return) {
-      const choice = choices[index];
+      const choice = choices[indexRef.current];
       if (!choice) return;
       const activation = ++activationRef.current;
       spec.picker.activate(choice.id).then((result) => {
@@ -491,7 +505,7 @@ function operationCopy(plan) {
 }
 
 function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
-  const [selection, setSelection] = useState(0);
+  const [selection, setSelection, selectionRef] = useCurrentState(0);
   const cancel = useCancel(onCancel);
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
   const operation = operationCopy(spec.plan);
@@ -508,7 +522,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     cancel(input, key);
     if (key.upArrow || key.leftArrow || input === "k" || input === "h") setSelection((value) => (value - 1 + choices.length) % choices.length);
     if (key.downArrow || key.rightArrow || input === "j" || input === "l" || key.tab) setSelection((value) => (value + 1) % choices.length);
-    if (key.return) onSubmit(choices[selection].value);
+    if (key.return) onSubmit(choices[selectionRef.current].value);
   });
   const workflowSummary = data.workflows.map((workflow) => workflow.split(" — ")[0]).join(", ");
   const modelSummary = data.models.map((model) => model.replace(/ \([^)]+\):/, ":"));
