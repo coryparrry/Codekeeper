@@ -19,11 +19,11 @@
     },
     {
       "path": "package-lock.json",
-      "sha256": "47bc0424fee05d9be41ef0d02d1f45fc3d103fec73d325d592cb691e14b31bb2"
+      "sha256": "cb1e0b554ab67499006d07c710e9fe3f583cc09b2bff17735df624d0ee5bac0b"
     },
     {
       "path": "package.json",
-      "sha256": "baebe1713a70d7a4b536289dd37e25271da68b9fa79f57c7d4f93325d8aa0646"
+      "sha256": "4d8f2d6ba53527def3dde26e11a499c9cdfbec9f17c5a588b3cfbaa7ea1fa1a6"
     },
     {
       "path": "presets/catalogue.mjs",

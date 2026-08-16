@@ -724,18 +724,18 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
     await repositoryFile("tools/codekeeper/package-lock.json"),
   );
   assert.deepEqual(packageJson.dependencies, {
-    "@openai/agents": "0.14.3",
-    "@openai/codex": "0.146.0",
+    "@openai/agents": "0.15.0",
+    "@openai/codex": "0.147.0",
     zod: "4.4.3",
   });
   assert.equal(packageLock.lockfileVersion, 3);
   assert.equal(
     packageLock.packages[""].dependencies["@openai/agents"],
-    "0.14.3",
+    "0.15.0",
   );
   assert.equal(
     packageLock.packages[""].dependencies["@openai/codex"],
-    "0.146.0",
+    "0.147.0",
   );
   assert.equal(packageLock.packages[""].dependencies.zod, "4.4.3");
 
@@ -836,7 +836,7 @@ test("review tracing uses the OpenAI exporter without alternate exporter credent
     await repositoryFile("packages/codekeeper/runtime-package/package.json"),
   );
   assert.deepEqual(packagedRuntime.dependencies, {
-    "@openai/agents": "0.14.3",
+    "@openai/agents": "0.15.0",
     "@openai/codex": "0.146.0",
     zod: "4.4.3",
   });

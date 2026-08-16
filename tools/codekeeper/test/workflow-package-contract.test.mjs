@@ -341,7 +341,7 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
   const runtimePackage = JSON.parse(
     await repositoryFile("tools/codekeeper/package.json"),
   );
-  assert.equal(runtimePackage.dependencies["@openai/codex"], "0.146.0");
+  assert.equal(runtimePackage.dependencies["@openai/codex"], "0.147.0");
   for (const mode of modes) {
     const source = await workflow(mode);
     const caller = await repositoryFile(
@@ -525,6 +525,6 @@ test("all checkouts discard persisted credentials and tool versions are exact", 
   const runtimePackage = JSON.parse(
     await repositoryFile("tools/codekeeper/package.json"),
   );
-  assert.equal(runtimePackage.dependencies["@openai/agents"], "0.14.3");
-  assert.equal(runtimePackage.dependencies["@openai/codex"], "0.146.0");
+  assert.equal(runtimePackage.dependencies["@openai/agents"], "0.15.0");
+  assert.equal(runtimePackage.dependencies["@openai/codex"], "0.147.0");
 });
