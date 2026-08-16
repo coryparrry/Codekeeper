@@ -30,9 +30,18 @@ const DIRECTORY_MAPPINGS = Object.freeze([
   ["packages/codekeeper/bin", "bin"],
   ["packages/codekeeper/src", "src"],
   ["tools/codekeeper/agents", "runtime/agents"],
+  ["tools/codekeeper/integrations", "runtime/integrations"],
   ["tools/codekeeper/presets", "runtime/presets"],
   ["tools/codekeeper/src", "runtime/src"],
 ]);
+
+const DIRECTORY_EXCLUSIONS = Object.freeze(new Map([
+  ["tools/codekeeper/integrations", new Set([
+    "braintrust/package.json",
+    "braintrust/package-lock.json",
+    "braintrust/npm-shrinkwrap.json",
+  ])],
+]));
 
 const FILE_MAPPINGS = Object.freeze([
   ["packages/codekeeper/LICENSE", "LICENSE"],
@@ -41,7 +50,6 @@ const FILE_MAPPINGS = Object.freeze([
   ["packages/codekeeper/npm-shrinkwrap.json", "npm-shrinkwrap.json"],
   ["packages/codekeeper/runtime-package/package.json", "runtime/package.json"],
   ["packages/codekeeper/runtime-package/npm-shrinkwrap.json", "runtime/npm-shrinkwrap.json"],
-  ["tools/codekeeper/integrations/braintrust/run-agent.mjs", "runtime/integrations/braintrust/run-agent.mjs"],
   ["tools/codekeeper/scripts/verify-tooling-artifact.mjs", "runtime/scripts/verify-tooling-artifact.mjs"],
   [".github/workflows/codekeeper-assistant.yml", "release/workflows/codekeeper-assistant.yml"],
   [".github/workflows/codekeeper-bootstrap.yml", "release/workflows/codekeeper-bootstrap.yml"],
@@ -192,6 +200,7 @@ export async function buildCodekeeperPackageStage({
     for (const [sourceDirectory, stageDirectory] of DIRECTORY_MAPPINGS) {
       const sourceRoot = path.join(repositoryRoot, sourceDirectory);
       for (const relativePath of await collectDirectoryFiles(sourceRoot)) {
+        if (DIRECTORY_EXCLUSIONS.get(sourceDirectory)?.has(relativePath)) continue;
         files.push(
           await copyProductFile({
             repositoryRoot,

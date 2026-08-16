@@ -18,7 +18,8 @@ import {
 } from "./plan.mjs";
 import { configureRepositorySettings, installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
-import { MODES, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
+import { MODES, PACKAGE_NAME, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
+import { normalizePackageRelease } from "./package-release.mjs";
 import { formatCommand } from "./shell-command.mjs";
 import { runLatestUpdate } from "./updater.mjs";
 
@@ -39,6 +40,9 @@ export function parseCliArgs(argv) {
   if (argv.length === 0 || (argv.length === 1 && argv[0] === "--help")) return Object.freeze({ command: "help" });
   if (argv.length === 1 && argv[0] === "--version") return Object.freeze({ command: "version" });
   if (argv.length === 1 && argv[0] === "init") return Object.freeze({ command: "init" });
+  if (argv.length === 2 && argv[0] === "init" && argv[1] === "--current-package") {
+    return Object.freeze({ command: "init", currentPackage: true });
+  }
   if (argv.length === 1 && argv[0] === "update") return Object.freeze({ command: "update" });
   if (argv.length === 2 && argv[0] === "update" && argv[1] === "--current-package") {
     return Object.freeze({ command: "update", currentPackage: true });
@@ -172,12 +176,25 @@ export async function runCli({
       return 1;
     }
   }
-  if (
-    parsed.command === "update"
-    && typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
-    && environment.CODEKEEPER_UPDATE_EXPECTED_VERSION !== PACKAGE_VERSION
-  ) {
-    errorOutput.write(`${formatInstallerError(new InstallerError("npm launched a different Codekeeper version than requested.", { code: "UPDATE_VERSION_MISMATCH" }))}\n`);
+  let packageRelease;
+  try {
+    if (
+      typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
+      && environment.CODEKEEPER_UPDATE_EXPECTED_VERSION !== PACKAGE_VERSION
+    ) {
+      throw new InstallerError("npm launched a different Codekeeper version than requested.", { code: "UPDATE_VERSION_MISMATCH" });
+    }
+    const releaseEnvironment = typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
+      || typeof environment.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY === "string"
+      ? environment
+      : process.env;
+    packageRelease = normalizePackageRelease({
+      name: PACKAGE_NAME,
+      version: releaseEnvironment.CODEKEEPER_UPDATE_EXPECTED_VERSION,
+      integrity: releaseEnvironment.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY
+    }, { code: "UPDATE_VERSION_MISMATCH" });
+  } catch (error) {
+    errorOutput.write(`${formatInstallerError(error)}\n`);
     return 1;
   }
   resumeCommand ??= currentResumeCommand(process.execPath, process.argv[1], platform, parsed.command);
@@ -187,7 +204,7 @@ export async function runCli({
     if (typeof runner.resolveTrustedCommands === "function") {
       runner = await runner.resolveTrustedCommands({ cwd });
     }
-    const bundle = await loadAssets();
+    const bundle = await loadAssets({ packageRelease });
     const ensureActivePrompt = async () => {
       if (activePrompt) return;
       const likelyTui = interactive

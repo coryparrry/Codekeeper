@@ -30,6 +30,17 @@ async function pathExists(filePath) {
   }
 }
 
+async function collectRelativeFiles(root, relative = "") {
+  const entries = await readdir(path.join(root, relative), { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const child = relative ? `${relative}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...await collectRelativeFiles(root, child));
+    else if (entry.isFile() && !entry.isSymbolicLink()) files.push(child);
+  }
+  return files.sort();
+}
+
 async function buildFixtureStage(t, name = "stage") {
   const temporaryRoot = await temporaryDirectory(t, "codekeeper-package-stage-test-");
   const destination = path.join(temporaryRoot, name);
@@ -162,6 +173,17 @@ test("package stage contains one release with separate closed installer and runt
     paths.filter((filePath) => filePath.startsWith("runtime/agents/")).map((filePath) => path.basename(filePath)).sort(),
     canonicalAgentFiles,
     "every canonical runtime agent is included without a hand-maintained stage inventory",
+  );
+  const integrationRoot = path.join(REPOSITORY_ROOT, "tools", "codekeeper", "integrations");
+  const canonicalIntegrationFiles = (await collectRelativeFiles(integrationRoot))
+    .filter((filePath) => !/(?:^|\/)package(?:-lock)?\.json$/.test(filePath) && !filePath.endsWith("npm-shrinkwrap.json"));
+  assert.deepEqual(
+    manifest.files
+      .filter((entry) => entry.sourcePath.startsWith("tools/codekeeper/integrations/"))
+      .map((entry) => entry.sourcePath.slice("tools/codekeeper/integrations/".length))
+      .sort(),
+    canonicalIntegrationFiles,
+    "every production integration file is included without a hand-maintained stage inventory",
   );
 });
 

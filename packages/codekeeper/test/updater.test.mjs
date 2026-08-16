@@ -3,7 +3,7 @@ import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { createRecordingRunner, result, temporaryDirectory, textSink } from "./helpers.mjs";
-import { resolveNpmCliPath, resolveNpmRelease, runLatestUpdate } from "../src/updater.mjs";
+import { resolveNpmCliPath, resolveNpmRelease, runLatestInit, runLatestUpdate } from "../src/updater.mjs";
 
 const RELEASE_INTEGRITY = `sha512-${Buffer.alloc(64, 0xab).toString("base64")}`;
 
@@ -56,6 +56,22 @@ test("the latest-release bootstrap resolves an exact receipt then runs that exac
   assert.equal(calls[1].options.env.NPM_CONFIG_CACHE, "/tmp/npm-cache");
   assert.equal(calls[1].options.env.OPENAI_API_KEY, undefined);
   assert.match(output.toString(), /Resolving the latest.*Launching Codekeeper 1\.4\.2/s);
+});
+
+test("init also re-enters through the exact latest package receipt", async () => {
+  const runner = createRecordingRunner((_call, index) => index === 0
+    ? result(JSON.stringify({ version: "1.4.2", dist: { integrity: RELEASE_INTEGRITY } }))
+    : result());
+  assert.equal(await runLatestInit({
+    cwd: "/tmp/widget",
+    output: textSink(),
+    environment: { PATH: "/trusted/bin" },
+    platform: "linux",
+    resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+    runner
+  }), 0);
+  assert.deepEqual(runner.calls[1].args.slice(-3), ["codekeeper", "init", "--current-package"]);
+  assert.equal(runner.calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY, RELEASE_INTEGRITY);
 });
 
 test("the latest-release bootstrap rejects invalid registry versions before execution", async () => {

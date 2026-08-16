@@ -3,10 +3,9 @@ import path from "node:path";
 import { createCommandRunner, resolveRepositoryBoundary, sanitizedEnvironment } from "./command-runner.mjs";
 import { PACKAGE_NAME } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
+import { RELEASE_VERSION, validSha512Integrity } from "./package-release.mjs";
 
 const NPM_TIMEOUT_MS = 5 * 60 * 1000;
-const RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-const SHA512_INTEGRITY = /^sha512-([A-Za-z0-9+/]+={0,2})$/;
 const NPM_ENV_NAMES = new Set([
   "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
   "http_proxy", "https_proxy", "no_proxy",
@@ -103,16 +102,6 @@ function releaseSelector(value) {
   failReleaseResolution("Codekeeper updates require the latest tag or an exact semantic version.");
 }
 
-function validSha512Integrity(value) {
-  if (typeof value !== "string") return false;
-  const match = SHA512_INTEGRITY.exec(value);
-  if (!match) return false;
-  const encoded = match[1];
-  const digest = Buffer.from(encoded, "base64");
-  if (digest.length !== 64) return false;
-  return digest.toString("base64").replace(/=+$/, "") === encoded.replace(/=+$/, "");
-}
-
 function releaseReceipt(source, requestedVersion) {
   let metadata;
   try {
@@ -162,7 +151,7 @@ export async function resolveNpmRelease({
 
 export const resolvePackageRelease = resolveNpmRelease;
 
-export async function runLatestUpdate({
+export async function runLatestCommand(command, {
   cwd = process.cwd(),
   output = process.stdout,
   environment = process.env,
@@ -170,6 +159,7 @@ export async function runLatestUpdate({
   resolveNpm = resolveNpmCliPath,
   runner = createCommandRunner({ commandPaths: { node: process.execPath }, environment, platform })
 } = {}) {
+  if (!new Set(["init", "update"]).has(command)) throw new TypeError("command must be init or update");
   output.write("Resolving the latest Codekeeper CLI and dependency release from npm...\n");
   const receipt = await resolveNpmRelease({
     cwd,
@@ -180,7 +170,7 @@ export async function runLatestUpdate({
     version: "latest"
   });
   output.write(`Launching Codekeeper ${receipt.version} with its locked CLI dependencies...\n`);
-  const updateResult = await runner.run("node", [
+  const commandResult = await runner.run("node", [
     receipt.npmCli,
     "exec",
     "--yes",
@@ -189,7 +179,7 @@ export async function runLatestUpdate({
     `--package=${PACKAGE_NAME}@${receipt.version}`,
     "--",
     PACKAGE_NAME,
-    "update",
+    command,
     "--current-package"
   ], {
     cwd,
@@ -197,10 +187,18 @@ export async function runLatestUpdate({
     stdio: "inherit",
     timeoutMs: NPM_TIMEOUT_MS
   });
-  if (updateResult.status !== 0 || updateResult.timedOut) {
-    throw new InstallerError("The latest Codekeeper CLI did not complete the repository update.", {
+  if (commandResult.status !== 0 || commandResult.timedOut) {
+    throw new InstallerError(`The latest Codekeeper CLI did not complete ${command}.`, {
       code: "UPDATE_BOOTSTRAP_FAILED"
     });
   }
   return 0;
+}
+
+export function runLatestUpdate(options = {}) {
+  return runLatestCommand("update", options);
+}
+
+export function runLatestInit(options = {}) {
+  return runLatestCommand("init", options);
 }

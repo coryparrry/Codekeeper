@@ -47,7 +47,8 @@ import {
   HEAD_SHA,
   PACKAGE_ROOT,
   PINNED_COMMIT,
-  REPOSITORY_ROOT
+  REPOSITORY_ROOT,
+  TEST_PACKAGE_RELEASE
 } from "./helpers.mjs";
 
 const EXPECTED_ASSETS = Object.freeze({
@@ -57,11 +58,17 @@ const EXPECTED_ASSETS = Object.freeze({
   "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
   "policies/mixed.json": "8431b2352fe5be158bdf3957b6077a86747ac199ae2fb4717b59a7cbe3620286",
   "policies/openai.json": "59a30700d883a117100b31f2a16675f48e8ba9eafe66d3b6e2a34dcce1aa4a10",
-  "workflows/assistant.yml": "bef52c224e85cb593f4d6f484d8811879197ebe797fcd79a462650eaf45ea2d7",
-  "workflows/fix.yml": "e388c51db33f6803f87a2695a6b98473f0760c659348ef48d4854b49e00981be",
-  "workflows/issues.yml": "a97b251d7918b0033983a6009d468b2a1aa038fec3d95082b21749b222c38463",
-  "workflows/maintain.yml": "da7b8fb26ec8b1203fa06453c89732e341d57f86747ed89cd7316b56112cf231",
-  "workflows/review.yml": "547ef1f59f7baf0ceccad910b963aae297e4812c7642994595330bb9d572296b"
+  "runtime-workflows/assistant.yml": "a1824ed06bf7d84ab9eda6e8a06416143608d7de30d500508f0eb04ff5b75423",
+  "runtime-workflows/bootstrap.yml": "dba0a3da830ed7f1f2add3dc60c7c0a99278dc3374782bb0a7c5bf1991949004",
+  "runtime-workflows/fix.yml": "7265604325e47cd8ea066fb5d328847ee0c82c4f3ec0fe980573cc0d08d56230",
+  "runtime-workflows/issues.yml": "7ff1b71bfd4e3c77fb6e84211bec3525caffbb456dda52f37dc1dc84816b9882",
+  "runtime-workflows/maintain.yml": "cecc237dec02000884cd2cd516ff60831470fc261d9b76f0bc9c58bbdfebae1f",
+  "runtime-workflows/review.yml": "8f4de122c144035e9a74c047a62ddf72b49bcf12ab52ee2e0c176e8f473ee83f",
+  "workflows/assistant.yml": "9fe96f04a773c1263c71578558238d1e2dc2d9f8efe8e1681f088a98204e09ef",
+  "workflows/fix.yml": "aed2b25cd75fe446c0294bb5cccc0001593ce1b5d36d021c28ea5c87cae5e5eb",
+  "workflows/issues.yml": "99a4541b91faa120d2bba941633d5f4286c74c839d19565309c2c0ab7a05b032",
+  "workflows/maintain.yml": "ce3a9aedddabc39f6d055bb82db2fa420375c270c11cf9fc8af118e99026e77f",
+  "workflows/review.yml": "d2aa7c4cfa1cf269453a9d7b1b2343dee56749d24b4a2bbf27159668e11eef8b"
 });
 
 const CHECKPOINT_PATHS = Object.freeze({
@@ -69,12 +76,7 @@ const CHECKPOINT_PATHS = Object.freeze({
   "agents/issue-triager.md": "tools/codekeeper/agents/issue-triager.md",
   "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
   "agents/repository-auditor.md": "tools/codekeeper/agents/repository-auditor.md",
-  "policies/mixed.json": ".github/codekeeper.json",
-  "workflows/assistant.yml": "examples/workflows/codekeeper-assistant.yml.example",
-  "workflows/fix.yml": "examples/workflows/codekeeper-fix.yml.example",
-  "workflows/issues.yml": "examples/workflows/codekeeper-issues.yml.example",
-  "workflows/maintain.yml": "examples/workflows/codekeeper-maintain.yml.example",
-  "workflows/review.yml": "examples/workflows/codekeeper-review.yml.example"
+  "policies/mixed.json": ".github/codekeeper.json"
 });
 
 const CHECKPOINT_PROVENANCE_PATHS = Object.freeze({
@@ -282,8 +284,7 @@ test("a same-provider model change stays in policy and does not rewrite a workfl
   assert.equal(renderedPolicy.ai.agents.review.workspace.model, "gpt-5.6-luna");
   for (const mode of MODE_IDS) {
     const rendered = renderWorkflow(bundle.contents[MODES[mode].asset], {
-      sourceRepository: SOURCE_REPOSITORY,
-      sourceCommit: SOURCE_COMMIT,
+      packageRelease: TEST_PACKAGE_RELEASE,
       mode,
       preset: "openai"
     });
@@ -372,29 +373,28 @@ test("each rendered workflow contains exactly the paired immutable bootstrap and
   for (const preset of ["mixed", "openai"]) {
     for (const mode of MODE_IDS) {
       const rendered = renderWorkflow(bundle.contents[MODES[mode].asset], {
-        sourceRepository: SOURCE_REPOSITORY,
-        sourceCommit: SOURCE_COMMIT,
+        packageRelease: TEST_PACKAGE_RELEASE,
         mode,
         preset
       });
       const uses = rendered.split("\n").map((line) => line.trim()).filter((line) => /^(?:- )?uses:/.test(line));
       assert.equal(uses.length, 2, `${preset}/${mode}`);
-      assert.ok(uses.every((line) => line.endsWith(`@${SOURCE_COMMIT}`)), `${preset}/${mode}`);
-      assert.match(rendered, new RegExp(`tools/codekeeper@${SOURCE_COMMIT}`));
-      assert.match(rendered, new RegExp(`${path.basename(MODES[mode].target).replace(".", "\\.")}@${SOURCE_COMMIT}`));
-      assert.doesNotMatch(rendered, /OWNER\/REPOSITORY|FULL_COMMIT_SHA|replace OWNER/);
+      assert.deepEqual(uses, [
+        "uses: ./.github/workflows/codekeeper-bootstrap.yml",
+        `uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`
+      ]);
+      assert.match(rendered, new RegExp(TEST_PACKAGE_RELEASE.integrity.replaceAll("+", "\\+")));
+      assert.doesNotMatch(rendered, /OWNER\/REPOSITORY|FULL_COMMIT_SHA|PACKAGE_(?:VERSION|INTEGRITY)/);
       assert.doesNotMatch(rendered, /codekeeper:ready/);
     }
   }
   const mixedIssue = renderWorkflow(bundle.contents[MODES.issues.asset], {
-    sourceRepository: SOURCE_REPOSITORY,
-    sourceCommit: SOURCE_COMMIT,
+    packageRelease: TEST_PACKAGE_RELEASE,
     mode: "issues",
     preset: "mixed"
   });
   const openaiIssue = renderWorkflow(bundle.contents[MODES.issues.asset], {
-    sourceRepository: SOURCE_REPOSITORY,
-    sourceCommit: SOURCE_COMMIT,
+    packageRelease: TEST_PACKAGE_RELEASE,
     mode: "issues",
     preset: "openai"
   });
@@ -445,6 +445,10 @@ test("renderInstallFiles omits packaged profiles unless an explicit repository o
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml",
+    ".github/workflows/codekeeper-bootstrap.yml",
+    ".github/workflows/codekeeper-runtime-assistant.yml",
+    ".github/workflows/codekeeper-runtime-review.yml",
+    ".github/workflows/codekeeper-runtime-issues.yml",
     ".github/codekeeper-release.json"
   ]);
   for (const file of files) {
@@ -614,6 +618,10 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml",
+    ".github/workflows/codekeeper-bootstrap.yml",
+    ".github/workflows/codekeeper-runtime-assistant.yml",
+    ".github/workflows/codekeeper-runtime-review.yml",
+    ".github/workflows/codekeeper-runtime-maintain.yml",
     ".github/codekeeper-release.json"
   ]);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [
@@ -691,7 +699,8 @@ test("a release update refreshes packaged defaults without materializing missing
   assert.equal(update.operation, "release-update");
   assert.equal(update.source.commit, "b".repeat(40));
   assert.equal(update.files.some((file) => file.path.startsWith(".github/codekeeper/agents/")), false);
-  assert.ok(update.files.some((file) => file.path === MODES.review.target));
+  assert.ok(update.files.some((file) => file.path === RELEASE_MANIFEST_TARGET));
+  assert.equal(update.files.some((file) => file.path === MODES.review.target), false);
 });
 
 test("resetting an existing profile override deletes it and resumes packaged updates", async () => {

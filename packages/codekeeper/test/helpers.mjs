@@ -8,6 +8,15 @@ export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.
 export const REPOSITORY_ROOT = path.resolve(PACKAGE_ROOT, "../..");
 export const PINNED_COMMIT = "46d5eef7a4d1a73f4fd3d1962713489e32fd8f68";
 export const HEAD_SHA = "a".repeat(40);
+export const TEST_PACKAGE_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
+export const TEST_PACKAGE_RELEASE = Object.freeze({
+  name: "codekeeper",
+  version: "0.2.0",
+  integrity: TEST_PACKAGE_INTEGRITY
+});
+
+process.env.CODEKEEPER_UPDATE_EXPECTED_VERSION = TEST_PACKAGE_RELEASE.version;
+process.env.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY = TEST_PACKAGE_RELEASE.integrity;
 
 export function result(stdout = "", overrides = {}) {
   return {

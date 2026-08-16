@@ -11,19 +11,23 @@ import {
   MODEL_PROVIDER_SECRETS,
   MODES,
   PACKAGE_NAME,
-  PACKAGE_VERSION,
   POLICY_TARGET,
+  PACKAGE_BOOTSTRAP_WORKFLOW,
   RELEASE_MANIFEST_TARGET,
+  RELEASE_WORKFLOW_ASSETS,
+  RUNTIME_WORKFLOWS,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 import { applyReleasePolicyBoundaries, upgradePolicy } from "./policy.mjs";
+import { normalizePackageRelease } from "./package-release.mjs";
 
 const DEFAULT_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const RELEASE_WORKFLOW_ASSET_MAP = new Map(RELEASE_WORKFLOW_ASSETS.map((workflow) => [workflow.asset, workflow]));
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -52,9 +56,24 @@ async function readRegularFile(fsImpl, filePath, label) {
   return fsImpl.readFile(filePath);
 }
 
+async function hasRegularFile(fsImpl, filePath, label) {
+  try {
+    const stat = await fsImpl.lstat(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new InstallerError(`${label} must be a regular, non-symlink file.`, { code: "ASSET_TYPE_INVALID" });
+    }
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 export async function loadVerifiedAssets({
   packageRoot = DEFAULT_PACKAGE_ROOT,
-  fsImpl = { readFile, lstat }
+  fsImpl = { readFile, lstat },
+  packageRelease = null,
+  environment = process.env
 } = {}) {
   const assetsRoot = path.join(packageRoot, "assets");
   const metadataBytes = await readRegularFile(fsImpl, path.join(assetsRoot, "metadata.json"), "Asset metadata");
@@ -75,6 +94,7 @@ export async function loadVerifiedAssets({
     throw new InstallerError("Asset metadata does not match this installer's pinned source release.", { code: "ASSET_METADATA_INVALID" });
   }
   exactKeys(Object.keys(metadata.assets), ASSET_KEYS, "Asset");
+  const stagedPackage = await hasRegularFile(fsImpl, path.join(packageRoot, "release", "manifest.json"), "Package release manifest");
 
   const contents = {};
   for (const assetKey of ASSET_KEYS) {
@@ -82,14 +102,39 @@ export async function loadVerifiedAssets({
     if (!record || !SHA256.test(record.sha256 ?? "") || !Number.isSafeInteger(record.bytes) || record.bytes < 1) {
       throw new InstallerError(`Asset metadata is invalid for ${assetKey}.`, { code: "ASSET_METADATA_INVALID" });
     }
-    const bytes = await readRegularFile(fsImpl, path.join(assetsRoot, ...assetKey.split("/")), `Asset ${assetKey}`);
+    const releaseWorkflow = RELEASE_WORKFLOW_ASSET_MAP.get(assetKey);
+    if (releaseWorkflow && (record.sourcePath !== releaseWorkflow.sourcePath || record.packagePath !== releaseWorkflow.packagePath)) {
+      throw new InstallerError(`Asset metadata is invalid for ${assetKey}.`, { code: "ASSET_METADATA_INVALID" });
+    }
+    const assetPath = releaseWorkflow
+      ? stagedPackage
+        ? path.join(packageRoot, ...releaseWorkflow.packagePath.split("/"))
+        : packageRoot === DEFAULT_PACKAGE_ROOT
+          ? path.resolve(packageRoot, "..", "..", ...releaseWorkflow.sourcePath.split("/"))
+          : path.join(assetsRoot, ...assetKey.split("/"))
+      : path.join(assetsRoot, ...assetKey.split("/"));
+    const bytes = await readRegularFile(fsImpl, assetPath, `Asset ${assetKey}`);
     if (bytes.byteLength !== record.bytes || sha256(bytes) !== record.sha256) {
       throw new InstallerError(`Bundled asset verification failed for ${assetKey}.`, { code: "ASSET_DIGEST_MISMATCH" });
     }
     contents[assetKey] = bytes.toString("utf8");
   }
 
-  return deepFreeze({ metadata, contents });
+  const environmentRelease = typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
+    || typeof environment.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY === "string"
+    ? {
+        name: PACKAGE_NAME,
+        version: environment.CODEKEEPER_UPDATE_EXPECTED_VERSION,
+        integrity: environment.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY
+      }
+    : null;
+  return deepFreeze({
+    metadata,
+    contents,
+    packageRelease: packageRelease || environmentRelease
+      ? normalizePackageRelease(packageRelease ?? environmentRelease)
+      : null
+  });
 }
 
 function count(source, token) {
@@ -179,35 +224,37 @@ export function renderPolicy(policySource, {
   return `${JSON.stringify(policy, null, 2)}\n`;
 }
 
-function assertPinnedWorkflow(source, sourceRepository, sourceCommit) {
+function assertLocalPackageWorkflow(source, mode) {
   const activeUses = source.split("\n")
     .map((line) => line.trim())
     .filter((line) => /^(?:-\s+)?uses:/.test(line))
     .map((line) => line.replace(/^-\s+/, ""));
-  if (activeUses.length !== 2 || activeUses.some((line) => !line.endsWith(`@${sourceCommit}`))) {
-    throw new InstallerError("Rendered workflow does not contain exactly two immutable source pins.", { code: "WORKFLOW_RENDER_INVALID" });
-  }
-  if (!activeUses.some((line) => line === `uses: ${sourceRepository}/tools/codekeeper@${sourceCommit}`)) {
-    throw new InstallerError("Rendered workflow is missing the pinned bootstrap action.", { code: "WORKFLOW_RENDER_INVALID" });
-  }
-  if (!activeUses.some((line) => line.startsWith(`uses: ${sourceRepository}/.github/workflows/codekeeper-`))) {
-    throw new InstallerError("Rendered workflow is missing the pinned reusable workflow.", { code: "WORKFLOW_RENDER_INVALID" });
+  const expected = [
+    "uses: ./.github/workflows/codekeeper-bootstrap.yml",
+    `uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`
+  ];
+  if (activeUses.length !== expected.length || expected.some((line) => !activeUses.includes(line))) {
+    throw new InstallerError("Rendered workflow does not use the installed package bootstrap and runtime workflows.", { code: "WORKFLOW_RENDER_INVALID" });
   }
 }
 
-export function renderWorkflow(template, { sourceRepository, sourceCommit, mode, provider, preset, policy = null }) {
+function renderPackageReceipt(template, packageRelease, label) {
+  const receipt = normalizePackageRelease(packageRelease);
+  if (count(template, "PACKAGE_VERSION") !== 2 || count(template, "PACKAGE_INTEGRITY") !== 2) {
+    throw new InstallerError(`Bundled ${label} workflow has unexpected package placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  const rendered = template
+    .replaceAll("PACKAGE_VERSION", receipt.version)
+    .replaceAll("PACKAGE_INTEGRITY", receipt.integrity);
+  if (/PACKAGE_(?:VERSION|INTEGRITY|MANIFEST_SHA256)/.test(rendered)) {
+    throw new InstallerError(`Rendered ${label} workflow contains unresolved package placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  return rendered;
+}
+
+export function renderWorkflow(template, { packageRelease, mode, provider, preset, policy = null }) {
   if (!MODE_IDS.includes(mode)) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
-  if (count(template, "OWNER/REPOSITORY") !== 3 || count(template, "FULL_COMMIT_SHA") !== 3) {
-    throw new InstallerError(`Bundled ${mode} workflow has unexpected placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
-  }
-  const manualHeader = `# Copy to .github/workflows/codekeeper-${mode}.yml, then replace OWNER/REPOSITORY\n# and FULL_COMMIT_SHA with the published maintainer repository and release commit.`;
-  if (count(template, manualHeader) !== 1) {
-    throw new InstallerError(`Bundled ${mode} workflow has an unexpected installation header.`, { code: "WORKFLOW_RENDER_INVALID" });
-  }
-  let rendered = template
-    .replace(manualHeader, `# Generated by codekeeper from ${sourceRepository}@${sourceCommit}.`)
-    .replaceAll("OWNER/REPOSITORY", sourceRepository)
-    .replaceAll("FULL_COMMIT_SHA", sourceCommit)
+  let rendered = renderPackageReceipt(template, packageRelease, mode)
     .replaceAll("codekeeper:ready", "ready");
 
   const resolvedProvider = provider ?? (mode === "issues" && preset === "mixed" ? "deepseek" : "openai");
@@ -241,31 +288,18 @@ export function renderWorkflow(template, { sourceRepository, sourceCommit, mode,
       rendered = rendered.replace('cron: "17 7 * * *"', `cron: ${JSON.stringify(automation.maintenanceSchedule)}`);
     }
   }
-  if (rendered.includes("OWNER/REPOSITORY") || rendered.includes("FULL_COMMIT_SHA")) {
-    throw new InstallerError(`Rendered ${mode} workflow contains unresolved placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
-  }
-  assertPinnedWorkflow(rendered, sourceRepository, sourceCommit);
+  assertLocalPackageWorkflow(rendered, mode);
   return rendered;
 }
 
-export function renderAssistantWorkflow(template, { sourceRepository, sourceCommit, ownerRequests, modes }) {
-  if (count(template, "OWNER/REPOSITORY") !== 3 || count(template, "FULL_COMMIT_SHA") !== 3) {
-    throw new InstallerError("Bundled assistant workflow has unexpected placeholders.", { code: "WORKFLOW_RENDER_INVALID" });
-  }
-  const manualHeader = "# Copy to .github/workflows/codekeeper-assistant.yml, then replace OWNER/REPOSITORY\n# and FULL_COMMIT_SHA with the published maintainer repository and release commit.";
+export function renderAssistantWorkflow(template, { packageRelease, ownerRequests, modes }) {
   if (!/owner_requests: (?:true|false)/.test(template) || !/installed_modes: [a-z,]+/.test(template)) {
     throw new InstallerError("Bundled assistant workflow has incomplete routing controls.", { code: "WORKFLOW_RENDER_INVALID" });
   }
-  const rendered = template
-    .replace(manualHeader, `# Generated by codekeeper from ${sourceRepository}@${sourceCommit}.`)
-    .replaceAll("OWNER/REPOSITORY", sourceRepository)
-    .replaceAll("FULL_COMMIT_SHA", sourceCommit)
+  const rendered = renderPackageReceipt(template, packageRelease, "assistant")
     .replace(/owner_requests: (?:true|false)/, `owner_requests: ${ownerRequests}`)
     .replace(/installed_modes: [a-z,]+/, `installed_modes: ${modes.join(",")}`);
-  if (rendered.includes("OWNER/REPOSITORY") || rendered.includes("FULL_COMMIT_SHA")) {
-    throw new InstallerError("Rendered assistant workflow contains unresolved placeholders.", { code: "WORKFLOW_RENDER_INVALID" });
-  }
-  assertPinnedWorkflow(rendered, sourceRepository, sourceCommit);
+  assertLocalPackageWorkflow(rendered, "assistant");
   return rendered;
 }
 
@@ -285,6 +319,7 @@ export function renderInstallFiles(bundle, {
   refreshReleaseBoundaries = false
 }) {
   const { repository: sourceRepository, commit: sourceCommit } = bundle.metadata.source;
+  const packageRelease = normalizePackageRelease(bundle.packageRelease);
   const policyContents = renderPolicy(policySource, {
     displayName,
     defaultBranch,
@@ -313,8 +348,7 @@ export function renderInstallFiles(bundle, {
   rendered.push({
     path: ASSISTANT_WORKFLOW.target,
     contents: renderAssistantWorkflow(bundle.contents[ASSISTANT_WORKFLOW.asset], {
-      sourceRepository,
-      sourceCommit,
+      packageRelease,
       ownerRequests: renderedPolicy.automation.ownerRequests,
       modes
     })
@@ -323,8 +357,7 @@ export function renderInstallFiles(bundle, {
     rendered.push({
       path: MODES[mode].target,
       contents: renderWorkflow(bundle.contents[MODES[mode].asset], {
-        sourceRepository,
-        sourceCommit,
+        packageRelease,
         mode,
         provider: models[mode]?.provider,
         preset,
@@ -332,14 +365,22 @@ export function renderInstallFiles(bundle, {
       })
     });
   }
+  rendered.push({
+    path: PACKAGE_BOOTSTRAP_WORKFLOW.target,
+    contents: bundle.contents[PACKAGE_BOOTSTRAP_WORKFLOW.asset]
+  });
+  for (const id of ["assistant", ...modes]) {
+    const workflow = RUNTIME_WORKFLOWS[id];
+    rendered.push({ path: workflow.target, contents: bundle.contents[workflow.asset] });
+  }
   const managedFiles = Object.fromEntries(rendered
-    .filter((file) => file.path === ASSISTANT_WORKFLOW.target || MODE_IDS.some((mode) => MODES[mode].target === file.path))
+    .filter((file) => file.path.endsWith(".yml"))
     .map((file) => [file.path, sha256(file.contents)]));
   rendered.push({
     path: RELEASE_MANIFEST_TARGET,
     contents: `${JSON.stringify({
-      version: 1,
-      package: { name: PACKAGE_NAME, version: PACKAGE_VERSION },
+      version: 2,
+      package: packageRelease,
       source: { repository: sourceRepository, commit: sourceCommit },
       managedFiles
     }, null, 2)}\n`

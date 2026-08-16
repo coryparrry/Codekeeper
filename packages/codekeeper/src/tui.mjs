@@ -442,6 +442,23 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 
 function reviewData(plan) {
   const documents = documentMap(plan.files);
+  const deletedPaths = new Set(plan.files.filter((file) => file.delete === true).map((file) => file.path));
+  const profileDocuments = documents.filter((item) => item.path.includes("/agents/"));
+  const callerDocuments = documents.filter((item) => /^\.github\/workflows\/codekeeper-(?:assistant|review|maintain|issues|fix)\.yml$/.test(item.path));
+  const packageWorkflowDocuments = documents.filter((item) => /^\.github\/workflows\/codekeeper-(?:bootstrap|runtime-)/.test(item.path));
+  const setupDocuments = [
+    ...documents.filter((item) => item.path === ".github/codekeeper.json"),
+    ...(callerDocuments.length ? [{
+      path: `.github/workflows/codekeeper-{${callerDocuments.map((item) => item.path.match(/codekeeper-([^.]+)\.yml$/)?.[1]).filter(Boolean).join(",")}}.yml`,
+      purpose: `${callerDocuments.length} installed caller workflows`
+    }] : []),
+    ...(packageWorkflowDocuments.length ? [{
+      path: ".github/workflows/codekeeper-{bootstrap,runtime-*}.yml",
+      purpose: `${packageWorkflowDocuments.length} verified package execution workflows`
+    }] : []),
+    ...documents.filter((item) => item.path === ".github/codekeeper-release.json"),
+    ...documents.filter((item) => deletedPaths.has(item.path))
+  ];
   return {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
@@ -452,9 +469,9 @@ function reviewData(plan) {
       const selection = plan.models[key];
       return `${label} (${workflow}): ${selection.provider} / ${selection.model} / ${selection.effort}`;
     }),
-    documents: documents.map((item) => `${item.path} — ${item.purpose}`),
-    setupDocumentPaths: documents.filter((item) => !item.path.includes("/agents/")).map((item) => item.path),
-    profileDocumentPaths: documents.filter((item) => item.path.includes("/agents/")).map((item) => item.path),
+    documents: [...setupDocuments, ...profileDocuments].map((item) => `${item.path} — ${item.purpose}`),
+    setupDocumentPaths: setupDocuments.map((item) => `${item.path} — ${item.purpose}`),
+    profileDocumentPaths: profileDocuments.map((item) => `${item.path} — ${item.purpose}`),
     secrets: plan.secrets.map((secret) => `${secret.name} — ${SECRET_PURPOSES[secret.name]}`),
     variables: plan.variables.map((variable) => `${variable.name} → ${variable.value}`),
     automation: [

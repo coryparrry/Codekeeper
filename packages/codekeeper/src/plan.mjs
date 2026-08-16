@@ -20,6 +20,7 @@ import {
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
   RELEASE_MANIFEST_TARGET,
+  RELEASE_WORKFLOW_ASSETS,
   SECRET_PURPOSES,
   SETUP_BRANCH,
   SETUP_COMMIT_MESSAGE,
@@ -218,6 +219,7 @@ export function appRegistrationUrl({ repository, displayName, ownerType = "User"
 }
 
 export function documentMap(files) {
+  const releaseWorkflows = new Map(RELEASE_WORKFLOW_ASSETS.map((workflow) => [workflow.target, workflow.description]));
   return files.map((file) => Object.freeze({
     path: file.path,
     purpose: file.delete === true
@@ -228,6 +230,7 @@ export function documentMap(files) {
       ? "Policy, model choices, protected paths, and startup controls"
       : AGENT_PROFILES[AGENT_PROFILE_IDS.find((profile) => AGENT_PROFILES[profile].target === file.path)]?.purpose
         ?? (file.path === ASSISTANT_WORKFLOW.target ? ASSISTANT_WORKFLOW.description : null)
+        ?? releaseWorkflows.get(file.path)
         ?? MODES[MODE_IDS.find((mode) => MODES[mode].target === file.path)]?.label
         ?? "Codekeeper setup"
   }));
