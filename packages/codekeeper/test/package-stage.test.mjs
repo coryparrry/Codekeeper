@@ -14,11 +14,6 @@ import {
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const INSTALLER_DEPENDENCIES = Object.freeze(["ink", "react"]);
-const PACKAGED_RUNTIME_DEPENDENCIES = Object.freeze({
-  "@openai/agents": "0.15.0",
-  "@openai/codex": "0.146.0",
-  zod: "4.4.3",
-});
 const REPLACED_RUNTIME_FILES = new Set([
   "package-lock.json",
   "package.json",
@@ -107,11 +102,14 @@ test("package stage contains one release with separate closed installer and runt
   const shrinkwrap = JSON.parse(await readFile(path.join(destination, "npm-shrinkwrap.json"), "utf8"));
   const stagedRuntimeManifest = JSON.parse(await readFile(path.join(destination, "runtime/package.json"), "utf8"));
   const runtimeShrinkwrap = JSON.parse(await readFile(path.join(destination, "runtime/npm-shrinkwrap.json"), "utf8"));
-  const runtimeDependencies = PACKAGED_RUNTIME_DEPENDENCIES;
+  const canonicalRuntimeManifest = JSON.parse(
+    await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/package.json"), "utf8"),
+  );
+  const runtimeDependencies = canonicalRuntimeManifest.dependencies;
   assert.deepEqual(Object.keys(packageManifest.dependencies).sort(), [...INSTALLER_DEPENDENCIES]);
   assert.deepEqual(stagedRuntimeManifest.dependencies, runtimeDependencies);
   for (const [name, version] of Object.entries(runtimeDependencies)) {
-    assert.equal(stagedRuntimeManifest.dependencies[name], version, `${name} matches its packaged runtime contract`);
+    assert.equal(stagedRuntimeManifest.dependencies[name], version, `${name} matches its runtime owner`);
   }
   assert.deepEqual(shrinkwrap.packages[""].dependencies, packageManifest.dependencies);
   assert.deepEqual(runtimeShrinkwrap.packages[""].dependencies, stagedRuntimeManifest.dependencies);
