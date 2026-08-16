@@ -7,7 +7,7 @@ import { loadVerifiedAssets as loadProductionAssets } from "../src/assets.mjs";
 
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const REPOSITORY_ROOT = path.resolve(PACKAGE_ROOT, "../..");
-export const PINNED_COMMIT = "a562cef322a2ee4e3395bb2d3528995e403f93ba";
+export const PINNED_COMMIT = "ce411f62de6c99f92d216ca7a56e65645b4026da";
 export const HEAD_SHA = "a".repeat(40);
 export const TEST_PACKAGE_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
 export const TEST_PACKAGE_RELEASE = Object.freeze({
