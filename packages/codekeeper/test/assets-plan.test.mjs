@@ -977,11 +977,22 @@ test("fixer can use any supported model without a separate planner credential", 
   assert.match(workflow, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
 });
 
-test("OpenAI model choices include Luna, Terra, and Sol and map Luna to one agent", async () => {
+test("OpenAI model choices include current general and coding models and map Luna to one agent", async () => {
   assert.deepEqual(
     [...new Set(MODEL_OPTIONS.openai.map((choice) => choice.model))],
-    ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
+    [
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.5",
+      "gpt-5.5-pro",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
+      "gpt-5.3-codex"
+    ]
   );
+  assert.deepEqual(MODEL_OPTIONS.deepseek.map((choice) => choice.model), ["deepseek-v4-flash", "deepseek-v4-pro"]);
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
     bundle,

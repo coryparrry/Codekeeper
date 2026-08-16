@@ -38,9 +38,9 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 
 ## What `init` does
 
-The Settings screen controls new and existing installations. Standard mode covers workflows, automation, schedules, every role's model settings, workspace specialists, tracing, and all four default profiles. Each selected row shows its purpose and its controls. Press Enter on a model ID to type any supported value. Press Enter on a provider or effort to see every choice.
+The Settings screen controls new and existing installations. Standard mode covers workflows, automation, schedules, every role's model settings, workspace specialists, tracing, and all four default profiles. Each selected row shows its purpose and its controls. Press Enter on a model ID to choose a current provider model or type another supported ID. Press Enter on a provider or effort to see every choice.
 
-Profile instructions stay inside the TUI. Editing a profile creates a repository override for that role. Untouched defaults do not create files. Press `R` on a profile to remove its override and resume packaged updates. Press `A` for Advanced mode. Advanced shows every editable policy field. Protected release and safety boundaries stay fixed and appear in the final review. High-impact changes require a separate warning confirmation. Nothing changes until you accept the final review.
+Profile instructions stay inside the TUI. Editing a profile creates a repository override for that role. Untouched defaults do not create files. Press `R` on a profile to remove its override and resume packaged updates. Press `A` for Advanced mode. Advanced shows every editable policy field. Model settings offer current provider choices and a custom model ID field. Protected release and safety boundaries stay fixed and appear in the final review. Nothing changes until you accept the final review.
 
 | Choice | What it adds |
 |---|---|

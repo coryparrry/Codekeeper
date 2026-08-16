@@ -13,6 +13,7 @@ import {
 import { parseSettingValue, resetProfileOverride, setSetting, settingsRows, validateEditableSettings } from "./settings.mjs";
 
 const h = React.createElement;
+const CUSTOM_MODEL_CHOICE = "Type another model ID…";
 
 function cancelled() {
   return new InstallerError("Interactive setup was cancelled.", { code: "PROMPT_ABORTED" });
@@ -28,6 +29,7 @@ function valueText(row) {
 function controlText(row) {
   if (row.kind === "boolean") return "Press Space or Enter to turn this setting on or off.";
   if (row.kind === "enum") return "Press Enter to see every choice. You can also use Left and Right.";
+  if (row.kind === "model") return "Press Enter to choose a model or type another model ID.";
   if (row.kind === "profile") return "Press Enter to edit these instructions here. Press R to restore the Codekeeper default.";
   if (["string", "number", "json"].includes(row.kind)) return "Press Enter to type a new value.";
   if (row.kind === "submit") return "Press Enter to review every change before Codekeeper applies it.";
@@ -35,7 +37,7 @@ function controlText(row) {
 }
 
 function sectionIcon(section) {
-  return ({ workflows: "⚡", automation: "⏱", review: "🔎", audit: "🛠", issues: "📌", merge: "🔀", ai: "🤖", profiles: "📝", labels: "🏷", repository: "📦" })[section] ?? "•";
+  return section === "workflows" ? "⚡" : " ";
 }
 
 export function settingInputText(row) {
@@ -105,8 +107,6 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [choosing, setChoosing] = useState(null);
-  const [pendingWarning, setPendingWarning] = useState(null);
-  const [warningConfirmed, setWarningConfirmed] = useState(false);
   const pendingPemMarkerRef = useRef("");
   const pemInputBlockedRef = useRef(false);
   const { stdout } = useStdout();
@@ -148,13 +148,6 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 
   const requestValue = (row, value) => {
     if (JSON.stringify(row.value) === JSON.stringify(value)) return true;
-    if (row.warning) {
-      setPendingWarning({ row, value });
-      setWarningConfirmed(false);
-      setNotice("");
-      setError("");
-      return false;
-    }
     return applyValue(row, value);
   };
 
@@ -181,32 +174,23 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (editing) appendEditingText(text);
   });
   useInput((input, key) => {
-    if (pendingWarning) {
-      if (key.escape || input.toLowerCase() === "n") {
-        setPendingWarning(null);
-        setWarningConfirmed(false);
-        return;
-      }
-      if (input.toLowerCase() === "y" || key.leftArrow || key.upArrow) setWarningConfirmed(true);
-      if (key.rightArrow || key.downArrow || key.tab) setWarningConfirmed(false);
-      if (key.return) {
-        if (warningConfirmed) applyValue(pendingWarning.row, pendingWarning.value);
-        setPendingWarning(null);
-        setWarningConfirmed(false);
-      }
-      return;
-    }
     if (choosing) {
       if (key.escape) {
         setChoosing(null);
         return;
       }
-      if (key.upArrow || input === "k") setChoosing((current) => ({ ...current, index: (current.index - 1 + current.row.choices.length) % current.row.choices.length }));
-      if (key.downArrow || input === "j" || key.tab) setChoosing((current) => ({ ...current, index: (current.index + 1) % current.row.choices.length }));
+      if (key.upArrow || input === "k") setChoosing((current) => ({ ...current, index: (current.index - 1 + current.choices.length) % current.choices.length }));
+      if (key.downArrow || input === "j" || key.tab) setChoosing((current) => ({ ...current, index: (current.index + 1) % current.choices.length }));
       if (key.return) {
-        const value = choosing.row.choices[choosing.index];
+        const value = choosing.choices[choosing.index];
         setChoosing(null);
-        requestValue(choosing.row, value);
+        if (choosing.row.kind === "model" && value === CUSTOM_MODEL_CHOICE) {
+          resetPemInput();
+          setEditing({ row: choosing.row, text: settingInputText(choosing.row) });
+          setError("");
+        } else {
+          requestValue(choosing.row, value);
+        }
       }
       return;
     }
@@ -289,8 +273,9 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       }
     } else if (row.kind === "boolean") {
       requestValue(row, !row.value);
-    } else if (row.kind === "enum") {
-      setChoosing({ row, index: Math.max(0, row.choices.indexOf(row.value)) });
+    } else if (["enum", "model"].includes(row.kind)) {
+      const choices = row.kind === "model" ? [...row.choices, CUSTOM_MODEL_CHOICE] : row.choices;
+      setChoosing({ row, choices, index: Math.max(0, choices.indexOf(row.value)) });
       setError("");
     } else if (["profile", "string", "number", "json"].includes(row.kind)) {
       resetPemInput();
@@ -299,20 +284,6 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     }
   });
 
-  if (pendingWarning) return h(
-    Box,
-    { flexDirection: "column", borderStyle: "round", borderColor: colorEnabled ? "yellow" : undefined, paddingX: 2, paddingY: 1, width: "100%" },
-    h(Text, { bold: true, ...color(colorEnabled, "yellow") }, "⚠  CHECK THIS CHANGE"),
-    h(Text, { bold: true }, pendingWarning.row.label),
-    h(Text, null, pendingWarning.row.warning),
-    h(Text, { dimColor: true }, `New value: ${valueText({ ...pendingWarning.row, value: pendingWarning.value })}`),
-    h(Box, { flexDirection: "column", marginTop: 1 },
-      h(Text, { bold: warningConfirmed, inverse: warningConfirmed }, `${warningConfirmed ? "›" : " "} Apply this change`),
-      h(Text, { bold: !warningConfirmed, inverse: !warningConfirmed }, `${!warningConfirmed ? "›" : " "} Keep the current value`)
-    ),
-    h(Text, { dimColor: true }, "←/→ choose  •  Enter confirm  •  Esc keep current value")
-  );
-
   if (choosing) return h(
     Box,
     { flexDirection: "column", borderStyle: "round", borderColor: colorEnabled ? "cyan" : undefined, paddingX: 2, paddingY: 1, width: "100%" },
@@ -320,7 +291,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     h(Text, { bold: true }, choosing.row.label),
     h(Text, { dimColor: true }, choosing.row.description),
     h(Box, { flexDirection: "column", marginTop: 1 },
-      ...choosing.row.choices.map((choice, choiceIndex) => h(Text, {
+      ...choosing.choices.map((choice, choiceIndex) => h(Text, {
         key: choice,
         bold: choiceIndex === choosing.index,
         inverse: choiceIndex === choosing.index,
@@ -333,7 +304,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   if (editing) return h(
     Box,
     { flexDirection: "column", borderStyle: "round", borderColor: colorEnabled ? "cyan" : undefined, paddingX: 2, paddingY: 1, width: "100%" },
-    h(Text, { bold: true, ...color(colorEnabled, "cyan") }, "✦ CODEKEEPER  ·  EDIT SETTING"),
+    h(Text, { bold: true, ...color(colorEnabled, "cyan") }, "CODEKEEPER  ·  EDIT SETTING"),
     h(Text, { bold: true }, editing.row.label),
     h(Text, { dimColor: true }, fitLine(editing.row.description, lineWidth)),
     h(Box, { borderStyle: "single", paddingX: 1, marginTop: 1 }, h(Text, null, fitLine(editing.text, Math.max(8, lineWidth - 4))), h(Text, color(colorEnabled, "cyan"), "▌")),
@@ -354,7 +325,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       width: "100%"
     },
     h(Box, compact ? { flexDirection: "column" } : { justifyContent: "space-between" },
-      h(Text, { bold: true, ...color(colorEnabled, "cyan") }, compact ? "✦ CODEKEEPER SETTINGS" : "✦ CODEKEEPER"),
+      h(Text, { bold: true, ...color(colorEnabled, "cyan") }, compact ? "CODEKEEPER SETTINGS" : "CODEKEEPER"),
       h(Text, { bold: true }, advanced ? "[ STANDARD ]  [● ADVANCED ]" : "[● STANDARD ]  [ ADVANCED ]")
     ),
     h(Text, { bold: true }, "Choose how Codekeeper works"),
@@ -375,7 +346,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     h(Box, { flexDirection: "column", borderStyle: compact ? undefined : "single", borderColor: colorEnabled ? "gray" : undefined, paddingX: compact ? 0 : 1, marginTop: 1 },
       compact ? null : h(Text, { bold: true }, selectedRow.label),
       h(Text, { dimColor: true }, fitLine(selectedRow.description, Math.max(8, lineWidth - 4))),
-      h(Text, color(colorEnabled, selectedRow.warning ? "yellow" : "cyan"), fitLine(`${selectedRow.warning ? "⚠ " : ""}${controlText(selectedRow)}`, Math.max(8, lineWidth - 4)))
+      h(Text, color(colorEnabled, "cyan"), fitLine(controlText(selectedRow), Math.max(8, lineWidth - 4)))
     ),
     notice ? h(Text, color(colorEnabled, "cyan"), notice) : null,
     error ? h(Text, color(colorEnabled, "red"), error) : null,

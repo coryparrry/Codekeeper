@@ -221,7 +221,7 @@ async function assertPagedScreenFits(tui, { kind, columns, rows, markers }) {
 
 function assertNamedPhase(tui, phase) {
   const frame = tui.output.lastSemanticFrame();
-  assert.ok(semanticText(frame).startsWith(`✦ CODEKEEPER ${phase.toUpperCase()} `), `missing ${phase} phase label`);
+  assert.ok(semanticText(frame).startsWith(`CODEKEEPER ${phase.toUpperCase()} `), `missing ${phase} phase label`);
   assert.doesNotMatch(frame, /\b(?:STEP|PHASE)\s+\d+\b/i);
 }
 
@@ -693,28 +693,22 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
     assertNamedPhase(tui, "repository");
     await tui.send("\r");
     await tui.waitForText("Choose how Codekeeper works");
-    const toggleWithWarning = async () => {
-      await tui.send(" ");
-      await tui.waitForText("CHECK THIS CHANGE");
-      await tui.send("\u001b[D");
-      await tui.send("\r");
-    };
-    await toggleWithWarning();
+    await tui.send(" ");
     await tui.send("j");
-    await toggleWithWarning();
+    await tui.send(" ");
     await tui.send("j");
-    await toggleWithWarning();
+    await tui.send(" ");
     await tui.send("j");
-    await toggleWithWarning();
+    await tui.send(" ");
     for (let index = 0; index < 27; index += 1) await tui.send("j");
     await tui.send("\r");
     await tui.waitForText("CHOOSE A VALUE");
     await tui.send("j");
     await tui.send("j");
     await tui.send("\r");
-    await tui.waitForText("CHECK THIS CHANGE");
-    await tui.send("\u001b[D");
+    await tui.send("j");
     await tui.send("\r");
+    await tui.waitForText("Type another model ID");
     await tui.send("j");
     await tui.send("\r");
     await tui.waitForText("issue triager model ID");
@@ -761,6 +755,50 @@ test("the Settings command centre resets a repository profile override", async (
   const result = await edited;
   assert.equal(result.profileSources.fixer, "package");
   assert.equal(result.profiles.fixer, bundle.contents[AGENT_PROFILES.fixer.asset]);
+});
+
+test("Settings applies changes directly and exposes current provider model choices", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  const settings = createEditableSettings({ policy, modes: ["review", "maintain"], enabled: true, profiles });
+  const tui = await createTuiHarness(t);
+  const edited = tui.prompt.editSettings({ settings, baselinePolicy: policy, repository: "acme/widget" });
+  await tui.waitForText("Choose how Codekeeper works");
+  assert.match(tui.output.lastSemanticFrame(), /⚡ Pull request review/);
+  assert.doesNotMatch(tui.output.lastSemanticFrame(), /[⏱🔎🛠📌🔀🤖📝🏷📦✦]/u);
+
+  await tui.send(" ");
+  await tui.waitForText("Updated Pull request review");
+  await tui.send(" ");
+  assert.doesNotMatch(tui.output.transcript(), /CHECK THIS CHANGE/);
+
+  const standard = settingsRows(settings);
+  const modelIndex = standard.findIndex((row) => row.id === "policy:ai.agents.review.model");
+  assert.ok(modelIndex > 0);
+  for (let index = 0; index < modelIndex; index += 1) await tui.send("j");
+  await tui.send("\r");
+  await tui.waitForText("gpt-5.5-pro");
+  assert.match(tui.output.lastSemanticFrame(), /gpt-5\.6-sol.*gpt-5\.4-mini.*gpt-5\.3-codex.*Type another model ID/s);
+  await tui.send("\u001b");
+
+  await tui.send("k");
+  await tui.send("\r");
+  await tui.waitForText("CHOOSE A VALUE");
+  await tui.send("j");
+  await tui.send("\r");
+  await tui.send("j");
+  await tui.send("\r");
+  await tui.waitForText("deepseek-v4-pro");
+  assert.match(tui.output.lastSemanticFrame(), /deepseek-v4-flash.*deepseek-v4-pro.*Type another model ID/s);
+  await tui.send("j");
+  await tui.send("\r");
+  await tui.send("G");
+  await tui.send("\r");
+
+  const result = await edited;
+  assert.equal(result.policy.ai.agents.review.provider, "deepseek");
+  assert.equal(result.policy.ai.agents.review.model, "deepseek-v4-pro");
 });
 
 test("Standard and Advanced choices expose their real editors inside the TUI", async (t) => {

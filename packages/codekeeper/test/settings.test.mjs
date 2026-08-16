@@ -38,7 +38,20 @@ test("standard and advanced settings expose only editable choices with clear con
   assert.equal(row(settings, "policy:automation.reviewFeedbackTriage").kind, "boolean");
   assert.deepEqual(row(settings, "policy:ai.agents.review.provider").choices, ["openai", "deepseek", "openrouter"]);
   assert.deepEqual(row(settings, "policy:ai.agents.review.effort").choices, ["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
-  assert.equal(row(settings, "policy:ai.agents.review.model").kind, "string");
+  const openaiModel = row(settings, "policy:ai.agents.review.model");
+  assert.equal(openaiModel.kind, "model");
+  assert.deepEqual(openaiModel.choices, [
+    "gpt-5.6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.5",
+    "gpt-5.5-pro",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-5.3-codex"
+  ]);
+  assert.equal(standard.some((candidate) => Object.hasOwn(candidate, "warning")), false);
   assert.equal(row(settings, "policy:ai.agents.review.modelSettings", true).kind, "json");
   assert.equal(advanced.some((candidate) => candidate.id === "policy:ai.providers"), false);
   assert.equal(advanced.some((candidate) => candidate.readOnly), false);
@@ -135,6 +148,7 @@ test("changing a provider selects a compatible default model", async () => {
 
   const deepseek = setSetting(settings, provider, "deepseek");
   assert.equal(deepseek.policy.ai.agents.review.model, "deepseek-v4-flash");
+  assert.deepEqual(row(deepseek, "policy:ai.agents.review.model").choices, ["deepseek-v4-flash", "deepseek-v4-pro"]);
   assert.deepEqual(row(deepseek, "policy:ai.agents.review.effort").choices, ["none"]);
   assert.deepEqual(row(deepseek, "policy:ai.agents.review.workspace.effort").choices, ["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
 
@@ -357,7 +371,7 @@ test("settings preserve runtime-valid optional fields and display-name limits", 
   validateEditableSettings(optional, policy);
   assert.deepEqual(optional.policy.projectInvariants, []);
   const workspaceModel = row(optional, "policy:ai.agents.review.workspace.model");
-  assert.equal(workspaceModel.kind, "string");
+  assert.equal(workspaceModel.kind, "model");
   assert.equal(parseSettingValue(workspaceModel, "gpt-5.6-sol"), "gpt-5.6-sol");
 });
 

@@ -101,7 +101,7 @@ function Shell({ step, title, description = [], footer, colorEnabled, compactDet
       h(
         Box,
         compact ? { flexDirection: "column" } : { justifyContent: "space-between" },
-        h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, "✦ CODEKEEPER"),
+        h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, "CODEKEEPER"),
         step ? h(Text, { bold: true, ...colorProps(colorEnabled, "magenta") }, step.toUpperCase()) : null
       ),
       h(Text, { bold: true }, title),
@@ -586,10 +586,10 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     pageKind === "setup" ? h(
       Box,
       { flexDirection: "column" },
-      h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, `📦 ${data.repository}`),
+      h(Text, { bold: true, ...colorProps(colorEnabled, "cyan") }, data.repository),
       h(Text, { dimColor: true }, data.identity),
       section("⚡ Workflows", data.workflows),
-      section("🤖 Models", data.models)
+      section("Models", data.models)
     ) : null,
     pageKind === "credentials" ? h(
       Box,
