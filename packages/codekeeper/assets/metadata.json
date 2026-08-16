@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "repository": "coryparry/Codekeeper",
-    "commit": "46d5eef7a4d1a73f4fd3d1962713489e32fd8f68"
+    "commit": "a562cef322a2ee4e3395bb2d3528995e403f93ba"
   },
   "assets": {
     "agents/pr-reviewer.md": {
@@ -34,6 +34,11 @@
       "sha256": "59a30700d883a117100b31f2a16675f48e8ba9eafe66d3b6e2a34dcce1aa4a10",
       "bytes": 9742,
       "sourcePath": ".github/codekeeper.json#preset=openai"
+    },
+    "repository/README.md": {
+      "sha256": "ba6502612135abf06646bb99179553658dec1464b89b9fa0a7bd7ddd944dc3e5",
+      "bytes": 584,
+      "sourcePath": "packages/codekeeper/assets/repository/README.md"
     },
     "workflows/assistant.yml": {
       "sha256": "9fe96f04a773c1263c71578558238d1e2dc2d9f8efe8e1681f088a98204e09ef",

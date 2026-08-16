@@ -12,11 +12,10 @@ import {
   MODES,
   POLICY_TARGET,
   RELEASE_MANIFEST_TARGET,
-  RELEASE_MANAGED_WORKFLOW_TARGETS,
-  RELEASE_WORKFLOW_ASSETS,
   SETUP_BRANCH,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
+import { RELEASE_MANAGED_CATALOG } from "./repository-artifacts.mjs";
 import { InstallerError } from "./errors.mjs";
 import { requireSuccess } from "./command-runner.mjs";
 import { upgradePolicy } from "./policy.mjs";
@@ -26,13 +25,15 @@ const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const GITHUB_WORKFLOW_REFERENCE = /(?:\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-|codekeeper@[0-9]|\.\/\.github\/workflows\/codekeeper-)/i;
-const RELEASE_MANAGED_WORKFLOW = new Set(RELEASE_MANAGED_WORKFLOW_TARGETS);
 
 function sha256(source) {
   return createHash("sha256").update(source).digest("hex");
 }
 
-export function parseReleaseManifest(source) {
+export function parseReleaseManifest(
+  source,
+  { artifactCatalog = RELEASE_MANAGED_CATALOG } = {},
+) {
   let manifest;
   try {
     manifest = JSON.parse(source);
@@ -47,8 +48,8 @@ export function parseReleaseManifest(source) {
     || manifest?.source?.repository !== SOURCE_REPOSITORY
     || !FULL_SHA.test(manifest?.source?.commit)
     || !managedEntries.length
-    || managedEntries.length > 32
-    || managedEntries.some(([target, digest]) => !RELEASE_MANAGED_WORKFLOW.has(target) || !SHA256.test(digest))
+    || managedEntries.length > artifactCatalog.targets.length
+    || managedEntries.some(([target, digest]) => !artifactCatalog.artifactForTarget(target) || !SHA256.test(digest))
   ) {
     throw new InstallerError("The existing Codekeeper release manifest is invalid.", { code: "EXISTING_INSTALLATION_INVALID" });
   }
@@ -180,10 +181,91 @@ function caseEntry(entries, expected) {
   return entries.find((entry) => entry.name.toLowerCase() === expected.toLowerCase());
 }
 
-export async function assertNoInstallationFiles(root, {
-  fsImpl = { lstat, readdir, readFile },
-  allowExisting = false
-} = {}) {
+async function readExactManagedTarget(
+  root,
+  target,
+  fsImpl,
+  { required = false } = {},
+) {
+  const parts = target.split("/");
+  let parent = root;
+  for (const [index, part] of parts.entries()) {
+    const entries = await safeDirectoryEntries(fsImpl, parent);
+    const entry = caseEntry(entries, part);
+    if (!entry) {
+      if (!required) return null;
+      throw new InstallerError(
+        `The managed Codekeeper artifact ${target} is missing.`,
+        { code: "EXISTING_INSTALLATION_INVALID" },
+      );
+    }
+    const final = index === parts.length - 1;
+    if (
+      entry.name !== part ||
+      entry.isSymbolicLink() ||
+      (final ? !entry.isFile() : !entry.isDirectory())
+    ) {
+      throw new InstallerError(
+        `The managed Codekeeper artifact ${target} has a case collision or unsafe file type.`,
+        { code: "PATH_COLLISION" },
+      );
+    }
+    parent = path.join(parent, entry.name);
+  }
+  return fsImpl.readFile(parent, "utf8");
+}
+
+async function assertManagedArtifacts(
+  root,
+  releaseManifest,
+  fsImpl,
+  artifactCatalog,
+) {
+  const managedFiles = releaseManifest?.managedFiles ?? {};
+  for (const [target, digest] of Object.entries(managedFiles)) {
+    const artifact = artifactCatalog.artifactForTarget(target);
+    const source = await readExactManagedTarget(root, target, fsImpl, {
+      required: true,
+    });
+    if (artifact.validation === "caller") {
+      if (!isInstalledCodekeeperWorkflow(source, artifact.callerMode)) {
+        throw new InstallerError(
+          `Managed caller ${target} is not an installed Codekeeper workflow.`,
+          { code: "EXISTING_INSTALLATION_INVALID" },
+        );
+      }
+      continue;
+    }
+    if (sha256(source) !== digest) {
+      throw new InstallerError(
+        `Managed artifact ${target} no longer matches its installation manifest.`,
+        { code: "EXISTING_INSTALLATION_INVALID" },
+      );
+    }
+  }
+  for (const artifact of artifactCatalog.artifacts) {
+    if (
+      artifact.validation !== "digest" ||
+      Object.hasOwn(managedFiles, artifact.target)
+    )
+      continue;
+    if (await readExactManagedTarget(root, artifact.target, fsImpl)) {
+      throw new InstallerError(
+        `The release-owned path ${artifact.target} is not recorded by this installation.`,
+        { code: "PATH_COLLISION" },
+      );
+    }
+  }
+}
+
+export async function assertNoInstallationFiles(
+  root,
+  {
+    fsImpl = { lstat, readdir, readFile },
+    allowExisting = false,
+    artifactCatalog = RELEASE_MANAGED_CATALOG,
+  } = {},
+) {
   const rootEntries = await safeDirectoryEntries(fsImpl, root);
   const githubEntry = caseEntry(rootEntries, ".github");
   if (!githubEntry) return;
@@ -208,9 +290,25 @@ export async function assertNoInstallationFiles(root, {
     if (releaseManifestEntry.name !== releaseManifestName || releaseManifestEntry.isSymbolicLink() || !releaseManifestEntry.isFile()) {
       throw new InstallerError("A case-colliding or symlinked Codekeeper release manifest exists.", { code: "PATH_COLLISION" });
     }
-    if (!allowExisting) throw new InstallerError("A Codekeeper release manifest already exists.", { code: "EXISTING_INSTALLATION" });
-    releaseManifest = parseReleaseManifest(await fsImpl.readFile(path.join(githubRoot, releaseManifestEntry.name), "utf8"));
+    if (!allowExisting)
+      throw new InstallerError(
+        "A Codekeeper release manifest already exists.",
+        { code: "EXISTING_INSTALLATION" },
+      );
+    releaseManifest = parseReleaseManifest(
+      await fsImpl.readFile(
+        path.join(githubRoot, releaseManifestEntry.name),
+        "utf8",
+      ),
+      { artifactCatalog },
+    );
   }
+  await assertManagedArtifacts(
+    root,
+    releaseManifest,
+    fsImpl,
+    artifactCatalog,
+  );
 
   const codekeeperEntry = caseEntry(githubEntries, "codekeeper");
   if (codekeeperEntry) {
@@ -250,21 +348,24 @@ export async function assertNoInstallationFiles(root, {
 
   const workflowsRoot = path.join(githubRoot, "workflows");
   const workflowEntries = await safeDirectoryEntries(fsImpl, workflowsRoot);
-  const knownWorkflowNames = new Map([
-    ...MODE_IDS.map((mode) => {
-      const name = path.basename(MODES[mode].target);
-      return [name.toLowerCase(), { mode, name }];
-    }),
-    [path.basename(ASSISTANT_WORKFLOW.target).toLowerCase(), { mode: ASSISTANT_WORKFLOW.id, name: path.basename(ASSISTANT_WORKFLOW.target) }]
-  ]);
-  const releaseWorkflowNames = new Map(RELEASE_WORKFLOW_ASSETS.map((workflow) => [
-    path.basename(workflow.target).toLowerCase(),
-    { name: path.basename(workflow.target), target: workflow.target }
-  ]));
-  const releasedWorkflowNames = new Map(Object.keys(releaseManifest?.managedFiles ?? {}).map((target) => [
-    path.basename(target).toLowerCase(),
-    { name: path.basename(target), digest: releaseManifest.managedFiles[target] }
-  ]));
+  const knownWorkflowNames = new Map(artifactCatalog.artifacts
+    .filter((artifact) => artifact.validation === "caller" && artifact.target.startsWith(".github/workflows/"))
+    .map((artifact) => [
+      path.basename(artifact.target).toLowerCase(),
+      { name: path.basename(artifact.target), artifact }
+    ]));
+  const releasedWorkflowNames = new Map(
+    Object.keys(releaseManifest?.managedFiles ?? {})
+      .filter((target) => target.startsWith(".github/workflows/"))
+      .map((target) => [
+        path.basename(target).toLowerCase(),
+        {
+          name: path.basename(target),
+          digest: releaseManifest.managedFiles[target],
+          artifact: artifactCatalog.artifactForTarget(target),
+        },
+      ]),
+  );
   for (const entry of workflowEntries) {
     const knownWorkflow = knownWorkflowNames.get(entry.name.toLowerCase());
     if (knownWorkflow) {
@@ -273,22 +374,8 @@ export async function assertNoInstallationFiles(root, {
       }
       if (!allowExisting) throw new InstallerError("A Codekeeper workflow already exists.", { code: "EXISTING_INSTALLATION" });
       const source = await fsImpl.readFile(path.join(workflowsRoot, entry.name), "utf8");
-      if (!isInstalledCodekeeperWorkflow(source, knownWorkflow.mode)) {
+      if (!isInstalledCodekeeperWorkflow(source, knownWorkflow.artifact.callerMode)) {
         throw new InstallerError(`Existing workflow ${entry.name} is not an installed Codekeeper caller.`, { code: "PATH_COLLISION" });
-      }
-      releasedWorkflowNames.delete(entry.name.toLowerCase());
-      continue;
-    }
-    const releaseWorkflow = releaseWorkflowNames.get(entry.name.toLowerCase());
-    if (releaseWorkflow) {
-      if (entry.name !== releaseWorkflow.name || entry.isSymbolicLink() || !entry.isFile()) {
-        throw new InstallerError("A case-colliding or symlinked Codekeeper runtime workflow exists.", { code: "PATH_COLLISION" });
-      }
-      if (!allowExisting) throw new InstallerError("A Codekeeper runtime workflow already exists.", { code: "EXISTING_INSTALLATION" });
-      const expectedDigest = releaseManifest?.managedFiles?.[releaseWorkflow.target];
-      const source = await fsImpl.readFile(path.join(workflowsRoot, entry.name), "utf8");
-      if (!expectedDigest || sha256(source) !== expectedDigest) {
-        throw new InstallerError(`Runtime workflow ${entry.name} does not match its installation manifest.`, { code: "EXISTING_INSTALLATION_INVALID" });
       }
       releasedWorkflowNames.delete(entry.name.toLowerCase());
       continue;
@@ -297,10 +384,6 @@ export async function assertNoInstallationFiles(root, {
     if (releasedWorkflow) {
       if (entry.name !== releasedWorkflow.name || entry.isSymbolicLink() || !entry.isFile()) {
         throw new InstallerError("A case-colliding or symlinked released Codekeeper workflow exists.", { code: "PATH_COLLISION" });
-      }
-      const source = await fsImpl.readFile(path.join(workflowsRoot, entry.name), "utf8");
-      if (!GITHUB_WORKFLOW_REFERENCE.test(source) || sha256(source) !== releasedWorkflow.digest) {
-        throw new InstallerError(`Released workflow ${entry.name} no longer matches its installation manifest.`, { code: "EXISTING_INSTALLATION_INVALID" });
       }
       releasedWorkflowNames.delete(entry.name.toLowerCase());
       continue;
@@ -315,25 +398,46 @@ export async function assertNoInstallationFiles(root, {
       throw new InstallerError(`Existing workflow ${entry.name} already invokes Codekeeper.`, { code: "EXISTING_INSTALLATION" });
     }
   }
-  if (releasedWorkflowNames.size) {
-    throw new InstallerError("The existing Codekeeper release manifest references a missing managed workflow.", { code: "EXISTING_INSTALLATION_INVALID" });
+}
+
+async function installedCaller(root, mode, releaseManifest, fsImpl, artifactCatalog) {
+  const currentArtifact = artifactCatalog.callerArtifactForMode(mode);
+  if (!currentArtifact) return null;
+  const targets = [
+    currentArtifact.target,
+    ...Object.keys(releaseManifest?.managedFiles ?? {}).filter((target) => {
+      const artifact = artifactCatalog.artifactForTarget(target);
+      return artifact?.validation === "caller"
+        && artifact.callerMode === mode
+        && target !== currentArtifact.target;
+    })
+  ];
+  const installed = [];
+  for (const target of targets) {
+    const source = await readExactManagedTarget(root, target, fsImpl);
+    if (source !== null) installed.push({ target, source });
   }
+  if (installed.length > 1) {
+    throw new InstallerError(`The existing installation has multiple ${mode} caller workflows.`, { code: "EXISTING_INSTALLATION_INVALID" });
+  }
+  return installed[0] ?? null;
 }
 
 export async function inspectInstallationFiles(root, {
-  fsImpl = { lstat, readdir, readFile }
+  fsImpl = { lstat, readdir, readFile },
+  artifactCatalog = RELEASE_MANAGED_CATALOG
 } = {}) {
   const policyPath = path.join(root, ...POLICY_TARGET.split("/"));
   const policyStat = await exists(fsImpl, policyPath);
   if (!policyStat) {
-    await assertNoInstallationFiles(root, { fsImpl });
+    await assertNoInstallationFiles(root, { fsImpl, artifactCatalog });
     return null;
   }
-  await assertNoInstallationFiles(root, { fsImpl, allowExisting: true });
+  await assertNoInstallationFiles(root, { fsImpl, allowExisting: true, artifactCatalog });
   const releaseManifestPath = path.join(root, ...RELEASE_MANIFEST_TARGET.split("/"));
   const releaseManifestStat = await exists(fsImpl, releaseManifestPath);
   const releaseManifestSource = releaseManifestStat ? await fsImpl.readFile(releaseManifestPath, "utf8") : null;
-  const releaseManifest = releaseManifestSource ? parseReleaseManifest(releaseManifestSource) : null;
+  const releaseManifest = releaseManifestSource ? parseReleaseManifest(releaseManifestSource, { artifactCatalog }) : null;
   let policy;
   const installedPolicySource = await fsImpl.readFile(policyPath, "utf8");
   try {
@@ -366,40 +470,36 @@ export async function inspectInstallationFiles(root, {
     contents[target] = await fsImpl.readFile(filePath, "utf8");
   }
   const modes = [];
+  const callerSources = {};
   for (const mode of MODE_IDS) {
-    const target = MODES[mode].target;
-    const filePath = path.join(root, ...target.split("/"));
-    if (!await exists(fsImpl, filePath)) continue;
+    const caller = await installedCaller(root, mode, releaseManifest, fsImpl, artifactCatalog);
+    if (!caller) continue;
     modes.push(mode);
-    contents[target] = await fsImpl.readFile(filePath, "utf8");
+    contents[caller.target] = caller.source;
+    callerSources[mode] = caller.source;
   }
   if (!modes.length) throw new InstallerError("The existing installation has no Codekeeper workflows.", { code: "EXISTING_INSTALLATION_INVALID" });
-  if (contents[MODES.review.target]) {
-    policy.automation.automaticPrReview = callerBoolean(contents[MODES.review.target], "auto_review") ?? policy.automation.automaticPrReview;
-    policy.automation.reviewFeedbackTriage = callerBoolean(contents[MODES.review.target], "feedback_triage") ?? policy.automation.reviewFeedbackTriage;
+  if (callerSources.review) {
+    policy.automation.automaticPrReview = callerBoolean(callerSources.review, "auto_review") ?? policy.automation.automaticPrReview;
+    policy.automation.reviewFeedbackTriage = callerBoolean(callerSources.review, "feedback_triage") ?? policy.automation.reviewFeedbackTriage;
   }
-  if (contents[MODES.issues.target]) {
-    policy.automation.issueTriage = callerBoolean(contents[MODES.issues.target], "auto_triage") ?? policy.automation.issueTriage;
+  if (callerSources.issues) {
+    policy.automation.issueTriage = callerBoolean(callerSources.issues, "auto_triage") ?? policy.automation.issueTriage;
   }
-  if (contents[MODES.maintain.target]) {
-    policy.automation.maintenanceSchedule = callerSchedule(contents[MODES.maintain.target]) ?? policy.automation.maintenanceSchedule;
+  if (callerSources.maintain) {
+    policy.automation.maintenanceSchedule = callerSchedule(callerSources.maintain) ?? policy.automation.maintenanceSchedule;
   }
-  const assistantPath = path.join(root, ...ASSISTANT_WORKFLOW.target.split("/"));
-  if (await exists(fsImpl, assistantPath)) {
-    contents[ASSISTANT_WORKFLOW.target] = await fsImpl.readFile(assistantPath, "utf8");
-    policy.automation.ownerRequests = callerBoolean(contents[ASSISTANT_WORKFLOW.target], "owner_requests") ?? policy.automation.ownerRequests;
+  const assistantCaller = await installedCaller(root, ASSISTANT_WORKFLOW.id, releaseManifest, fsImpl, artifactCatalog);
+  if (assistantCaller) {
+    contents[assistantCaller.target] = assistantCaller.source;
+    policy.automation.ownerRequests = callerBoolean(assistantCaller.source, "owner_requests") ?? policy.automation.ownerRequests;
   } else {
-    const legacyOwnerRequests = [contents[MODES.issues.target], contents[MODES.fix.target]]
+    const legacyOwnerRequests = [callerSources.issues, callerSources.fix]
       .filter(Boolean)
       .map((source) => callerBoolean(source, "owner_requests"))
       .filter((value) => typeof value === "boolean");
     if (legacyOwnerRequests.includes(false)) policy.automation.ownerRequests = false;
     else if (legacyOwnerRequests.includes(true)) policy.automation.ownerRequests = true;
-  }
-  for (const workflow of RELEASE_WORKFLOW_ASSETS) {
-    const workflowPath = path.join(root, ...workflow.target.split("/"));
-    if (!await exists(fsImpl, workflowPath)) continue;
-    contents[workflow.target] = await fsImpl.readFile(workflowPath, "utf8");
   }
   for (const target of Object.keys(releaseManifest?.managedFiles ?? {})) {
     if (contents[target] !== undefined) continue;

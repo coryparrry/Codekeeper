@@ -14,7 +14,6 @@ import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
   APP_SECRET,
-  ASSET_KEYS,
   DEEPSEEK_SECRET,
   MODE_IDS,
   MODEL_OPTIONS,
@@ -28,6 +27,7 @@ import {
   SOURCE_REPOSITORY,
   TRACE_SECRET
 } from "../src/constants.mjs";
+import { ASSET_KEYS } from "../src/repository-artifacts.mjs";
 import {
   appRegistrationUrl,
   buildInstallPlan,
@@ -430,6 +430,7 @@ test("renderInstallFiles omits packaged profiles unless an explicit repository o
     ".github/workflows/codekeeper-runtime-assistant.yml",
     ".github/workflows/codekeeper-runtime-review.yml",
     ".github/workflows/codekeeper-runtime-issues.yml",
+    ".github/codekeeper/README.md",
     ".github/codekeeper-release.json"
   ]);
   for (const file of files) {
@@ -603,6 +604,7 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/workflows/codekeeper-runtime-assistant.yml",
     ".github/workflows/codekeeper-runtime-review.yml",
     ".github/workflows/codekeeper-runtime-maintain.yml",
+    ".github/codekeeper/README.md",
     ".github/codekeeper-release.json"
   ]);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [

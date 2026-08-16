@@ -4,7 +4,7 @@ export {
   PACKAGE_VERSION,
 } from "./package-identity.mjs";
 export const MINIMUM_NODE_MAJOR = 22;
-export const SOURCE_COMMIT = "46d5eef7a4d1a73f4fd3d1962713489e32fd8f68";
+export const SOURCE_COMMIT = "a562cef322a2ee4e3395bb2d3528995e403f93ba";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -90,11 +90,6 @@ export const RELEASE_WORKFLOW_ASSETS = Object.freeze([
   PACKAGE_BOOTSTRAP_WORKFLOW,
   ...RUNTIME_WORKFLOW_IDS.map((id) => RUNTIME_WORKFLOWS[id])
 ]);
-export const RELEASE_MANAGED_WORKFLOW_TARGETS = Object.freeze([
-  ASSISTANT_WORKFLOW.target,
-  ...MODE_IDS.map((mode) => MODES[mode].target),
-  ...RELEASE_WORKFLOW_ASSETS.map((workflow) => workflow.target),
-]);
 export const AGENT_PROFILES = Object.freeze({
   "pr-reviewer": Object.freeze({
     id: "pr-reviewer",
@@ -176,23 +171,6 @@ export const MODEL_OPTIONS = Object.freeze({
 export const ALL_MODEL_OPTIONS = Object.freeze(Object.values(MODEL_OPTIONS).flat());
 export const POLICY_TARGET = ".github/codekeeper.json";
 export const RELEASE_MANIFEST_TARGET = ".github/codekeeper-release.json";
-export const KNOWN_TARGETS = Object.freeze([
-  POLICY_TARGET,
-  RELEASE_MANIFEST_TARGET,
-  ASSISTANT_WORKFLOW.target,
-  ...RELEASE_WORKFLOW_ASSETS.map((workflow) => workflow.target),
-  ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].target),
-  ...MODE_IDS.map((mode) => MODES[mode].target)
-]);
-export const ASSET_KEYS = Object.freeze([
-  "policies/mixed.json",
-  "policies/openai.json",
-  ASSISTANT_WORKFLOW.asset,
-  ...RELEASE_WORKFLOW_ASSETS.map((workflow) => workflow.asset),
-  ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].asset),
-  ...MODE_IDS.map((mode) => MODES[mode].asset)
-].sort());
-
 export const APP_SECRET = "CODEKEEPER_APP_PRIVATE_KEY";
 export const TRACE_SECRET = "OPENAI_TRACE_API_KEY";
 export const OPENAI_SECRET = "OPENAI_API_KEY";

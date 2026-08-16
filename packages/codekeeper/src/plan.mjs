@@ -4,7 +4,6 @@ import {
   AGENT_PROFILES,
   ALL_MODEL_OPTIONS,
   APP_SECRET,
-  ASSISTANT_WORKFLOW,
   BOT_LOGIN_VARIABLE,
   CAPABILITIES,
   CAPABILITY_IDS,
@@ -19,7 +18,6 @@ import {
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
   RELEASE_MANIFEST_TARGET,
-  RELEASE_WORKFLOW_ASSETS,
   SECRET_PURPOSES,
   SETUP_BRANCH,
   SETUP_COMMIT_MESSAGE,
@@ -29,6 +27,7 @@ import {
 import { renderInstallFiles, sha256 } from "./assets.mjs";
 import { InstallerError } from "./errors.mjs";
 import { upgradePolicy } from "./policy.mjs";
+import { repositoryArtifactForTarget } from "./repository-artifacts.mjs";
 import { createEditableSettings, normalizeProfileSettings, settingsAnswers, validateEditableSettings } from "./settings.mjs";
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -218,21 +217,19 @@ export function appRegistrationUrl({ repository, displayName, ownerType = "User"
 }
 
 export function documentMap(files) {
-  const releaseWorkflows = new Map(RELEASE_WORKFLOW_ASSETS.map((workflow) => [workflow.target, workflow.description]));
-  return files.map((file) => Object.freeze({
-    path: file.path,
-    purpose: file.delete === true
-      ? "Remove this installed workflow"
-      : file.path === RELEASE_MANIFEST_TARGET
-        ? "Release version and managed generated-file inventory"
-      : file.path.endsWith("codekeeper.json")
-      ? "Policy, model choices, protected paths, and startup controls"
-      : AGENT_PROFILES[AGENT_PROFILE_IDS.find((profile) => AGENT_PROFILES[profile].target === file.path)]?.purpose
-        ?? (file.path === ASSISTANT_WORKFLOW.target ? ASSISTANT_WORKFLOW.description : null)
-        ?? releaseWorkflows.get(file.path)
-        ?? MODES[MODE_IDS.find((mode) => MODES[mode].target === file.path)]?.label
-        ?? "Codekeeper setup"
-  }));
+  return files.map((file) => {
+    const artifact = repositoryArtifactForTarget(file.path);
+    return Object.freeze({
+      path: file.path,
+      purpose: file.delete === true
+        ? artifact
+          ? `Remove this release-owned artifact. ${artifact.purpose}`
+          : "Remove this retired Codekeeper artifact"
+        : file.path === RELEASE_MANIFEST_TARGET
+          ? "Release version and managed generated-file inventory"
+          : (artifact?.purpose ?? "Codekeeper setup")
+    });
+  });
 }
 
 export function workflowMap(modes) {
@@ -461,6 +458,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     }
     for (const mode of installation.modes.filter((mode) => !modes.includes(mode))) {
       const target = MODES[mode].target;
+      if (!Object.hasOwn(installation.contents, target)) continue;
       changedFiles.push({
         path: target,
         contents: null,
