@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_PROFILE_BUNDLE_FILE, agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
 import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
-import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges } from "../src/lib/git.mjs";
+import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges, runValidationCommands, validationEnvironment } from "../src/lib/git.mjs";
 import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
 import { validateFrozenReviewFeedback } from "../src/lib/validate.mjs";
 
@@ -35,6 +35,10 @@ function digest(value) {
 
 function bundle(root, name = "bundle") {
   return `${root}-${name}`;
+}
+
+function shellLiteral(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
 function closingPullRequestsResponse(nodes = []) {
@@ -132,6 +136,62 @@ async function createRepository() {
   run("git", ["commit", "-qm", "initial"], root);
   return root;
 }
+
+test("validation commands receive a disposable home and a credential-free direct parent", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-boundary-test-"));
+  const homeRecord = path.join(root, "validation-home");
+  const rustupHome = path.join(root, "rustup");
+  const savedEnvironment = Object.fromEntries(
+    ["HOME", "RUSTUP_HOME"].map((name) => [name, process.env[name]])
+  );
+  await mkdir(rustupHome);
+  process.env.RUSTUP_HOME = rustupHome;
+  try {
+    const command = [
+      'test -n "$HOME"',
+      `test "$HOME" != ${shellLiteral(savedEnvironment.HOME ?? "")}`,
+      `test "$RUSTUP_HOME" = ${shellLiteral(await realpath(rustupHome))}`,
+      `if test -r "/proc/$PPID/environ"; then ! tr '\\0' '\\n' < "/proc/$PPID/environ" | cut -d= -f1 | grep -E '(^|_)(TOKEN|API_KEY|PRIVATE_KEY|PAT|SECRET)($|_)'; fi`,
+      `printf '%s' "$HOME" > ${shellLiteral(homeRecord)}`
+    ].join(" && ");
+    const results = await runValidationCommands([command], root);
+    assert.equal(results[0].success, true);
+    const disposableHome = await readFile(homeRecord, "utf8");
+    assert.notEqual(disposableHome, savedEnvironment.HOME);
+    await assert.rejects(lstat(disposableHome), { code: "ENOENT" });
+  } finally {
+    for (const [name, value] of Object.entries(savedEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("validation environment admits only verified Rust toolchain state", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-rustup-test-"));
+  const rustupHome = path.join(root, "rustup");
+  const link = path.join(root, "rustup-link");
+  await mkdir(rustupHome);
+  await symlink(rustupHome, link);
+  try {
+    const valid = await validationEnvironment({
+      PATH: "/usr/bin:/bin",
+      HOME: "/private/home",
+      RUSTUP_HOME: rustupHome,
+      OPENAI_API_KEY: "must-not-pass"
+    });
+    assert.deepEqual(valid, { PATH: "/usr/bin:/bin", RUSTUP_HOME: await realpath(rustupHome) });
+
+    const missing = await validationEnvironment({ PATH: "/usr/bin:/bin", RUSTUP_HOME: path.join(root, "missing") });
+    assert.deepEqual(missing, { PATH: "/usr/bin:/bin" });
+
+    const symlinked = await validationEnvironment({ PATH: "/usr/bin:/bin", RUSTUP_HOME: link });
+    assert.deepEqual(symlinked, { PATH: "/usr/bin:/bin" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("working-tree metadata preserves rename and executable-file policy inputs", async () => {
   const root = await createRepository();

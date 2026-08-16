@@ -133,8 +133,9 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
       assert.match(verify, /without OpenAI or App credentials/);
       assert.doesNotMatch(
         verify,
-        /openai\/codex-action@|create-github-app-token|secrets\./,
+        /openai\/codex-action@|create-github-app-token|secrets\.|github\.token|GITHUB_TOKEN|(?:CODEKEEPER_)?APP_PRIVATE_KEY|CODEKEEPER_(?:MODEL|TRACE|WORKSPACE)_API_KEY/,
       );
+      assert.match(verify, /permissions:\n\s+contents: read/);
       assert.match(source, /needs: \[workspace, analyze, verify\]/);
     }
 
