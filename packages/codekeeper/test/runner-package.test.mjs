@@ -356,14 +356,13 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   ], { cwd: runtimeRoot, ...npmOptions });
   const installedRuntimePaths = await import(pathToFileURL(path.join(runtimeRoot, "src", "lib", "runtime-paths.mjs")).href);
   const installedAgentProfiles = await import(pathToFileURL(path.join(runtimeRoot, "src", "lib", "agent-profiles.mjs")).href);
-  const installedBraintrust = await import(pathToFileURL(path.join(runtimeRoot, "integrations", "braintrust", "run-agent.mjs")).href);
   assert.equal(
     await realpath(installedRuntimePaths.CODEX_BIN),
     await realpath(path.join(runtimeRoot, "node_modules", "@openai", "codex", "bin", "codex.js"))
   );
-  assert.equal(typeof installedBraintrust.runBraintrustAgent, "function");
   assert.ok(await pathExists(path.join(runtimeRoot, "node_modules", "@openai", "agents")));
-  assert.ok(await pathExists(path.join(runtimeRoot, "node_modules", "braintrust")));
+  assert.equal(await pathExists(path.join(runtimeRoot, "node_modules", "@braintrust", "openai-agents")), false);
+  assert.equal(await pathExists(path.join(runtimeRoot, "node_modules", "braintrust")), false);
   const packagedProfile = await installedAgentProfiles.loadTrustedAgentProfile({
     mode: "review",
     source: installedAgentProfiles.AGENT_PROFILE_SOURCES.package,

@@ -94,10 +94,6 @@ OPENAI_API_KEY=<OpenAI coordinator/workspace key>              # Actions secret 
 DEEPSEEK_API_KEY=<DeepSeek coordinator key>                    # Actions secret for the starter issue mode
 OPENROUTER_API_KEY=<OpenRouter coordinator key>                # Actions secret when a mode uses OpenRouter
 OPENAI_TRACE_API_KEY=<dedicated OpenAI trace-export key>       # Actions secret; never a model/provider key
-BRAINTRUST_API_KEY=<dedicated Braintrust key>                  # Optional; review workflow only
-CODEKEEPER_TRACE_EXPORTER=openai                               # Optional variable: openai or braintrust
-CODEKEEPER_BRAINTRUST_PROJECT=Codekeeper                       # Optional Braintrust project variable
-CODEKEEPER_BRAINTRUST_API_URL=<regional HTTPS API URL>         # Optional Braintrust endpoint variable
 CODEKEEPER_ENABLED=false                                   # Actions variable initially
 ```
 
@@ -107,7 +103,7 @@ For the manual fallback, submit the App PEM from its file instead of pasting it 
 gh secret set CODEKEEPER_APP_PRIVATE_KEY --app actions --repo OWNER/REPOSITORY < /absolute/path/to/downloaded-private-key.pem
 ```
 
-The App token is present only in publication jobs. Maintenance and fix callers may map empty App values for `dry_run=true`; their reusable contracts do not require an App client ID or private key until `dry_run=false` selects publication, where both are checked before token minting. Review and issue-triage always publish, so their App mappings remain required. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The starter policy enables Agents SDK tracing with `includeSensitiveData=false`. OpenAI remains the default exporter. The review caller alone can select Braintrust through repository variables without changing any other mode; its Braintrust packages are installed only in that coordinator job. Never reuse a model-provider key as an observability key.
+The App token is present only in publication jobs. Maintenance and fix callers may map empty App values for `dry_run=true`; their reusable contracts do not require an App client ID or private key until `dry_run=false` selects publication, where both are checked before token minting. Review and issue-triage always publish, so their App mappings remain required. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The starter policy enables Agents SDK tracing with `includeSensitiveData=false` and exports traces through OpenAI. Never reuse a model-provider key as an observability key.
 
 ## 4. Prove the configuration before making the gate required
 
