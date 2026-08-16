@@ -70,10 +70,6 @@ jobs:
       owner_command: ${{ needs.intent.outputs.owner_command == 'true' }}
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
-      trace_exporter: ${{ vars.CODEKEEPER_TRACE_EXPORTER || 'openai' }}
-      braintrust_project: ${{ vars.CODEKEEPER_BRAINTRUST_PROJECT || 'Codekeeper' }}
-      braintrust_api_url: ${{ vars.CODEKEEPER_BRAINTRUST_API_URL || '' }}
-      braintrust_include_sensitive_data: ${{ vars.CODEKEEPER_BRAINTRUST_INCLUDE_SENSITIVE_DATA == 'true' }}
     secrets:
       # Match this secret to ai.agents.review.provider in .github/codekeeper.json.
       model_api_key: ${{ secrets.OPENAI_API_KEY }}
@@ -81,6 +77,4 @@ jobs:
       workspace_api_key: ${{ secrets.OPENAI_API_KEY }}
       # Always a separate OpenAI trace-export key, never the model-provider key.
       trace_api_key: ${{ secrets.OPENAI_TRACE_API_KEY }}
-      # Optional unless CODEKEEPER_TRACE_EXPORTER=braintrust.
-      braintrust_api_key: ${{ secrets.BRAINTRUST_API_KEY }}
       app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}

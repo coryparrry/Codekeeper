@@ -94,4 +94,4 @@ These local checks do not prove an adopter installation. Before enabling writes,
 
 Record workflow-run, issue, pull-request, review, and App-owned commit URLs as evidence. Restore `CODEKEEPER_ENABLED=false` after proof. Forks, merge queues, non-default PR targets, and GitHub Enterprise Server are outside the supported surface.
 
-The local suite does not export live traces. In an adopter run, provide the observability key for the selected exporter and keep sensitive tracing off unless the evaluation explicitly needs prompts and responses. Confirm the trace appears in OpenAI **Logs > Traces** by default, or in the configured Braintrust project for an opted-in review. Do not map a model-provider key to either trace-export credential.
+The local suite does not export live traces. In an adopter run, provide the OpenAI trace-export key and keep sensitive tracing off unless the evaluation explicitly needs prompts and responses. Confirm the trace appears in OpenAI **Logs > Traces**. Do not map a model-provider key to the trace-export credential.

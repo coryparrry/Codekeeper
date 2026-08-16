@@ -72,7 +72,7 @@ Every run selects either the packaged default or the fixed override path from th
 - Repair patches are checked again in a fresh credential-free checkout before sealing and publication.
 - Review labels, sticky comments, issue fingerprints, repair PRs, and same-PR repair commits trust only the configured GitHub App bot identity.
 - Auto-merge remains opt-in and is independently limited by author, branch, risk, tests, paths, files, changed lines, and complete frozen diff context.
-- Agents SDK tracing is enabled by the starter policy with `includeSensitiveData=false`. OpenAI remains the default exporter and requires a separate `trace_api_key`; the review caller can instead select the isolated Braintrust exporter with `CODEKEEPER_TRACE_EXPORTER=braintrust` and a dedicated `BRAINTRUST_API_KEY`.
+- Agents SDK tracing is enabled by the starter policy with `includeSensitiveData=false`. OpenAI trace export requires a separate `trace_api_key`.
 
 See [the architecture](docs/ARCHITECTURE.md) and [installation guide](INSTALL.md) for the exact boundaries.
 
@@ -100,7 +100,7 @@ node tools/codekeeper/src/cli.mjs check-config
 cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 ```
 
-The package pins its Agents SDK dependencies and requires Node.js 22 or newer locally. The reusable workflows pin Node.js, npm dependencies, and the optional Codex CLI themselves. See [evaluating Codekeeper reviews](docs/EVALUATIONS.md) for synthetic gates, Braintrust traces, repeated live GitHub runs, answer-key isolation, and aggregate scoring.
+The package pins its Agents SDK dependencies and requires Node.js 22 or newer locally. The reusable workflows pin Node.js, npm dependencies, and the optional Codex CLI themselves. See [evaluating Codekeeper reviews](docs/EVALUATIONS.md) for synthetic gates, repeated live GitHub runs, answer-key isolation, and aggregate scoring.
 
 ## Source releases
 
