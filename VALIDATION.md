@@ -26,16 +26,6 @@ cd tools/codekeeper && npm run eval:live -- --preset mixed --repeat 3
 cd tools/codekeeper && npm run eval:live -- --preset openai --repeat 3
 ```
 
-To inspect the same synthetic live scenarios in Braintrust without changing adopter or production tracing, install the isolated evaluation adapter once and run the dedicated command. The adapter replaces tracing only inside that evaluation process, captures scenario prompts and structured model responses, and flushes every trace before exit. It requires `BRAINTRUST_API_KEY` and defaults to the `CodeKeeper` project. `BRAINTRUST_PROJECT` can select another project by name, while `BRAINTRUST_PROJECT_ID` targets an existing project unambiguously and takes precedence. Provider credentials remain the same as the corresponding live gate. Do not pass any credential on the command line. For the EU data plane selected during Braintrust onboarding, also set `BRAINTRUST_API_URL=https://api-eu.braintrust.dev`:
-
-```bash
-cd tools/codekeeper
-npm run eval:braintrust:setup
-BRAINTRUST_API_URL=https://api-eu.braintrust.dev npm run eval:braintrust -- --preset openai --repeat 3
-```
-
-The synthetic adapter remains isolated under `evals/braintrust`. The verified tooling artifact also carries a minimal pinned adapter under `integrations/braintrust`; the review workflow installs it only when its trusted caller selects `trace_exporter=braintrust`. OpenAI remains the default for review and every other mode.
-
 For release-relevant response evaluation, repeat a complete GitHub review against one immutable pull-request head, retain each sealed result, and grade the runs with the answer key kept outside the adopter repository:
 
 ```bash
@@ -47,7 +37,7 @@ npm run eval:live-review -- \
   --markdown-output /secure/local/report.md
 ```
 
-See [evaluating Codekeeper reviews](docs/EVALUATIONS.md) for fixture design, repeat strategy, artifact layout, metrics, Braintrust interpretation, and the boundary between an intentional blocking gate failure and an infrastructure failure.
+See [evaluating Codekeeper reviews](docs/EVALUATIONS.md) for fixture design, repeat strategy, artifact layout, metrics, and the boundary between an intentional blocking gate failure and an infrastructure failure.
 
 For an authorized OpenAI issue-triage release decision, run the same OpenAI matrix with one candidate at a time and select the first all-pass result deliberately. These commands are evaluation overrides only; they do not change the shipped policy:
 
