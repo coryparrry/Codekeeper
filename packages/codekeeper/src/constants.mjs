@@ -4,7 +4,7 @@ export {
   PACKAGE_VERSION,
 } from "./package-identity.mjs";
 export const MINIMUM_NODE_MAJOR = 22;
-export const SOURCE_COMMIT = "c2cee237e11af2d247b87526ff66afa4c46f522f";
+export const SOURCE_COMMIT = "ec1a9192572934ee544c4ac70badef9fd967763d";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
