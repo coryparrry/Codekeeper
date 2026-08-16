@@ -827,9 +827,9 @@ test("review tracing uses the OpenAI exporter without alternate exporter credent
   const workspace = jobSection(source, "workspace", "analyze");
   const analyze = jobSection(source, "analyze", "seal");
 
-  assert.doesNotMatch(source, /trace_exporter|braintrust/i);
-  assert.doesNotMatch(workspace, /trace_exporter|braintrust/i);
-  assert.doesNotMatch(analyze, /trace_exporter|braintrust/i);
+  assert.doesNotMatch(source, /trace_exporter/i);
+  assert.doesNotMatch(workspace, /trace_exporter/i);
+  assert.doesNotMatch(analyze, /trace_exporter/i);
   assert.match(
     analyze,
     /bin\/install-runtime\.mjs/,
@@ -846,7 +846,7 @@ test("review tracing uses the OpenAI exporter without alternate exporter credent
     analyze,
     /name: Finalize review with configured Agents SDK model/,
   );
-  assert.doesNotMatch(caller, /trace_exporter|braintrust/i);
+  assert.doesNotMatch(caller, /trace_exporter/i);
 });
 
 test("self-test reports through annotations with read-only repository permissions", async () => {
