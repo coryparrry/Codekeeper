@@ -571,7 +571,7 @@ export async function assertNoSetupBranch({ runner, root, repository, branch = S
   const pulls = parseJson(await requireSuccess(
     runner,
     "gh",
-    ["pr", "list", "--repo", repository, "--state", "all", "--head", branch, "--json", "number,url"],
+    ["pr", "list", "--repo", repository, "--state", "open", "--head", branch, "--json", "number,url"],
     { cwd: root },
     "Could not inspect existing setup pull requests."
   ), "GitHub pull-request query");
