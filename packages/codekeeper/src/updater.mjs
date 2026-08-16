@@ -5,7 +5,8 @@ import { PACKAGE_NAME } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 
 const NPM_TIMEOUT_MS = 5 * 60 * 1000;
-const RELEASE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const SHA512_INTEGRITY = /^sha512-([A-Za-z0-9+/]+={0,2})$/;
 const NPM_ENV_NAMES = new Set([
   "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
   "http_proxy", "https_proxy", "no_proxy",
@@ -70,12 +71,13 @@ export async function resolveNpmCliPath({
   });
 }
 
-function updateEnvironment(environment, platform, expectedVersion) {
+function updateEnvironment(environment, platform, expectedVersion, expectedIntegrity) {
   const updated = { ...sanitizedEnvironment(environment, { platform }) };
   for (const name of NPM_ENV_NAMES) {
     if (typeof environment[name] === "string") updated[name] = environment[name];
   }
   updated.CODEKEEPER_UPDATE_EXPECTED_VERSION = expectedVersion;
+  if (expectedIntegrity !== undefined) updated.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY = expectedIntegrity;
   updated.npm_config_audit = "false";
   updated.npm_config_fund = "false";
   updated.npm_config_ignore_scripts = "true";
@@ -85,11 +87,80 @@ function updateEnvironment(environment, platform, expectedVersion) {
 }
 
 function requireCommandSuccess(result, message) {
-  if (result.status !== 0 || result.timedOut || result.truncated) {
+  if (!result || result.status !== 0 || result.timedOut || result.truncated || typeof result.stdout !== "string") {
     throw new InstallerError(message, { code: "UPDATE_BOOTSTRAP_FAILED" });
   }
   return result.stdout.trim();
 }
+
+function failReleaseResolution(message) {
+  throw new InstallerError(message, { code: "UPDATE_BOOTSTRAP_FAILED" });
+}
+
+function releaseSelector(value) {
+  if (value === "latest") return value;
+  if (typeof value === "string" && RELEASE_VERSION.test(value)) return value;
+  failReleaseResolution("Codekeeper updates require the latest tag or an exact semantic version.");
+}
+
+function validSha512Integrity(value) {
+  if (typeof value !== "string") return false;
+  const match = SHA512_INTEGRITY.exec(value);
+  if (!match) return false;
+  const encoded = match[1];
+  const digest = Buffer.from(encoded, "base64");
+  if (digest.length !== 64) return false;
+  return digest.toString("base64").replace(/=+$/, "") === encoded.replace(/=+$/, "");
+}
+
+function releaseReceipt(source, requestedVersion) {
+  let metadata;
+  try {
+    metadata = JSON.parse(source);
+  } catch {
+    failReleaseResolution("npm returned invalid Codekeeper release metadata.");
+  }
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    failReleaseResolution("npm returned invalid Codekeeper release metadata.");
+  }
+  const version = metadata.version;
+  const integrity = metadata.dist?.integrity ?? metadata["dist.integrity"];
+  if (typeof version !== "string" || !RELEASE_VERSION.test(version)) {
+    failReleaseResolution("npm returned an invalid Codekeeper release version.");
+  }
+  if (!validSha512Integrity(integrity)) {
+    failReleaseResolution("npm returned a missing or invalid Codekeeper release integrity.");
+  }
+  if (requestedVersion !== "latest" && version !== requestedVersion) {
+    failReleaseResolution("npm returned a different Codekeeper release than the exact version requested.");
+  }
+  return Object.freeze({ version, integrity });
+}
+
+export async function resolveNpmRelease({
+  cwd = process.cwd(),
+  environment = process.env,
+  platform = process.platform,
+  version = "latest",
+  requestedVersion,
+  resolveNpm = resolveNpmCliPath,
+  runner = createCommandRunner({ commandPaths: { node: process.execPath }, environment, platform })
+} = {}) {
+  const requested = releaseSelector(requestedVersion ?? version);
+  const npmCli = await resolveNpm({ cwd, environment, platform });
+  const metadataResult = await runner.run("node", [
+    npmCli, "view", `${PACKAGE_NAME}@${requested}`, "version", "dist.integrity", "--json"
+  ], {
+    cwd,
+    env: updateEnvironment(environment, platform, "resolving"),
+    timeoutMs: NPM_TIMEOUT_MS
+  });
+  const metadataSource = requireCommandSuccess(metadataResult, "Could not resolve the Codekeeper release metadata from npm.");
+  const receipt = releaseReceipt(metadataSource, requested);
+  return Object.freeze({ npmCli, ...receipt });
+}
+
+export const resolvePackageRelease = resolveNpmRelease;
 
 export async function runLatestUpdate({
   cwd = process.cwd(),
@@ -99,40 +170,30 @@ export async function runLatestUpdate({
   resolveNpm = resolveNpmCliPath,
   runner = createCommandRunner({ commandPaths: { node: process.execPath }, environment, platform })
 } = {}) {
-  const npmCli = await resolveNpm({ cwd, environment, platform });
   output.write("Resolving the latest Codekeeper CLI and dependency release from npm...\n");
-  const versionResult = await runner.run("node", [
-    npmCli, "view", `${PACKAGE_NAME}@latest`, "version", "--json"
-  ], {
+  const receipt = await resolveNpmRelease({
     cwd,
-    env: updateEnvironment(environment, platform, "resolving"),
-    timeoutMs: NPM_TIMEOUT_MS
+    environment,
+    platform,
+    resolveNpm,
+    runner,
+    version: "latest"
   });
-  const versionSource = requireCommandSuccess(versionResult, "Could not resolve the latest Codekeeper release from npm.");
-  let version;
-  try {
-    version = JSON.parse(versionSource);
-  } catch {
-    throw new InstallerError("npm returned an invalid Codekeeper release version.", { code: "UPDATE_BOOTSTRAP_FAILED" });
-  }
-  if (typeof version !== "string" || !RELEASE_VERSION.test(version)) {
-    throw new InstallerError("npm returned an invalid Codekeeper release version.", { code: "UPDATE_BOOTSTRAP_FAILED" });
-  }
-  output.write(`Launching Codekeeper ${version} with its locked CLI dependencies...\n`);
+  output.write(`Launching Codekeeper ${receipt.version} with its locked CLI dependencies...\n`);
   const updateResult = await runner.run("node", [
-    npmCli,
+    receipt.npmCli,
     "exec",
     "--yes",
     "--ignore-scripts",
     "--prefer-online",
-    `--package=${PACKAGE_NAME}@${version}`,
+    `--package=${PACKAGE_NAME}@${receipt.version}`,
     "--",
     PACKAGE_NAME,
     "update",
     "--current-package"
   ], {
     cwd,
-    env: updateEnvironment(environment, platform, version),
+    env: updateEnvironment(environment, platform, receipt.version, receipt.integrity),
     stdio: "inherit",
     timeoutMs: NPM_TIMEOUT_MS
   });
