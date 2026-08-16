@@ -665,7 +665,7 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
     await tui.send("\r");
     await tui.waitForText("Choose how Codekeeper works");
     assert.match(tui.output.lastSemanticFrame(), /SIMPLE/);
-    assert.match(tui.output.lastSemanticFrame(), /\[🤖 Models\].*⚡ Workflows.*⏱ Automation/s);
+    assert.match(tui.output.lastSemanticFrame(), /🤖 Models.*⚡ Workflows.*⏱ Automation/s);
     assert.match(tui.output.lastSemanticFrame(), /0 changed/);
     await tui.send("G");
     await tui.waitForText("✓ Continue");
@@ -765,13 +765,13 @@ test("Settings applies changes directly and exposes current provider model choic
   const tui = await createTuiHarness(t);
   const edited = tui.prompt.editSettings({ settings, baselinePolicy: policy, repository: "acme/widget" });
   await tui.waitForText("Choose how Codekeeper works");
-  assert.match(tui.output.lastSemanticFrame(), /\[🤖 Models\].*⚡ Workflows.*⏱ Automation/s);
+  assert.match(tui.output.lastSemanticFrame(), /🤖 Models.*⚡ Workflows.*⏱ Automation/s);
   assert.match(tui.output.lastSemanticFrame(), /Pull request reviewer\s+Provider\s+openai/);
 
   await tui.send("\t");
-  await tui.send(" ");
+  await tui.send("\u001b[C");
   await tui.waitForText("Updated Pull request review");
-  await tui.send(" ");
+  await tui.send("\u001b[D");
   assert.doesNotMatch(tui.output.transcript(), /CHECK THIS CHANGE/);
 
   await tui.send("g");

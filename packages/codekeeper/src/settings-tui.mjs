@@ -27,7 +27,7 @@ function valueText(row) {
 }
 
 function controlText(row) {
-  if (row.kind === "boolean") return "Press Space to turn this setting on or off.";
+  if (row.kind === "boolean") return "Use Left or Right, or press Space, to turn this setting on or off.";
   if (row.kind === "enum") return "Use Left or Right to change this choice. Space also moves to the next choice.";
   if (row.kind === "model") return "Use Left or Right to change model. Press Enter to see all models or type another ID.";
   if (row.kind === "profile") return "Press Enter to edit these instructions here. Press R to restore the Codekeeper default.";
@@ -274,7 +274,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         : "This profile already uses the packaged default.");
       return;
     }
-    if (input === " " && row.kind === "boolean") requestValue(row, !row.value);
+    if ((key.leftArrow || key.rightArrow || input === " ") && row.kind === "boolean") requestValue(row, !row.value);
     if ((key.leftArrow || key.rightArrow || input === " ") && ["enum", "model"].includes(row.kind)) {
       const direction = key.leftArrow ? -1 : 1;
       const current = row.choices.indexOf(row.value);
@@ -351,7 +351,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
         bold: candidateIndex === activeSectionIndex,
         inverse: candidateIndex === activeSectionIndex,
         ...color(colorEnabled && candidateIndex === activeSectionIndex, "cyan")
-      }, `${candidateIndex === activeSectionIndex ? "[" : " "}${section.icon} ${section.label}${candidateIndex === activeSectionIndex ? "]" : " "}  `))
+      }, `${section.icon} ${section.label}  `))
     ),
     h(Text, { bold: true, ...color(colorEnabled, "cyan") }, `${activeSection.icon} ${activeSection.label}`),
     h(Box, { flexDirection: "column", marginTop: 1 },
