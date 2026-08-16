@@ -5,18 +5,11 @@ export const RELEASE_DIRECTORY_MAPPINGS = Object.freeze([
   ["packages/codekeeper/bin", "bin"],
   ["packages/codekeeper/src", "src"],
   ["tools/codekeeper/agents", "runtime/agents"],
-  ["tools/codekeeper/integrations", "runtime/integrations"],
   ["tools/codekeeper/presets", "runtime/presets"],
   ["tools/codekeeper/src", "runtime/src"],
 ]);
 
-export const RELEASE_DIRECTORY_EXCLUSIONS = Object.freeze(new Map([
-  ["tools/codekeeper/integrations", new Set([
-    "braintrust/package.json",
-    "braintrust/package-lock.json",
-    "braintrust/npm-shrinkwrap.json",
-  ])],
-]));
+export const RELEASE_DIRECTORY_EXCLUSIONS = Object.freeze(new Map());
 
 const STATIC_FILE_MAPPINGS = Object.freeze([
   ["packages/codekeeper/LICENSE", "LICENSE"],

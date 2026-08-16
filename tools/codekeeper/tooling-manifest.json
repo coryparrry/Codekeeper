@@ -18,24 +18,12 @@
       "sha256": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208"
     },
     {
-      "path": "integrations/braintrust/package-lock.json",
-      "sha256": "149401c77a8028f9150ddc716b77a863b735c54b828da532966a071173e51a35"
-    },
-    {
-      "path": "integrations/braintrust/package.json",
-      "sha256": "e91dcf8eda321939fc13d8ffe19619ea9f882425df0ae35379c308c5a5bb65e7"
-    },
-    {
-      "path": "integrations/braintrust/run-agent.mjs",
-      "sha256": "1c628eef31a8aba017e89c1ea13b05f46d3143e2f2b0ef6d7a0306946479ec3c"
-    },
-    {
       "path": "package-lock.json",
       "sha256": "47bc0424fee05d9be41ef0d02d1f45fc3d103fec73d325d592cb691e14b31bb2"
     },
     {
       "path": "package.json",
-      "sha256": "ec7b67d11ecd83ab0b16dee29ea0e4af3314ca8ba94e7998ddcb554bb8a278fe"
+      "sha256": "5529a92b07f4ed1df8b4a4c87c51d9e07124a12cfd9a0127626820f4a4d47851"
     },
     {
       "path": "presets/catalogue.mjs",

@@ -34,7 +34,7 @@ runs:
           exit 1
         fi
         cp "$ACTION_PATH/scripts/verify-tooling-artifact.mjs" "$target/scripts/verify-tooling-artifact.mjs"
-        for directory in agents integrations/braintrust presets src; do
+        for directory in agents presets src; do
           if ! test -d "$ACTION_PATH/$directory" || test -L "$ACTION_PATH/$directory"; then
             echo "Codekeeper tooling bootstrap refused an invalid directory: $directory" >&2
             exit 1

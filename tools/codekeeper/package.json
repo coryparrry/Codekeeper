@@ -20,6 +20,6 @@
     "eval:braintrust": "npm --prefix evals/braintrust run eval --",
     "eval:braintrust:bundle": "npm --prefix evals/braintrust run eval:bundle --",
     "eval:live-review": "node evals/live-review-suite.mjs",
-    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs presets/*.mjs scripts/*.mjs integrations/braintrust/*.mjs evals/*.mjs evals/braintrust/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node scripts/generate-tooling-manifest.mjs --check && node --test --test-concurrency=1 test/*.test.mjs audit/*.test.mjs evals/*.test.mjs evals/braintrust/*.test.mjs"
+    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs presets/*.mjs scripts/*.mjs evals/*.mjs evals/braintrust/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node scripts/generate-tooling-manifest.mjs --check && node --test --test-concurrency=1 test/*.test.mjs audit/*.test.mjs evals/*.test.mjs evals/braintrust/*.test.mjs"
   }
 }

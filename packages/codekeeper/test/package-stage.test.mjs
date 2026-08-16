@@ -15,8 +15,6 @@ import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const INSTALLER_DEPENDENCIES = Object.freeze(["ink", "react"]);
 const REPLACED_RUNTIME_FILES = new Set([
-  "integrations/braintrust/package-lock.json",
-  "integrations/braintrust/package.json",
   "package-lock.json",
   "package.json",
 ]);
@@ -28,17 +26,6 @@ async function pathExists(filePath) {
   } catch {
     return false;
   }
-}
-
-async function collectRelativeFiles(root, relative = "") {
-  const entries = await readdir(path.join(root, relative), { withFileTypes: true });
-  const files = [];
-  for (const entry of entries) {
-    const child = relative ? `${relative}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) files.push(...await collectRelativeFiles(root, child));
-    else if (entry.isFile() && !entry.isSymbolicLink()) files.push(child);
-  }
-  return files.sort();
 }
 
 async function buildFixtureStage(t, name = "stage") {
@@ -75,7 +62,6 @@ test("package stage contains one release with separate closed installer and runt
     "src/tui.mjs",
     "assets/agents/fixer.md",
     "runtime/agents/fixer.md",
-    "runtime/integrations/braintrust/run-agent.mjs",
     "runtime/presets/catalogue.mjs",
     "runtime/package.json",
     "runtime/npm-shrinkwrap.json",
@@ -166,17 +152,7 @@ test("package stage contains one release with separate closed installer and runt
     canonicalAgentFiles,
     "every canonical runtime agent is included without a hand-maintained stage inventory",
   );
-  const integrationRoot = path.join(REPOSITORY_ROOT, "tools", "codekeeper", "integrations");
-  const canonicalIntegrationFiles = (await collectRelativeFiles(integrationRoot))
-    .filter((filePath) => !/(?:^|\/)package(?:-lock)?\.json$/.test(filePath) && !filePath.endsWith("npm-shrinkwrap.json"));
-  assert.deepEqual(
-    manifest.files
-      .filter((entry) => entry.sourcePath.startsWith("tools/codekeeper/integrations/"))
-      .map((entry) => entry.sourcePath.slice("tools/codekeeper/integrations/".length))
-      .sort(),
-    canonicalIntegrationFiles,
-    "every production integration file is included without a hand-maintained stage inventory",
-  );
+  assert.ok(paths.every((filePath) => !filePath.startsWith("runtime/integrations/")));
 });
 
 test("package stage verification rejects omission, addition, tampering, hidden files, and symlinks", async (t) => {
