@@ -5,7 +5,8 @@
   "description": "Complete CLI, TUI, runtime, and workflow release package for Codekeeper",
   "type": "module",
   "bin": {
-    "codekeeper": "bin/codekeeper.mjs"
+    "codekeeper": "bin/codekeeper.mjs",
+    "codekeeper-verify-package": "bin/verify-package.mjs"
   },
   "files": [
     "assets/",
@@ -21,8 +22,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs audit/*.test.mjs",
-    "check": "node ../../scripts/sync-policy-validator.mjs --check && bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs audit/*.test.mjs"
+    "prepare:runtime-test": "npm --prefix runtime-package ci --ignore-scripts --no-audit --no-fund",
+    "test:unit": "node --test test/*.test.mjs audit/*.test.mjs",
+    "test": "npm run prepare:runtime-test && npm run test:unit",
+    "check": "npm run prepare:runtime-test && node ../../scripts/sync-policy-validator.mjs --check && bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && npm run test:unit"
   },
   "keywords": [
     "github",
@@ -31,12 +34,7 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@braintrust/openai-agents": "0.1.5",
-    "@openai/agents": "0.14.3",
-    "@openai/codex": "0.146.0",
-    "braintrust": "3.27.0",
     "ink": "7.1.1",
-    "react": "19.2.8",
-    "zod": "4.4.3"
+    "react": "19.2.8"
   }
 }

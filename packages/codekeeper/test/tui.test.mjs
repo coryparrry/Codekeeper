@@ -4,8 +4,7 @@ import { EventEmitter } from "node:events";
 import { mkdir, lstat, readdir, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { render as inkRender } from "ink";
-import { loadVerifiedAssets } from "../src/assets.mjs";
-import { runCli } from "../src/cli.mjs";
+import { runCli as runProductionCli } from "../src/cli.mjs";
 import { STDIN_FILE_LIMIT_BYTES } from "../src/command-runner.mjs";
 import { AGENT_PROFILE_IDS, AGENT_PROFILES } from "../src/constants.mjs";
 import { buildInstallPlan, collectAppAnswers, collectSetupAnswers } from "../src/plan.mjs";
@@ -21,7 +20,14 @@ import {
   sanitizeTextInput,
   shouldUseInkTui
 } from "../src/tui.mjs";
-import { HEAD_SHA, temporaryDirectory } from "./helpers.mjs";
+import { HEAD_SHA, loadVerifiedAssets, temporaryDirectory, testPackageEnvironment } from "./helpers.mjs";
+
+function runCli(options = {}) {
+  return runProductionCli({
+    ...options,
+    environment: testPackageEnvironment(options.environment),
+  });
+}
 
 const ESCAPE_SEQUENCE = /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\)?)/g;
 const COLOR_SGR_SEQUENCE = /\u001B\[(?:[0-9;]*;)?(?:3[0-9]|4[0-9]|9[0-7]|10[0-7])(?:;[0-9;]*)?m/;
@@ -845,24 +851,30 @@ test("final review supports paged Back navigation and requires explicit creation
   });
   const tui = await createTuiHarness(t);
   const approved = tui.prompt.reviewInstallPlan(plan);
-  await tui.waitForText("Review the setup · 1 of 3");
+  await tui.waitForText("Review the setup · 1 of 11");
   assertNamedPhase(tui, "final review");
-  assert.match(tui.output.lastSemanticFrame(), /Nothing has changed/);
+  assert.match(tui.output.lastSemanticFrame(), /App key is selected/);
   await tui.send("\r");
-  await tui.waitForText("Review the setup · 2 of 3");
-  await tui.send("\r");
-  await tui.waitForText("Review the setup · 3 of 3");
-  await tui.send("\u007f");
-  await tui.waitForText("Review the setup · 2 of 3");
+  await tui.waitForText("Review the setup · 2 of 11");
+  await tui.send("\u001b[D");
+  await tui.waitForText("Review the setup · 1 of 11");
   await tui.send("\u001b[C");
-  await tui.waitForText("Review the setup · 3 of 3");
+  for (let page = 2; page < 11; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 11`);
+    await tui.send("\r");
+  }
+  await tui.waitForText("Review the setup · 11 of 11");
+  await tui.send("\u007f");
+  await tui.waitForText("Review the setup · 10 of 11");
+  await tui.send("\u001b[C");
+  await tui.waitForText("Review the setup · 11 of 11");
   await tui.send("\u001b[D");
   await tui.send("\r");
   assert.equal(await approved, true);
 
   const cancelled = tui.prompt.reviewInstallPlan(plan);
   const cancellation = assert.rejects(cancelled, (error) => error.code === "PROMPT_ABORTED");
-  await tui.waitForText("Review the setup · 1 of 3");
+  await tui.waitForText("Review the setup · 1 of 11");
   await tui.send("\u001b");
   await cancellation;
 });
@@ -937,6 +949,38 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
   }
 });
 
+test("final review shows an exact managed workflow deletion", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: repositorySnapshot(),
+    answers: {
+      modes: ["review"],
+      preset: "openai",
+      displayName: "Widget",
+      ownerLogins: ["cory"],
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-widget[bot]"
+    }
+  });
+  const deletionPlan = {
+    ...plan,
+    files: [{ path: ".github/workflows/codekeeper-runtime-fix.yml", delete: true }],
+    variables: [],
+    secrets: []
+  };
+  const tui = await createTuiHarness(t, { columns: 80, rows: 24 });
+  const review = tui.prompt.reviewInstallPlan(deletionPlan);
+  const cancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
+  await tui.waitForText("Review the setup · 1 of 7");
+  await tui.send("\r");
+  await tui.send("\r");
+  await tui.waitForText(".github/workflows/codekeeper-runtime-fix.yml");
+  assert.match(semanticText(tui.output.lastSemanticFrame()), /Remove this installed workflow/);
+  await tui.send("\u001b");
+  await cancellation;
+});
+
 test("Ink completion shows every completed step on one screen", async (t) => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
@@ -985,7 +1029,10 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
   const reviewMarkers = [
     ["Workflows", "Pull request review"],
     ["Models (editable", "gpt-5.6"],
-    ["Policy and caller documents", ".github/codekeeper.json"],
+    ["Policy and caller documents", ".github/codekeeper.json", "Repository maintenance"],
+    ["Policy and caller documents", "Issue triage", "verified Codekeeper package"],
+    ["Policy and caller documents", "pull request review", "implementation and pull request repair"],
+    ["Policy and caller documents", ".github/codekeeper-release.json"],
     ["Repository variables", "CODEKEEPER_ENABLED"],
     ["Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
     ["Settings", "Codekeeper starts after merge"],
@@ -1032,18 +1079,14 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     });
   }
 
-  await t.test("100x40 uses the fitting unpaged detail layout", async (t) => {
+  await t.test("100x40 pages the complete exact document inventory", async (t) => {
     const dimensions = { columns: 100, rows: 40 };
     const tui = await createTuiHarness(t, dimensions);
     const review = tui.prompt.reviewInstallPlan(plan);
     const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
     await assertPagedScreenFits(tui, {
       kind: "review",
-      markers: [
-        ["Workflows", "Models (editable", "gpt-5.6"],
-        ["Document map", ".github/codekeeper.json", "Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
-        ["Settings", "Create setup", "› Cancel"]
-      ],
+      markers: reviewMarkers,
       ...dimensions
     });
     await tui.send("\u001b");
@@ -1204,9 +1247,9 @@ test("NO_COLOR and narrow terminals retain visible selection semantics without o
   });
   const review = tui.prompt.reviewInstallPlan(plan);
   const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  for (let page = 1; page <= 9; page += 1) {
-    await tui.waitForText(`Review the setup · ${page} of 9`);
-    if (page < 9) await tui.send("\r");
+  for (let page = 1; page <= 11; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 11`);
+    if (page < 11) await tui.send("\r");
   }
   assert.match(tui.output.lastSemanticFrame(), /› Cancel/);
   await tui.send("\u001b[D");

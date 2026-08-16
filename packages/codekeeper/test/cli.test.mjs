@@ -2,12 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadVerifiedAssets } from "../src/assets.mjs";
-import { currentResumeCommand, parseCliArgs, runCli, USAGE } from "../src/cli.mjs";
+import { currentResumeCommand, parseCliArgs, runCli as runProductionCli, USAGE } from "../src/cli.mjs";
 import { createCommandRunner } from "../src/command-runner.mjs";
 import { buildInstallPlan, completionGuidance } from "../src/plan.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
-import { createRecordingRunner, git, HEAD_SHA, result, temporaryDirectory, textSink } from "./helpers.mjs";
+import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, result, temporaryDirectory, testPackageEnvironment, textSink } from "./helpers.mjs";
+
+function runCli(options = {}) {
+  return runProductionCli({
+    ...options,
+    environment: testPackageEnvironment(options.environment),
+  });
+}
 
 function guidedPrompt(confirmations = [true, true, true, true, true, true], { privateKeyPath = "/private/tmp/codekeeper-test-private-key.pem" } = {}) {
   const answers = [...confirmations];
@@ -625,8 +631,9 @@ test("update advances release-owned files while preserving adopter configuration
   assert.equal(reviewedPlan.policy.ai.agents.review.maxTurns, 1);
   assert.deepEqual(reviewedPlan.policy.merge.blockedPaths, JSON.parse(bundle.contents["policies/openai.json"]).merge.blockedPaths);
   assert.ok(reviewedPlan.files.some((file) => file.path === ".github/codekeeper.json"));
-  assert.ok(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-assistant.yml" && file.contents.includes(nextCommit)));
-  assert.ok(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-review.yml" && file.contents.includes(nextCommit)));
+  assert.ok(reviewedPlan.files.some((file) => file.path === ".github/codekeeper-release.json" && file.contents.includes(nextCommit)));
+  assert.equal(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-assistant.yml"), false);
+  assert.equal(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-review.yml"), false);
   assert.equal(reviewedPlan.files.some((file) => file.path === ".github/codekeeper/agents/pr-reviewer.md"), false);
   assert.match(output.toString(), /selected workflows.*existing agent profile overrides stay unchanged/s);
   assert.deepEqual(runner.calls, []);
@@ -897,8 +904,12 @@ test("successful init revalidates three snapshots and orders settings, exact com
       ".github/codekeeper-release.json",
       ".github/codekeeper.json",
       ".github/workflows/codekeeper-assistant.yml",
+      ".github/workflows/codekeeper-bootstrap.yml",
       ".github/workflows/codekeeper-maintain.yml",
-      ".github/workflows/codekeeper-review.yml"
+      ".github/workflows/codekeeper-review.yml",
+      ".github/workflows/codekeeper-runtime-assistant.yml",
+      ".github/workflows/codekeeper-runtime-maintain.yml",
+      ".github/workflows/codekeeper-runtime-review.yml"
     ]
   );
   assert.match(output.toString(), /Starting model set: openai/);

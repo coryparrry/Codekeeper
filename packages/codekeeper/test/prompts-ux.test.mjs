@@ -1,12 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Readable, Writable } from "node:stream";
-import { loadVerifiedAssets } from "../src/assets.mjs";
 import { MODE_IDS, MODES, RECOMMENDED_MODES, RECOMMENDED_PRESET } from "../src/constants.mjs";
 import { collectAppAnswers, collectSetupAnswers } from "../src/plan.mjs";
 import { upgradePolicy } from "../src/policy.mjs";
 import { createTerminalPrompter } from "../src/prompts.mjs";
-import { HEAD_SHA, textSink } from "./helpers.mjs";
+import { HEAD_SHA, loadVerifiedAssets, textSink } from "./helpers.mjs";
 
 function terminal(answer) {
   const chunks = [];

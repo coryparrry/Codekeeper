@@ -1,7 +1,9 @@
-export const PACKAGE_NAME = "codekeeper";
-export const PACKAGE_VERSION = "0.2.0";
+export {
+  PACKAGE_NAME,
+  PACKAGE_SOURCE_REPOSITORY as SOURCE_REPOSITORY,
+  PACKAGE_VERSION,
+} from "./package-identity.mjs";
 export const MINIMUM_NODE_MAJOR = 22;
-export const SOURCE_REPOSITORY = "coryparry/Codekeeper";
 export const SOURCE_COMMIT = "46d5eef7a4d1a73f4fd3d1962713489e32fd8f68";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
@@ -62,6 +64,37 @@ export const ASSISTANT_WORKFLOW = Object.freeze({
   asset: "workflows/assistant.yml",
   description: "Routes configured-owner requests to the installed role workflows."
 });
+export const PACKAGE_BOOTSTRAP_WORKFLOW = Object.freeze({
+  id: "bootstrap",
+  label: "Package bootstrap",
+  target: ".github/workflows/codekeeper-bootstrap.yml",
+  asset: "runtime-workflows/bootstrap.yml",
+  sourcePath: ".github/workflows/codekeeper-bootstrap.yml",
+  packagePath: "release/workflows/codekeeper-bootstrap.yml",
+  description: "Downloads and verifies the exact Codekeeper npm release without repository or credential access."
+});
+export const RUNTIME_WORKFLOWS = Object.freeze(Object.fromEntries([
+  ["assistant", "Repository assistant"],
+  ...MODE_IDS.map((mode) => [mode, MODES[mode].label])
+].map(([id, label]) => [id, Object.freeze({
+  id,
+  label: `${label} runtime`,
+  target: `.github/workflows/codekeeper-runtime-${id}.yml`,
+  asset: `runtime-workflows/${id}.yml`,
+  sourcePath: `.github/workflows/codekeeper-${id}.yml`,
+  packagePath: `release/workflows/codekeeper-${id}.yml`,
+  description: `Runs the ${label.toLowerCase()} from the verified Codekeeper package.`
+})])));
+export const RUNTIME_WORKFLOW_IDS = Object.freeze(Object.keys(RUNTIME_WORKFLOWS));
+export const RELEASE_WORKFLOW_ASSETS = Object.freeze([
+  PACKAGE_BOOTSTRAP_WORKFLOW,
+  ...RUNTIME_WORKFLOW_IDS.map((id) => RUNTIME_WORKFLOWS[id])
+]);
+export const RELEASE_MANAGED_WORKFLOW_TARGETS = Object.freeze([
+  ASSISTANT_WORKFLOW.target,
+  ...MODE_IDS.map((mode) => MODES[mode].target),
+  ...RELEASE_WORKFLOW_ASSETS.map((workflow) => workflow.target),
+]);
 export const AGENT_PROFILES = Object.freeze({
   "pr-reviewer": Object.freeze({
     id: "pr-reviewer",
@@ -147,6 +180,7 @@ export const KNOWN_TARGETS = Object.freeze([
   POLICY_TARGET,
   RELEASE_MANIFEST_TARGET,
   ASSISTANT_WORKFLOW.target,
+  ...RELEASE_WORKFLOW_ASSETS.map((workflow) => workflow.target),
   ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].target),
   ...MODE_IDS.map((mode) => MODES[mode].target)
 ]);
@@ -154,6 +188,7 @@ export const ASSET_KEYS = Object.freeze([
   "policies/mixed.json",
   "policies/openai.json",
   ASSISTANT_WORKFLOW.asset,
+  ...RELEASE_WORKFLOW_ASSETS.map((workflow) => workflow.asset),
   ...AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].asset),
   ...MODE_IDS.map((mode) => MODES[mode].asset)
 ].sort());
@@ -182,7 +217,7 @@ export const SECRET_PURPOSES = Object.freeze({
 
 export const CONSERVATIVE_BOUNDARIES = Object.freeze([
   "Agent profiles guide decisions. They cannot grant write access or change triggers, branches, or permissions.",
-  "Every generated workflow pins an exact source commit.",
+  "Every generated workflow pins an exact npm package version and SHA-512 integrity.",
   "Protected paths and git diff --check stay in place.",
   "The installer opens a setup pull request. It does not merge it or run a workflow."
 ]);

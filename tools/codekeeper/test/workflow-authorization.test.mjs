@@ -13,14 +13,14 @@ const issues = new URL(
 
 test("assistant authorizes trusted policy before minting a write token", async () => {
   const source = await readFile(assistant, "utf8");
-  const tooling = source.indexOf(
-    "Verify bootstrap Codekeeper tooling against pinned manifest",
+  const verifiedPackage = source.indexOf(
+    "Verify bootstrap Codekeeper package",
   );
   const policy = source.indexOf("Check out trusted default-branch policy");
   const authorization = source.indexOf("Authorize configured owner request");
   const token = source.indexOf("Create short-lived GitHub App token");
 
-  assert.ok(tooling >= 0 && tooling < authorization);
+  assert.ok(verifiedPackage >= 0 && verifiedPackage < authorization);
   assert.ok(policy >= 0 && policy < authorization);
   assert.ok(authorization < token);
   assert.match(

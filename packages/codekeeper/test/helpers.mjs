@@ -3,11 +3,30 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadVerifiedAssets as loadProductionAssets } from "../src/assets.mjs";
 
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const REPOSITORY_ROOT = path.resolve(PACKAGE_ROOT, "../..");
 export const PINNED_COMMIT = "46d5eef7a4d1a73f4fd3d1962713489e32fd8f68";
 export const HEAD_SHA = "a".repeat(40);
+export const TEST_PACKAGE_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
+export const TEST_PACKAGE_RELEASE = Object.freeze({
+  name: "codekeeper",
+  version: "0.2.0",
+  integrity: TEST_PACKAGE_INTEGRITY
+});
+
+export function testPackageEnvironment(environment = {}) {
+  return {
+    CODEKEEPER_UPDATE_EXPECTED_VERSION: TEST_PACKAGE_RELEASE.version,
+    CODEKEEPER_UPDATE_EXPECTED_INTEGRITY: TEST_PACKAGE_RELEASE.integrity,
+    ...environment,
+  };
+}
+
+export function loadVerifiedAssets(options = {}) {
+  return loadProductionAssets({ packageRelease: TEST_PACKAGE_RELEASE, ...options });
+}
 
 export function result(stdout = "", overrides = {}) {
   return {

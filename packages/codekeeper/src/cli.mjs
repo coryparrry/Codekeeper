@@ -18,20 +18,22 @@ import {
 } from "./plan.mjs";
 import { configureRepositorySettings, installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
-import { MODES, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
+import { MODES, PACKAGE_NAME, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
+import { normalizePackageRelease } from "./package-release.mjs";
 import { formatCommand } from "./shell-command.mjs";
 import { runLatestUpdate } from "./updater.mjs";
 
 export const USAGE = `Usage:
   codekeeper init
   codekeeper update
-  codekeeper update --current-package
+  codekeeper init --current-package --package-integrity SHA512
+  codekeeper update --current-package --package-integrity SHA512
   codekeeper --help
   codekeeper --version
 
 Codekeeper init creates a setup pull request for GitHub.com.
-Codekeeper update refreshes the CLI, dependencies, and every release-owned installation file.
-Use --current-package only to exercise an exact local release tarball without contacting npm.
+Codekeeper update runs the latest CLI to refresh runtime dependencies and every release-owned installation file.
+Use --current-package with the tarball's SHA-512 integrity only for exact local release testing.
 `;
 
 export function parseCliArgs(argv) {
@@ -39,16 +41,30 @@ export function parseCliArgs(argv) {
   if (argv.length === 0 || (argv.length === 1 && argv[0] === "--help")) return Object.freeze({ command: "help" });
   if (argv.length === 1 && argv[0] === "--version") return Object.freeze({ command: "version" });
   if (argv.length === 1 && argv[0] === "init") return Object.freeze({ command: "init" });
+  if (argv.length === 2 && argv[0] === "init" && argv[1] === "--current-package") {
+    return Object.freeze({ command: "init", currentPackage: true });
+  }
   if (argv.length === 1 && argv[0] === "update") return Object.freeze({ command: "update" });
   if (argv.length === 2 && argv[0] === "update" && argv[1] === "--current-package") {
     return Object.freeze({ command: "update", currentPackage: true });
   }
+  if (
+    argv.length === 4
+    && new Set(["init", "update"]).has(argv[0])
+    && argv[1] === "--current-package"
+    && argv[2] === "--package-integrity"
+    && argv[3]
+  ) {
+    return Object.freeze({ command: argv[0], currentPackage: true, packageIntegrity: argv[3] });
+  }
   throw new InstallerError("Unsupported command or option.", { code: "CLI_USAGE" });
 }
 
-export function currentResumeCommand(execPath = process.execPath, binPath = process.argv[1], platform = process.platform, command = "init") {
+export function currentResumeCommand(execPath = process.execPath, binPath = process.argv[1], platform = process.platform, command = "init", packageIntegrity = null) {
   if (typeof binPath !== "string" || !binPath) return `codekeeper ${command}`;
-  return formatCommand(execPath, [binPath, command], platform);
+  const args = [binPath, command];
+  if (packageIntegrity) args.push("--current-package", "--package-integrity", packageIntegrity);
+  return formatCommand(execPath, args, platform);
 }
 
 async function bestEffortOpen(url, { runner, platform = process.platform }) {
@@ -172,22 +188,32 @@ export async function runCli({
       return 1;
     }
   }
-  if (
-    parsed.command === "update"
-    && typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
-    && environment.CODEKEEPER_UPDATE_EXPECTED_VERSION !== PACKAGE_VERSION
-  ) {
-    errorOutput.write(`${formatInstallerError(new InstallerError("npm launched a different Codekeeper version than requested.", { code: "UPDATE_VERSION_MISMATCH" }))}\n`);
+  let packageRelease;
+  try {
+    if (
+      typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
+      && environment.CODEKEEPER_UPDATE_EXPECTED_VERSION !== PACKAGE_VERSION
+    ) {
+      throw new InstallerError("npm launched a different Codekeeper version than requested.", { code: "UPDATE_VERSION_MISMATCH" });
+    }
+    const releaseEnvironment = environment;
+    packageRelease = normalizePackageRelease({
+      name: PACKAGE_NAME,
+      version: releaseEnvironment.CODEKEEPER_UPDATE_EXPECTED_VERSION ?? (parsed.currentPackage ? PACKAGE_VERSION : undefined),
+      integrity: parsed.packageIntegrity ?? releaseEnvironment.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY
+    }, { code: "UPDATE_VERSION_MISMATCH" });
+  } catch (error) {
+    errorOutput.write(`${formatInstallerError(error)}\n`);
     return 1;
   }
-  resumeCommand ??= currentResumeCommand(process.execPath, process.argv[1], platform, parsed.command);
+  resumeCommand ??= currentResumeCommand(process.execPath, process.argv[1], platform, parsed.command, parsed.packageIntegrity);
 
   let activePrompt = prompt;
   try {
     if (typeof runner.resolveTrustedCommands === "function") {
       runner = await runner.resolveTrustedCommands({ cwd });
     }
-    const bundle = await loadAssets();
+    const bundle = await loadAssets({ packageRelease });
     const ensureActivePrompt = async () => {
       if (activePrompt) return;
       const likelyTui = interactive

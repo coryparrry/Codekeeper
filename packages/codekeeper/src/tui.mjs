@@ -442,6 +442,8 @@ function FilePickerScreen({ spec, onSubmit, onCancel, colorEnabled }) {
 
 function reviewData(plan) {
   const documents = documentMap(plan.files);
+  const profileDocuments = documents.filter((item) => item.path.includes("/agents/"));
+  const setupDocuments = documents.filter((item) => !item.path.includes("/agents/"));
   return {
     repository: `${plan.repository} · ${plan.defaultBranch}`,
     identity: `${plan.displayName} · owners: ${plan.ownerLogins.join(", ")}`,
@@ -453,8 +455,8 @@ function reviewData(plan) {
       return `${label} (${workflow}): ${selection.provider} / ${selection.model} / ${selection.effort}`;
     }),
     documents: documents.map((item) => `${item.path} — ${item.purpose}`),
-    setupDocumentPaths: documents.filter((item) => !item.path.includes("/agents/")).map((item) => item.path),
-    profileDocumentPaths: documents.filter((item) => item.path.includes("/agents/")).map((item) => item.path),
+    setupDocumentPaths: setupDocuments.map((item) => `${item.path} — ${item.purpose}`),
+    profileDocumentPaths: profileDocuments.map((item) => `${item.path} — ${item.purpose}`),
     secrets: plan.secrets.map((secret) => `${secret.name} — ${SECRET_PURPOSES[secret.name]}`),
     variables: plan.variables.map((variable) => `${variable.name} → ${variable.value}`),
     automation: [
@@ -500,14 +502,21 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [page, setPage] = useState(0);
   const cancel = useCancel(onCancel);
   const { stdout } = useStdout();
-  const pagedDetail = usesPagedDetailLayout(stdout);
-  const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
   const data = useMemo(() => reviewData(spec.plan), [spec.plan]);
+  const documentPages = useMemo(() => {
+    const pages = [];
+    for (let index = 0; index < data.setupDocumentPaths.length; index += 4) {
+      pages.push(data.setupDocumentPaths.slice(index, index + 4));
+    }
+    return pages;
+  }, [data.setupDocumentPaths]);
+  const pagedDetail = usesPagedDetailLayout(stdout) || documentPages.length > 1;
+  const compactDetail = pagedDetail && Number.isFinite(stdout?.rows) && stdout.rows < 30;
   const operation = operationCopy(spec.plan);
   const pagedPages = useMemo(() => [
     "overview",
     "models",
-    ...(data.setupDocumentPaths.length ? ["documents"] : []),
+    ...documentPages.map((_, index) => `documents-${index}`),
     ...(data.profileDocumentPaths.length ? ["profiles"] : []),
     ...(data.variables.length ? ["variables"] : []),
     ...(data.secrets.length ? ["secrets"] : []),
@@ -515,7 +524,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     "capabilities",
     "boundaries",
     "confirm"
-  ], [data]);
+  ], [data, documentPages]);
   const lastPage = pagedDetail ? pagedPages.length - 1 : 2;
   const pageKind = pagedPages[page];
   usePaste(() => {});
@@ -596,7 +605,9 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
       section("Workflows", data.workflows, 0)
     ) : null,
     pagedDetail && pageKind === "models" ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
-    pagedDetail && pageKind === "documents" ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
+    pagedDetail && pageKind?.startsWith("documents-")
+      ? section("Policy and caller documents", documentPages[Number(pageKind.slice("documents-".length))], 0)
+      : null,
     pagedDetail && pageKind === "profiles" ? section("Repository profile overrides", data.profileDocumentPaths, 0) : null,
     pagedDetail && pageKind === "variables" ? section("Repository variables", data.variables, 0) : null,
     pagedDetail && pageKind === "secrets" ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,

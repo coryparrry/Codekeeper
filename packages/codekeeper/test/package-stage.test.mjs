@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { access, cp, readFile, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -6,6 +7,10 @@ import {
   buildCodekeeperPackageStage,
   verifyCodekeeperPackageStage,
 } from "../../../scripts/build-codekeeper-package.mjs";
+import {
+  INTEGRITY_RECEIPT_PATH,
+  verifyCodekeeperRelease,
+} from "../src/release-verifier.mjs";
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const INSTALLER_DEPENDENCIES = Object.freeze(["ink", "react"]);
@@ -23,6 +28,17 @@ async function pathExists(filePath) {
   } catch {
     return false;
   }
+}
+
+async function collectRelativeFiles(root, relative = "") {
+  const entries = await readdir(path.join(root, relative), { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const child = relative ? `${relative}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...await collectRelativeFiles(root, child));
+    else if (entry.isFile() && !entry.isSymbolicLink()) files.push(child);
+  }
+  return files.sort();
 }
 
 async function buildFixtureStage(t, name = "stage") {
@@ -44,27 +60,31 @@ async function cloneStage(t, source, name) {
   return destination;
 }
 
-test("package stage contains the complete approved product and one closed dependency graph", async (t) => {
+test("package stage contains one release with separate closed installer and runtime dependency graphs", async (t) => {
   const { destination, manifest } = await buildFixtureStage(t);
   const paths = manifest.files.map((entry) => entry.path);
   assert.deepEqual(paths, [...paths].sort());
   assert.equal(manifest.package.name, "codekeeper");
   assert.match(manifest.package.version, /^\d+\.\d+\.\d+/);
   assert.match(manifest.source.commit, /^[0-9a-f]{40}$/);
-  assert.equal(manifest.files.find((entry) => entry.path === "runtime/action.yml")?.role, "legacy-compatibility");
+  assert.equal(paths.includes("runtime/action.yml"), false);
 
   for (const requiredPath of [
     "bin/codekeeper.mjs",
+    "bin/verify-package.mjs",
     "src/tui.mjs",
     "assets/agents/fixer.md",
     "runtime/agents/fixer.md",
     "runtime/integrations/braintrust/run-agent.mjs",
     "runtime/presets/catalogue.mjs",
+    "runtime/package.json",
+    "runtime/npm-shrinkwrap.json",
     "runtime/scripts/verify-tooling-artifact.mjs",
     "runtime/src/cli.mjs",
     "runtime/src/lib/agents-runtime.mjs",
     "runtime/src/lib/runtime-paths.mjs",
     "release/workflows/codekeeper-assistant.yml",
+    "release/workflows/codekeeper-bootstrap.yml",
     "release/workflows/codekeeper-fix.yml",
     "release/workflows/codekeeper-issues.yml",
     "release/workflows/codekeeper-maintain.yml",
@@ -94,32 +114,41 @@ test("package stage contains the complete approved product and one closed depend
 
   const packageManifest = JSON.parse(await readFile(path.join(destination, "package.json"), "utf8"));
   const shrinkwrap = JSON.parse(await readFile(path.join(destination, "npm-shrinkwrap.json"), "utf8"));
-  const runtimeManifest = JSON.parse(
+  const stagedRuntimeManifest = JSON.parse(await readFile(path.join(destination, "runtime/package.json"), "utf8"));
+  const runtimeShrinkwrap = JSON.parse(await readFile(path.join(destination, "runtime/npm-shrinkwrap.json"), "utf8"));
+  const canonicalRuntimeManifest = JSON.parse(
     await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/package.json"), "utf8"),
   );
-  const braintrustManifest = JSON.parse(
+  const canonicalBraintrustManifest = JSON.parse(
     await readFile(
       path.join(REPOSITORY_ROOT, "tools/codekeeper/integrations/braintrust/package.json"),
       "utf8",
     ),
   );
   const runtimeDependencies = {
-    ...runtimeManifest.dependencies,
-    ...braintrustManifest.dependencies,
+    ...canonicalRuntimeManifest.dependencies,
+    ...canonicalBraintrustManifest.dependencies,
   };
-  assert.deepEqual(
-    Object.keys(packageManifest.dependencies).sort(),
-    [...new Set([...INSTALLER_DEPENDENCIES, ...Object.keys(runtimeDependencies)])].sort(),
-  );
+  assert.deepEqual(Object.keys(packageManifest.dependencies).sort(), [...INSTALLER_DEPENDENCIES]);
+  assert.deepEqual(stagedRuntimeManifest.dependencies, runtimeDependencies);
   for (const [name, version] of Object.entries(runtimeDependencies)) {
-    assert.equal(packageManifest.dependencies[name], version, `${name} matches its runtime owner`);
+    assert.equal(stagedRuntimeManifest.dependencies[name], version, `${name} matches its runtime owner`);
   }
   assert.deepEqual(shrinkwrap.packages[""].dependencies, packageManifest.dependencies);
-  for (const [packagePath, metadata] of Object.entries(shrinkwrap.packages)) {
-    if (!packagePath.startsWith("node_modules/")) continue;
-    assert.equal(typeof metadata.version, "string", `${packagePath} has an exact version`);
-    assert.match(metadata.integrity, /^sha512-/, `${packagePath} has sha512 integrity`);
+  assert.deepEqual(runtimeShrinkwrap.packages[""].dependencies, stagedRuntimeManifest.dependencies);
+  for (const [label, lock] of [["installer", shrinkwrap], ["runtime", runtimeShrinkwrap]]) {
+    for (const [packagePath, metadata] of Object.entries(lock.packages)) {
+      if (!packagePath.startsWith("node_modules/")) continue;
+      assert.equal(typeof metadata.version, "string", `${label} ${packagePath} has an exact version`);
+      assert.match(metadata.integrity, /^sha512-/, `${label} ${packagePath} has sha512 integrity`);
+    }
   }
+  assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/@openai/agents"), false);
+  assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/@openai/codex"), false);
+  assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/braintrust"), false);
+  assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@openai/agents"));
+  assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@openai/codex"));
+  assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/braintrust"));
 
   const toolingManifest = JSON.parse(
     await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/tooling-manifest.json"), "utf8"),
@@ -144,6 +173,17 @@ test("package stage contains the complete approved product and one closed depend
     paths.filter((filePath) => filePath.startsWith("runtime/agents/")).map((filePath) => path.basename(filePath)).sort(),
     canonicalAgentFiles,
     "every canonical runtime agent is included without a hand-maintained stage inventory",
+  );
+  const integrationRoot = path.join(REPOSITORY_ROOT, "tools", "codekeeper", "integrations");
+  const canonicalIntegrationFiles = (await collectRelativeFiles(integrationRoot))
+    .filter((filePath) => !/(?:^|\/)package(?:-lock)?\.json$/.test(filePath) && !filePath.endsWith("npm-shrinkwrap.json"));
+  assert.deepEqual(
+    manifest.files
+      .filter((entry) => entry.sourcePath.startsWith("tools/codekeeper/integrations/"))
+      .map((entry) => entry.sourcePath.slice("tools/codekeeper/integrations/".length))
+      .sort(),
+    canonicalIntegrationFiles,
+    "every production integration file is included without a hand-maintained stage inventory",
   );
 });
 
@@ -173,6 +213,36 @@ test("package stage verification rejects omission, addition, tampering, hidden f
   await assert.rejects(verifyCodekeeperPackageStage(linked), /symlink is not allowed/);
 
   await rm(path.join(linked, target), { force: true });
+});
+
+test("installed-package verifier binds external package identity, integrity receipt, manifest, and source", async (t) => {
+  const { destination, manifest } = await buildFixtureStage(t);
+  const integrity = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
+  const manifestBytes = await readFile(path.join(destination, "release", "manifest.json"));
+  const manifestSha256 = createHash("sha256").update(manifestBytes).digest("hex");
+  await writeFile(path.join(destination, ...INTEGRITY_RECEIPT_PATH.split("/")), `${JSON.stringify({
+    version: 1,
+    algorithm: "sha512",
+    integrity,
+  })}\n`);
+  const expected = {
+    root: destination,
+    expectedName: manifest.package.name,
+    expectedVersion: manifest.package.version,
+    expectedIntegrity: integrity,
+    expectedManifestSha256: manifestSha256,
+    expectedSourceCommit: manifest.source.commit,
+  };
+  assert.equal((await verifyCodekeeperRelease(expected)).source.commit, manifest.source.commit);
+  for (const [field, value, message] of [
+    ["expectedName", "another-package", /package name does not match/],
+    ["expectedVersion", "9.9.9", /package version does not match/],
+    ["expectedIntegrity", `sha512-${Buffer.alloc(64, 8).toString("base64")}`, /integrity receipt does not match/],
+    ["expectedManifestSha256", "0".repeat(64), /manifest SHA-256 does not match/],
+    ["expectedSourceCommit", "0".repeat(40), /source commit does not match/],
+  ]) {
+    await assert.rejects(verifyCodekeeperRelease({ ...expected, [field]: value }), message);
+  }
 });
 
 test("package stage rejects destination reuse, repository output, and mismatched release commits", async (t) => {
