@@ -1,40 +1,41 @@
 # Codekeeper package
 
-`codekeeper` is the complete Node.js release package for Codekeeper's versioned GitHub Actions workflows. It contains the installer and TUI, production runtime, default agents, presets, reusable workflows, and exact installer/runtime dependency graphs. `npx codekeeper init` first resolves and runs the exact latest package receipt, then opens a terminal UI, creates a setup branch, pushes it, and opens a pull request. After installation, `codekeeper update` runs the latest CLI to advance the complete release-owned repository installation and runtime dependency pins. By default, the selected workflows start after the first pull request merges. You can choose a disabled install instead. The installer does not copy runtime source or dependencies into the adopter repository.
+`codekeeper` is the complete Node.js release package for Codekeeper's versioned GitHub Actions workflows. It contains the installer and TUI, production runtime, default agents, presets, reusable workflows, and exact installer/runtime dependency graphs. Version `0.2.0` is published on npm. From a clean adopter checkout, `npx --yes codekeeper@0.2.0 init` resolves and runs the exact package receipt, then opens a terminal UI, creates a setup branch, pushes it, and opens a pull request. Use `npx --yes codekeeper@0.2.0 update` to advance the complete release-owned repository installation and runtime dependency pins. By default, the selected workflows start after the first pull request merges. You can choose a disabled install instead. The installer does not copy runtime source or dependencies into the adopter repository.
 
-The package is currently **unpublished** while private acceptance is in progress. Exercise the exact local tarball from a clean adopter checkout:
+## Published CLI
 
-Use the `integrity` value returned by the same `npm pack --json` operation that created the tarball; do not calculate it from a different file or registry response.
+The v1 CLI surface is:
+
+```bash
+npx --yes codekeeper@0.2.0 init
+npx --yes codekeeper@0.2.0 update
+npx --yes codekeeper@0.2.0 --help
+npx --yes codekeeper@0.2.0 --version
+```
+
+The installer resolves and verifies the npm release receipt before running its locked CLI dependencies. Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. GitHub.com is the only supported host. The TUI uses the full terminal while setup runs. Use the arrow keys, Space, Enter, and Escape to move through it. Plain prompts remain the fallback for limited terminals. The `--help` and `--version` commands never start the TUI.
+
+## Maintainer/recovery: local package testing
+
+Adopters should use the published commands above. Maintainers can exercise an exact local tarball from a clean adopter checkout when testing a source release or recovering from registry unavailability. Use the `integrity` value returned by the same `npm pack --json` operation that created the tarball; do not calculate it from a different file or registry response.
 
 ```bash
 npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper init --current-package --package-integrity 'sha512-...'
 npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper update --current-package --package-integrity 'sha512-...'
 ```
 
-The v1 CLI surface is:
-
-```bash
-npx codekeeper init
-codekeeper update
-codekeeper update --current-package --package-integrity 'sha512-...'
-npx codekeeper --help
-npx codekeeper --version
-```
-
-Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. GitHub.com is the only supported host. The TUI uses the full terminal while setup runs. Use the arrow keys, Space, Enter, and Escape to move through it. Plain prompts remain the fallback for limited terminals. The `--help` and `--version` commands never start the TUI.
-
 ## Document map
 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and operating model. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparry/Codekeeper/blob/0cceb845ed7212d7f4d69fe7863d45f37647864d/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/0cceb845ed7212d7f4d69fe7863d45f37647864d/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/README.md` | Release-owned explanation of the installed files and update commands. | When orienting maintainers inside an adopter repository. |
 | Generated `.github/codekeeper-release.json` | Installed package/source version and inventory of release-managed files, with exact digests for copied artifacts and semantic validation for generated callers. | When reviewing an update that adds, replaces, renames, or removes generated callers. |
 | Optional `.github/codekeeper/agents/*.md` overrides | Adopter-owned overrides for evidence, risk, duplicate, test-adequacy, and no-action judgment. Absent files use the packaged defaults. | Only when repository-specific behavior should differ from the release default. |
 | Generated `.github/workflows/codekeeper-*.yml` and `.github/codekeeper/actions/acquire-package/action.yml` | Selected callers, local runtime workflows, and the exact-package acquisition action pinned to the npm version and SHA-512 integrity. | When reviewing triggers, permissions, package identity, or secret mappings. |
-| [Packaged default profiles](https://github.com/coryparry/Codekeeper/tree/0cceb845ed7212d7f4d69fe7863d45f37647864d/tools/codekeeper/agents) | Immutable source and provenance for the four defaults bundled with this release. | When comparing an optional repository override with the release baseline. |
+| [Packaged default profiles](https://github.com/coryparrry/Codekeeper/tree/0cceb845ed7212d7f4d69fe7863d45f37647864d/tools/codekeeper/agents) | Immutable source and provenance for the four defaults bundled with this release. | When comparing an optional repository override with the release baseline. |
 
 ## What `init` does
 
@@ -60,17 +61,17 @@ After choosing the settings, the TUI shows one short summary of the repository, 
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
 6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add setup`, pushes the branch, and creates a setup pull request. The TUI then opens the pull request in the browser.
 
-It never merges the pull request, runs a workflow, publishes an npm package, copies the runtime, or creates a hosted service.
+It never merges the pull request, runs a workflow, copies the runtime, or creates a hosted service.
 
 ## Change an existing installation
 
-Run `npx codekeeper init` again from the current default branch to edit settings. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and repository profile overrides into the same Settings screen. Missing overrides display the current packaged defaults. You can add or remove role workflows, change every editable policy value, edit profiles inside the TUI, or press `R` to restore the default profile.
+Run `npx --yes codekeeper@0.2.0 init` again from the current default branch to edit settings. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and repository profile overrides into the same Settings screen. Missing overrides display the current packaged defaults. You can add or remove role workflows, change every editable policy value, edit profiles inside the TUI, or press `R` to restore the default profile.
 
 The installer writes only values that changed. It preserves every untouched profile override. It does not ask for existing secrets again. Press `R` to remove an override. Editing one default creates only that role's override. A settings change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
 
 ## Update an existing installation
 
-Run `codekeeper update` from a clean, current default-branch checkout. The command resolves the registry's current `latest` version and `dist.integrity` together, launches that exact package with install scripts disabled, and refuses a missing, malformed, or mismatched receipt. The update refreshes every release-owned caller, local package action/runtime workflow, provider definition, policy/schema safety boundary, and generated-file inventory. New generated files are added and retired release-owned files are removed in the same reviewed pull request after preflight validates their ownership and binds the plan to the exact inspected bytes. Existing source-pinned installations migrate to package execution through that pull request; the historical commit remains valid until it merges.
+Run `npx --yes codekeeper@0.2.0 update` from a clean, current default-branch checkout. The command resolves the registry's current `latest` version and `dist.integrity` together, launches that exact package with install scripts disabled, and refuses a missing, malformed, or mismatched receipt. The update refreshes every release-owned caller, local package action/runtime workflow, provider definition, policy/schema safety boundary, and generated-file inventory. New generated files are added and retired release-owned files are removed in the same reviewed pull request after preflight validates their ownership and binds the plan to the exact inspected bytes. Existing source-pinned installations migrate to package execution through that pull request; the historical commit remains valid until it merges.
 
 The published tarball is the update boundary. New CLI and TUI modules come from `packages/codekeeper`. New runtime modules, agent tools, profiles, and presets come from their approved production roots. The package verifier rejects missing, extra, changed, hidden, or linked files. One strict artifact catalog controls repository-installed files. The `.github/codekeeper-release.json` file records their inventory. Each copied Markdown, settings, or workflow asset needs one catalog record. The record defines its destination, owner, activation, renderer, validation rule, and purpose. The existing systems then add or update it. Renames list the previous target. Removal records stay until every supported installation has migrated.
 

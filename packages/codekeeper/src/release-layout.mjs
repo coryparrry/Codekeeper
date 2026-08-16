@@ -13,9 +13,8 @@ const STATIC_FILE_MAPPINGS = Object.freeze([
   ["packages/codekeeper/LICENSE", "LICENSE"],
   ["packages/codekeeper/README.md", "README.md"],
   ["packages/codekeeper/package.json", "package.json"],
-  ["packages/codekeeper/npm-shrinkwrap.json", "npm-shrinkwrap.json"],
   ["packages/codekeeper/runtime-package/package.json", "runtime/package.json"],
-  ["packages/codekeeper/runtime-package/npm-shrinkwrap.json", "runtime/npm-shrinkwrap.json"],
+  ["packages/codekeeper/runtime-package/package-lock.json", "runtime/package-lock.json"],
   ["tools/codekeeper/scripts/verify-tooling-artifact.mjs", "runtime/scripts/verify-tooling-artifact.mjs"],
 ]);
 

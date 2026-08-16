@@ -111,7 +111,7 @@
     },
     {
       "path": "src/lib/render.mjs",
-      "sha256": "173a61fea06601a8772086fb336f3809960719b9dc5c46d7b91f21a259ea69b8"
+      "sha256": "50965b8b64dc2908b5de6e54087c2a81120b7396254b3df9790a97bc0ff32b16"
     },
     {
       "path": "src/lib/review-feedback.mjs",

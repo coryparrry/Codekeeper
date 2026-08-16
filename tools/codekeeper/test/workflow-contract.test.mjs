@@ -116,7 +116,11 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
         workspace,
         /id: repository-source[\s\S]*echo "sha=\$\(git rev-parse HEAD\)"/,
       );
-      assert.match(workspace, /ref: \$\{\{ github\.sha \}\}/);
+      assert.match(
+        workspace,
+        /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/,
+      );
+      assert.doesNotMatch(workspace, /ref: \$\{\{ github\.sha \}\}/);
       assert.match(
         analyze,
         /ref: \$\{\{ needs\.workspace\.outputs\.repository_sha \}\}/,
@@ -164,6 +168,14 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(publish, /\$GITHUB_API_URL\/users\/\$\{APP_SLUG\}\[bot\]/);
     assert.doesNotMatch(publish, /\$GITHUB_API_URL\/user(?:["']|\))/);
     assert.match(publish, /codekeeper-artifact/);
+    if (mode === "review") {
+      assert.match(publish, /node codekeeper-runtime\/src\/cli\.mjs publish-review/);
+      assert.doesNotMatch(publish, /node tools\/codekeeper\/src\/cli\.mjs publish-review/);
+    }
+    if (mode === "issues") {
+      assert.match(publish, /node codekeeper-runtime\/src\/cli\.mjs publish-issue/);
+      assert.doesNotMatch(publish, /node tools\/codekeeper\/src\/cli\.mjs publish-issue/);
+    }
     if (mode === "fix") {
       assert.match(
         publish,
@@ -418,18 +430,22 @@ test("merged review gate executes the same fail-closed publication contract", as
     );
   }
 
-  for (const overrides of [
-    { IS_AUTOMATION_REPLY: "true" },
-    { IS_OWNER_COMMAND_REVIEW: "true" },
-  ]) {
-    const intentionalNoOp = await runGate({
-      ...overrides,
-      ANALYZE_RESULT: "skipped",
-      SEAL_RESULT: "skipped",
-      PUBLISH_RESULT: "skipped",
-    });
-    assert.match(intentionalNoOp.stdout, /intentionally (?:ignored|routed)/);
-  }
+  const intentionalNoOp = await runGate({
+    IS_AUTOMATION_REPLY: "true",
+    ANALYZE_RESULT: "skipped",
+    SEAL_RESULT: "skipped",
+    PUBLISH_RESULT: "skipped",
+  });
+  assert.match(intentionalNoOp.stdout, /intentionally ignored/);
+
+  await assert.rejects(
+    () => runGate({ IS_OWNER_COMMAND_REVIEW: "true" }),
+    (error) =>
+      error.code === 1 &&
+      /Owner review commands must be routed by the repository assistant/.test(
+        error.stdout,
+      ),
+  );
 });
 
 test("review uses a PR-native fail-closed gate instead of a reusable commit status", async () => {
@@ -491,7 +507,7 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   );
   assert.match(
     gate,
-    /Owner review command is intentionally routed by the repository assistant/,
+    /Owner review commands must be routed by the repository assistant, not the required review gate/,
   );
   assert.match(
     jobSection(source, "workspace", "analyze"),
@@ -641,6 +657,15 @@ test("owner-commanded pull request repair can update only the frozen existing he
   assert.match(assistant, /owner_requests:/);
   assert.match(assistant, /installed_modes:/);
   assert.match(assistant, /owner-command/);
+  const assistantRoute = jobSection(assistant, "route");
+  assert.match(
+    assistantRoute,
+    /Route deterministic owner request[\s\S]*CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/,
+  );
+  assert.doesNotMatch(
+    assistantRoute,
+    /CONFIG: \$\{\{ github\.workspace \}\}\/policy\/\.github\/codekeeper\.json/,
+  );
   assert.match(assistant, /--installed-modes "\$INSTALLED_MODES"/);
   assert.match(
     assistantCaller,
@@ -665,6 +690,13 @@ test("owner-commanded pull request repair can update only the frozen existing he
     /target_kind: \$\{\{ fromJSON\(steps\.prepare\.outputs\.result\)\.target\.kind \}\}/,
   );
   assert.equal([...fix.matchAll(/Check out frozen repair target/g)].length, 4);
+  for (const job of [
+    jobSection(fix, "verify", "seal"),
+    jobSection(fix, "publish"),
+  ]) {
+    assert.match(job, /uses: \.\/policy\/\.github\/codekeeper\/actions\/acquire-package/);
+    assert.doesNotMatch(job, /uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/);
+  }
   assert.match(publisher, /createCommitOnCurrentHead/);
   assert.match(publisher, /pushHeadToBranch\(target\.headRef/);
   assert.match(

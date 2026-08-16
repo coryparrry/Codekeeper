@@ -184,9 +184,14 @@ test("reusable workflows acquire one exact package and reverify it in every isol
       [...source.matchAll(/name: Check out frozen maintainer tooling/g)].length,
       0,
     );
+    const policyAcquisitionCount = mode === "fix" ? 2 : 0;
     assert.equal(
       [...source.matchAll(/uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/g)].length,
-      count,
+      count - policyAcquisitionCount,
+    );
+    assert.equal(
+      [...source.matchAll(/uses: \.\/policy\/\.github\/codekeeper\/actions\/acquire-package/g)].length,
+      policyAcquisitionCount,
     );
     if (mode !== "assistant") {
       assert.match(
@@ -284,6 +289,10 @@ test("reusable workflows acquire one exact package and reverify it in every isol
     );
     for (const [index, jobName] of jobs.entries()) {
       const job = jobSection(source, jobName, jobs[index + 1]);
+      const actionCheckout =
+        mode === "fix" && (jobName === "verify" || jobName === "publish")
+          ? "policy"
+          : "repository";
       const node = job.indexOf("uses: actions/setup-node@");
       const checkout = job.indexOf("path: repository");
       const install = job.indexOf("name: Install exact Codekeeper runtime");
@@ -291,7 +300,7 @@ test("reusable workflows acquire one exact package and reverify it in every isol
       assert.ok(node > checkout, `${mode}.${jobName} sets up Node after checkout`);
       if (index === 0) {
         const acquire = job.indexOf(
-          "uses: ./repository/.github/codekeeper/actions/acquire-package",
+          `uses: ./${actionCheckout}/.github/codekeeper/actions/acquire-package`,
         );
         const upload = job.indexOf("name: Upload verified Codekeeper package");
         assert.ok(acquire > node, `${mode}.${jobName} acquires after Node setup`);
@@ -308,7 +317,9 @@ test("reusable workflows acquire one exact package and reverify it in every isol
         assert.ok(verify > node, `${mode}.${jobName} verifies after Node setup`);
         assert.match(
           job.slice(verify),
-          /uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package[\s\S]*package_source: artifact/,
+          new RegExp(
+            `uses: \\.\\/${actionCheckout}\\/\\.github\\/codekeeper\\/actions\\/acquire-package[\\s\\S]*package_source: artifact`,
+          ),
         );
         assert.ok(install > verify, `${mode}.${jobName} installs only after verification`);
         assert.match(job, /needs: \[[^\]]*workspace[^\]]*\]|needs: workspace/);
@@ -446,7 +457,7 @@ test("package acquisition validates tarball SRI before deriving package provenan
       source.indexOf("printf 'package_manifest_sha256="),
   );
   assert.match(source, /package-integrity\.json/);
-  assert.match(source, /https:\/\/github\.com\/coryparry\/Codekeeper/);
+  assert.match(source, /https:\/\/github\.com\/coryparrry\/Codekeeper/);
   assert.match(
     source,
     /const receipt = \{ version: 1, algorithm: "sha512", integrity: process\.env\.CODEKEEPER_PACKAGE_INTEGRITY \}/,

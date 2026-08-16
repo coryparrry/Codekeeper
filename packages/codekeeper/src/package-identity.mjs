@@ -11,5 +11,5 @@ if (
 
 export const PACKAGE_NAME = packageManifest.name;
 export const PACKAGE_VERSION = packageManifest.version;
-export const PACKAGE_SOURCE_REPOSITORY = "coryparry/Codekeeper";
+export const PACKAGE_SOURCE_REPOSITORY = "coryparrry/Codekeeper";
 export const PACKAGE_SOURCE_REPOSITORY_URL = `https://github.com/${PACKAGE_SOURCE_REPOSITORY}`;

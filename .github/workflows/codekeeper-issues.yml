@@ -512,7 +512,7 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
-          node tools/codekeeper/src/cli.mjs publish-issue \
+          node codekeeper-runtime/src/cli.mjs publish-issue \
             --config "$CONFIG" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \

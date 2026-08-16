@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { SOURCE_COMMIT } from "../src/constants.mjs";
+import { PACKAGE_SOURCE_REPOSITORY, PACKAGE_SOURCE_REPOSITORY_URL } from "../src/package-identity.mjs";
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
@@ -63,13 +64,19 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.check, /npm run test:unit/);
 });
 
-test("root private-tarball instructions use the exact npm pack receipt", async () => {
+test("published installer leads while recovery tarball preserves the exact npm pack receipt", async () => {
   const installGuide = await readFile(new URL("../../../INSTALL.md", import.meta.url), "utf8");
   const packageReadme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-  const rootTarballCommands = installGuide.match(/```bash\n(.*?)\n```/s)?.[1] ?? "";
-  assert.match(rootTarballCommands, /PACK_REPORT=.*npm pack --json --pack-destination/);
+  const bashBlocks = [...installGuide.matchAll(/```bash\n(.*?)\n```/gs)].map(([, block]) => block);
+  assert.match(bashBlocks[0] ?? "", /^npx --yes codekeeper@0\.2\.0 init$/);
+  const rootTarballCommands = bashBlocks.find((block) => block.includes("PACK_REPORT=")) ?? "";
+  assert.match(rootTarballCommands, /npm install --global npm@12\.0\.2/);
+  assert.match(rootTarballCommands, /PACK_REPORT=.*npm run --silent package:pack -- --destination/);
   assert.match(rootTarballCommands, /npm exec --package .*-- codekeeper init --current-package --package-integrity "\$PACKAGE_INTEGRITY"/);
+  assert.match(packageReadme, /npx --yes codekeeper@0\.2\.0 init/);
+  assert.match(packageReadme, /npx --yes codekeeper@0\.2\.0 update/);
   assert.match(packageReadme, /codekeeper init --current-package --package-integrity 'sha512-\.\.\.'/);
+  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /unpublished|private acceptance|Do not assume npx/i);
   const extractionScripts = [...rootTarballCommands.matchAll(/node -e '\n([\s\S]*?)\n' "\$PACK_REPORT"/g)].map(([, script]) => script);
   assert.equal(extractionScripts.length, 2);
   const keyedReport = {
@@ -94,22 +101,47 @@ test("root private-tarball instructions use the exact npm pack receipt", async (
   }
 });
 
-test("release packaging uses one deterministic tarball with separate installer and runtime shrinkwraps", async () => {
+test("release packaging uses npm 12 with bundled installer dependencies and a locked runtime", async () => {
   const rootPackage = JSON.parse(
     await readFile(new URL("../../../package.json", import.meta.url), "utf8"),
   );
   const packageManifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const selfTestWorkflow = await readFile(new URL("../../../.github/workflows/codekeeper-self-test.yml", import.meta.url), "utf8");
+  assert.equal(rootPackage.packageManager, "npm@12.0.2");
+  assert.equal(rootPackage.scripts["package:pack"], "node scripts/pack-codekeeper-package.mjs");
   assert.equal(rootPackage.scripts["package:stage"], "node scripts/build-codekeeper-package.mjs");
   assert.match(rootPackage.scripts["package:stage:check"], /package-stage\.test\.mjs/);
+  assert.equal(selfTestWorkflow.match(/npm install --global npm@12\.0\.2 --ignore-scripts --no-audit --no-fund/g)?.length, 3);
   assert.ok(packageManifest.files.includes("release/"));
   assert.ok(packageManifest.files.includes("runtime/"));
+  assert.equal(packageManifest.files.includes("package-lock.json"), false);
   assert.equal(packageManifest.bin["codekeeper-verify-package"], "bin/verify-package.mjs");
   assert.deepEqual(packageManifest.dependencies, { ink: "7.1.1", react: "19.2.8" });
-  await access(new URL("../npm-shrinkwrap.json", import.meta.url));
+  assert.deepEqual(packageManifest.bundleDependencies, ["ink", "react"]);
+  assert.equal(packageManifest.private, undefined);
+  assert.deepEqual(packageManifest.publishConfig, {
+    access: "public",
+    registry: "https://registry.npmjs.org/",
+  });
+  await access(new URL("../package-lock.json", import.meta.url));
   await access(new URL("../runtime-package/package.json", import.meta.url));
-  await access(new URL("../runtime-package/npm-shrinkwrap.json", import.meta.url));
-  await assert.rejects(access(new URL("../package-lock.json", import.meta.url)), /ENOENT/);
-  await assert.rejects(access(new URL("../runtime-package/package-lock.json", import.meta.url)), /ENOENT/);
+  await access(new URL("../runtime-package/package-lock.json", import.meta.url));
+  await assert.rejects(access(new URL("../npm-shrinkwrap.json", import.meta.url)), /ENOENT/);
+  await assert.rejects(access(new URL("../runtime-package/npm-shrinkwrap.json", import.meta.url)), /ENOENT/);
+});
+
+test("release identity uses the current personal repository everywhere", async () => {
+  assert.equal(PACKAGE_SOURCE_REPOSITORY, "coryparrry/Codekeeper");
+  assert.equal(PACKAGE_SOURCE_REPOSITORY_URL, "https://github.com/coryparrry/Codekeeper");
+  const surfaces = await Promise.all([
+    readFile(new URL("../assets/metadata.json", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../../../.github/codekeeper/actions/acquire-package/action.yml", import.meta.url), "utf8"),
+    readFile(new URL("../../../tools/codekeeper/src/lib/render.mjs", import.meta.url), "utf8"),
+  ]);
+  const staleRepository = ["coryparry", "Codekeeper"].join("/");
+  assert.ok(surfaces.every((contents) => !contents.includes(staleRepository)));
+  assert.ok(surfaces.every((contents) => contents.includes("coryparrry/Codekeeper")));
 });
 
 test("installer source pin is a full reviewed checkpoint reachable from the repository default branch", () => {

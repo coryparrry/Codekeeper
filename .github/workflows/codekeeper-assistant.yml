@@ -129,7 +129,7 @@ jobs:
         if: steps.authorization.outputs.authorized == 'true'
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
+          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           BOT_LOGIN: ${{ steps.bot.outputs.login }}
           BOT_ID: ${{ steps.bot.outputs.id }}
           INSTALLED_MODES: ${{ inputs.installed_modes }}

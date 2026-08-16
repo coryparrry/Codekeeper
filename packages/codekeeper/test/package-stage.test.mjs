@@ -64,7 +64,7 @@ test("package stage contains one release with separate closed installer and runt
     "runtime/agents/fixer.md",
     "runtime/presets/catalogue.mjs",
     "runtime/package.json",
-    "runtime/npm-shrinkwrap.json",
+    "runtime/package-lock.json",
     "runtime/scripts/verify-tooling-artifact.mjs",
     "runtime/src/cli.mjs",
     "runtime/src/lib/agents-runtime.mjs",
@@ -75,7 +75,6 @@ test("package stage contains one release with separate closed installer and runt
     "release/workflows/codekeeper-issues.yml",
     "release/workflows/codekeeper-maintain.yml",
     "release/workflows/codekeeper-review.yml",
-    "npm-shrinkwrap.json",
     "package.json",
   ]) {
     assert.ok(paths.includes(requiredPath), `${requiredPath} is staged`);
@@ -86,7 +85,7 @@ test("package stage contains one release with separate closed installer and runt
         !filePath.includes("/test/") &&
         !filePath.includes("/audit/") &&
         !filePath.includes("/evals/") &&
-        !filePath.endsWith("package-lock.json") &&
+        filePath !== "package-lock.json" &&
         !filePath.endsWith("tooling-manifest.json"),
     ),
   );
@@ -99,9 +98,9 @@ test("package stage contains one release with separate closed installer and runt
   }
 
   const packageManifest = JSON.parse(await readFile(path.join(destination, "package.json"), "utf8"));
-  const shrinkwrap = JSON.parse(await readFile(path.join(destination, "npm-shrinkwrap.json"), "utf8"));
+  const packageLock = JSON.parse(await readFile(path.join(REPOSITORY_ROOT, "packages/codekeeper/package-lock.json"), "utf8"));
   const stagedRuntimeManifest = JSON.parse(await readFile(path.join(destination, "runtime/package.json"), "utf8"));
-  const runtimeShrinkwrap = JSON.parse(await readFile(path.join(destination, "runtime/npm-shrinkwrap.json"), "utf8"));
+  const runtimePackageLock = JSON.parse(await readFile(path.join(destination, "runtime/package-lock.json"), "utf8"));
   const canonicalRuntimeManifest = JSON.parse(
     await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/package.json"), "utf8"),
   );
@@ -111,19 +110,21 @@ test("package stage contains one release with separate closed installer and runt
   for (const [name, version] of Object.entries(runtimeDependencies)) {
     assert.equal(stagedRuntimeManifest.dependencies[name], version, `${name} matches its runtime owner`);
   }
-  assert.deepEqual(shrinkwrap.packages[""].dependencies, packageManifest.dependencies);
-  assert.deepEqual(runtimeShrinkwrap.packages[""].dependencies, stagedRuntimeManifest.dependencies);
-  for (const [label, lock] of [["installer", shrinkwrap], ["runtime", runtimeShrinkwrap]]) {
+  assert.deepEqual(packageManifest.bundleDependencies, INSTALLER_DEPENDENCIES);
+  assert.deepEqual(packageLock.packages[""].dependencies, packageManifest.dependencies);
+  assert.deepEqual(packageLock.packages[""].bundleDependencies, packageManifest.bundleDependencies);
+  assert.deepEqual(runtimePackageLock.packages[""].dependencies, stagedRuntimeManifest.dependencies);
+  for (const [label, lock] of [["installer", packageLock], ["runtime", runtimePackageLock]]) {
     for (const [packagePath, metadata] of Object.entries(lock.packages)) {
       if (!packagePath.startsWith("node_modules/")) continue;
       assert.equal(typeof metadata.version, "string", `${label} ${packagePath} has an exact version`);
       assert.match(metadata.integrity, /^sha512-/, `${label} ${packagePath} has sha512 integrity`);
     }
   }
-  assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/@openai/agents"), false);
-  assert.equal(Object.hasOwn(shrinkwrap.packages, "node_modules/@openai/codex"), false);
-  assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@openai/agents"));
-  assert.ok(Object.hasOwn(runtimeShrinkwrap.packages, "node_modules/@openai/codex"));
+  assert.equal(Object.hasOwn(packageLock.packages, "node_modules/@openai/agents"), false);
+  assert.equal(Object.hasOwn(packageLock.packages, "node_modules/@openai/codex"), false);
+  assert.ok(Object.hasOwn(runtimePackageLock.packages, "node_modules/@openai/agents"));
+  assert.ok(Object.hasOwn(runtimePackageLock.packages, "node_modules/@openai/codex"));
 
   const toolingManifest = JSON.parse(
     await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/tooling-manifest.json"), "utf8"),

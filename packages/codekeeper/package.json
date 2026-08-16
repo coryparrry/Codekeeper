@@ -1,8 +1,11 @@
 {
   "name": "codekeeper",
   "version": "0.2.0",
-  "private": true,
   "description": "Complete CLI, TUI, runtime, and workflow release package for Codekeeper",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "bin": {
     "codekeeper": "bin/codekeeper.mjs",
@@ -15,8 +18,11 @@
     "runtime/",
     "src/",
     "LICENSE",
-    "README.md",
-    "npm-shrinkwrap.json"
+    "README.md"
+  ],
+  "bundleDependencies": [
+    "ink",
+    "react"
   ],
   "engines": {
     "node": ">=22"

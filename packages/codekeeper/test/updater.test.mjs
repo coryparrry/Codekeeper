@@ -99,6 +99,42 @@ test("the trusted launcher rejects changed tarball bytes for the same package ve
   );
 });
 
+for (const [description, wrapReport] of [
+  ["a single-array report", (entry) => [entry]],
+  ["a direct report object", (entry) => entry],
+  ["a single-key report object", (entry) => ({ codekeeper: entry })],
+]) {
+  test(`the trusted launcher accepts ${description} from npm pack`, async (t) => {
+    const downloadRoot = await temporaryDirectory(t, "codekeeper-updater-download-");
+    const filename = "codekeeper-1.4.2.tgz";
+    const bytes = Buffer.from(`${description} package bytes`);
+    const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+    await writeFile(path.join(downloadRoot, filename), bytes);
+    const entry = { name: "codekeeper", version: "1.4.2", integrity, filename };
+    assert.equal(await verifyDownloadedTarball({
+      downloadRoot,
+      reportSource: JSON.stringify(wrapReport(entry)),
+      receipt: { version: "1.4.2", integrity },
+    }), await realpath(path.join(downloadRoot, filename)));
+  });
+}
+
+for (const [description, report] of [
+  ["an array with multiple reports", [{ name: "codekeeper" }, { name: "codekeeper" }]],
+  ["an object with multiple reports", { codekeeper: { name: "codekeeper" }, other: { name: "other" } }],
+]) {
+  test(`the trusted launcher rejects ${description}`, async (t) => {
+    await assert.rejects(
+      verifyDownloadedTarball({
+        downloadRoot: await temporaryDirectory(t, "codekeeper-updater-download-"),
+        reportSource: JSON.stringify(report),
+        receipt: { version: "1.4.2", integrity: RELEASE_INTEGRITY },
+      }),
+      (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /invalid report/.test(error.message),
+    );
+  });
+}
+
 test("the latest-release bootstrap rejects invalid registry versions before execution", async () => {
   const runner = createRecordingRunner(() => result(JSON.stringify({
     version: "latest",
