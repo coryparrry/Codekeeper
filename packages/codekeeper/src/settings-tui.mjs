@@ -10,7 +10,7 @@ import {
   inspectPrivateKeyTextInput,
   PRIVATE_KEY_INPUT_ERROR
 } from "./input-safety.mjs";
-import { parseSettingValue, setSetting, settingsRows, validateEditableSettings } from "./settings.mjs";
+import { parseSettingValue, resetProfileOverride, setSetting, settingsRows, validateEditableSettings } from "./settings.mjs";
 
 const h = React.createElement;
 
@@ -90,6 +90,7 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
   const [index, setIndex] = useState(0);
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const pendingPemMarkerRef = useRef("");
   const pemInputBlockedRef = useRef(false);
@@ -107,8 +108,10 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     try {
       setSettings((current) => setSetting(current, row, value));
       setError("");
+      setNotice("");
       return true;
     } catch (cause) {
+      setNotice("");
       setError(cause.message);
       return false;
     }
@@ -189,6 +192,14 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     if (key.downArrow || input === "j" || key.tab) setIndex((value) => (value + 1) % rows.length);
     const row = rows[index];
     if (!row) return;
+    if (input.toLowerCase() === "r" && row.kind === "profile") {
+      setSettings((current) => resetProfileOverride(current, row.profile));
+      setError("");
+      setNotice(row.source === "repository"
+        ? "Using the packaged default; the repository override will be removed after final review."
+        : "This profile already uses the packaged default.");
+      return;
+    }
     if (input === " " && row.kind === "boolean") applyValue(row, !row.value);
     if ((key.leftArrow || key.rightArrow) && row.kind === "enum") {
       const direction = key.leftArrow ? -1 : 1;
@@ -251,8 +262,9 @@ export function SettingsScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     ),
     h(Text, { dimColor: true }, `${start + 1}–${Math.min(rows.length, start + visibleCount)} of ${rows.length}`),
     busy ? h(Text, color(colorEnabled, "cyan"), "Waiting for $EDITOR…") : null,
+    notice ? h(Text, color(colorEnabled, "cyan"), notice) : null,
     error ? h(Text, color(colorEnabled, "red"), error) : null,
-    h(Text, { dimColor: true }, fitLine("↑/↓ move  •  Space toggle  •  ←/→ cycle  •  Enter edit  •  A Standard/Advanced  •  Esc cancel", lineWidth))
+    h(Text, { dimColor: true }, fitLine("↑/↓ move  •  Space toggle  •  ←/→ cycle  •  Enter edit  •  R reset profile  •  A Standard/Advanced  •  Esc cancel", lineWidth))
   );
 }
 

@@ -134,6 +134,17 @@ test("package stage contains the complete approved product and one closed depend
       `${toolingEntry.path} remains in the unified package inventory`,
     );
   }
+  const canonicalAgentFiles = (await readdir(path.join(REPOSITORY_ROOT, "tools", "codekeeper", "agents"), {
+    withFileTypes: true,
+  }))
+    .filter((entry) => entry.isFile() && !entry.isSymbolicLink())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(
+    paths.filter((filePath) => filePath.startsWith("runtime/agents/")).map((filePath) => path.basename(filePath)).sort(),
+    canonicalAgentFiles,
+    "every canonical runtime agent is included without a hand-maintained stage inventory",
+  );
 });
 
 test("package stage verification rejects omission, addition, tampering, hidden files, and symlinks", async (t) => {

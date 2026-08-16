@@ -29,7 +29,7 @@ import {
 import { renderInstallFiles, sha256 } from "./assets.mjs";
 import { InstallerError } from "./errors.mjs";
 import { upgradePolicy } from "./policy.mjs";
-import { createEditableSettings, settingsAnswers, validateEditableSettings } from "./settings.mjs";
+import { createEditableSettings, normalizeProfileSettings, settingsAnswers, validateEditableSettings } from "./settings.mjs";
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const BOT_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,99})\[bot\]$/;
@@ -252,7 +252,7 @@ export function completionGuidance(modes, enabled = true, update = false) {
         ? "Codekeeper keeps running the current default-branch configuration. The change takes effect when the pull request merges; no separate validation run is required."
         : "Codekeeper is ready. It starts the selected workflows when the setup pull request merges; no separate dry run or controlled test is required."
       : "Codekeeper stays off after merge. Set CODEKEEPER_ENABLED=true when you want it to start; no separate validation run is required.",
-    profileGuidance: "Edit .github/codekeeper/agents/*.md to change priorities, work selection, implementation, review standards, and reporting. Capability switches control repair, issue implementation, issue closure, and merge actions.",
+    profileGuidance: "Packaged agent profiles are the default. Edit a profile in Settings to create an optional .github/codekeeper/agents/*.md repository override. Capability switches control repair, issue implementation, issue closure, and merge actions.",
     reviewGateWarning: !enabled && normalizedModes.includes("review")
       ? "Keep the Codekeeper review gate optional while Codekeeper is disabled."
       : null,
@@ -272,11 +272,14 @@ function editableSettingsForInstallation(snapshot, bundle) {
     id,
     installation.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
+  const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
   const settings = createEditableSettings({
     policy: installation.policy,
     modes: installation.modes,
     enabled: snapshot.existingSettings.enabled,
-    profiles
+    profiles,
+    profileDefaults,
+    profileOverrides: AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
   });
   return { preset, settings };
 }
@@ -285,7 +288,7 @@ export function buildUpdateAnswers({ snapshot, bundle, output }) {
   const { preset, settings } = editableSettingsForInstallation(snapshot, bundle);
   output.write("Codekeeper release update\n\n");
   output.write("This advances the release-owned workflow and runtime pins, policy safety boundaries, and provider definitions.\n");
-  output.write("Your selected workflows, repository settings, model choices, automation choices, and edited agent profiles stay unchanged.\n\n");
+  output.write("Your selected workflows, repository settings, model choices, automation choices, and existing agent profile overrides stay unchanged.\n\n");
   return Object.freeze({
     ...settingsAnswers(settings),
     preset,
@@ -354,7 +357,7 @@ ${plan.enabled
       : "Codekeeper starts running the selected workflows when this pull request merges; no separate dry run or controlled test is required."
     : "Codekeeper stays off. Set `CODEKEEPER_ENABLED=true` when you want it to start; no separate validation run is required."}
 
-Edit \`.github/codekeeper/agents/*.md\` to tune priorities, work selection, implementation approach, review standards, and reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
+Packaged agent profiles are used by default. Edit a profile in Settings to create an optional \`.github/codekeeper/agents/*.md\` repository override for priorities, work selection, implementation approach, review standards, or reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
 
 The installer did not merge this pull request or run a workflow.
 `;
@@ -372,14 +375,20 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     ? upgradePolicy(JSON.parse(bundle.contents[`policies/${answers.preset}.json`]))
     : baselinePolicy;
   validationBaselinePolicy.repository.defaultBranch = snapshot.defaultBranch;
-  const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
+  const effectiveProfiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
     installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
+  const packagedProfileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
   const inputPolicy = answers.policy ?? createEditableSettings({
     policy: baselinePolicy,
     modes,
     enabled: answers.enabled !== false,
-    profiles: answers.profiles ?? profileDefaults
+    profiles: answers.profiles ?? effectiveProfiles,
+    profileDefaults: packagedProfileDefaults,
+    profileSources: answers.profileSources,
+    profileOverrides: installation
+      ? AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
+      : []
   }).policy;
   const displayName = answers.policy?.repository.displayName ?? answers.displayName;
   if (!validDisplayName(displayName)) throw new InstallerError("Repository display name is invalid.", { code: "PLAN_INVALID" });
@@ -388,8 +397,21 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
   const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models, policySource });
   const tracing = answers.policy ? answers.policy.ai.tracing.enabled : answers.tracing !== false;
-  const profileSources = { ...bundle.contents, ...(installation?.contents ?? {}) };
-  for (const id of AGENT_PROFILE_IDS) profileSources[AGENT_PROFILES[id].target] = answers.profiles?.[id] ?? profileDefaults[id];
+  const desiredProfileSettings = normalizeProfileSettings({
+    profiles: answers.profiles ?? effectiveProfiles,
+    defaults: packagedProfileDefaults,
+    sources: answers.profileSources,
+    existingOverrides: installation
+      ? AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
+      : []
+  });
+  const profileSources = {};
+  for (const id of AGENT_PROFILE_IDS) {
+    const { target } = AGENT_PROFILES[id];
+    if (desiredProfileSettings.profileSources[id] === "repository") {
+      profileSources[target] = desiredProfileSettings.profiles[id];
+    }
+  }
   const files = renderInstallFiles(bundle, {
     modes,
     preset: answers.preset,
@@ -410,7 +432,9 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     policy: effectivePolicy,
     modes,
     enabled: answers.enabled !== false,
-    profiles: answers.profiles ?? profileDefaults
+    profiles: desiredProfileSettings.profiles,
+    profileDefaults: desiredProfileSettings.profileDefaults,
+    profileSources: desiredProfileSettings.profileSources
   }, validationBaselinePolicy);
   const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, effectivePolicy.automation.ownerRequests);
   const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
@@ -421,6 +445,18 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
       .map((file) => ({ ...file, previousSha256: installation.contents[file.path] === undefined ? null : sha256(installation.contents[file.path]) }))
     : files;
   if (installation) {
+    for (const id of AGENT_PROFILE_IDS) {
+      const target = AGENT_PROFILES[id].target;
+      if (desiredProfileSettings.profileSources[id] !== "package" || !Object.hasOwn(installation.contents, target)) continue;
+      changedFiles.push({
+        path: target,
+        contents: null,
+        bytes: 0,
+        sha256: null,
+        previousSha256: sha256(installation.contents[target]),
+        delete: true
+      });
+    }
     for (const mode of installation.modes.filter((mode) => !modes.includes(mode))) {
       const target = MODES[mode].target;
       changedFiles.push({

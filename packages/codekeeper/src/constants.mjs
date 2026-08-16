@@ -2,7 +2,7 @@ export const PACKAGE_NAME = "codekeeper";
 export const PACKAGE_VERSION = "0.2.0";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_REPOSITORY = "coryparry/Codekeeper";
-export const SOURCE_COMMIT = "ab3c817d98721248c675350a514ca0a3734adff0";
+export const SOURCE_COMMIT = "46d5eef7a4d1a73f4fd3d1962713489e32fd8f68";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -67,25 +67,25 @@ export const AGENT_PROFILES = Object.freeze({
     id: "pr-reviewer",
     target: ".github/codekeeper/agents/pr-reviewer.md",
     asset: "agents/pr-reviewer.md",
-    purpose: "Editable pull-request review judgment rules"
+    purpose: "Pull-request review judgment rules"
   }),
   "repository-auditor": Object.freeze({
     id: "repository-auditor",
     target: ".github/codekeeper/agents/repository-auditor.md",
     asset: "agents/repository-auditor.md",
-    purpose: "Editable repository-audit judgment rules"
+    purpose: "Repository-audit judgment rules"
   }),
   "issue-triager": Object.freeze({
     id: "issue-triager",
     target: ".github/codekeeper/agents/issue-triager.md",
     asset: "agents/issue-triager.md",
-    purpose: "Editable issue-triage judgment rules"
+    purpose: "Issue-triage judgment rules"
   }),
   fixer: Object.freeze({
     id: "fixer",
     target: ".github/codekeeper/agents/fixer.md",
     asset: "agents/fixer.md",
-    purpose: "Editable implementation and repair rules"
+    purpose: "Implementation and repair rules"
   })
 });
 export const AGENT_PROFILE_IDS = Object.freeze(Object.keys(AGENT_PROFILES));

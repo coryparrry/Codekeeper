@@ -267,6 +267,13 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "lib",
     "runtime-paths.mjs"
   )).href);
+  const installedAgentProfiles = await import(pathToFileURL(path.join(
+    installedRoot,
+    "runtime",
+    "src",
+    "lib",
+    "agent-profiles.mjs"
+  )).href);
   assert.match(help, /^Usage:\n  codekeeper init/m);
   assert.match(help, /^  codekeeper update$/m);
   assert.match(npmInstallHelp, /^Usage:\n  codekeeper init/m);
@@ -288,4 +295,15 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     output: { isTTY: true },
     environment: { TERM: "xterm-256color" }
   }), true);
+  const packagedProfile = await installedAgentProfiles.loadTrustedAgentProfile({
+    mode: "review",
+    source: installedAgentProfiles.AGENT_PROFILE_SOURCES.package,
+    sourceSha: PINNED_COMMIT
+  });
+  assert.equal(packagedProfile.metadata.source, "package");
+  assert.equal(packagedProfile.metadata.path, "runtime/agents/pr-reviewer.md");
+  assert.equal(
+    packagedProfile.text,
+    await readFile(path.join(installedRoot, "runtime", "agents", "pr-reviewer.md"), "utf8")
+  );
 });

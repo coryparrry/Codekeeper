@@ -1,6 +1,6 @@
 # Configuration
 
-The adopter-owned `.github/codekeeper.json` is the runtime policy file. Four separate adopter-owned Markdown profiles under `.github/codekeeper/agents/` tune coordinator judgment. The workflow reads both policy and the selected profile from the adopter default branch, freezes them into the run, and hash-checks them again before publication.
+The adopter-owned `.github/codekeeper.json` is the runtime policy file. Each coordinator has a packaged Markdown default and may have an adopter-owned override under `.github/codekeeper/agents/`. The workflow freezes the selected source into the run and revalidates its provenance and digest before publication.
 
 ## Validation and resource bounds
 
@@ -68,18 +68,18 @@ Provider base URLs must use HTTPS. Explicit loopback HTTP is accepted only for l
 
 `model_api_key` maps the selected mode’s provider credential. It is required in every reusable workflow and never falls back to an OpenAI key. The optional Codex specialist uses `workspace_api_key`; `openai_api_key` remains only as a compatibility fallback for that OpenAI-only workspace action.
 
-## Adopter-owned coordinator profiles
+## Packaged profiles and optional adopter overrides
 
-The installer creates all four fixed profile paths in the adopter repository. The runtime loads the selected Markdown file into the Agents SDK coordinator instructions inside an immutable safety and authorization envelope.
+The package contains all four default profiles. A new installation leaves the adopter paths absent, and the runtime loads the matching packaged default into the Agents SDK coordinator instructions inside an immutable safety and authorization envelope. Editing one profile in Settings creates only that adopter override.
 
-| Mode | Fixed adopter path | Judgment responsibility |
+| Mode | Optional adopter override | Judgment responsibility |
 |---|---|---|
 | review | `.github/codekeeper/agents/pr-reviewer.md` | PR summary, evidence-backed findings, risk, test adequacy, and merge recommendation. |
 | issue | `.github/codekeeper/agents/issue-triager.md` | Issue classification, actionability, missing information, and duplicate assessment. |
 | audit | `.github/codekeeper/agents/repository-auditor.md` | Audit evidence, category and priority calibration, and report/no-action decisions. |
 | fix | `.github/codekeeper/agents/fixer.md` | Problem proof, bounded implementation, validation evidence, risk, and no-change decisions. |
 
-Edit these Markdown files through the adopter's normal review process. A merged default-branch edit affects later runs without a runtime release. The workflow rejects missing, empty, non-UTF-8, oversized, symlinked, or wrong-path profiles. It records the default-branch source commit and profile SHA-256, freezes the exact bytes for the workspace and coordinator, carries them through sealing, and refuses publication if the trusted profile has changed since preparation.
+An absent override is valid and selects the packaged default from the installed release. Updates can therefore change defaults without modifying adopter files. When an override exists, edit it through the adopter's normal review process; a merged default-branch edit affects later runs without a runtime release. In Settings, press `R` on a profile to reset it to the packaged default; the reviewed update deletes the existing override with a digest-bound precondition, so later releases resume advancing that profile automatically. The workflow rejects empty, non-UTF-8, oversized, symlinked, or wrong-path overrides. It records whether the selected source is `package` or `repository`, its exact logical path, source identity, and SHA-256; freezes those bytes for the workspace and coordinator; carries that provenance through sealing; and refuses publication if the selected source has changed since preparation.
 
 Profiles may tune evidence thresholds, severity and priority calibration, test expectations, duplicate criteria, repair-risk judgment, positive no-action cases, and report wording. They may not:
 
@@ -90,7 +90,7 @@ Profiles may tune evidence thresholds, severity and priority calibration, test e
 
 Those permissions remain deterministic in the caller, frozen policy, schema, validator, and publication code. If a profile conflicts with one of those controls, the run ignores the conflicting instruction and fails safely.
 
-The currently pinned earlier installer checkpoint does not gain this behavior merely because a newer Markdown file exists. Adopter-owned profiles and the repair contracts below require an installer pin to the final source checkpoint that implements them.
+Existing overrides are never replaced by a package refresh, including when their bytes happen to equal an earlier packaged default.
 
 ## Caller automation controls
 

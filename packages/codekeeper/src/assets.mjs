@@ -279,7 +279,7 @@ export function renderInstallFiles(bundle, {
   models = {},
   tracing = true,
   policySource = bundle.contents[`policies/${preset}.json`],
-  profileSources = bundle.contents,
+  profileSources = {},
   enforceBundledDefaults = true,
   policyOverride = null,
   refreshReleaseBoundaries = false
@@ -303,9 +303,11 @@ export function renderInstallFiles(bundle, {
     contents: policyContents
   }];
   for (const profile of AGENT_PROFILE_IDS) {
+    const target = AGENT_PROFILES[profile].target;
+    if (!Object.hasOwn(profileSources, target)) continue;
     rendered.push({
-      path: AGENT_PROFILES[profile].target,
-      contents: profileSources[AGENT_PROFILES[profile].target] ?? profileSources[AGENT_PROFILES[profile].asset]
+      path: target,
+      contents: profileSources[target]
     });
   }
   rendered.push({

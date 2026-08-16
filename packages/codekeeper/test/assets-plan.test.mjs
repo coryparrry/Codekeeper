@@ -31,6 +31,7 @@ import {
 import {
   appRegistrationUrl,
   buildInstallPlan,
+  buildUpdateAnswers,
   completionGuidance,
   documentMap,
   normalizeModelChoices,
@@ -430,7 +431,7 @@ test("generated callers honor the rendered policy automation controls", async ()
   assert.match(contents[MODES.maintain.target], /cron: "5 4 \* \* 1"/);
 });
 
-test("renderInstallFiles emits policy, every profile, and only selected callers with verified output digests", async () => {
+test("renderInstallFiles omits packaged profiles unless an explicit repository override is provided", async () => {
   const bundle = await loadVerifiedAssets();
   const files = renderInstallFiles(bundle, {
     modes: ["review", "issues"],
@@ -441,10 +442,6 @@ test("renderInstallFiles emits policy, every profile, and only selected callers 
   });
   assert.deepEqual(files.map((file) => file.path), [
     ".github/codekeeper.json",
-    ".github/codekeeper/agents/pr-reviewer.md",
-    ".github/codekeeper/agents/repository-auditor.md",
-    ".github/codekeeper/agents/issue-triager.md",
-    ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml",
@@ -455,10 +452,22 @@ test("renderInstallFiles emits policy, every profile, and only selected callers 
     assert.equal(file.sha256, sha256(file.contents));
     assert.ok(Object.isFrozen(file));
   }
-  for (const profile of AGENT_PROFILE_IDS) {
-    const definition = AGENT_PROFILES[profile];
-    assert.equal(files.find((file) => file.path === definition.target).contents, bundle.contents[definition.asset]);
-  }
+  assert.equal(files.some((file) => file.path.startsWith(".github/codekeeper/agents/")), false);
+
+  const override = `${bundle.contents[AGENT_PROFILES["pr-reviewer"].asset]}\nRepository override.\n`;
+  const overridden = renderInstallFiles(bundle, {
+    modes: ["review"],
+    preset: "openai",
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    profileSources: { [AGENT_PROFILES["pr-reviewer"].target]: override }
+  });
+  assert.deepEqual(
+    overridden.filter((file) => file.path.startsWith(".github/codekeeper/agents/")).map((file) => file.path),
+    [AGENT_PROFILES["pr-reviewer"].target]
+  );
+  assert.equal(overridden.find((file) => file.path === AGENT_PROFILES["pr-reviewer"].target).contents, override);
 });
 
 test("mode and owner normalization is deterministic and rejects aliases, empties, and duplicates", () => {
@@ -576,7 +585,8 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.match(plan.pullRequest.body, /\| Pull request review \| Pull request reviewer \|/);
   assert.match(plan.pullRequest.body, /OpenAI traces are \*\*enabled\*\*/);
   assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
-  assert.match(plan.pullRequest.body, /Edit `.github\/codekeeper\/agents\/\*\.md` to tune priorities, work selection, implementation approach/);
+  assert.match(plan.pullRequest.body, /Packaged agent profiles are used by default/);
+  assert.match(plan.pullRequest.body, /Edit a profile in Settings to create an optional `.github\/codekeeper\/agents\/\*\.md` repository override/);
   assert.match(plan.pullRequest.body, /capability switches above control which GitHub actions Codekeeper can take/);
   assert.match(plan.pullRequest.body, /live maintenance run can repair when repository repair is on/);
   assert.match(plan.pullRequest.body, /no separate dry run or controlled test is required/i);
@@ -585,10 +595,7 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.match(plan.pullRequest.body, /did not merge this pull request or run a workflow/);
   assert.doesNotMatch(plan.pullRequest.body, /PRIVATE KEY|sk-[A-Za-z0-9]/i);
   assert.deepEqual(documentMap(plan.files).map((item) => item.path), plan.files.map((file) => file.path));
-  assert.deepEqual(
-    documentMap(plan.files).filter((item) => item.path.startsWith(".github/codekeeper/agents/")).map((item) => item.purpose),
-    AGENT_PROFILE_IDS.map((profile) => AGENT_PROFILES[profile].purpose)
-  );
+  assert.deepEqual(documentMap(plan.files).filter((item) => item.path.startsWith(".github/codekeeper/agents/")), []);
   assert.deepEqual(workflowMap(plan.modes).map((item) => item.mode), MODE_IDS);
   assert.equal(setupPullRequestBody(plan), plan.pullRequest.body);
 });
@@ -604,10 +611,6 @@ test("recommended starter plan selects review and maintenance with separate Open
   assert.equal(plan.preset, "openai");
   assert.deepEqual(plan.files.map((file) => file.path), [
     ".github/codekeeper.json",
-    ".github/codekeeper/agents/pr-reviewer.md",
-    ".github/codekeeper/agents/repository-auditor.md",
-    ".github/codekeeper/agents/issue-triager.md",
-    ".github/codekeeper/agents/fixer.md",
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml",
@@ -628,6 +631,134 @@ test("recommended starter plan selects review and maintenance with separate Open
     [policy.ai.agents.audit.provider, policy.ai.agents.audit.model, policy.ai.agents.audit.effort],
     ["openai", "gpt-5.6-sol", "high"]
   );
+});
+
+test("editing one packaged profile materializes only that repository override", async () => {
+  const bundle = await loadVerifiedAssets();
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  profiles["pr-reviewer"] += "\nRepository override: report API regressions first.\n";
+  const plan = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET, profiles })
+  });
+  const profileFiles = plan.files.filter((file) => file.path.startsWith(".github/codekeeper/agents/"));
+  assert.deepEqual(profileFiles.map((file) => file.path), [AGENT_PROFILES["pr-reviewer"].target]);
+  assert.equal(profileFiles[0].contents, profiles["pr-reviewer"]);
+  assert.deepEqual(documentMap(profileFiles).map((item) => item.purpose), [AGENT_PROFILES["pr-reviewer"].purpose]);
+});
+
+test("a release update refreshes packaged defaults without materializing missing repository profiles", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const nextBundle = {
+    ...bundle,
+    metadata: {
+      ...bundle.metadata,
+      source: { ...bundle.metadata.source, commit: "b".repeat(40) }
+    },
+    contents: {
+      ...bundle.contents,
+      "agents/pr-reviewer.md": `${bundle.contents["agents/pr-reviewer.md"]}\nNew packaged default.\n`
+    }
+  };
+  const existingSnapshot = {
+    ...snapshot(),
+    installation: {
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
+      modes: initial.modes,
+      contents
+    },
+    existingSettings: {
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    },
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  };
+  const output = { write() {} };
+  const update = buildInstallPlan({
+    bundle: nextBundle,
+    snapshot: existingSnapshot,
+    answers: buildUpdateAnswers({ snapshot: existingSnapshot, bundle: nextBundle, output })
+  });
+  assert.equal(update.operation, "release-update");
+  assert.equal(update.source.commit, "b".repeat(40));
+  assert.equal(update.files.some((file) => file.path.startsWith(".github/codekeeper/agents/")), false);
+  assert.ok(update.files.some((file) => file.path === MODES.review.target));
+});
+
+test("resetting an existing profile override deletes it and resumes packaged updates", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const profileId = "pr-reviewer";
+  const target = AGENT_PROFILES[profileId].target;
+  contents[target] = `${bundle.contents[AGENT_PROFILES[profileId].asset]}\nRepository preference.\n`;
+  const existingSnapshot = {
+    ...snapshot(),
+    installation: {
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
+      modes: initial.modes,
+      contents
+    },
+    existingSettings: {
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    },
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  };
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  const profileSources = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, "package"]));
+  const reset = buildInstallPlan({
+    bundle,
+    snapshot: existingSnapshot,
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET, profiles, profileSources })
+  });
+  assert.deepEqual(reset.files.map((file) => file.path), [target]);
+  assert.deepEqual(reset.files[0], {
+    path: target,
+    contents: null,
+    bytes: 0,
+    sha256: null,
+    previousSha256: sha256(contents[target]),
+    delete: true
+  });
+
+  const nextBundle = {
+    ...bundle,
+    metadata: {
+      ...bundle.metadata,
+      source: { ...bundle.metadata.source, commit: "c".repeat(40) }
+    },
+    contents: {
+      ...bundle.contents,
+      [AGENT_PROFILES[profileId].asset]: `${bundle.contents[AGENT_PROFILES[profileId].asset]}\nNext packaged default.\n`
+    }
+  };
+  const resetContents = { ...contents };
+  delete resetContents[target];
+  const resetSnapshot = {
+    ...existingSnapshot,
+    installation: { ...existingSnapshot.installation, contents: resetContents }
+  };
+  const updateAnswers = buildUpdateAnswers({ snapshot: resetSnapshot, bundle: nextBundle, output: { write() {} } });
+  assert.equal(updateAnswers.profileSources[profileId], "package");
+  assert.match(updateAnswers.profiles[profileId], /Next packaged default/);
+  const releaseUpdate = buildInstallPlan({ bundle: nextBundle, snapshot: resetSnapshot, answers: updateAnswers });
+  assert.equal(releaseUpdate.files.some((file) => file.path === target), false);
 });
 
 test("normal installation enables selected workflows after the setup pull request merges", async () => {
@@ -884,7 +1015,7 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
     answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET })
   });
   const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
-  contents[".github/codekeeper/agents/pr-reviewer.md"] += "\nRepository preference: report API regressions first.\n";
+  contents[".github/codekeeper/agents/pr-reviewer.md"] = `${bundle.contents["agents/pr-reviewer.md"]}\nRepository preference: report API regressions first.\n`;
   const existingSnapshot = {
     ...snapshot(),
     installation: {

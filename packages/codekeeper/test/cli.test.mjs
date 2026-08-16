@@ -522,7 +522,7 @@ test("update advances release-owned files while preserving adopter configuration
   policy.ai.agents.review.maxTurns = 99;
   policy.merge.blockedPaths = ["adopter-stale-release-boundary"];
   contents[".github/codekeeper.json"] = `${JSON.stringify(policy, null, 2)}\n`;
-  contents[".github/codekeeper/agents/pr-reviewer.md"] += "\nRepository rule: prioritise public API regressions.\n";
+  contents[".github/codekeeper/agents/pr-reviewer.md"] = `${bundle.contents["agents/pr-reviewer.md"]}\nRepository rule: prioritise public API regressions.\n`;
   const nextCommit = "b".repeat(40);
   const nextBundle = {
     ...bundle,
@@ -570,9 +570,9 @@ test("update advances release-owned files while preserving adopter configuration
       policy: configurationPolicy,
       profiles: {
         "pr-reviewer": contents[".github/codekeeper/agents/pr-reviewer.md"],
-        "repository-auditor": contents[".github/codekeeper/agents/repository-auditor.md"],
-        "issue-triager": contents[".github/codekeeper/agents/issue-triager.md"],
-        fixer: contents[".github/codekeeper/agents/fixer.md"]
+        "repository-auditor": bundle.contents["agents/repository-auditor.md"],
+        "issue-triager": bundle.contents["agents/issue-triager.md"],
+        fixer: bundle.contents["agents/fixer.md"]
       },
       appClientId: "Iv123456789012345678",
       automationBotLogin: "codekeeper-widget[bot]"
@@ -628,7 +628,7 @@ test("update advances release-owned files while preserving adopter configuration
   assert.ok(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-assistant.yml" && file.contents.includes(nextCommit)));
   assert.ok(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-review.yml" && file.contents.includes(nextCommit)));
   assert.equal(reviewedPlan.files.some((file) => file.path === ".github/codekeeper/agents/pr-reviewer.md"), false);
-  assert.match(output.toString(), /selected workflows.*edited agent profiles stay unchanged/s);
+  assert.match(output.toString(), /selected workflows.*existing agent profile overrides stay unchanged/s);
   assert.deepEqual(runner.calls, []);
 });
 
@@ -896,10 +896,6 @@ test("successful init revalidates three snapshots and orders settings, exact com
     [
       ".github/codekeeper-release.json",
       ".github/codekeeper.json",
-      ".github/codekeeper/agents/fixer.md",
-      ".github/codekeeper/agents/issue-triager.md",
-      ".github/codekeeper/agents/pr-reviewer.md",
-      ".github/codekeeper/agents/repository-auditor.md",
       ".github/workflows/codekeeper-assistant.yml",
       ".github/workflows/codekeeper-maintain.yml",
       ".github/workflows/codekeeper-review.yml"
@@ -915,8 +911,8 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.doesNotMatch(output.toString(), /DEEPSEEK_API_KEY:/);
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-review\.yml/);
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-maintain\.yml/);
-  assert.match(output.toString(), /\.github\/codekeeper\/agents\/pr-reviewer\.md/);
-  assert.match(output.toString(), /edit decision guidance in \.github\/codekeeper\/agents/);
+  assert.doesNotMatch(output.toString(), /\.github\/codekeeper\/agents\/pr-reviewer\.md/);
+  assert.match(output.toString(), /Packaged agent profiles are the default/);
   assert.match(output.toString(), /Capability switches control repair, issue implementation, issue closure, and merge actions/);
   assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
   assert.match(output.toString(), /starts the selected workflows when the setup pull request merges/);

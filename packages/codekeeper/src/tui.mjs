@@ -597,7 +597,7 @@ function ReviewScreen({ spec, onSubmit, onCancel, colorEnabled }) {
     ) : null,
     pagedDetail && pageKind === "models" ? section("Models (editable in .github/codekeeper.json)", data.models, 0) : null,
     pagedDetail && pageKind === "documents" ? section("Policy and caller documents", data.setupDocumentPaths, 0) : null,
-    pagedDetail && pageKind === "profiles" ? section("Editable agent profiles", data.profileDocumentPaths, 0) : null,
+    pagedDetail && pageKind === "profiles" ? section("Repository profile overrides", data.profileDocumentPaths, 0) : null,
     pagedDetail && pageKind === "variables" ? section("Repository variables", data.variables, 0) : null,
     pagedDetail && pageKind === "secrets" ? section("Secrets requested through GitHub CLI", data.secrets, 0) : null,
     pagedDetail && pageKind === "settings" ? section("Settings", [data.startup, ...data.automation], 0) : null,

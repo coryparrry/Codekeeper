@@ -181,6 +181,15 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     await writeFile(path.join(root, ".github", "codekeeper", "agents", "Issue-Triager.MD"), "# Existing\n");
     await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
   });
+  await t.test("case-colliding optional agent profile fails during an update scan", async (t) => {
+    const root = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
+    await writeFile(path.join(root, ".github", "codekeeper", "agents", "PR-Reviewer.md"), "# Existing\n");
+    await assert.rejects(
+      assertNoInstallationFiles(root, { allowExisting: true }),
+      assertInstallerCode(assert, "PATH_COLLISION")
+    );
+  });
   await t.test("case-colliding Codekeeper profile parent fails", async (t) => {
     const root = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github", "CodeKeeper", "agents"), { recursive: true });
@@ -207,6 +216,17 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     await writeFile(path.join(outside, "profile.md"), "# Outside\n");
     await symlink(path.join(outside, "profile.md"), path.join(root, ".github", "codekeeper", "agents", "fixer.md"));
     await assert.rejects(assertNoInstallationFiles(root), assertInstallerCode(assert, "PATH_COLLISION"));
+  });
+  await t.test("symlinked optional agent profile fails during an update scan", async (t) => {
+    const root = await temporaryDirectory(t);
+    const outside = await temporaryDirectory(t);
+    await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
+    await writeFile(path.join(outside, "profile.md"), "# Outside\n");
+    await symlink(path.join(outside, "profile.md"), path.join(root, ".github", "codekeeper", "agents", "fixer.md"));
+    await assert.rejects(
+      assertNoInstallationFiles(root, { allowExisting: true }),
+      assertInstallerCode(assert, "PATH_COLLISION")
+    );
   });
   await t.test("renamed caller invoking Codekeeper fails", async (t) => {
     const root = await temporaryDirectory(t);
@@ -267,7 +287,7 @@ test("release manifests admit only digest-bound retired Codekeeper workflows", a
   );
 });
 
-test("existing generated files are recognized as a rerunnable installation", async (t) => {
+test("existing generated files with every optional profile missing are recognized as a rerunnable installation", async (t) => {
   const root = await temporaryDirectory(t);
   const bundle = await loadVerifiedAssets();
   await mkdir(path.join(root, ".github", "codekeeper", "agents"), { recursive: true });
@@ -277,11 +297,6 @@ test("existing generated files are recognized as a rerunnable installation", asy
   for (const agent of Object.values(legacyPolicy.ai.agents)) agent.maxTurns = 2;
   await writeFile(path.join(root, ".github", "codekeeper.json"), `${JSON.stringify(legacyPolicy, null, 2)}\n`);
   await writeFile(path.join(root, ".github", "codekeeper", "agents", "maintenance-planner.md"), "# Legacy planner\n");
-  for (const [name, asset] of [
-    ["pr-reviewer.md", "agents/pr-reviewer.md"],
-    ["repository-auditor.md", "agents/repository-auditor.md"],
-    ["issue-triager.md", "agents/issue-triager.md"]
-  ]) await writeFile(path.join(root, ".github", "codekeeper", "agents", name), bundle.contents[asset]);
   await writeFile(path.join(root, ".github", "workflows", "codekeeper-review.yml"), installedWorkflow(bundle.contents["workflows/review.yml"])
     .replace("auto_review: true", "auto_review: false")
     .replace("feedback_triage: true", "feedback_triage: false"));
@@ -314,7 +329,9 @@ test("existing generated files are recognized as a rerunnable installation", asy
     assert.equal(installation.policy.ai.agents[agent].maxTurns, 1);
   }
   assert.deepEqual(installation.legacyFiles, [".github/codekeeper/agents/maintenance-planner.md"]);
-  assert.equal(installation.contents[".github/codekeeper/agents/fixer.md"], undefined);
+  for (const profile of ["pr-reviewer", "repository-auditor", "issue-triager", "fixer"]) {
+    assert.equal(installation.contents[`.github/codekeeper/agents/${profile}.md`], undefined);
+  }
   const inspected = await inspectRepository({ runner: preflightRunner(root), cwd: root });
   assert.equal(inspected.updateBranch, `codekeeper/update-${HEAD_SHA.slice(0, 12)}`);
   assert.equal(inspected.existingSettings.enabled, true);
