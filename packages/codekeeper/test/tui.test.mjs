@@ -149,6 +149,10 @@ async function createTuiHarness(t, {
     if (value === "\u001b") await new Promise((resolve) => setTimeout(resolve, 30));
     await flush();
   };
+  const sendBatch = async (...values) => {
+    for (const value of values) input.send(value);
+    await flush();
+  };
   const waitForText = async (text) => {
     for (let attempt = 0; attempt < 200; attempt += 1) {
       await flush();
@@ -166,7 +170,7 @@ async function createTuiHarness(t, {
     }
     assert.fail(`TUI did not render expected pattern: ${pattern}\n${output.lastSemanticFrame()}`);
   };
-  return { input, output, errorOutput, prompt, instance: () => instance, renderOptions: () => renderOptions, flush, send, waitForText, waitForPattern, dispose };
+  return { input, output, errorOutput, prompt, instance: () => instance, renderOptions: () => renderOptions, flush, send, sendBatch, waitForText, waitForPattern, dispose };
 }
 
 function assertFrameFits(frame, { columns, rows }) {
@@ -651,6 +655,54 @@ test("Ink controls support arrows, j/k, checkboxes, text editing, Escape, and Ct
   await tui.dispose();
   assert.ok(tui.input.rawModeChanges.includes(true));
   assert.equal(tui.input.rawModeChanges.at(-1), false);
+});
+
+test("Ink controls submit the latest value when input and Enter arrive in one batch", { timeout: 5000 }, async (t) => {
+  const tui = await createTuiHarness(t);
+
+  const confirmation = tui.prompt.confirm({ message: "Confirm repository", defaultValue: false });
+  await tui.waitForText("Confirm repository");
+  await tui.sendBatch("\u001b[D", "\r");
+  assert.equal(await confirmation, true);
+
+  const selection = tui.prompt.select({
+    message: "Choose preset",
+    choices: [{ value: "openai", label: "OpenAI" }, { value: "mixed", label: "Mixed" }],
+    defaultValue: "openai"
+  });
+  await tui.waitForText("Choose preset");
+  await tui.sendBatch("\u001b[B", "\r");
+  assert.equal(await selection, "mixed");
+
+  const modes = tui.prompt.multiselect({
+    message: "Choose workflows",
+    choices: [{ value: "review", label: "Review" }],
+    defaultValues: ["review"],
+    allowEmpty: true
+  });
+  await tui.waitForText("Choose workflows");
+  await tui.sendBatch(" ", "\r");
+  assert.deepEqual(await modes, []);
+
+  const text = tui.prompt.inputText({
+    message: "Display name",
+    validate: (value) => value === "batched" || "Enter the expected name."
+  });
+  await tui.waitForText("Display name");
+  await tui.sendBatch("batched", "\r");
+  assert.equal(await text, "batched");
+});
+
+test("the Settings command centre submits after batched navigation to Continue", { timeout: 5000 }, async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const tui = await createTuiHarness(t);
+  const answers = collectSetupAnswers({ prompt: tui.prompt, snapshot: repositorySnapshot(), bundle, output: tui.prompt.notices });
+  await tui.waitForText("Install into acme/widget");
+  await tui.send("\r");
+  await tui.waitForText("Choose how Codekeeper works");
+  await tui.send("G\r");
+  const result = await answers;
+  assert.deepEqual(result.modes, ["review", "maintain"]);
 });
 
 test("the Settings command centre returns defaults and arbitrary model edits", async (t) => {
