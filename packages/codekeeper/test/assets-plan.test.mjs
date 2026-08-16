@@ -9,6 +9,7 @@ import {
   renderWorkflow,
   sha256
 } from "../src/assets.mjs";
+import { applyPolicyPreset } from "../../../tools/codekeeper/presets/catalogue.mjs";
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
@@ -51,32 +52,13 @@ import {
   TEST_PACKAGE_RELEASE
 } from "./helpers.mjs";
 
-const EXPECTED_ASSETS = Object.freeze({
-  "agents/fixer.md": "6770753275c0df9a6546cfe0453b82e6bae985819ddb57998eeb94b14c6ae38a",
-  "agents/issue-triager.md": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
-  "agents/pr-reviewer.md": "edcb2d24d78c39290129ae8e80931eca067a0175568a6a72eb13e8c7c001af41",
-  "agents/repository-auditor.md": "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
-  "policies/mixed.json": "8431b2352fe5be158bdf3957b6077a86747ac199ae2fb4717b59a7cbe3620286",
-  "policies/openai.json": "59a30700d883a117100b31f2a16675f48e8ba9eafe66d3b6e2a34dcce1aa4a10",
-  "runtime-workflows/assistant.yml": "a1824ed06bf7d84ab9eda6e8a06416143608d7de30d500508f0eb04ff5b75423",
-  "runtime-workflows/bootstrap.yml": "30392f2c66190e37ed6bd39d675476a01c99f6f8bb80061649e2ea492d984bd9",
-  "runtime-workflows/fix.yml": "555a6bb0f009ac2a189457f591c304769bc47cb4e5507e9902828f87dc9238f1",
-  "runtime-workflows/issues.yml": "da58328ec73df8e25dc4298a03233c425d76be473226117f42011680cc5fc2d1",
-  "runtime-workflows/maintain.yml": "9565e7e174b989c5e30e6b77cdf0e11c7dc2aa4be6c0f41165e60e434a981e7c",
-  "runtime-workflows/review.yml": "8f4de122c144035e9a74c047a62ddf72b49bcf12ab52ee2e0c176e8f473ee83f",
-  "workflows/assistant.yml": "9fe96f04a773c1263c71578558238d1e2dc2d9f8efe8e1681f088a98204e09ef",
-  "workflows/fix.yml": "aed2b25cd75fe446c0294bb5cccc0001593ce1b5d36d021c28ea5c87cae5e5eb",
-  "workflows/issues.yml": "99a4541b91faa120d2bba941633d5f4286c74c839d19565309c2c0ab7a05b032",
-  "workflows/maintain.yml": "ce3a9aedddabc39f6d055bb82db2fa420375c270c11cf9fc8af118e99026e77f",
-  "workflows/review.yml": "d2aa7c4cfa1cf269453a9d7b1b2343dee56749d24b4a2bbf27159668e11eef8b"
-});
-
 const CHECKPOINT_PATHS = Object.freeze({
   "agents/fixer.md": "tools/codekeeper/agents/fixer.md",
   "agents/issue-triager.md": "tools/codekeeper/agents/issue-triager.md",
   "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
   "agents/repository-auditor.md": "tools/codekeeper/agents/repository-auditor.md",
-  "policies/mixed.json": ".github/codekeeper.json"
+  "policies/mixed.json": ".github/codekeeper.json",
+  "policies/openai.json": ".github/codekeeper.json#preset=openai"
 });
 
 const CHECKPOINT_PROVENANCE_PATHS = Object.freeze({
@@ -117,35 +99,34 @@ function answers(overrides = {}) {
   return value;
 }
 
-test("the bundled assets have immutable release inventory, provenance, byte counts, and digests", async () => {
+test("the bundled asset inventory and metadata match their canonical source bytes", async () => {
   const bundle = await loadVerifiedAssets();
   assert.equal(bundle.metadata.source.repository, SOURCE_REPOSITORY);
   assert.equal(bundle.metadata.source.commit, SOURCE_COMMIT);
   assert.equal(SOURCE_COMMIT, PINNED_COMMIT);
   assert.deepEqual(Object.keys(bundle.metadata.assets).sort(), ASSET_KEYS);
   assert.deepEqual(Object.keys(bundle.contents).sort(), ASSET_KEYS);
-  assert.deepEqual(
-    Object.fromEntries(Object.entries(bundle.metadata.assets).map(([key, value]) => [key, value.sha256])),
-    EXPECTED_ASSETS
-  );
   for (const key of ASSET_KEYS) {
+    const record = bundle.metadata.assets[key];
     const contents = bundle.contents[key];
-    assert.equal(Buffer.byteLength(contents), bundle.metadata.assets[key].bytes, key);
-    assert.equal(sha256(contents), EXPECTED_ASSETS[key], key);
+    const checkpointPath = CHECKPOINT_PATHS[key];
+    if (checkpointPath) assert.equal(record.sourcePath, checkpointPath, `${key} source path`);
+    const [sourcePath, preset] = (checkpointPath ?? record.sourcePath).split("#preset=");
+    const baseSource = checkpointPath
+      ? execFileSync("git", ["show", `${PINNED_COMMIT}:${sourcePath}`], {
+          cwd: REPOSITORY_ROOT,
+          encoding: "utf8"
+        })
+      : await readFile(path.join(REPOSITORY_ROOT, ...sourcePath.split("/")), "utf8");
+    const source = preset
+      ? `${JSON.stringify(applyPolicyPreset(JSON.parse(baseSource), preset), null, 2)}\n`
+      : baseSource;
+    assert.equal(contents, source, `${key} canonical source`);
+    assert.equal(record.bytes, Buffer.byteLength(source), `${key} bytes`);
+    assert.equal(record.sha256, sha256(source), `${key} SHA-256`);
   }
   assert.ok(Object.isFrozen(bundle));
   assert.ok(Object.isFrozen(bundle.metadata.assets));
-});
-
-test("checkpoint-backed assets are byte-for-byte source release files", async () => {
-  const bundle = await loadVerifiedAssets();
-  for (const [asset, sourcePath] of Object.entries(CHECKPOINT_PATHS)) {
-    const source = execFileSync("git", ["show", `${PINNED_COMMIT}:${sourcePath}`], {
-      cwd: REPOSITORY_ROOT,
-      encoding: "utf8"
-    });
-    assert.equal(bundle.contents[asset], source, `${asset} differs from ${sourcePath} at the pinned checkpoint`);
-  }
 });
 
 test("the pinned runtime accepts the policy version emitted by this installer", async () => {

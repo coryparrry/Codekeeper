@@ -104,19 +104,7 @@ jobs:
             --expected-source-commit "$CODEKEEPER_PACKAGE_SOURCE_COMMIT"
 
       - name: Install exact Codekeeper runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          runtime="$GITHUB_WORKSPACE/tooling/codekeeper-runtime"
-          if test -e "$runtime"; then
-            echo "Codekeeper runtime install path already exists" >&2
-            exit 1
-          fi
-          cp -R "$GITHUB_WORKSPACE/tooling/tools/codekeeper/runtime" "$runtime"
-          (
-            cd "$runtime"
-            npm ci --ignore-scripts --no-audit --no-fund
-          )
+        run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
 
       - name: Check out trusted default-branch policy
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

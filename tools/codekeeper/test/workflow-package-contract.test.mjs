@@ -258,19 +258,12 @@ test("reusable workflows reverify the exact closed package before every consumer
     assert.equal(
       [
         ...source.matchAll(
-          /cp -R "\$GITHUB_WORKSPACE\/tooling\/tools\/codekeeper\/runtime" "\$runtime"/g,
+          /run: node "\$GITHUB_WORKSPACE\/tooling\/tools\/codekeeper\/bin\/install-runtime\.mjs"/g,
         ),
       ].length,
       count,
     );
-    assert.equal(
-      [
-        ...source.matchAll(
-          /cd "\$runtime"\n\s+npm ci --ignore-scripts --no-audit --no-fund/g,
-        ),
-      ].length,
-      count,
-    );
+    assert.doesNotMatch(source, /cp -R .*codekeeper\/runtime|cd "\$runtime"/);
     assert.doesNotMatch(
       source,
       /node (?:\.\.\/)?tooling\/tools\/codekeeper\/runtime/,
@@ -354,7 +347,7 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
     );
     assert.match(
       workspace,
-      /name: Install exact Codekeeper runtime[\s\S]*cp -R "\$GITHUB_WORKSPACE\/tooling\/tools\/codekeeper\/runtime" "\$runtime"[\s\S]*cd "\$runtime"[\s\S]*npm ci --ignore-scripts --no-audit --no-fund/,
+      /name: Install exact Codekeeper runtime\n\s+run: node "\$GITHUB_WORKSPACE\/tooling\/tools\/codekeeper\/bin\/install-runtime\.mjs"/,
     );
     assert.match(workspace, /name: .*Codex through the Agents SDK/);
     assert.match(

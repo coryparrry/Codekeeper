@@ -54,9 +54,12 @@ function resolveDefaultBranchRef(repositoryRoot, defaultBranch) {
 
 test("installer checks include hardening audit tests", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-  assert.match(packageJson.scripts.test, /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
+  assert.match(packageJson.scripts.test, /npm run prepare:runtime-test/);
+  assert.match(packageJson.scripts.test, /npm run test:unit/);
+  assert.match(packageJson.scripts["test:unit"], /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
   assert.match(packageJson.scripts.check, /audit\/\*\.mjs/);
-  assert.match(packageJson.scripts.check, /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
+  assert.match(packageJson.scripts.check, /npm run prepare:runtime-test/);
+  assert.match(packageJson.scripts.check, /npm run test:unit/);
 });
 
 test("release packaging uses one deterministic tarball with separate installer and runtime shrinkwraps", async () => {

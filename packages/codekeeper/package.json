@@ -22,8 +22,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs audit/*.test.mjs",
-    "check": "npm --prefix runtime-package ci --ignore-scripts --no-audit --no-fund && node ../../scripts/sync-policy-validator.mjs --check && bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node --test test/*.test.mjs audit/*.test.mjs"
+    "prepare:runtime-test": "npm --prefix runtime-package ci --ignore-scripts --no-audit --no-fund",
+    "test:unit": "node --test test/*.test.mjs audit/*.test.mjs",
+    "test": "npm run prepare:runtime-test && npm run test:unit",
+    "check": "npm run prepare:runtime-test && node ../../scripts/sync-policy-validator.mjs --check && bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && npm run test:unit"
   },
   "keywords": [
     "github",

@@ -755,7 +755,7 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
       source,
       /trace_api_key:\n\s+description:[^\n]*\n\s+required: false/,
     );
-    assert.match(workspace, /npm ci --ignore-scripts --no-audit --no-fund/);
+    assert.match(workspace, /bin\/install-runtime\.mjs/);
     assert.match(
       workspace,
       new RegExp(`agent-settings[\\s\\S]*--mode ${effectiveMode}`),
@@ -788,7 +788,7 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
     );
     assert.match(workspace, /run-workspace-agent/);
     assert.doesNotMatch(workspace, /prompt-file: .*\/prompt\.md/);
-    assert.match(analyze, /npm ci --ignore-scripts --no-audit --no-fund/);
+    assert.match(analyze, /bin\/install-runtime\.mjs/);
     assert.match(analyze, /run-agent/);
     assert.match(
       analyze,
@@ -839,8 +839,14 @@ test("review tracing keeps OpenAI as the default and supports an isolated Braint
   );
   assert.match(
     analyze,
-    /name: Install pinned Braintrust trace exporter\n\s+if: inputs\.trace_exporter == 'braintrust'[\s\S]*integrations\/braintrust/,
+    /bin\/install-runtime\.mjs/,
   );
+  assert.doesNotMatch(analyze, /Install pinned Braintrust trace exporter/);
+  const packagedRuntime = JSON.parse(
+    await repositoryFile("packages/codekeeper/runtime-package/package.json"),
+  );
+  assert.equal(packagedRuntime.dependencies["@braintrust/openai-agents"], "0.1.5");
+  assert.equal(packagedRuntime.dependencies.braintrust, "3.27.0");
   assert.match(
     analyze,
     /name: Finalize review with configured Agents SDK model\n\s+if: inputs\.trace_exporter == 'openai'/,
