@@ -47,11 +47,11 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "4af9bd751b9a50608d09b57092010a5a31f59aed417d3818162c7b4c8c43fc72"
+      "sha256": "a480d490d1a54218e85d11bc92fa7e5e4324a5c29c5b6a858ed40feb80278cf7"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
-      "sha256": "f0aed0c8e59fc550ef8ca2861e674540cd160b10dc09e1378c8faab948c7eafe"
+      "sha256": "66be6585838af4a74f96056fb14b5ab86ca4840593854f421a98ea2d42289442"
     },
     {
       "path": "src/lib/agents-runtime.mjs",

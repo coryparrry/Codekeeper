@@ -8,7 +8,8 @@ import {
   AGENT_PROFILE_BUNDLE_FILE,
   MAX_AGENT_PROFILE_BYTES,
   agentProfilePathForMode,
-  loadTrustedAgentProfile
+  loadTrustedAgentProfile,
+  resolveAgentProfileInputs
 } from "../src/lib/agent-profiles.mjs";
 import {
   authenticateCodexCli,
@@ -629,6 +630,39 @@ test("absent repository profiles load the source-checkout packaged default with 
       sourceSha: trustedSourceSha
     }),
     /cannot use a repository source path/
+  );
+});
+
+test("profile input resolution selects an optional repository override without weakening file checks", async (context) => {
+  const { root, profilePath } = await profileFixture("review", "# Repository override\n");
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const repositorySha = "a".repeat(40);
+  const packageSha = "b".repeat(40);
+  assert.deepEqual(await resolveAgentProfileInputs({
+    sourcePath: profilePath,
+    sourceSha: repositorySha,
+    packageSourceSha: packageSha
+  }), {
+    agentProfilePath: profilePath,
+    agentProfileSource: "repository",
+    agentProfileSourceSha: repositorySha
+  });
+
+  await rm(profilePath);
+  assert.deepEqual(await resolveAgentProfileInputs({
+    sourcePath: profilePath,
+    sourceSha: repositorySha,
+    packageSourceSha: packageSha
+  }), {
+    agentProfilePath: undefined,
+    agentProfileSource: "package",
+    agentProfileSourceSha: packageSha
+  });
+
+  await symlink("missing-profile.md", profilePath);
+  await assert.rejects(
+    resolveAgentProfileInputs({ sourcePath: profilePath, sourceSha: repositorySha, packageSourceSha: packageSha }),
+    /non-symlink regular file/
   );
 });
 

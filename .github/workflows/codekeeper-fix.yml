@@ -55,7 +55,7 @@ permissions:
   pull-requests: read
 
 env:
-  CODEKEEPER_TOOLING_MANIFEST_SHA256: 38fde9462721af299d2be084460cdccccf326c9ac315b943c9c3097340a465f7
+  CODEKEEPER_TOOLING_MANIFEST_SHA256: 83a8ab735e0c4b6e34ed1757b61b06c180ee7cbc6d059ffd1eb724276cfcd523
 
 concurrency:
   group: codekeeper-fix-${{ inputs.issue_number || github.event.issue.number || github.event.client_payload.number }}
@@ -82,7 +82,7 @@ jobs:
     outputs:
       context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
       base_sha: ${{ fromJSON(steps.prepare.outputs.result).baseSha }}
-      source_sha: ${{ fromJSON(steps.prepare.outputs.result).agentProfile.sourceSha }}
+      repository_sha: ${{ steps.repository-source.outputs.sha }}
       target_kind: ${{ fromJSON(steps.prepare.outputs.result).target.kind }}
     steps:
       - name: Resolve authorised repair target
@@ -132,6 +132,10 @@ jobs:
           fetch-depth: 0
           path: repository
           persist-credentials: false
+      - name: Record trusted repository source
+        id: repository-source
+        working-directory: repository
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Set up pinned Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -159,18 +163,6 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
-          PROFILE_ARGS=(--agent-profile-source package --agent-profile-source-sha "$CODEKEEPER_TOOLING_SHA")
-          if [[ -L "$AGENT_PROFILE" ]]; then
-            echo "Repository agent profile must not be a symlink"
-            exit 1
-          elif [[ -e "$AGENT_PROFILE" ]]; then
-            [[ -f "$AGENT_PROFILE" ]] || { echo "Repository agent profile must be a regular file"; exit 1; }
-            PROFILE_ARGS=(
-              --agent-profile-source repository
-              --agent-profile "$AGENT_PROFILE"
-              --agent-profile-source-sha "$(git rev-parse HEAD)"
-            )
-          fi
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-fix \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
@@ -179,7 +171,8 @@ jobs:
             --authorization-mode "$AUTHORIZATION_MODE" \
             --expected-head "$EXPECTED_HEAD" \
             --review-thread-ids "$REVIEW_THREAD_IDS" \
-            "${PROFILE_ARGS[@]}" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$(git rev-parse HEAD)" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - name: Check out frozen repair target
@@ -357,7 +350,7 @@ jobs:
       - name: Check out trusted default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.workspace.outputs.source_sha }}
+          ref: ${{ needs.workspace.outputs.repository_sha }}
           fetch-depth: 0
           path: repository
           persist-credentials: false
@@ -398,18 +391,6 @@ jobs:
             echo "Configured default branch does not match the repository default branch"
             exit 1
           }
-          PROFILE_ARGS=(--agent-profile-source package --agent-profile-source-sha "$CODEKEEPER_TOOLING_SHA")
-          if [[ -L "$AGENT_PROFILE" ]]; then
-            echo "Repository agent profile must not be a symlink"
-            exit 1
-          elif [[ -e "$AGENT_PROFILE" ]]; then
-            [[ -f "$AGENT_PROFILE" ]] || { echo "Repository agent profile must be a regular file"; exit 1; }
-            PROFILE_ARGS=(
-              --agent-profile-source repository
-              --agent-profile "$AGENT_PROFILE"
-              --agent-profile-source-sha "$(git rev-parse HEAD)"
-            )
-          fi
           node ../tooling/tools/codekeeper/src/cli.mjs prepare-fix \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
@@ -418,7 +399,8 @@ jobs:
             --authorization-mode "$AUTHORIZATION_MODE" \
             --expected-head "$EXPECTED_HEAD" \
             --review-thread-ids "$REVIEW_THREAD_IDS" \
-            "${PROFILE_ARGS[@]}" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$(git rev-parse HEAD)" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
           {
             echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
@@ -748,16 +730,9 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/policy/.github/codekeeper/agents/fixer.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
-          PROFILE_ARGS=(--agent-profile-source package --agent-profile-source-sha "$CODEKEEPER_TOOLING_SHA")
-          if [[ -L "$AGENT_PROFILE" ]]; then
-            echo "Repository agent profile must not be a symlink"
-            exit 1
-          elif [[ -e "$AGENT_PROFILE" ]]; then
-            [[ -f "$AGENT_PROFILE" ]] || { echo "Repository agent profile must be a regular file"; exit 1; }
-            PROFILE_ARGS=(--agent-profile-source repository --agent-profile "$AGENT_PROFILE")
-          fi
           node ../tooling/tools/codekeeper/src/cli.mjs publish-fix \
             --config "$CONFIG" \
-            "${PROFILE_ARGS[@]}" \
+            --agent-profile "$AGENT_PROFILE" \
+            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/policy" rev-parse HEAD)" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"

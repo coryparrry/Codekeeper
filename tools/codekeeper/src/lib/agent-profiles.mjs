@@ -26,6 +26,42 @@ export function packagedAgentProfilePathForMode(mode) {
   return `runtime/agents/${path.basename(agentProfilePathForMode(mode))}`;
 }
 
+export async function resolveAgentProfileInputs({
+  sourcePath,
+  source,
+  sourceSha,
+  packageSourceSha
+}) {
+  if (source !== undefined) {
+    const normalizedSource = validateProfileSource(source);
+    return {
+      agentProfilePath: sourcePath,
+      agentProfileSource: normalizedSource,
+      agentProfileSourceSha: sourceSha ?? (normalizedSource === AGENT_PROFILE_SOURCES.package ? packageSourceSha : undefined)
+    };
+  }
+  if (sourcePath) {
+    try {
+      const information = await lstat(sourcePath);
+      if (!information.isFile() || information.isSymbolicLink()) {
+        throw new Error(`Repository agent profile must be a non-symlink regular file: ${sourcePath}`);
+      }
+      return {
+        agentProfilePath: sourcePath,
+        agentProfileSource: AGENT_PROFILE_SOURCES.repository,
+        agentProfileSourceSha: sourceSha
+      };
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  return {
+    agentProfilePath: undefined,
+    agentProfileSource: AGENT_PROFILE_SOURCES.package,
+    agentProfileSourceSha: packageSourceSha
+  };
+}
+
 function validateSourceSha(sourceSha) {
   const normalized = String(sourceSha ?? "").trim().toLowerCase();
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(normalized)) {
