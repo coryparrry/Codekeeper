@@ -33,3 +33,16 @@ Release and source pins must be full, reviewed commits reachable from the reposi
 ## Generic Product Boundary
 
 Keep this repository generic and adopter-safe. Do not commit organization-specific runner labels, billing settings, repository names, fixture credentials, user identities, or other deployment-local values to product workflows, examples, policies, or tests. Put concrete CI runner choices in repository or organization settings behind a generic variable with a portable default. Put live acceptance-only configuration in the private acceptance repository. Any exception requires explicit product-level justification and a contract test proving it is not personal configuration.
+
+<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+This repository has a generated `openwiki/` evidence index. It is optional just-in-time context, not required startup reading.
+
+- Treat source code and tests as authoritative. A brief's unknowns and review items are verification gaps, not automatic requirements.
+- Prefer the narrowest quiet validation that proves the changed behavior. Preserve complete failure output.
+
+The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
+
+<!-- OPENWIKI:END -->
