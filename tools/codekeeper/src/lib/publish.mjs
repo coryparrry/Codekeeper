@@ -619,6 +619,15 @@ function rootReviewCommentIds(sources) {
     .filter((commentId) => Number.isSafeInteger(commentId) && commentId > 0))];
 }
 
+async function reconcileSecondaryIssue(github, issue, mutation) {
+  await github.beginSecondaryIssueMutation({ issue, allowClosed: issue.state === "closed" });
+  try {
+    return await mutation();
+  } finally {
+    github.endSecondaryIssueMutation();
+  }
+}
+
 export async function replyToReviewFeedback({ github, context, result, automationIdentity, dryRun = false, retiredFingerprints = [] }) {
   const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
   const activeFingerprints = new Set((result.reviewFeedback ?? [])
@@ -696,11 +705,11 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
       published.push({ fingerprint: markerMatch[1], state: "would-close", issueNumber: issue.number });
       continue;
     }
-    await github.updateIssue(issue.number, {
+    await reconcileSecondaryIssue(github, issue, () => github.updateIssue(issue.number, {
       body: issue.body.replace(markerMatch[0], `${DEFERRED_RECONCILED_MARKER}\n${markerMatch[0]}`),
       state: "closed",
       state_reason: "completed"
-    });
+    }));
     published.push({ fingerprint: markerMatch[1], state: "closed", issueNumber: issue.number });
   }
   for (const { feedback, sourceKey } of deferredSources) {
@@ -738,12 +747,15 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
     await github.ensureLabels(config.labels, labels);
     let issue;
     if (match) {
-      issue = await github.updateIssue(match.number, {
-        title,
-        body,
-        ...(automaticallyReconciled ? { state: "open", state_reason: null } : {})
+      issue = await reconcileSecondaryIssue(github, match, async () => {
+        const updated = await github.updateIssue(match.number, {
+          title,
+          body,
+          ...(automaticallyReconciled ? { state: "open", state_reason: null } : {})
+        });
+        await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
+        return updated;
       });
-      await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
     } else {
       issue = await github.createIssue({ title, body, labels });
       existing.push(issue);
@@ -931,8 +943,10 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
     }
     await github.ensureLabels(config.labels, labels);
     if (match) {
-      await github.updateIssue(match.number, { title, body });
-      await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
+      await reconcileSecondaryIssue(github, match, async () => {
+        await github.updateIssue(match.number, { title, body });
+        await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
+      });
       published.push({ fingerprint, state: "updated", issueNumber: match.number });
     } else {
       const created = await github.createIssue({ title, body, labels });
@@ -1019,6 +1033,49 @@ async function findOpenRepairPull(github, fingerprint, config, mode) {
   }) ? pull : null;
 }
 
+async function verifyExistingRepairPull({
+  github,
+  pull,
+  branch,
+  expectedTreeSha,
+  context,
+  config,
+  fingerprint,
+  automationIdentity
+}) {
+  const remote = await github.getBranchTip(branch);
+  if (!remote) throw new Error(`Existing repair PR #${pull.number} has no live automation branch`);
+  if (
+    remote.treeSha !== expectedTreeSha ||
+    remote.parentShas.length !== 1 ||
+    remote.parentShas[0] !== context.baseSha
+  ) {
+    throw new Error(`Existing repair PR #${pull.number} no longer matches the sealed repair tree`);
+  }
+  const live = await github.getPull(pull.number, { expectedHeadSha: remote.headSha });
+  if (!isTrustedRepairPull(live, {
+    fingerprint,
+    config,
+    repository: github.repository,
+    botLogin: automationIdentity.login,
+    botId: automationIdentity.id,
+    mode: context.mode
+  })) {
+    throw new Error(`Existing repair PR #${pull.number} is no longer trusted`);
+  }
+  const expectedBaseRef = context.defaultBranch ?? config.repository.defaultBranch;
+  if (
+    live.state !== "open" ||
+    live.head?.ref !== branch ||
+    live.head?.sha !== remote.headSha ||
+    live.base?.ref !== expectedBaseRef ||
+    live.base?.sha !== context.baseSha
+  ) {
+    throw new Error(`Existing repair PR #${pull.number} no longer matches the sealed repair target`);
+  }
+  return live;
+}
+
 async function publishPatchPullRequest({
   github,
   artifactDirectory,
@@ -1041,80 +1098,82 @@ async function publishPatchPullRequest({
 
   const labels = new Set(["maintenance", `risk ${risk}`, "manual review"]);
   if (finding) findingLabels(finding).forEach((label) => labels.add(label));
+  if (currentHead() !== context.baseSha) {
+    return { created: false, reason: `Default branch moved from ${context.baseSha} to ${currentHead()}` };
+  }
+  ensureClean();
+  const patchPath = path.join(artifactDirectory, manifest.patch.fileName);
+  const patchBytes = await readRegularFile(patchPath);
+  if (sha256(patchBytes) !== manifest.patch.sha256) throw new Error("Patch artifact SHA-256 does not match manifest");
+  if (patchBytes.length > config.audit.repair.maximumPatchBytes) {
+    throw new Error(`Patch artifact is ${patchBytes.length} bytes; maximum is ${config.audit.repair.maximumPatchBytes}`);
+  }
+  applyPatch(patchPath);
+  const liveChanges = { ...(await collectWorkingTreeChanges()), patchBytes: patchBytes.length };
+  const livePolicy = validatePatch(liveChanges, config);
+  if (!livePolicy.valid) throw new Error(`Fresh-checkout patch validation failed: ${livePolicy.reasons.join("; ")}`);
+  const expectedFiles = [...manifest.patch.files].sort();
+  const actualFiles = [...livePolicy.files].sort();
+  if (JSON.stringify(expectedFiles) !== JSON.stringify(actualFiles)) {
+    throw new Error(`Fresh-checkout patch files differ from validated artifact: expected ${expectedFiles.join(", ")}, got ${actualFiles.join(", ")}`);
+  }
+  // Do not execute repository code in this token-bearing job. Configurable test
+  // commands ran in the analysis job, which had no GitHub write token. Here we
+  // only prove that the fresh checkout produces the exact validated patch.
+  const freshPatchDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-patch-"));
+  const freshPatchPath = path.join(freshPatchDirectory, "fresh.diff");
+  try {
+    await createPatch(freshPatchPath);
+    const freshPatchBytes = await readFile(freshPatchPath);
+    if (sha256(freshPatchBytes) !== manifest.patch.sha256) {
+      throw new Error("Fresh-checkout patch differs from the validated artifact");
+    }
+  } finally {
+    await rm(freshPatchDirectory, { recursive: true, force: true });
+  }
+
+  const branch = repairBranch(config, context.mode, fingerprint);
+  const normalizedTitle = singleLine(title, 200) || "chore: apply bounded maintenance repair";
+  const draft = !readyForReview || risk !== "low";
+  const validationSummary = [
+    ...(manifest.validation?.commands ?? []).map((item) => `- \`${item.command}\`: ${item.success ? "passed" : "failed"}`),
+  ].join("\n");
+  const prBody = renderRepairPullRequest({
+    titleSummary: summary,
+    body,
+    finding,
+    issueNumber,
+    fingerprint,
+    validationSummary,
+    files: livePolicy.files
+  });
+
+  if (dryRun) {
+    return { created: false, dryRun: true, branch, title: normalizedTitle, draft, files: livePolicy.files, prBody };
+  }
+
+  const automationIdentity = expectedAutomationIdentity();
+  configureAutomationIdentity(automationIdentity);
+  createBranchAndCommit({ branch, message: "chore: apply automated maintenance repair" });
+  const expectedTreeSha = gitText(["rev-parse", "HEAD^{tree}"]);
   const existing = await findOpenRepairPull(github, fingerprint, config, context.mode);
   let pull = existing;
   let created = false;
-  let branch;
-  let draft;
-  if (!pull) {
-    if (currentHead() !== context.baseSha) {
-      return { created: false, reason: `Default branch moved from ${context.baseSha} to ${currentHead()}` };
-    }
-    ensureClean();
-    const patchPath = path.join(artifactDirectory, manifest.patch.fileName);
-    const patchBytes = await readRegularFile(patchPath);
-    if (sha256(patchBytes) !== manifest.patch.sha256) throw new Error("Patch artifact SHA-256 does not match manifest");
-    if (patchBytes.length > config.audit.repair.maximumPatchBytes) {
-      throw new Error(`Patch artifact is ${patchBytes.length} bytes; maximum is ${config.audit.repair.maximumPatchBytes}`);
-    }
-    applyPatch(patchPath);
-    const liveChanges = { ...(await collectWorkingTreeChanges()), patchBytes: patchBytes.length };
-    const livePolicy = validatePatch(liveChanges, config);
-    if (!livePolicy.valid) throw new Error(`Fresh-checkout patch validation failed: ${livePolicy.reasons.join("; ")}`);
-    const expectedFiles = [...manifest.patch.files].sort();
-    const actualFiles = [...livePolicy.files].sort();
-    if (JSON.stringify(expectedFiles) !== JSON.stringify(actualFiles)) {
-      throw new Error(`Fresh-checkout patch files differ from validated artifact: expected ${expectedFiles.join(", ")}, got ${actualFiles.join(", ")}`);
-    }
-    // Do not execute repository code in this token-bearing job. Configurable test
-    // commands ran in the analysis job, which had no GitHub write token. Here we
-    // only prove that the fresh checkout produces the exact validated patch.
-    const freshPatchDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-patch-"));
-    const freshPatchPath = path.join(freshPatchDirectory, "fresh.diff");
-    try {
-      await createPatch(freshPatchPath);
-      const freshPatchBytes = await readFile(freshPatchPath);
-      if (sha256(freshPatchBytes) !== manifest.patch.sha256) {
-        throw new Error("Fresh-checkout patch differs from the validated artifact");
-      }
-    } finally {
-      await rm(freshPatchDirectory, { recursive: true, force: true });
-    }
-
-    branch = repairBranch(config, context.mode, fingerprint);
-    const normalizedTitle = singleLine(title, 200) || "chore: apply bounded maintenance repair";
-    draft = !readyForReview || risk !== "low";
-    const validationSummary = [
-      ...(manifest.validation?.commands ?? []).map((item) => `- \`${item.command}\`: ${item.success ? "passed" : "failed"}`),
-    ].join("\n");
-    const prBody = renderRepairPullRequest({
-      titleSummary: summary,
-      body,
-      finding,
-      issueNumber,
-      fingerprint,
-      validationSummary,
-      files: livePolicy.files
+  const remote = await github.getBranchTip(branch);
+  if (!pull && remote && (
+    remote.treeSha !== expectedTreeSha ||
+    remote.parentShas.length !== 1 ||
+    remote.parentShas[0] !== context.baseSha
+  )) {
+    throw new Error(`Automation branch ${branch} already exists with unexpected content`);
+  }
+  let pushedByThisRun = false;
+  if (pull) {
+    pull = await verifyExistingRepairPull({
+      github, pull, branch, expectedTreeSha, context, config, fingerprint, automationIdentity
     });
-
-    if (dryRun) {
-      return { created: false, dryRun: true, branch, title: normalizedTitle, draft, files: livePolicy.files, prBody };
-    }
-
-    const automationIdentity = expectedAutomationIdentity();
-    configureAutomationIdentity(automationIdentity);
-    createBranchAndCommit({ branch, message: "chore: apply automated maintenance repair" });
-    const remote = await github.getBranchTip(branch);
-    let pushedByThisRun = false;
-    if (remote) {
-      if (
-        remote.treeSha !== gitText(["rev-parse", "HEAD^{tree}"]) ||
-        remote.parentShas.length !== 1 ||
-        remote.parentShas[0] !== context.baseSha
-      ) {
-        throw new Error(`Automation branch ${branch} already exists with unexpected content`);
-      }
-    } else {
+  } else {
+    if (!remote) {
       await github.mutateIfCurrent(() => pushBranch(branch, github.token));
       pushedByThisRun = true;
     }
@@ -1140,7 +1199,17 @@ async function publishPatchPullRequest({
     }
   }
   if (!dryRun) {
+    if (!created) {
+      pull = await verifyExistingRepairPull({
+        github, pull, branch, expectedTreeSha, context, config, fingerprint, automationIdentity
+      });
+    }
     await github.ensureLabels(config.labels, [...labels]);
+    if (!created) {
+      pull = await verifyExistingRepairPull({
+        github, pull, branch, expectedTreeSha, context, config, fingerprint, automationIdentity
+      });
+    }
     await github.replaceManagedLabels(pull.number, [...labels], managedIssueLabels(config));
   }
   return created

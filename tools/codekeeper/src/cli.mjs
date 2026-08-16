@@ -49,8 +49,9 @@ function stringList(value, name) {
 }
 
 function bundleFile(directory, filePath, flag) {
-  const resolved = path.resolve(filePath);
-  const relative = path.relative(directory, resolved);
+  const runnerDirectory = assertRunnerOwnedDirectory(directory);
+  const resolved = runnerFile(filePath, flag);
+  const relative = path.relative(runnerDirectory, resolved);
   if (relative === "" || relative.startsWith(`..${path.sep}`) || relative === "..") {
     throw new Error(`--${flag} must be a file inside the runner-owned --directory`);
   }
@@ -59,8 +60,8 @@ function bundleFile(directory, filePath, flag) {
 
 function runnerFile(filePath, flag) {
   const resolved = path.resolve(filePath);
-  assertRunnerOwnedDirectory(path.dirname(resolved));
-  return resolved;
+  const directory = assertRunnerOwnedDirectory(path.dirname(resolved));
+  return path.join(directory, path.basename(resolved));
 }
 
 function agentProfileInputs(args, toolingSha) {

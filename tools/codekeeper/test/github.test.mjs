@@ -272,6 +272,102 @@ test("conditional issue mutations allow closed issues only for resolution reconc
   await github.verifyIssueMutation();
 });
 
+test("secondary issue mutations reject inventory drift and advance after their own update", async () => {
+  const state = {
+    issue: {
+      number: 9,
+      title: "Deferred report",
+      body: "Original body",
+      state: "open",
+      state_reason: null,
+      updated_at: "2026-08-16T10:00:00Z",
+      labels: [{ name: "deferred" }],
+      user: { login: "codekeeper[bot]", id: 123, type: "Bot" }
+    },
+    comments: []
+  };
+  const writes = [];
+  const github = client({
+    retries: 0,
+    fetch: async (url, options) => {
+      const href = String(url);
+      const changes = options.body ? JSON.parse(options.body) : null;
+      if (options.method === "GET" && /\/issues\/9\/comments\?/.test(href)) {
+        return new Response(JSON.stringify(state.comments));
+      }
+      if (options.method === "GET" && /\/issues\/9$/.test(href)) {
+        return new Response(JSON.stringify(state.issue));
+      }
+      if (options.method === "PATCH" && /\/issues\/9$/.test(href)) {
+        writes.push({ method: options.method, changes });
+        Object.assign(state.issue, changes, { updated_at: "2026-08-16T10:01:00Z" });
+        return new Response(JSON.stringify(state.issue));
+      }
+      if (options.method === "POST" && /\/issues\/9\/labels$/.test(href)) {
+        writes.push({ method: options.method, changes });
+        state.issue.labels = [...state.issue.labels, ...changes.labels.map((name) => ({ name }))];
+        state.issue.updated_at = "2026-08-16T10:02:00Z";
+        return new Response(JSON.stringify(state.issue.labels));
+      }
+      return new Response(null, { status: 204 });
+    }
+  });
+
+  const inventory = structuredClone(state.issue);
+  for (const { name, mutate, expected } of [
+    { name: "title", mutate: (issue) => { issue.title = "Human edit"; }, expected: /changed after inventory/ },
+    { name: "state", mutate: (issue) => { issue.state = "closed"; }, expected: /no longer eligible/ },
+    { name: "labels", mutate: (issue) => { issue.labels = [{ name: "human-label" }]; }, expected: /labels changed after inventory/ },
+    { name: "timestamp", mutate: (issue) => { issue.updated_at = "2026-08-16T10:00:30Z"; }, expected: /changed after inventory/ }
+  ]) {
+    state.issue = structuredClone(inventory);
+    writes.length = 0;
+    await github.beginSecondaryIssueMutation({ issue: structuredClone(state.issue) });
+    mutate(state.issue);
+    await assert.rejects(github.updateIssue(9, { body: "Codekeeper update" }), expected, name);
+    assert.deepEqual(writes, [], `${name} drift must not issue a write`);
+    github.endSecondaryIssueMutation();
+  }
+
+  state.issue = structuredClone(inventory);
+  await github.beginSecondaryIssueMutation({ issue: structuredClone(state.issue) });
+  await github.updateIssue(9, { body: "Codekeeper update" });
+  await github.replaceManagedLabels(9, ["deferred", "testing"], ["deferred", "testing"]);
+  assert.deepEqual(writes.map(({ method }) => method), ["PATCH", "POST"]);
+  assert.deepEqual(state.issue.labels.map(({ name }) => name), ["deferred", "testing"]);
+  await github.endSecondaryIssueMutation();
+});
+
+test("secondary issue mutations reject comment drift before reconciliation", async () => {
+  const issue = {
+    number: 10, title: "Maintenance report", body: "Original", state: "open",
+    updated_at: "2026-08-16T10:00:00Z", labels: [], user: { login: "codekeeper[bot]", id: 123, type: "Bot" }
+  };
+  let comments = [];
+  let writes = 0;
+  const github = client({
+    retries: 0,
+    fetch: async (url, options) => {
+      const href = String(url);
+      if (options.method === "GET" && /\/issues\/10\/comments\?/.test(href)) return new Response(JSON.stringify(comments));
+      if (options.method === "GET" && /\/issues\/10$/.test(href)) return new Response(JSON.stringify(issue));
+      if (options.method === "PATCH" && /\/issues\/10$/.test(href)) {
+        writes += 1;
+        return new Response(JSON.stringify(issue));
+      }
+      return new Response(null, { status: 204 });
+    }
+  });
+  await github.beginSecondaryIssueMutation({ issue: structuredClone(issue) });
+  comments = [{
+    id: 41, body: "Human note", created_at: "2026-08-16T10:00:30Z", updated_at: "2026-08-16T10:00:30Z",
+    user: { login: "maintainer", id: 456, type: "User" }
+  }];
+  await assert.rejects(github.updateIssue(10, { body: "Codekeeper update" }), /comments changed after inventory/);
+  assert.equal(writes, 0);
+  await github.endSecondaryIssueMutation();
+});
+
 test("GitHub requests carry a finite abort deadline", async () => {
   let signal;
   const github = client({

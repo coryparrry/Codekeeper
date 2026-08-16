@@ -5,11 +5,36 @@
 The separate [`codekeeper` installer](packages/codekeeper/README.md) is the preferred guided path. It opens a keyboard-driven terminal UI on Node.js 22+, but remains private and unpublished during acceptance. Do not assume `npx codekeeper init` resolves to this project from the public npm registry yet. Build a local tarball from this checkout and invoke that exact file instead:
 
 ```bash
-mkdir -p /absolute/path/outside/source-checkout/codekeeper-dist
+PACKAGE_DESTINATION=/absolute/path/outside/source-checkout/codekeeper-dist
+mkdir -p "$PACKAGE_DESTINATION"
 cd packages/codekeeper
-npm pack --pack-destination /absolute/path/outside/source-checkout/codekeeper-dist
+PACK_REPORT="$(npm pack --json --pack-destination "$PACKAGE_DESTINATION")"
+PACKAGE_FILE="$(node -e '
+const report = JSON.parse(process.argv[1]);
+const reports = Array.isArray(report)
+  ? report
+  : report && typeof report === "object"
+    ? Object.hasOwn(report, "filename") || Object.hasOwn(report, "integrity") ? [report] : Object.values(report)
+    : [];
+if (reports.length !== 1) throw new Error("npm pack must return exactly one report");
+const [entry] = reports;
+if (!entry || typeof entry !== "object" || typeof entry.filename !== "string" || typeof entry.integrity !== "string" || !entry.integrity.startsWith("sha512-")) throw new Error("npm pack returned an invalid report");
+process.stdout.write(entry.filename);
+' "$PACK_REPORT")"
+PACKAGE_INTEGRITY="$(node -e '
+const report = JSON.parse(process.argv[1]);
+const reports = Array.isArray(report)
+  ? report
+  : report && typeof report === "object"
+    ? Object.hasOwn(report, "filename") || Object.hasOwn(report, "integrity") ? [report] : Object.values(report)
+    : [];
+if (reports.length !== 1) throw new Error("npm pack must return exactly one report");
+const [entry] = reports;
+if (!entry || typeof entry !== "object" || typeof entry.filename !== "string" || typeof entry.integrity !== "string" || !entry.integrity.startsWith("sha512-")) throw new Error("npm pack returned an invalid report");
+process.stdout.write(entry.integrity);
+' "$PACK_REPORT")"
 cd /absolute/path/to/adopter-repository
-npm exec --package /absolute/path/outside/source-checkout/codekeeper-dist/codekeeper-0.2.0.tgz -- codekeeper init
+npm exec --package "$PACKAGE_DESTINATION/$PACKAGE_FILE" -- codekeeper init --current-package --package-integrity "$PACKAGE_INTEGRITY"
 ```
 
 The installer opens one tabbed Settings screen and generates a setup or configuration PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Simple mode puts provider, model, and effort choices first. Advanced mode uses the same sections and exposes every editable policy field while keeping deterministic safety and release boundaries read-only. Review the short summary or return to Settings at the final mutation boundary. If the installer cannot be used, the numbered steps below remain the manual fallback.

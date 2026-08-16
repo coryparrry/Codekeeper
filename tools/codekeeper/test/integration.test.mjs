@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { copyFile, lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -345,6 +345,9 @@ test("prepare requires an external runner-owned directory and cannot follow chec
   const root = await createRepository();
   const victim = `${root}-victim`;
   const checkoutDirectory = path.join(root, ".codekeeper");
+  const checkoutSink = path.join(root, ".codekeeper-sink");
+  const externalFinalSymlink = `${root}-final-symlink`;
+  const externalParentSymlink = `${root}-parent-symlink`;
   await writeFile(victim, "safe\n", "utf8");
   await symlink(victim, checkoutDirectory);
 
@@ -355,10 +358,39 @@ test("prepare requires an external runner-owned directory and cannot follow chec
   assert.equal(await readFile(victim, "utf8"), "safe\n");
   assert.equal((await lstat(checkoutDirectory)).isSymbolicLink(), true);
 
+  await mkdir(checkoutSink);
+  await symlink(checkoutSink, externalFinalSymlink);
+  assert.throws(
+    () => run("node", [cli, "prepare-audit", "--config", ".github/codekeeper.json", "--directory", externalFinalSymlink], root, { GITHUB_REPOSITORY: "acme/example" }),
+    /Command failed/
+  );
+  assert.equal((await lstat(externalFinalSymlink)).isSymbolicLink(), true);
+  await assert.rejects(lstat(path.join(checkoutSink, "context.json")), { code: "ENOENT" });
+
+  await symlink(root, externalParentSymlink);
+  const parentBundle = path.join(externalParentSymlink, "bundle");
+  assert.throws(
+    () => run("node", [cli, "prepare-audit", "--config", ".github/codekeeper.json", "--directory", parentBundle], root, { GITHUB_REPOSITORY: "acme/example" }),
+    /Command failed/
+  );
+  await assert.rejects(lstat(path.join(root, "bundle")), { code: "ENOENT" });
+
   const externalDirectory = bundle(root, "trusted-input");
   prepareAudit(root, externalDirectory);
   assert.equal((await lstat(path.join(externalDirectory, "context.json"))).isFile(), true);
   assert.equal(await readFile(victim, "utf8"), "safe\n");
+});
+
+test("prepare accepts runner files through the macOS /var alias", async (context) => {
+  const canonicalVar = await realpath("/var");
+  if (canonicalVar === "/var") return context.skip("this platform does not canonicalize /var");
+  const root = await createRepository();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const directory = bundle(root, "var-alias");
+  if (!directory.startsWith("/var/")) return context.skip("the temporary directory does not use the /var alias");
+
+  prepareAudit(root, directory);
+  assert.equal((await lstat(path.join(directory, "context.json"))).isFile(), true);
 });
 
 test("preparation freezes one trusted profile for workspace and the coordinator cache prefix", async (context) => {

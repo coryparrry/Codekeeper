@@ -253,6 +253,7 @@ export class GitHubClient {
     this.pullMutation = null;
     this.branchMutation = null;
     this.issueMutation = null;
+    this.secondaryIssueMutation = null;
   }
 
   assertNoMutationGuard() {
@@ -401,7 +402,97 @@ export class GitHubClient {
     }
   }
 
-  async assertMutationCurrent() {
+  async beginSecondaryIssueMutation({ issue, allowClosed = issue?.state === "closed" }) {
+    if (this.secondaryIssueMutation) {
+      throw new Error("A conditional secondary issue mutation is already active");
+    }
+    if (
+      !issue || issue.pull_request || !Number.isSafeInteger(issue.number) || issue.number <= 0 ||
+      typeof issue.updated_at !== "string" || !Number.isFinite(Date.parse(issue.updated_at))
+    ) {
+      throw new Error("Conditional secondary issue mutation requires a frozen issue snapshot");
+    }
+    this.secondaryIssueMutation = {
+      number: issue.number,
+      updatedAt: issue.updated_at,
+      subject: issueMutationSubject(issue),
+      labels: issueLabelNames(issue),
+      comments: null,
+      allowClosed: allowClosed === true,
+    };
+    try {
+      const live = await this.assertSecondaryIssueMutationCurrent();
+      this.secondaryIssueMutation.comments = issueCommentInventory(
+        await this.listIssueComments(issue.number),
+        issue.number
+      );
+      return live;
+    } catch (error) {
+      this.secondaryIssueMutation = null;
+      throw error;
+    }
+  }
+
+  endSecondaryIssueMutation() {
+    this.secondaryIssueMutation = null;
+  }
+
+  async assertSecondaryIssueMutationCurrent() {
+    const expected = this.secondaryIssueMutation;
+    if (!expected) return null;
+    const [issue, comments] = await Promise.all([
+      this.getIssue(expected.number),
+      expected.comments === null ? Promise.resolve(null) : this.listIssueComments(expected.number)
+    ]);
+    if (
+      issue.pull_request ||
+      (issue.state !== "open" && !(expected.allowClosed && issue.state === "closed"))
+    ) {
+      throw new Error(`Issue #${expected.number} is no longer eligible`);
+    }
+    if (!sameJson(issueMutationSubject(issue), expected.subject)) {
+      throw new Error(`Issue #${expected.number} changed after inventory; stale reconciliation will not mutate GitHub`);
+    }
+    if (!sameStrings(issueLabelNames(issue), expected.labels)) {
+      throw new Error(`Issue #${expected.number} labels changed after inventory`);
+    }
+    if (issue.updated_at !== expected.updatedAt) {
+      throw new Error(`Issue #${expected.number} changed after inventory; stale reconciliation will not mutate GitHub`);
+    }
+    if (expected.comments !== null && !sameJson(
+      issueCommentInventory(comments, expected.number),
+      expected.comments
+    )) {
+      throw new Error(`Issue #${expected.number} comments changed after inventory`);
+    }
+    return issue;
+  }
+
+  advanceSecondaryIssueMutation(issue) {
+    const expected = this.secondaryIssueMutation;
+    if (!expected || issue?.number !== expected.number) return;
+    if (typeof issue.updated_at !== "string" || !Number.isFinite(Date.parse(issue.updated_at))) {
+      throw new Error(`Issue #${expected.number} has no updated timestamp after secondary reconciliation`);
+    }
+    expected.updatedAt = issue.updated_at;
+    expected.subject = issueMutationSubject(issue);
+    expected.labels = issueLabelNames(issue);
+  }
+
+  async advanceSecondaryIssueMutationLabels(number, labels) {
+    const expected = this.secondaryIssueMutation;
+    if (!expected || expected.number !== number) return;
+    const after = await this.getIssue(number);
+    if (!sameJson(issueMutationSubject(after), expected.subject)) {
+      throw new Error(`Issue #${number} changed while Codekeeper reconciled labels`);
+    }
+    if (!sameStrings(issueLabelNames(after), labels)) {
+      throw new Error(`Issue #${number} labels changed while Codekeeper reconciled labels`);
+    }
+    this.advanceSecondaryIssueMutation(after);
+  }
+
+  async assertPrimaryMutationCurrent() {
     if (this.pullMutation) return this.assertPullMutationCurrent();
     if (this.branchMutation) {
       const branch = await this.getBranch(this.branchMutation.branch);
@@ -456,6 +547,12 @@ export class GitHubClient {
       return issue;
     }
     return null;
+  }
+
+  async assertMutationCurrent() {
+    const primary = await this.assertPrimaryMutationCurrent();
+    const secondary = await this.assertSecondaryIssueMutationCurrent();
+    return primary ?? secondary;
   }
 
   advanceIssueMutationLabels(labels, updatedAt) {
@@ -960,7 +1057,9 @@ export class GitHubClient {
   }
 
   async updateIssue(number, changes) {
-    return (await this.request("PATCH", this.repoPath(`/issues/${number}`), { body: changes })).data;
+    const issue = (await this.request("PATCH", this.repoPath(`/issues/${number}`), { body: changes })).data;
+    this.advanceSecondaryIssueMutation(issue);
+    return issue;
   }
 
   async createComment(number, body) {
@@ -1087,23 +1186,37 @@ export class GitHubClient {
     if (unmanaged.length > 0) {
       throw new Error(`Attempted to mutate labels outside configured ownership: ${unmanaged.join(", ")}`);
     }
-    const conditional = this.issueMutation?.number === number ? this.issueMutation : null;
+    const secondary = this.secondaryIssueMutation?.number === number
+      ? this.secondaryIssueMutation
+      : null;
+    const conditional = this.issueMutation?.number === number
+      ? this.issueMutation
+      : secondary;
     if (conditional) await this.assertMutationCurrent();
     const issue = await this.getIssue(number);
     const existing = (issue.labels ?? []).map((label) => (typeof label === "string" ? label : label.name));
     const additions = [...desiredSet].filter((label) => !existing.includes(label));
+    const expectedLabels = [...new Set([
+      ...issueLabelNames(issue).filter((label) => !managedSet.has(label)),
+      ...desiredSet
+    ])].sort();
+    let currentLabels = issueLabelNames(issue);
     if (additions.length > 0) {
       await this.request("POST", this.repoPath(`/issues/${number}/labels`), {
         body: { labels: additions },
-        ...(conditional ? { guardToken: ISSUE_MUTATION_INTERNAL } : {})
+        ...(secondary ? {} : conditional ? { guardToken: ISSUE_MUTATION_INTERNAL } : {})
       });
+      currentLabels = [...new Set([...currentLabels, ...additions])].sort();
+      if (secondary) await this.advanceSecondaryIssueMutationLabels(number, currentLabels);
     }
     for (const label of existing) {
       if (!managedSet.has(label) || desiredSet.has(label)) continue;
       try {
         await this.request("DELETE", this.repoPath(`/issues/${number}/labels/${encodeURIComponent(label)}`), {
-          ...(conditional ? { guardToken: ISSUE_MUTATION_INTERNAL } : {})
+          ...(secondary ? {} : conditional ? { guardToken: ISSUE_MUTATION_INTERNAL } : {})
         });
+        currentLabels = currentLabels.filter((item) => item !== label);
+        if (secondary) await this.advanceSecondaryIssueMutationLabels(number, currentLabels);
       } catch (error) {
         if (error.status !== 404) throw error;
       }
@@ -1113,17 +1226,14 @@ export class GitHubClient {
       if (!sameJson(issueMutationSubject(after), conditional.subject)) {
         throw new Error(`Issue #${number} changed while Codekeeper reconciled labels`);
       }
-      const expectedLabels = [...new Set([
-        ...issueLabelNames(issue).filter((label) => !managedSet.has(label)),
-        ...desiredSet
-      ])].sort();
       if (!sameStrings(issueLabelNames(after), expectedLabels)) {
         throw new Error(`Issue #${number} labels changed while Codekeeper reconciled labels`);
       }
       if (typeof after.updated_at !== "string" || !Number.isFinite(Date.parse(after.updated_at))) {
         throw new Error(`Issue #${number} has no updated timestamp after label reconciliation`);
       }
-      this.advanceIssueMutationLabels(expectedLabels, after.updated_at);
+      conditional.labels = expectedLabels;
+      conditional.updatedAt = after.updated_at;
     }
   }
 
@@ -1178,10 +1288,11 @@ export class GitHubClient {
     if (!branchData) return null;
     const treeSha = branchData?.commit?.commit?.tree?.sha;
     const parentShas = branchData?.commit?.parents?.map((parent) => parent?.sha);
-    if (typeof treeSha !== "string" || !Array.isArray(parentShas) || parentShas.some((sha) => typeof sha !== "string")) {
+    const headSha = branchData?.commit?.sha;
+    if (typeof headSha !== "string" || typeof treeSha !== "string" || !Array.isArray(parentShas) || parentShas.some((sha) => typeof sha !== "string")) {
       throw new Error(`GitHub branch ${branch} has an invalid commit shape`);
     }
-    return { treeSha, parentShas };
+    return { headSha, treeSha, parentShas };
   }
 
   async deleteBranch(branch) {

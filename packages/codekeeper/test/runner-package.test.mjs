@@ -29,6 +29,67 @@ async function pathExists(filePath) {
   }
 }
 
+function normalizeNpmPackReport(output) {
+  const parsed = JSON.parse(output);
+  if (Array.isArray(parsed)) {
+    if (parsed.length !== 1)
+      throw new TypeError("npm pack returned an invalid number of reports");
+    return normalizeNpmPackReportValue(parsed[0]);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("npm pack returned an invalid report");
+  }
+  if (Array.isArray(parsed.files)) return parsed;
+  const reports = Object.values(parsed);
+  if (reports.length !== 1)
+    throw new TypeError("npm pack returned an invalid number of reports");
+  return normalizeNpmPackReportValue(reports[0]);
+}
+
+function normalizeNpmPackReportValue(report) {
+  if (
+    report === null ||
+    typeof report !== "object" ||
+    Array.isArray(report) ||
+    !Array.isArray(report.files)
+  ) {
+    throw new TypeError("npm pack returned an invalid report");
+  }
+  return report;
+}
+
+test("normalizes object- and single-element array-shaped npm pack reports", () => {
+  const report = {
+    filename: "codekeeper-0.2.0.tgz",
+    files: [{ path: "package.json" }],
+  };
+  assert.deepEqual(normalizeNpmPackReport(JSON.stringify(report)), report);
+  assert.deepEqual(
+    normalizeNpmPackReport(JSON.stringify({ codekeeper: report })),
+    report,
+  );
+  assert.deepEqual(normalizeNpmPackReport(JSON.stringify([report])), report);
+});
+
+test("rejects invalid and multiple npm pack reports", () => {
+  assert.throws(() => normalizeNpmPackReport("null"), /invalid report/);
+  assert.throws(
+    () => normalizeNpmPackReport(JSON.stringify([])),
+    /invalid number of reports/,
+  );
+  assert.throws(
+    () =>
+      normalizeNpmPackReport(
+        JSON.stringify({ first: { files: [] }, second: { files: [] } }),
+      ),
+    /invalid number of reports/,
+  );
+  assert.throws(
+    () => normalizeNpmPackReport(JSON.stringify([null])),
+    /invalid report/,
+  );
+});
+
 test("sanitized command environments retain only terminal/GitHub configuration and force GitHub.com", () => {
   const environment = sanitizedEnvironment({
     PATH: "/usr/bin",
@@ -171,7 +232,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     cwd: packageStage,
     ...npmOptions
   });
-  const report = JSON.parse(output)[0];
+  const report = normalizeNpmPackReport(output);
   const files = report.files.map((file) => file.path).sort();
   const expected = [...releaseManifest.files.map((file) => file.path), "release/manifest.json"].sort();
   assert.equal(report.name, "codekeeper");
@@ -179,9 +240,9 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   assert.deepEqual(files, expected);
   assert.ok(files.every((file) => !file.includes("/test/") && !file.includes("package-lock")));
 
-  const packed = JSON.parse(execFileSync("npm", [
+  const packed = normalizeNpmPackReport(execFileSync("npm", [
     "pack", "--json", "--ignore-scripts", "--pack-destination", packDestination
-  ], { cwd: packageStage, ...npmOptions }))[0];
+  ], { cwd: packageStage, ...npmOptions }));
   assert.deepEqual(packed.files.map((file) => file.path).sort(), expected);
   const tarball = path.join(packDestination, packed.filename);
   const shrinkwrap = JSON.parse(await readFile(path.join(packageStage, "npm-shrinkwrap.json"), "utf8"));

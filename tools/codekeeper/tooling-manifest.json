@@ -35,7 +35,7 @@
     },
     {
       "path": "src/cli.mjs",
-      "sha256": "a480d490d1a54218e85d11bc92fa7e5e4324a5c29c5b6a858ed40feb80278cf7"
+      "sha256": "ec07bc42161bb1db5de34afe99b14f70a347b01e8cc59efa6267ef98e735ea1d"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
@@ -59,7 +59,7 @@
     },
     {
       "path": "src/lib/github.mjs",
-      "sha256": "013910cd3c212dd55af03cd012384c19c9932ba79d02778a06be017644a0f56e"
+      "sha256": "98bfe119ed95af8ab951f10d09dc2de1af5e21253da0fc3623c80a755858f19a"
     },
     {
       "path": "src/lib/glob.mjs",
@@ -91,7 +91,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "6a438bf6cb136bca4b97e005b5f46b20da8044a1a2955bb33f7a862fab2a1fdc"
+      "sha256": "c0cb677b7bcded26c1de76c000c94dba7f36941f3de2d94ffbced93004136cf9"
     },
     {
       "path": "src/lib/process-supervisor.mjs",
@@ -103,7 +103,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "75c4d26335fb7bf86e662ccbed79a0ebf10756088e129fd5f591cc0eb2478b8c"
+      "sha256": "a291333e4adc0c6f387b01c7162e1e37593b048436a064c7fdcb9c6d560c3768"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",
@@ -131,7 +131,7 @@
     },
     {
       "path": "src/lib/workspace.mjs",
-      "sha256": "a5452f6a4aec327f2ce47e8955aafeec942b90e3d955e80536f8fd5f14fc43ac"
+      "sha256": "12705b2ac2b30dc384c159fb29a4ec1f76855bd6a8c2248f70beeec7c22952a3"
     }
   ]
 }
