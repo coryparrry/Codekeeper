@@ -29,13 +29,13 @@ npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper update -
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and operating model. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/0cceb845ed7212d7f4d69fe7863d45f37647864d/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparrry/Codekeeper/blob/59a0ccc6dae19d12b65a6ea1418d1db0231d6ac7/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper/README.md` | Release-owned explanation of the installed files and update commands. | When orienting maintainers inside an adopter repository. |
 | Generated `.github/codekeeper-release.json` | Installed package/source version and inventory of release-managed files, with exact digests for copied artifacts and semantic validation for generated callers. | When reviewing an update that adds, replaces, renames, or removes generated callers. |
 | Optional `.github/codekeeper/agents/*.md` overrides | Adopter-owned overrides for evidence, risk, duplicate, test-adequacy, and no-action judgment. Absent files use the packaged defaults. | Only when repository-specific behavior should differ from the release default. |
 | Generated `.github/workflows/codekeeper-*.yml` and `.github/codekeeper/actions/acquire-package/action.yml` | Selected callers, local runtime workflows, and the exact-package acquisition action pinned to the npm version and SHA-512 integrity. | When reviewing triggers, permissions, package identity, or secret mappings. |
-| [Packaged default profiles](https://github.com/coryparrry/Codekeeper/tree/0cceb845ed7212d7f4d69fe7863d45f37647864d/tools/codekeeper/agents) | Immutable source and provenance for the four defaults bundled with this release. | When comparing an optional repository override with the release baseline. |
+| [Packaged default profiles](https://github.com/coryparrry/Codekeeper/tree/59a0ccc6dae19d12b65a6ea1418d1db0231d6ac7/tools/codekeeper/agents) | Immutable source and provenance for the four defaults bundled with this release. | When comparing an optional repository override with the release baseline. |
 
 ## What `init` does
 
