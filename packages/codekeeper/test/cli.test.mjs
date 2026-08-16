@@ -11,37 +11,42 @@ import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, result, tempo
 function runCli(options = {}) {
   return runProductionCli({
     ...options,
-    environment: testPackageEnvironment(options.environment),
+    showDoctor: options.showDoctor ?? false,
+    environment: testPackageEnvironment(options.environment)
   });
 }
 
-function guidedPrompt(confirmations = [true, true, true, true, true, true], { privateKeyPath = "/private/tmp/codekeeper-test-private-key.pem" } = {}) {
+function guidedPrompt(confirmations = [true, true, true, true, true, true], { privateKeyPath = "/private/tmp/codekeeper-test-private-key.pem", recommended = true } = {}) {
   const answers = [...confirmations];
   const prompt = {
     confirmations: [],
     async confirm(options) {
       prompt.confirmations.push(options);
-      if (options.message === "Enable OpenAI traces?") return true;
+      if (options.message === "Use the recommended starter setup?") return answers.shift() ?? recommended;
       return answers.shift();
     },
     async multiselect({ message, defaultValues }) {
-      if (message.startsWith("Choose capabilities")) return defaultValues;
-      throw new Error("recommended setup must not ask for custom workflows");
+      if (message.startsWith("Choose capabilities") || message.startsWith("Choose workflows")) return defaultValues;
+      throw new Error(`Unexpected multiselect prompt: ${message}`);
     },
     async select({ message, defaultValue }) {
-      if (message === "Choose a starting setup") return "recommended";
+      if (message === "Choose a starting setup") return recommended ? "recommended" : "custom";
+      if (message.startsWith("Choose the starting model set")) return defaultValue;
       if (message.startsWith("Assign a model to")) return defaultValue;
+      if (message.startsWith("Choose the provider for")) return defaultValue;
+      if (message.startsWith("Choose the reasoning effort for")) return defaultValue;
       if (message === "Enable OpenAI traces?") return "enabled";
       if (message.startsWith("Start Codekeeper")) return "enabled";
-      throw new Error("recommended setup must not ask for a custom preset");
+      throw new Error(`Unexpected select prompt: ${message}`);
     },
-    async inputText({ message }) {
+    async inputText({ message, defaultValue }) {
       if (message.startsWith("Name to show")) return "Widget";
       if (message.startsWith("GitHub users")) return "cory";
       if (message.startsWith("GitHub App Client")) return "Iv123456789012345678";
       if (message.startsWith("Paste the GitHub App")) return "https://github.com/settings/apps/codekeeper-widget";
       if (message.startsWith("GitHub App bot")) return "codekeeper-widget[bot]";
       if (message.startsWith("Full absolute path")) return privateKeyPath;
+      if (message.startsWith("Enter the model ID for")) return defaultValue;
       throw new Error(`Unexpected prompt: ${message}`);
     }
   };
@@ -68,9 +73,40 @@ test("CLI accepts only the documented commands", () => {
   assert.deepEqual(parseCliArgs(["--version"]), { command: "version" });
   assert.deepEqual(parseCliArgs(["init"]), { command: "init" });
   assert.deepEqual(parseCliArgs(["update"]), { command: "update" });
-  assert.deepEqual(parseCliArgs(["update", "--current-package"]), { command: "update", currentPackage: true });
-  assert.throws(() => parseCliArgs(["init", "--force"]), (error) => error.code === "CLI_USAGE");
-  assert.throws(() => parseCliArgs(["verify"]), (error) => error.code === "CLI_USAGE");
+  assert.deepEqual(parseCliArgs(["doctor"]), {
+    command: "doctor",
+    json: false
+  });
+  assert.deepEqual(parseCliArgs(["doctor", "--json"]), {
+    command: "doctor",
+    json: true
+  });
+  assert.deepEqual(parseCliArgs(["verify"]), {
+    command: "verify",
+    json: false,
+    controlled: false
+  });
+  assert.deepEqual(parseCliArgs(["verify", "--json", "--controlled"]), {
+    command: "verify",
+    json: true,
+    controlled: true
+  });
+  assert.deepEqual(parseCliArgs(["update", "--current-package"]), {
+    command: "update",
+    currentPackage: true
+  });
+  assert.throws(
+    () => parseCliArgs(["init", "--force"]),
+    (error) => error.code === "CLI_USAGE"
+  );
+  assert.throws(
+    () => parseCliArgs(["verify", "--unknown"]),
+    (error) => error.code === "CLI_USAGE"
+  );
+  assert.throws(
+    () => parseCliArgs(["verify", "--json", "--json"]),
+    (error) => error.code === "CLI_USAGE"
+  );
   assert.throws(() => parseCliArgs("init"), TypeError);
 });
 
@@ -155,13 +191,131 @@ test("help, version, and rejected arguments perform no installer side effects", 
   }
 });
 
+test("doctor supports JSON output and returns a failing exit code when mutation is blocked", async () => {
+  const report = Object.freeze({
+    mutationAllowed: false,
+    counts: Object.freeze({ pass: 1, warning: 0, fail: 1 }),
+    checks: Object.freeze([
+      Object.freeze({
+        id: "git",
+        label: "Git",
+        status: "pass",
+        detail: "Git is available."
+      }),
+      Object.freeze({
+        id: "checkout",
+        label: "Checkout",
+        status: "fail",
+        detail: "Run doctor inside a Git checkout."
+      })
+    ])
+  });
+  const output = textSink();
+  const errorOutput = textSink();
+  let received;
+  const status = await runCli({
+    argv: ["doctor", "--json"],
+    output,
+    errorOutput,
+    runner: createRecordingRunner(() => {
+      throw new Error("doctor must use the injected report");
+    }),
+    doctor: async (options) => {
+      received = options;
+      return report;
+    }
+  });
+  assert.equal(status, 1);
+  assert.equal(received.cwd, process.cwd());
+  assert.deepEqual(JSON.parse(output.toString()), report);
+  assert.equal(errorOutput.toString(), "");
+});
+
+test("init runs the visible doctor explicitly even with a wrapped repository inspector", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  let inspections = 0;
+  const status = await runCli({
+    argv: ["init"],
+    output,
+    errorOutput,
+    prompt: guidedPrompt(),
+    interactive: true,
+    showDoctor: true,
+    loadAssets: loadVerifiedAssets,
+    doctor: async () => ({
+      mutationAllowed: false,
+      counts: { pass: 0, warning: 0, fail: 1 },
+      checks: [
+        {
+          id: "organization-app-authority",
+          label: "Organization App authority",
+          status: "fail",
+          detail: "An organization owner must complete App registration.",
+          remediation: "Ask an organization owner before configuring settings."
+        }
+      ]
+    }),
+    inspect: async () => {
+      inspections += 1;
+      return repositorySnapshot("/tmp/widget", HEAD_SHA);
+    }
+  });
+  assert.equal(status, 1);
+  assert.equal(inspections, 0);
+  assert.match(output.toString(), /Organization App authority/);
+  assert.match(errorOutput.toString(), /readiness checks failed/);
+});
+
+test("verify passes controlled mode through, emits JSON, and uses readiness exit semantics", async () => {
+  const report = Object.freeze({
+    ready: true,
+    repository: "acme/widget",
+    checks: Object.freeze([
+      Object.freeze({
+        id: "checkout",
+        status: "pass",
+        detail: "Checkout is current."
+      }),
+      Object.freeze({
+        id: "controlled-check",
+        status: "skipped",
+        detail: "Not requested."
+      })
+    ])
+  });
+  const output = textSink();
+  const errorOutput = textSink();
+  let received;
+  const status = await runCli({
+    argv: ["verify", "--json", "--controlled"],
+    cwd: "/tmp/widget",
+    output,
+    errorOutput,
+    runner: createRecordingRunner(() => {
+      throw new Error("verify must use the injected report");
+    }),
+    verifyReadiness: async (options) => {
+      received = options;
+      return report;
+    }
+  });
+  assert.equal(status, 0);
+  assert.equal(received.cwd, "/tmp/widget");
+  assert.equal(received.controlledCheck, true);
+  assert.equal(typeof received.inspectApp, "function");
+  assert.equal(typeof received.verifyPackage, "function");
+  assert.deepEqual(JSON.parse(output.toString()), report);
+  assert.equal(errorOutput.toString(), "");
+});
+
 test("app-registration abort prints the URL and an exact platform-safe resume command without mutation", async () => {
   const output = textSink();
   const errorOutput = textSink();
   const runner = createRecordingRunner(() => {
     throw new Error("no external command is expected before the App confirmation");
   });
-  const prompt = guidedPrompt([true, true, true, true, false]);
+  const prompt = guidedPrompt([true, true, false]);
   const snapshot = Object.freeze({
     root: "/tmp/acme widget",
     originUrl: "https://github.com/acme/widget.git",
@@ -195,7 +349,23 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   assert.match(output.toString(), new RegExp(openedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(errorOutput.toString(), /Complete GitHub App creation/);
   assert.match(errorOutput.toString(), new RegExp(resumeCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.equal(prompt.confirmations.length, 6);
+  assert.deepEqual(
+    prompt.confirmations.map(({ message, defaultValue }) => ({
+      message,
+      defaultValue
+    })),
+    [
+      {
+        message: "Install into acme/widget on default branch main?",
+        defaultValue: true
+      },
+      { message: "Use the recommended starter setup?", defaultValue: true },
+      {
+        message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
+        defaultValue: true
+      }
+    ]
+  );
   assert.deepEqual(runner.calls, []);
 });
 
@@ -222,19 +392,24 @@ test("declining the repository confirmation performs no mutation or App navigati
   assert.equal(status, 1);
   assert.equal(opens, 0);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: true }
+    {
+      message: "Install into acme/widget on default branch main?",
+      defaultValue: true
+    }
   ]);
   assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
   assert.deepEqual(runner.calls, []);
 });
 
-test("declining conservative boundaries on the recommended path performs no mutation or App navigation", async () => {
+test("declining conservative boundaries on the custom path performs no mutation or App navigation", async () => {
   const output = textSink();
   const errorOutput = textSink();
   const runner = createRecordingRunner(() => {
     throw new Error("no external mutation is expected before boundary confirmation");
   });
-  const prompt = guidedPrompt([true, true, true, false]);
+  const prompt = guidedPrompt([true, false, true, true, false, false], {
+    recommended: false
+  });
   let opens = 0;
   const snapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
   const status = await runCli({
@@ -252,10 +427,17 @@ test("declining conservative boundaries on the recommended path performs no muta
   assert.equal(status, 1);
   assert.equal(opens, 0);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: true },
+    {
+      message: "Install into acme/widget on default branch main?",
+      defaultValue: true
+    },
     { message: "Use the recommended starter setup?", defaultValue: true },
-    { message: "Enable OpenAI traces?", defaultValue: true },
-    { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
+    { message: "Enable OpenAI traces?", defaultValue: false },
+    {
+      message: "Start Codekeeper after the setup pull request merges?",
+      defaultValue: true
+    },
+    { message: "Run maintenance on a schedule?", defaultValue: false },
     { message: "Continue with these safety settings?", defaultValue: false }
   ]);
   assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
@@ -283,7 +465,7 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   const runner = createRecordingRunner(() => {
     throw new Error("no repository setting, GitHub, or Git command is expected before final confirmation");
   });
-  const prompt = guidedPrompt([true, true, true, true, true, false]);
+  const prompt = guidedPrompt([true, true, true, false]);
   let inspections = 0;
   let openedUrl = null;
   const status = await runCli({
@@ -307,12 +489,15 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   assert.equal(inspections, 1);
   assert.match(openedUrl, /^https:\/\/github\.com\/settings\/apps\/new\?/);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: true },
+    {
+      message: "Install into acme/widget on default branch main?",
+      defaultValue: true
+    },
     { message: "Use the recommended starter setup?", defaultValue: true },
-    { message: "Enable OpenAI traces?", defaultValue: true },
-    { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
-    { message: "Continue with these safety settings?", defaultValue: false },
-    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: true },
+    {
+      message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
+      defaultValue: true
+    },
     { message: "Create this setup?", defaultValue: false }
   ]);
   assert.match(output.toString(), /Setup preview/);
@@ -424,7 +609,13 @@ test("Ink final review returns to the same settings without inventing an OpenRou
       start() { throw new Error("progress must not start after review cancellation"); },
       update() { throw new Error("progress must not update after review cancellation"); }
     },
-    async confirm() { return true; },
+    async confirm() {
+      return true;
+    },
+    async select({ message }) {
+      if (message === "Choose a starting setup") return "custom";
+      throw new Error(`Unexpected select prompt: ${message}`);
+    },
     async editSettings({ settings }) {
       settingsVisits += 1;
       return settings;
@@ -731,7 +922,11 @@ test("update exits successfully when the bundled release is already installed", 
     },
     updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
   };
-  const output = Object.assign(textSink(), { isTTY: true, columns: 80, rows: 24 });
+  const output = Object.assign(textSink(), {
+    isTTY: true,
+    columns: 80,
+    rows: 24
+  });
   let rawModeCalls = 0;
   const status = await runCli({
     argv: ["update", "--current-package"],
@@ -816,7 +1011,7 @@ test("resume command formatting is executable on POSIX and PowerShell", () => {
   assert.equal(formatCommand("gh", ["pr", "view", "a'b"], "linux"), "'gh' 'pr' 'view' 'a'\"'\"'b'");
 });
 
-test("successful init revalidates three snapshots and orders settings, exact commit publication, and completion", async (t) => {
+test("successful init revalidates the confirmed snapshot and orders commit, publication, settings, and completion", async (t) => {
   const root = await temporaryDirectory(t, "codekeeper-cli-");
   git(root, ["init", "--template=", "--initial-branch=main"]);
   git(root, ["config", "user.name", "Codekeeper Test"]);
@@ -834,7 +1029,12 @@ test("successful init revalidates three snapshots and orders settings, exact com
   const head = git(root, ["rev-parse", "HEAD"]).trim();
   const snapshot = repositorySnapshot(root, head);
   const actual = createCommandRunner({
-    environment: { PATH: process.env.PATH, HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), LANG: "C" }
+    environment: {
+      PATH: process.env.PATH,
+      HOME: root,
+      XDG_CONFIG_HOME: path.join(root, ".config"),
+      LANG: "C"
+    }
   });
   const calls = [];
   let pushedCommit = null;
@@ -902,14 +1102,26 @@ test("successful init revalidates three snapshots and orders settings, exact com
     platform: "linux"
   });
   assert.equal(status, 0, errorOutput.toString());
-  assert.equal(inspections, 3);
+  assert.equal(inspections, 2);
   assert.equal(progressStarted, 1);
-  assert.deepEqual(prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })), [
-    { message: "Install into acme/widget on default branch main?", defaultValue: true },
-    { message: "Continue with these safety settings?", defaultValue: false },
-    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: true },
-    { message: "Create this setup?", defaultValue: false }
-  ]);
+  assert.deepEqual(
+    prompt.confirmations.map(({ message, defaultValue }) => ({
+      message,
+      defaultValue
+    })),
+    [
+      {
+        message: "Install into acme/widget on default branch main?",
+        defaultValue: true
+      },
+      { message: "Use the recommended starter setup?", defaultValue: true },
+      {
+        message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
+        defaultValue: true
+      },
+      { message: "Create this setup?", defaultValue: false }
+    ]
+  );
   assert.match(opened[0], /^https:\/\/github\.com\/settings\/apps\/new\?/);
   assert.equal(opened.at(-1), "https://github.com/acme/widget/pull/42");
   assert.match(pushedCommit, /^[0-9a-f]{40}$/);
@@ -922,39 +1134,33 @@ test("successful init revalidates three snapshots and orders settings, exact com
   const commitIndex = indexOf((call) => call.command === "git" && call.args[0] === "commit");
   const pushIndex = indexOf((call) => call.command === "git" && call.args[0] === "push");
   const prIndex = indexOf((call) => call.command === "gh" && call.args[0] === "pr");
-  assert.ok([disableIndex, secretIndex, branchIndex, commitIndex, pushIndex, prIndex].every((index) => index >= 0));
-  assert.ok(disableIndex < secretIndex && secretIndex < branchIndex && branchIndex < commitIndex && commitIndex < pushIndex && pushIndex < prIndex);
+  const variableIndex = indexOf((call) => call.command === "gh" && call.args[0] === "variable" && !call.args.includes("CODEKEEPER_ENABLED"));
+  assert.ok([disableIndex, secretIndex, branchIndex, commitIndex, pushIndex, prIndex, variableIndex].every((index) => index >= 0));
+  assert.ok(branchIndex < commitIndex && commitIndex < pushIndex && pushIndex < secretIndex && secretIndex < variableIndex && variableIndex < disableIndex && disableIndex < prIndex);
   assert.deepEqual(
     calls.filter((call) => call.command === "gh" && call.args[0] === "secret").map((call) => call.args[2]),
-    ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]
+    ["OPENAI_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]
   );
-  assert.deepEqual(enteredSecrets.map(({ name }) => name), ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY"]);
-  assert.deepEqual(enteredSecrets.map(({ purpose }) => purpose), [
-    "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key. Used by: Pull request reviewer, Repository auditor.",
-    "Separate OpenAI Platform API key for trace export. Do not reuse the model API key."
-  ]);
-  assert.equal(enteredSecrets.some(({ name }) => name === "CODEKEEPER_APP_PRIVATE_KEY"), false);
-  const providerSecretCalls = calls.filter((call) => call.command === "gh"
-    && call.args[0] === "secret"
-    && call.args[2] !== "CODEKEEPER_APP_PRIVATE_KEY");
-  assert.ok(providerSecretCalls.every((call) => call.options.stdio === "ignore"
-    && typeof call.options.provideInput === "function"
-    && !Object.hasOwn(call.options, "stdinFd")));
+  assert.deepEqual(
+    enteredSecrets.map(({ name }) => name),
+    ["OPENAI_API_KEY"]
+  );
+  assert.deepEqual(
+    enteredSecrets.map(({ purpose }) => purpose),
+    ["OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key. Used by: Pull request reviewer, Repository auditor."]
+  );
+  assert.equal(
+    enteredSecrets.some(({ name }) => name === "CODEKEEPER_APP_PRIVATE_KEY"),
+    false
+  );
+  const providerSecretCalls = calls.filter((call) => call.command === "gh" && call.args[0] === "secret" && call.args[2] !== "CODEKEEPER_APP_PRIVATE_KEY");
+  assert.ok(providerSecretCalls.every((call) => call.options.stdio === "ignore" && typeof call.options.provideInput === "function" && !Object.hasOwn(call.options, "stdinFd")));
   const appSecretCall = calls.find((call) => call.command === "gh" && call.args.includes("CODEKEEPER_APP_PRIVATE_KEY"));
   assert.equal(appSecretCall.options.stdio, "ignore");
   assert.ok(Number.isInteger(appSecretCall.options.stdinFd) && appSecretCall.options.stdinFd >= 3);
   assert.deepEqual(
     progressEvents.filter((event) => event.status === "done").map((event) => event.id),
-    [
-      "repository:verify",
-      "settings:disable",
-      "secret:provider",
-      "secret:app",
-      "variables:configure",
-      "git:commit",
-      "git:push",
-      "github:pull-request"
-    ]
+    ["repository:verify", "git:commit", "git:push", "secret:provider", "secret:app", "variables:configure", "settings:disable", "github:pull-request"]
   );
   const providerDone = progressEvents.findIndex((event) => event.id === "secret:provider" && event.status === "done");
   const appActive = progressEvents.findIndex((event) => event.id === "secret:app" && event.status === "active");
@@ -976,11 +1182,11 @@ test("successful init revalidates three snapshots and orders settings, exact com
     ]
   );
   assert.match(output.toString(), /Starting model set: openai/);
-  assert.match(output.toString(), /OpenAI traces: enabled/);
+  assert.match(output.toString(), /OpenAI traces: disabled/);
   assert.match(output.toString(), /Pull request reviewer \(Pull request review\): openai \/ gpt-5\.6-luna \/ medium effort/);
   assert.match(output.toString(), /Repository auditor \(Repository maintenance\): openai \/ gpt-5\.6-sol \/ high effort/);
   assert.match(output.toString(), /OPENAI_API_KEY: OpenAI Platform API key for model calls/);
-  assert.match(output.toString(), /OPENAI_TRACE_API_KEY: Separate OpenAI Platform API key for trace export/);
+  assert.doesNotMatch(output.toString(), /OPENAI_TRACE_API_KEY:/);
   assert.match(output.toString(), /CODEKEEPER_APP_PRIVATE_KEY: downloaded GitHub App PEM private key used to mint App installation tokens/);
   assert.doesNotMatch(output.toString(), /DEEPSEEK_API_KEY:/);
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-review\.yml/);
@@ -989,11 +1195,10 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.match(output.toString(), /Packaged agent profiles are the default/);
   assert.match(output.toString(), /Capability switches control repair, issue implementation, issue closure, and merge actions/);
   assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
-  assert.match(output.toString(), /starts the selected workflows when the setup pull request merges/);
-  assert.match(output.toString(), /no separate dry run or controlled test is required/);
-  assert.doesNotMatch(output.toString(), /controlled review|dry_run=true|test each/i);
+  assert.match(output.toString(), /Startup: enabled after merge/);
+  assert.match(output.toString(), /run codekeeper verify before treating it as ready/i);
   assert.match(output.toString(), /Created setup pull request: https:\/\/github\.com\/acme\/widget\/pull\/42/);
-  assert.match(output.toString(), /did not run a workflow or merge the pull request/);
+  assert.match(output.toString(), /not proven ready until the pull request merges/i);
   const guidance = completionGuidance(["review", "maintain"]);
   assert.match(output.toString(), new RegExp(guidance.profileGuidance.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(guidance.reviewGateWarning, null);
@@ -1010,7 +1215,11 @@ test("snapshot drift after confirmation aborts before settings or Git mutation",
     throw new Error("mutation must not run after snapshot drift");
   });
   const initial = repositorySnapshot("/tmp/widget", HEAD_SHA);
-  const changed = Object.freeze({ ...initial, headSha: "b".repeat(40), remoteDefaultSha: "b".repeat(40) });
+  const changed = Object.freeze({
+    ...initial,
+    headSha: "b".repeat(40),
+    remoteDefaultSha: "b".repeat(40)
+  });
   let inspections = 0;
   const status = await runCli({
     argv: ["init"],
@@ -1052,7 +1261,10 @@ test("repository settings drift after confirmation aborts before any mutation", 
       });
       const changed = Object.freeze({
         ...initial,
-        existingSettings: Object.freeze({ ...initial.existingSettings, [field]: value })
+        existingSettings: Object.freeze({
+          ...initial.existingSettings,
+          [field]: value
+        })
       });
       let inspections = 0;
       const status = await runCli({

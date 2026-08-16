@@ -10,13 +10,15 @@ npx --yes codekeeper@0.2.0 init
 
 The installer requires Node.js 22 or newer, Git, and an authenticated current GitHub CLI. It opens a keyboard-driven terminal UI, resolves the exact published package receipt and SHA-512 integrity, and generates a setup pull request from verified release assets. No source checkout, local package build, or source-repository token is required. To update an existing installation, run `npx --yes codekeeper@0.2.0 update` from a clean, current checkout of the default branch.
 
-The installer opens one tabbed Settings screen. Simple mode puts provider, model, and effort choices first. Advanced mode uses the same sections and exposes every editable policy field while keeping deterministic safety and release boundaries read-only. Review the short summary or return to Settings at the final mutation boundary.
+Before configuration, the installer runs `codekeeper doctor` and shows every safe prerequisite together, including the checkout, GitHub access, repository state, Git identity, branch collisions, and any organization-owned App caveat. For organization repositories, creating the App can require an organization owner or App Manager, but an App Manager cannot install it; repository administrators can install only when organization policy permits it. Resolve that authority before continuing.
 
-If you are unsure which options to choose, accept the recommended starter setup: pull-request review plus repository maintenance, the `openai` preset, the repository name as the comment display name, and your authenticated GitHub login as the owner-command user. Issue triage and the separately gated fix path can be added later through a reviewed policy/workflow change.
+A fresh installation then offers two paths. **Recommended** continues immediately with automatic pull-request review, manual maintenance, OpenAI models, the authenticated user as owner, and Codekeeper enabled after merge. Scheduled maintenance, tracing, repository repair, issue implementation, duplicate closure, and automatic merge start off. **Customize** opens the complete tabbed Settings screen. Existing installations continue directly to Settings. Simple mode hides inactive role settings; advanced mode retains them as read-only context.
 
 Before the installer's final confirmation, choose the newly downloaded GitHub App `.pem` file in its metadata-only picker. Do not open or paste the PEM contents. The picker ignores symlinks and does not read the file; after confirmation, the installer opens it read-only and passes its descriptor directly to GitHub CLI. It does not expose the path or key through terminal output, argv, environment variables, logs, generated files, or snapshots.
 
-After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller retains its schedule, but its runtime jobs skip package acquisition and analysis while disabled.
+The final review shows automatic triggers, code-changing authority, coordinator and workspace models, tracing, App permissions and repository scope, repair boundaries, validation commands, and the exact secret, variable, and file mutations. The installer creates and verifies the local commit, pushes the setup branch, stores secrets and non-startup variables, applies `CODEKEEPER_ENABLED` last, then opens the pull request. A failure receipt distinguishes completed, pending, and unknown remote mutations.
+
+After the setup PR merges, run `npx --yes codekeeper@0.2.0 verify` from a clean, current default-branch checkout. It verifies the installed catalog, GitHub setting names, exact App identity/permissions/repository scope where the current token can prove them, the exact npm package receipt and package inventory, and the acquired runtime's credential-free policy check. `--controlled` additionally dispatches a maintenance dry run; it is optional and does not prove App publication because dry runs deliberately do not mint the App token. Do not make the review gate required until a controlled same-repository review has also proven App-authored publication.
 
 ## Maintainer/recovery: reproduce a package from source
 
@@ -116,7 +118,7 @@ That command is available from a local checkout of this source repository. The r
 
 ### 3. Create an adopter-owned GitHub App
 
-Create a GitHub App and install it only where automation is intended. No webhook URL is needed.
+The installer opens GitHub's registration form with these permissions, private visibility, and disabled webhooks prefilled. GitHub lets the person registering the App edit those values, so do not change them. Create an adopter-owned GitHub App and install it only on the selected repository.
 
 | Repository permission | Access |
 |---|---|
@@ -144,13 +146,13 @@ For the manual fallback, submit the App PEM from its file instead of pasting it 
 gh secret set CODEKEEPER_APP_PRIVATE_KEY --app actions --repo OWNER/REPOSITORY < /absolute/path/to/downloaded-private-key.pem
 ```
 
-The App token is present only in publication jobs. Maintenance and fix callers may map empty App values for `dry_run=true`; their reusable contracts do not require an App client ID or private key until `dry_run=false` selects publication, where both are checked before token minting. Review and issue-triage always publish, so their App mappings remain required. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The starter policy enables Agents SDK tracing with `includeSensitiveData=false` and exports traces through OpenAI. Never reuse a model-provider key as an observability key.
+The App token is present only in publication jobs. Maintenance and fix callers may map empty App values for `dry_run=true`; their reusable contracts do not require an App client ID or private key until `dry_run=false` selects publication, where both are checked before token minting. Review and issue-triage always publish, so their App mappings remain required. Codex runs in a separate workspace-only job, while model and trace credentials are present only in the fresh coordinator job; the coordinator binds its rebuilt context to the workspace context digest and treats the transferred specialist result and any audit/fix patch as untrusted. The bundled policy supports Agents SDK tracing with `includeSensitiveData=false`, but the recommended installer path leaves tracing off. If tracing is enabled, never reuse a model-provider key as the observability key.
 
 When updating an installation that used the retired alternate trace exporter, configure `OPENAI_TRACE_API_KEY` or disable tracing before merging the update. After merge, remove the now-ignored alternate-exporter variables and secrets.
 
 ### 4. Prove the configuration before making the gate required
 
-Commit the configuration, callers, and any intentional profile overrides to the default branch. Run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests, and does not require the maintenance App client ID or private-key mapping.
+Commit the configuration, callers, and any intentional profile overrides to the default branch. Run `codekeeper verify` first. If you explicitly want a model-backed check, run `codekeeper verify --controlled`; it dispatches maintenance with `dry_run=true`, validates and seals an artifact, but does not mutate labels, issues, branches, or pull requests and does not mint an App token.
 
 Then open a small same-repository pull request targeting the default branch. The supplied caller sets `auto_review: true`; keep it true while proving the required review gate. Confirm that the caller's **Codekeeper review gate** completes and the App identity, labels, and `PR review summary` comment are correct before adding the gate to branch protection.
 

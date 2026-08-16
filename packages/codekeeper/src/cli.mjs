@@ -2,30 +2,22 @@ import { stdin, stdout, stderr } from "node:process";
 import { createCommandRunner } from "./command-runner.mjs";
 import { loadVerifiedAssets } from "./assets.mjs";
 import { createTerminalPrompter } from "./prompts.mjs";
-import { inspectRepository } from "./preflight.mjs";
-import {
-  appRegistrationUrl,
-  buildInstallPlan,
-  collectAppAnswers,
-  collectAutomationBotLogin,
-  collectAppPrivateKeyPath,
-  collectSetupAnswers,
-  buildUpdateAnswers,
-  completionGuidance,
-  documentMap,
-  modelAssignments,
-  requiresAutomationBotLogin,
-} from "./plan.mjs";
-import { configureRepositorySettings, installPlan } from "./install.mjs";
+import { doctorRepository, inspectRepository } from "./preflight.mjs";
+import { appRegistrationUrl, buildInstallPlan, collectAppAnswers, collectAutomationBotLogin, collectAppPrivateKeyPath, collectSetupAnswers, buildUpdateAnswers, completionGuidance, documentMap, modelAssignments, requiresAutomationBotLogin } from "./plan.mjs";
+import { installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
 import { MODES, PACKAGE_NAME, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
 import { normalizePackageRelease } from "./package-release.mjs";
 import { formatCommand } from "./shell-command.mjs";
 import { runLatestUpdate } from "./updater.mjs";
+import { verifyCodekeeperReadiness } from "./verify.mjs";
+import { inspectInstalledApp, runMaintenanceDryRun, verifyInstalledPackage } from "./verification-adapters.mjs";
 
 export const USAGE = `Usage:
   codekeeper init
   codekeeper update
+  codekeeper doctor [--json]
+  codekeeper verify [--json] [--controlled]
   codekeeper init --current-package --package-integrity SHA512
   codekeeper update --current-package --package-integrity SHA512
   codekeeper --help
@@ -33,6 +25,8 @@ export const USAGE = `Usage:
 
 Codekeeper init creates a setup pull request for GitHub.com.
 Codekeeper update runs the latest CLI to refresh runtime dependencies and every release-owned installation file.
+Codekeeper doctor reports every safe installation prerequisite together.
+Codekeeper verify proves an installed default-branch checkout; --controlled also runs a maintenance dry run.
 Use --current-package with the tarball's SHA-512 integrity only for exact local release testing.
 `;
 
@@ -45,19 +39,34 @@ export function parseCliArgs(argv) {
     return Object.freeze({ command: "init", currentPackage: true });
   }
   if (argv.length === 1 && argv[0] === "update") return Object.freeze({ command: "update" });
+  if (argv.length === 1 && argv[0] === "doctor") return Object.freeze({ command: "doctor", json: false });
+  if (argv.length === 2 && argv[0] === "doctor" && argv[1] === "--json") return Object.freeze({ command: "doctor", json: true });
+  if (argv[0] === "verify") {
+    const options = new Set(argv.slice(1));
+    if (options.size !== argv.length - 1 || [...options].some((option) => !["--json", "--controlled"].includes(option))) {
+      throw new InstallerError("Unsupported verify option.", {
+        code: "CLI_USAGE"
+      });
+    }
+    return Object.freeze({
+      command: "verify",
+      json: options.has("--json"),
+      controlled: options.has("--controlled")
+    });
+  }
   if (argv.length === 2 && argv[0] === "update" && argv[1] === "--current-package") {
     return Object.freeze({ command: "update", currentPackage: true });
   }
-  if (
-    argv.length === 4
-    && new Set(["init", "update"]).has(argv[0])
-    && argv[1] === "--current-package"
-    && argv[2] === "--package-integrity"
-    && argv[3]
-  ) {
-    return Object.freeze({ command: argv[0], currentPackage: true, packageIntegrity: argv[3] });
+  if (argv.length === 4 && new Set(["init", "update"]).has(argv[0]) && argv[1] === "--current-package" && argv[2] === "--package-integrity" && argv[3]) {
+    return Object.freeze({
+      command: argv[0],
+      currentPackage: true,
+      packageIntegrity: argv[3]
+    });
   }
-  throw new InstallerError("Unsupported command or option.", { code: "CLI_USAGE" });
+  throw new InstallerError("Unsupported command or option.", {
+    code: "CLI_USAGE"
+  });
 }
 
 export function currentResumeCommand(execPath = process.execPath, binPath = process.argv[1], platform = process.platform, command = "init", packageIntegrity = null) {
@@ -74,7 +83,10 @@ async function bestEffortOpen(url, { runner, platform = process.platform }) {
       ? ["explorer.exe", [url]]
       : ["xdg-open", [url]];
   try {
-    const result = await runner.run(invocation[0], invocation[1], { stdio: "ignore", timeoutMs: 5_000 });
+    const result = await runner.run(invocation[0], invocation[1], {
+      stdio: "ignore",
+      timeoutMs: 5_000
+    });
     return result.status === 0 && !result.timedOut;
   } catch {
     return false;
@@ -126,16 +138,21 @@ function preview(plan, output) {
   for (const mode of plan.modes) output.write(`    - ${MODES[mode].label}: ${MODES[mode].description}\n`);
   output.write("  Models (editable in .github/codekeeper.json before merge):\n");
   for (const { key, label, workflow } of modelAssignments(plan.modes)) {
-    const selection = plan.models[key];
-    output.write(`    - ${label} (${workflow}): ${selection.provider} / ${selection.model} / ${selection.effort} effort\n`);
+    const summary = plan.modelSummary[key];
+    output.write(`    - ${label} (${workflow}): ${summary.coordinator.provider} / ${summary.coordinator.model} / ${summary.coordinator.effort} effort\n`);
+    output.write(`      workspace: ${summary.workspace.enabled ? `${summary.workspace.model} / ${summary.workspace.effort} / ${summary.workspace.allowWrites ? "write-enabled" : "read-only"}` : "off"}\n`);
   }
   output.write(`  OpenAI traces: ${plan.tracing ? "enabled" : "disabled"}\n`);
+  output.write(`  Scheduled maintenance: ${plan.maintenanceScheduled ? "enabled" : "disabled; manual runs remain available"}\n`);
+  output.write("  GitHub App: contents/issues/pull requests read-write; metadata read-only; selected repository only\n");
+  output.write(`  Code-changing capabilities: ${["reviewRepair", "repair", "issueImplementation"].some((id) => plan.capabilities[id]) ? "enabled" : "off"}; automatic merge: ${plan.capabilities.autoMerge ? "enabled" : "off"}\n`);
   output.write("  Files:\n");
   for (const file of plan.files) output.write(`    - ${file.path}\n`);
   output.write("  You can edit decision guidance in .github/codekeeper/agents. These files cannot grant access.\n");
-  output.write(`  Variables: ${plan.variables.map((item) => item.name).join(", ")}\n`);
+  output.write(`  Variables created or replaced (${plan.variables.length}): ${plan.variables.map((item) => item.name).join(", ") || "none"}\n`);
   output.write("  Secrets sent directly to GitHub CLI. Codekeeper does not display or store their values:\n");
   for (const secret of plan.secrets) output.write(`    - ${secret.name}: ${SECRET_PURPOSES[secret.name]}\n`);
+  output.write(`  Validation after merge: codekeeper verify\n`);
   if (plan.secrets.some((secret) => secret.name === "CODEKEEPER_APP_PRIVATE_KEY")) {
     output.write("  The GitHub App PEM is supplied from its downloaded file, never pasted into a terminal prompt.\n");
   }
@@ -161,23 +178,29 @@ function printCompletion(plan, receipt, output) {
   output.write(`${guidance.closing}\n`);
 }
 
-export async function runCli({
-  argv = process.argv.slice(2),
-  cwd = process.cwd(),
-  input = stdin,
-  output = stdout,
-  errorOutput = stderr,
-  runner = createCommandRunner(),
-  prompt = null,
-  interactive = input.isTTY === true && output.isTTY === true,
-  environment = process.env,
-  platform = process.platform,
-  openUrl = null,
-  loadAssets = loadVerifiedAssets,
-  inspect = inspectRepository,
-  resumeCommand = null,
-  launchLatestUpdate = runLatestUpdate
-} = {}) {
+function doctorSymbol(status) {
+  return status === "pass" ? "✓" : status === "warning" ? "⚠" : status === "skipped" ? "·" : "✕";
+}
+
+function printDoctor(report, output) {
+  output.write("\nRepository readiness\n");
+  for (const check of report.checks) {
+    output.write(`${doctorSymbol(check.status)} ${check.label}: ${check.detail}\n`);
+    if (check.status !== "pass" && check.remediation) output.write(`  ${check.remediation}\n`);
+  }
+  output.write(`\n${report.counts.pass} passed · ${report.counts.warning} warnings · ${report.counts.fail} failed\n`);
+}
+
+function printVerification(report, output) {
+  output.write(`\n${report.ready ? "Codekeeper is ready" : "Codekeeper is not ready"}\n`);
+  for (const check of report.checks) {
+    const symbol = check.status === "pass" ? "✓" : check.status === "skipped" ? "·" : "✕";
+    output.write(`${symbol} ${check.label}: ${check.detail}\n`);
+    if (!["pass", "skipped"].includes(check.status) && check.remediation) output.write(`  ${check.remediation}\n`);
+  }
+}
+
+export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd(), input = stdin, output = stdout, errorOutput = stderr, runner = createCommandRunner(), prompt = null, interactive = input.isTTY === true && output.isTTY === true, environment = process.env, platform = process.platform, openUrl = null, loadAssets = loadVerifiedAssets, inspect = inspectRepository, doctor = doctorRepository, showDoctor = true, verifyReadiness = verifyCodekeeperReadiness, resumeCommand = null, launchLatestUpdate = runLatestUpdate } = {}) {
   let parsed;
   try {
     parsed = parseCliArgs(argv);
@@ -196,6 +219,31 @@ export async function runCli({
   if (parsed.command === "update" && parsed.currentPackage !== true) {
     try {
       return await launchLatestUpdate({ cwd, output, environment, platform });
+    } catch (error) {
+      errorOutput.write(`${formatInstallerError(error)}\n`);
+      return 1;
+    }
+  }
+  if (["doctor", "verify"].includes(parsed.command)) {
+    try {
+      if (typeof runner.resolveTrustedCommands === "function") runner = await runner.resolveTrustedCommands({ cwd });
+      if (parsed.command === "doctor") {
+        const report = await doctor({ runner, cwd });
+        if (parsed.json) output.write(`${JSON.stringify(report)}\n`);
+        else printDoctor(report, output);
+        return report.mutationAllowed ? 0 : 1;
+      }
+      const report = await verifyReadiness({
+        runner,
+        cwd,
+        inspectApp: inspectInstalledApp,
+        verifyPackage: (input) => verifyInstalledPackage(input, { runner, environment, platform }),
+        controlledCheck: parsed.controlled,
+        runControlledCheck: parsed.controlled ? runMaintenanceDryRun : null
+      });
+      if (parsed.json) output.write(`${JSON.stringify(report)}\n`);
+      else printVerification(report, output);
+      return report.ready ? 0 : 1;
     } catch (error) {
       errorOutput.write(`${formatInstallerError(error)}\n`);
       return 1;
@@ -242,8 +290,18 @@ export async function runCli({
         } catch (cause) {
           throw new InstallerError("The interactive terminal UI failed to load.", { code: "TUI_UNAVAILABLE", cause });
         }
-        activePrompt = tui.shouldUseInkTui({ interactive, input, output, environment })
-          ? await tui.createInkPrompter({ input, output, errorOutput, environment })
+        activePrompt = tui.shouldUseInkTui({
+          interactive,
+          input,
+          output,
+          environment
+        })
+          ? await tui.createInkPrompter({
+              input,
+              output,
+              errorOutput,
+              environment
+            })
           : createTerminalPrompter({ input, output });
       } else {
         activePrompt = createTerminalPrompter({ input, output });
@@ -251,10 +309,26 @@ export async function runCli({
     };
     if (parsed.command !== "update") await ensureActivePrompt();
     let presentationOutput = activePrompt?.kind === "ink" ? activePrompt.notices : output;
+    if (showDoctor) {
+      const doctorReport = await doctor({ runner, cwd });
+      if (typeof activePrompt?.showDoctor === "function") await activePrompt.showDoctor(doctorReport);
+      else printDoctor(doctorReport, output);
+      if (!doctorReport.mutationAllowed) {
+        throw new InstallerError("Repository readiness checks failed. Fix every failed item, then run Codekeeper again.", {
+          code: "DOCTOR_FAILED"
+        });
+      }
+    }
     const snapshot = await inspect({ runner, cwd, interactive });
-    let setupAnswers = parsed.command === "update"
-      ? buildUpdateAnswers({ snapshot, bundle, output: presentationOutput })
-      : await collectSetupAnswers({ prompt: activePrompt, snapshot, bundle, output: presentationOutput });
+    let setupAnswers =
+      parsed.command === "update"
+        ? buildUpdateAnswers({ snapshot, bundle, output: presentationOutput })
+        : await collectSetupAnswers({
+            prompt: activePrompt,
+            snapshot,
+            bundle,
+            output: presentationOutput
+          });
     let appAnswers;
     if (parsed.command === "update") {
       appAnswers = {
@@ -270,7 +344,10 @@ export async function runCli({
         ?? snapshot.installation.policy.automation.ownerRequests;
       if (requiresAutomationBotLogin(setupAnswers.modes, setupAnswers.capabilities, ownerRequests) && !appAnswers.automationBotLogin) {
         presentationOutput.write("\nGitHub App identifier\n");
-        appAnswers.automationBotLogin = await collectAutomationBotLogin({ prompt: activePrompt, output: presentationOutput });
+        appAnswers.automationBotLogin = await collectAutomationBotLogin({
+          prompt: activePrompt,
+          output: presentationOutput
+        });
       }
     } else {
       const registrationUrl = appRegistrationUrl({
@@ -278,7 +355,7 @@ export async function runCli({
         displayName: setupAnswers.displayName,
         ownerType: snapshot.ownerType
       });
-      presentationOutput.write(`\nUse a GitHub App that you own. Install it only on ${snapshot.repository}.\nThe link creates an App with the required permissions. If you already installed one, close the page and use it.\n${registrationUrl}\n`);
+      presentationOutput.write(`\nUse a GitHub App that you own. Install it only on ${snapshot.repository}.\nGitHub pre-fills Codekeeper's required permissions. Do not change them; Codekeeper will verify the App after the setup pull request merges. GitHub does not create the App until you submit the form.\n${registrationUrl}\n`);
       try {
         await safelyOpenUrl(registrationUrl);
       } catch {
@@ -287,17 +364,14 @@ export async function runCli({
       const appReady = await activePrompt.confirm({
         message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
         defaultValue: true,
-        ...(activePrompt.kind === "ink" ? {
-          step: "GitHub App",
-          description: [
-            "Codekeeper opened a prefilled GitHub page in your browser.",
-            "1. Create the App. GitHub applies the required permissions.",
-            `2. Install the App only on ${snapshot.repository}.`,
-            "3. Create and download one private key. Then return here."
-          ],
-          yesLabel: "App and key ready",
-          noLabel: "Stop for now"
-        } : {})
+        ...(activePrompt.kind === "ink"
+          ? {
+              step: "GitHub App",
+              description: ["Codekeeper opened a prefilled GitHub page in your browser.", "1. Review the prefilled permissions. Do not change them, then create the App.", `2. Install the App only on ${snapshot.repository}.`, "3. Create and download one private key. Codekeeper verifies the App after merge."],
+              yesLabel: "App and key ready",
+              noLabel: "Stop for now"
+            }
+          : {})
       });
       if (!appReady) {
         throw new InstallerError("Complete GitHub App creation and installation, then rerun init.", {
@@ -329,7 +403,10 @@ export async function runCli({
     await ensureActivePrompt();
     presentationOutput = activePrompt.kind === "ink" ? activePrompt.notices : output;
     const appPrivateKeyPath = plan.secrets.some((secret) => secret.name === "CODEKEEPER_APP_PRIVATE_KEY")
-      ? await collectAppPrivateKeyPath({ prompt: activePrompt, output: presentationOutput })
+      ? await collectAppPrivateKeyPath({
+          prompt: activePrompt,
+          output: presentationOutput
+        })
       : null;
     let confirmed;
     while (true) {
@@ -354,7 +431,10 @@ export async function runCli({
       if (requiresAutomationBotLogin(setupAnswers.modes, setupAnswers.capabilities, ownerRequests) && !appAnswers.automationBotLogin) {
         appAnswers = {
           ...appAnswers,
-          automationBotLogin: await collectAutomationBotLogin({ prompt: activePrompt, output: presentationOutput })
+          automationBotLogin: await collectAutomationBotLogin({
+            prompt: activePrompt,
+            output: presentationOutput
+          })
         };
       }
       plan = buildInstallPlan({
@@ -370,41 +450,27 @@ export async function runCli({
     }
 
     activePrompt.progress?.start();
-    activePrompt.progress?.update({ id: "repository:verify", status: "active" });
-    const beforeMutation = await inspect({ runner, cwd: snapshot.root, interactive });
+    activePrompt.progress?.update({
+      id: "repository:verify",
+      status: "active"
+    });
+    const beforeMutation = await inspect({
+      runner,
+      cwd: snapshot.root,
+      interactive
+    });
     assertSameSnapshot(snapshot, beforeMutation, resumeCommand);
     activePrompt.progress?.update({ id: "repository:verify", status: "done" });
-    const hasSettingsMutation = plan.variables.length > 0 || plan.secrets.length > 0;
-    if (hasSettingsMutation) {
-      await configureRepositorySettings(plan, {
-        runner,
-        output: presentationOutput,
-        appPrivateKeyPath,
-        onProgress: activePrompt.progress?.update,
-        withSecretInput: typeof activePrompt.inputSecret === "function"
-          ? (spec) => activePrompt.inputSecret(spec)
-          : null,
-        withInteractiveTerminal: typeof activePrompt.suspendTerminal === "function"
-          ? (callback, notice) => activePrompt.suspendTerminal(callback, notice)
-          : (callback) => callback(),
-        resumeCommand
-      });
-    }
-    let receipt;
-    if (plan.settingsOnly) {
-      receipt = Object.freeze({ settingsOnly: true, pullRequestUrl: "No pull request was needed." });
-    } else {
-      if (hasSettingsMutation) {
-        const beforeGit = await inspect({ runner, cwd: snapshot.root, interactive });
-        assertSameSnapshot(snapshot, beforeGit, resumeCommand, { includeSettings: false });
-      }
-      receipt = await installPlan(plan, {
-        runner,
-        onProgress: activePrompt.progress?.update,
-        resumeCommand,
-        platform
-      });
-    }
+    let receipt = await installPlan(plan, {
+      runner,
+      output: presentationOutput,
+      appPrivateKeyPath,
+      onProgress: activePrompt.progress?.update,
+      withSecretInput: typeof activePrompt.inputSecret === "function" ? (spec) => activePrompt.inputSecret(spec) : null,
+      withInteractiveTerminal: typeof activePrompt.suspendTerminal === "function" ? (callback, notice) => activePrompt.suspendTerminal(callback, notice) : (callback) => callback(),
+      resumeCommand,
+      platform
+    });
     if (!receipt.settingsOnly) {
       let pullRequestOpened = false;
       try {

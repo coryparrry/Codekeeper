@@ -4,12 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256 } from "../src/assets.mjs";
 import { createCommandRunner } from "../src/command-runner.mjs";
-import {
-  configureRepositorySettings,
-  createSetupCommit,
-  pushAndOpenSetupPullRequest,
-  SECRET_UPLOAD_TIMEOUT_MS
-} from "../src/install.mjs";
+import { configureRepositorySettings, createSetupCommit, pushAndOpenSetupPullRequest, remoteSetupRecovery, SECRET_UPLOAD_TIMEOUT_MS } from "../src/install.mjs";
 import { buildInstallPlan } from "../src/plan.mjs";
 import {
   assertInstallerCode,
@@ -108,7 +103,10 @@ test("repository settings set secrets and non-startup variables before startup t
   const basePlan = await completePlan();
   const plan = {
     ...basePlan,
-    secrets: basePlan.secrets.map((secret) => ({ ...secret, value: SECRET_CANARY }))
+    secrets: basePlan.secrets.map((secret) => ({
+      ...secret,
+      value: SECRET_CANARY
+    }))
   };
   const output = textSink();
   const enteredSecrets = [];
@@ -203,7 +201,10 @@ test("repository settings set secrets and non-startup variables before startup t
 
 test("invalid plans stop before mutation and startup failure occurs after settings", async () => {
   const valid = await completePlan();
-  const invalid = { ...valid, variables: [{ name: "CODEKEEPER_ENABLED", value: "sometimes" }, ...valid.variables.slice(1)] };
+  const invalid = {
+    ...valid,
+    variables: [{ name: "CODEKEEPER_ENABLED", value: "sometimes" }, ...valid.variables.slice(1)]
+  };
   const invalidRunner = createRecordingRunner(() => result());
   await assert.rejects(
     configureRepositorySettings(invalid, {
@@ -248,13 +249,35 @@ test("secret or variable failure stops later settings", async () => {
         openInputFile: () => ({ descriptor: 39, close() { closed += 1; } }),
         resumeCommand: "resume exactly"
       }),
-      (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume === "resume exactly"
+      (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume === "resume exactly" && error.receipt.unknownMutation === true && error.receipt.phase === `settings:${failedName.includes("API_KEY") ? "secret" : "variable"}:${failedName}`
     );
     const failedIndex = runner.calls.findIndex((call) => call.args.includes(failedName));
     assert.equal(failedIndex, runner.calls.length - 1);
     assert.equal(runner.calls.some((call) => call.args.includes("CODEKEEPER_ENABLED")), false);
     assert.equal(closed, 1);
   }
+});
+
+test("a pushed setup failure returns durable manual recovery instead of an unusable init rerun", () => {
+  const plan = simplePlan("/tmp/widget", HEAD_SHA);
+  const recovery = remoteSetupRecovery(
+    plan,
+    {
+      remoteSha: COMMIT_SHA,
+      branch: plan.branch,
+      unknownMutation: true,
+      pendingSecrets: ["OPENAI_API_KEY"],
+      pendingVariables: ["CODEKEEPER_APP_CLIENT_ID", "CODEKEEPER_ENABLED"]
+    },
+    "linux"
+  );
+  assert.match(recovery, /already pushed.*Do not rerun Codekeeper init/s);
+  assert.match(recovery, /OPENAI_API_KEY/);
+  assert.match(recovery, /'gh' 'variable' 'set' 'CODEKEEPER_APP_CLIENT_ID'/);
+  assert.match(recovery, /Set the startup choice last/);
+  assert.match(recovery, /'gh' 'variable' 'set' 'CODEKEEPER_ENABLED'/);
+  assert.match(recovery, /'gh' 'pr' 'list'/);
+  assert.match(recovery, /If no pull request is listed: 'gh' 'pr' 'create'/);
 });
 
 test("push uses the verified full SHA and verifies the remote branch both before and after PR creation", async () => {
@@ -309,10 +332,11 @@ test("publication refuses invalid SHA, push failure, remote mismatch, PR failure
   await t.test("push failure", async () => {
     const runner = createRecordingRunner(() => result("", { status: 1 }));
     await assert.rejects(
-      pushAndOpenSetupPullRequest(plan, COMMIT_SHA, { runner, platform: "linux" }),
-      (error) => error.code === "EXTERNAL_MUTATION_FAILED"
-        && error.resume.includes(`'${COMMIT_SHA}:refs/heads/codekeeper/setup'`)
-        && error.resume.includes("'gh' 'pr' 'create'")
+      pushAndOpenSetupPullRequest(plan, COMMIT_SHA, {
+        runner,
+        platform: "linux"
+      }),
+      (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume.includes(`'${COMMIT_SHA}:refs/heads/codekeeper/setup'`) && error.resume.includes("'gh' 'pr' 'create'")
     );
     assert.equal(runner.calls.length, 1);
   });
@@ -333,11 +357,11 @@ test("publication refuses invalid SHA, push failure, remote mismatch, PR failure
       return result();
     });
     await assert.rejects(
-      pushAndOpenSetupPullRequest(plan, COMMIT_SHA, { runner, platform: "win32" }),
-      (error) => error.code === "EXTERNAL_MUTATION_FAILED"
-        && error.resume.startsWith("& 'gh' 'pr' 'list'")
-        && error.resume.includes("If no pull request is listed: & 'gh' 'pr' 'create'")
-        && error.resume.includes("Cory''s approval")
+      pushAndOpenSetupPullRequest(plan, COMMIT_SHA, {
+        runner,
+        platform: "win32"
+      }),
+      (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume.startsWith("& 'gh' 'pr' 'list'") && error.resume.includes("If no pull request is listed: & 'gh' 'pr' 'create'") && error.resume.includes("Cory''s approval")
     );
   });
   await t.test("post-PR remote drift", async () => {
@@ -409,7 +433,13 @@ test("real Git integration reruns can change configuration and remove a workflow
   const bundle = await loadVerifiedAssets();
   const initial = buildInstallPlan({
     bundle,
-    snapshot: { root, repository: "acme/widget", defaultBranch: "main", headSha: head, viewerLogin: "cory" },
+    snapshot: {
+      root,
+      repository: "acme/widget",
+      defaultBranch: "main",
+      headSha: head,
+      viewerLogin: "cory"
+    },
     answers: {
       modes: ["review", "maintain"],
       preset: "openai",
@@ -426,7 +456,9 @@ test("real Git integration reruns can change configuration and remove a workflow
   }
   const profileTarget = ".github/codekeeper/agents/pr-reviewer.md";
   const profileContents = `${bundle.contents["agents/pr-reviewer.md"]}\nTeam preference: report API regressions first.\n`;
-  await mkdir(path.dirname(path.join(root, profileTarget)), { recursive: true });
+  await mkdir(path.dirname(path.join(root, profileTarget)), {
+    recursive: true
+  });
   await writeFile(path.join(root, profileTarget), profileContents);
   git(root, ["add", ".github"]);
   git(root, ["commit", "-m", "install codekeeper"]);
@@ -468,7 +500,9 @@ test("real Git integration reruns can change configuration and remove a workflow
       capabilities: []
     }
   });
-  const commit = await createSetupCommit(update, { runner: isolatedCommandRunner(root) });
+  const commit = await createSetupCommit(update, {
+    runner: isolatedCommandRunner(root)
+  });
   assert.match(commit, /^[0-9a-f]{40}$/);
   assert.equal(git(root, ["branch", "--show-current"]).trim(), `codekeeper/update-${installedHead.slice(0, 12)}`);
   assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [
@@ -572,9 +606,12 @@ test("real Git integration detects post-commit hook mutation before any push", a
 
 test("real Git integration rolls back a pre-commit generated-file failure to the clean default branch", async (t) => {
   const { root, head } = await committedRepository(t);
-  const plan = simplePlan(root, head, [[".github/codekeeper.json", "{ \"bad\": true }   \n"]]);
+  const plan = simplePlan(root, head, [[".github/codekeeper.json", '{ "bad": true }   \n']]);
   await assert.rejects(
-    createSetupCommit(plan, { runner: isolatedCommandRunner(root), resumeCommand: "'node' 'cli.mjs' 'init'" }),
+    createSetupCommit(plan, {
+      runner: isolatedCommandRunner(root),
+      resumeCommand: "'node' 'cli.mjs' 'init'"
+    }),
     (error) => error.code === "COMMAND_FAILED" && error.resume === "'node' 'cli.mjs' 'init'"
   );
   assert.equal(git(root, ["branch", "--show-current"]).trim(), "main");

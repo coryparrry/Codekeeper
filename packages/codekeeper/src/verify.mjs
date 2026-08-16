@@ -1,4 +1,4 @@
-import { inspectInstallationFiles, parseGitHubRemote } from "./preflight.mjs";
+import { inspectInstallationFiles, parseGitHubRemote, parseRemoteBranchSha } from "./preflight.mjs";
 import { validatePolicy } from "./policy-validator.mjs";
 import { normalizePackageRelease } from "./package-release.mjs";
 import { requiredSecretNames, requiresAutomationBotLogin } from "./plan.mjs";
@@ -64,16 +64,18 @@ function nameList(source) {
   return new Set(entries.map((entry) => entry.name));
 }
 
+function variableMap(source) {
+  const parsed = JSON.parse(source);
+  if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry?.name !== "string" || typeof entry?.value !== "string")) {
+    throw new Error("invalid variables response");
+  }
+  return new Map(parsed.map((entry) => [entry.name, entry.value]));
+}
+
 function expectedNames(installation) {
   const { modes, policy } = installation;
   const variables = new Set([ENABLED_VARIABLE, CLIENT_ID_VARIABLE]);
-  if (
-    requiresAutomationBotLogin(
-      modes,
-      policy.capabilities,
-      policy.automation.ownerRequests,
-    )
-  ) {
+  if (requiresAutomationBotLogin(modes, { issueImplementation: policy.issues?.allowAiImplementation === true }, policy.automation.ownerRequests)) {
     variables.add(BOT_LOGIN_VARIABLE);
   }
   const secrets = new Set(
@@ -132,6 +134,7 @@ export async function verifyCodekeeperReadiness({
   let repository = null;
   let defaultBranch = null;
   let installation = null;
+  let repositoryVariables = null;
   const checks = [];
 
   try {
@@ -185,15 +188,9 @@ export async function verifyCodekeeperReadiness({
     const headSha = await command(runner, "git", ["rev-parse", "HEAD"], {
       cwd: root,
     });
-    const remote = await command(
-      runner,
-      "git",
-      ["ls-remote", "origin", `refs/heads/${defaultBranch}`],
-      { cwd: root },
-    );
-    const remoteSha = remote.split(/\s+/)[0];
-    if (!FULL_SHA.test(headSha) || !FULL_SHA.test(remoteSha))
-      throw new Error("invalid commit");
+    const remote = await command(runner, "git", ["ls-remote", "origin", `refs/heads/${defaultBranch}`], { cwd: root });
+    const remoteSha = parseRemoteBranchSha(remote, defaultBranch);
+    if (!FULL_SHA.test(headSha) || !FULL_SHA.test(remoteSha)) throw new Error("invalid commit");
     if (currentBranch !== defaultBranch) {
       checks.push(
         frozenCheck({
@@ -343,24 +340,9 @@ export async function verifyCodekeeperReadiness({
     }
     try {
       if (!repository || !expected) throw new Error("repository unavailable");
-      const [variables, secrets] = await Promise.all([
-        command(
-          runner,
-          "gh",
-          ["variable", "list", "--repo", repository, "--json", "name"],
-          { cwd: root },
-        ),
-        command(
-          runner,
-          "gh",
-          ["secret", "list", "--repo", repository, "--json", "name"],
-          { cwd: root },
-        ),
-      ]);
-      const missingVariables = missingNames(
-        expected.variables,
-        nameList(variables),
-      );
+      const [variables, secrets] = await Promise.all([command(runner, "gh", ["variable", "list", "--repo", repository, "--json", "name,value"], { cwd: root }), command(runner, "gh", ["secret", "list", "--repo", repository, "--json", "name"], { cwd: root })]);
+      repositoryVariables = variableMap(variables);
+      const missingVariables = missingNames(expected.variables, new Set(repositoryVariables.keys()));
       const missingSecrets = missingNames(expected.secrets, nameList(secrets));
       if (missingVariables.length || missingSecrets.length) {
         checks.push(
@@ -408,6 +390,7 @@ export async function verifyCodekeeperReadiness({
           root,
           repository,
           installation,
+          variables: repositoryVariables
         });
         if (proof === true || proof?.status === "pass") {
           checks.push(
@@ -436,31 +419,15 @@ export async function verifyCodekeeperReadiness({
           );
         }
       } else {
-        if (!repository) throw new Error("repository unavailable");
-        await command(
-          runner,
-          "gh",
-          [
-            "api",
-            "--hostname",
-            "github.com",
-            "user/installations",
-            "--jq",
-            ".installations[] | {id,app_id,app_slug,repository_selection,permissions}",
-          ],
-          { cwd: root },
-        );
         checks.push(
           frozenCheck({
             id: "github-app",
             label: "GitHub App",
             status: "not-provable",
             boundary: "github-read",
-            detail:
-              "Token-visible App installations were read, but they cannot be linked safely to the installed App without reading an App identifier value.",
-            remediation:
-              "After merge, verify the installed GitHub App, installation scope, and permissions in GitHub settings.",
-          }),
+            detail: "No read-only GitHub App proof adapter was supplied.",
+            remediation: "After merge, verify the installed GitHub App, installation scope, and permissions in GitHub settings."
+          })
         );
       }
     } catch {
@@ -573,6 +540,18 @@ export async function verifyCodekeeperReadiness({
         required: false,
       }),
     );
+  } else if (checks.some((check) => check.required && check.status !== "pass")) {
+    checks.push(
+      frozenCheck({
+        id: "controlled-check",
+        label: "Controlled check",
+        status: "skipped",
+        boundary: "github-workflow",
+        detail: "The controlled workflow was not dispatched because required readiness checks failed.",
+        remediation: "Resolve the required readiness failures, then request the controlled check again.",
+        required: false
+      })
+    );
   } else if (!runControlledCheck) {
     checks.push(
       frozenCheck({
@@ -580,12 +559,9 @@ export async function verifyCodekeeperReadiness({
         label: "Controlled check",
         status: "not-provable",
         boundary: "github-workflow",
-        detail:
-          "A controlled workflow check was requested, but no approved hook was supplied.",
-        remediation:
-          "Supply an approved controlled-check hook for this repository.",
-        required: false,
-      }),
+        detail: "A controlled workflow check was requested, but no approved hook was supplied.",
+        remediation: "Supply an approved controlled-check hook for this repository."
+      })
     );
   } else {
     try {
@@ -602,14 +578,9 @@ export async function verifyCodekeeperReadiness({
           label: "Controlled check",
           status: passed ? "pass" : "fail",
           boundary: "github-workflow",
-          detail: passed
-            ? "The approved controlled workflow check passed."
-            : "The approved controlled workflow check did not pass.",
-          remediation: passed
-            ? "None."
-            : "Resolve the controlled-check failure, then verify again.",
-          required: false,
-        }),
+          detail: passed ? "The approved controlled workflow check passed." : "The approved controlled workflow check did not pass.",
+          remediation: passed ? "None." : "Resolve the controlled-check failure, then verify again."
+        })
       );
     } catch {
       checks.push(
@@ -619,10 +590,8 @@ export async function verifyCodekeeperReadiness({
           status: "fail",
           boundary: "github-workflow",
           detail: "The approved controlled workflow check could not complete.",
-          remediation:
-            "Resolve the controlled-check failure, then verify again.",
-          required: false,
-        }),
+          remediation: "Resolve the controlled-check failure, then verify again."
+        })
       );
     }
   }
