@@ -61,7 +61,7 @@ It never merges the pull request, runs a workflow, publishes an npm package, cop
 
 Run `npx codekeeper init` again from the current default branch to edit configuration. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and any repository profile overrides into the same Settings screen. Missing overrides display the current packaged defaults. You can add or remove role workflows, change every editable policy value, open any profile in `$EDITOR` without losing prior customizations, or press `R` to reset an override to the packaged default.
 
-The installer writes only values that changed. It preserves every existing profile override byte-for-byte and does not ask for secrets again. Editing one packaged default creates only that role's override. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
+The installer writes only values that changed. It preserves every untouched existing profile override byte-for-byte and does not ask for secrets again; an override is removed only when it is explicitly reset with `R`. Editing one packaged default creates only that role's override. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
 
 ## Update an existing installation
 
