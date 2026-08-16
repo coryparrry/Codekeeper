@@ -213,6 +213,7 @@ export async function runCli({
     if (typeof runner.resolveTrustedCommands === "function") {
       runner = await runner.resolveTrustedCommands({ cwd });
     }
+    const safelyOpenUrl = openUrl ?? ((url) => bestEffortOpen(url, { runner, platform }));
     const bundle = await loadAssets({ packageRelease });
     const ensureActivePrompt = async () => {
       if (activePrompt) return;
@@ -261,7 +262,6 @@ export async function runCli({
         displayName: setupAnswers.displayName,
         ownerType: snapshot.ownerType
       });
-      const safelyOpenUrl = openUrl ?? ((url) => bestEffortOpen(url, { runner, platform }));
       presentationOutput.write(`\nUse a GitHub App that you own. Install it only on ${snapshot.repository}.\nThe link creates an App with the required permissions. If you already installed one, close the page and use it.\n${registrationUrl}\n`);
       try {
         await safelyOpenUrl(registrationUrl);
@@ -274,11 +274,10 @@ export async function runCli({
         ...(activePrompt.kind === "ink" ? {
           step: "GitHub App",
           description: [
-            `Required for: ${snapshot.repository}`,
-            "The App needs read and write access to contents, issues, and pull requests.",
-            "The App needs read-only access to metadata. Webhooks stay disabled.",
-            "Create or inspect the App in the browser, install it only on this repository, then download a new private key.",
-            registrationUrl
+            "Codekeeper opened a prefilled GitHub page in your browser.",
+            "1. Create the App. GitHub applies the required permissions.",
+            `2. Install the App only on ${snapshot.repository}.`,
+            "3. Create and download one private key. Then return here."
           ],
           yesLabel: "App and key ready",
           noLabel: "Stop for now"
@@ -367,6 +366,15 @@ export async function runCli({
         resumeCommand,
         platform
       });
+    }
+    if (!receipt.settingsOnly) {
+      let pullRequestOpened = false;
+      try {
+        pullRequestOpened = await safelyOpenUrl(receipt.pullRequestUrl) !== false;
+      } catch {
+        // The completion screen always shows the verified pull request URL.
+      }
+      receipt = Object.freeze({ ...receipt, pullRequestOpened });
     }
     if (typeof activePrompt.showCompletion === "function") await activePrompt.showCompletion(plan, receipt);
     else printCompletion(plan, receipt, output);

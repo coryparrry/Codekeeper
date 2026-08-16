@@ -172,7 +172,7 @@ test("recommended setup explains consequences and returns review plus maintenanc
   assert.deepEqual(
     prompt.calls.filter((call) => call.method === "confirm").map((call) => call.options),
     [
-      { message: "Install into acme/widget on default branch main?", defaultValue: false },
+      { message: "Install into acme/widget on default branch main?", defaultValue: true },
       { message: "Use the recommended starter setup?", defaultValue: true },
       { message: "Enable OpenAI traces?", defaultValue: true },
       { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
@@ -385,7 +385,7 @@ test("GitHub App identity asks for the App name in plain language", async () => 
     appClientId: "Iv123456789012345678",
     automationBotLogin: "codekeeper-widget[bot]"
   });
-  assert.equal(prompts[1].message, "GitHub App name from the settings URL");
+  assert.equal(prompts[1].message, "Paste the GitHub App settings URL");
   assert.match(prompts[1].description.join("\n"), /settings URL/i);
 });
 
@@ -407,5 +407,5 @@ test("fix-only issue implementation also collects the App bot identity", async (
     appClientId: "Iv123456789012345678",
     automationBotLogin: "codekeeper-widget[bot]"
   });
-  assert.ok(prompts.includes("GitHub App name from the settings URL"));
+  assert.ok(prompts.includes("Paste the GitHub App settings URL"));
 });

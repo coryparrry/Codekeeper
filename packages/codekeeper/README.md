@@ -21,7 +21,7 @@ npx codekeeper --help
 npx codekeeper --version
 ```
 
-Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. GitHub.com is the only supported host. In a real TTY, use the arrow keys, Space, Enter, and Escape to move through the installer. Plain prompts remain the fallback for limited terminals; `--help` and `--version` never start the terminal UI.
+Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. GitHub.com is the only supported host. The TUI uses the full terminal while setup runs. Use the arrow keys, Space, Enter, and Escape to move through it. Plain prompts remain the fallback for limited terminals. The `--help` and `--version` commands never start the TUI.
 
 ## Document map
 
@@ -38,7 +38,9 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 
 ## What `init` does
 
-The Settings screen is the command centre for both new and existing installations. Standard mode covers workflows, autonomy, schedules, every role's provider/model/effort, workspace specialists, tracing, and all four packaged profile defaults. Editing a profile opts that role into a repository override; untouched defaults do not create files. Press `R` on a profile to remove its repository override and resume packaged updates for that role. Press `A` for Advanced mode, which exposes every editable policy field and shows immutable safety and release boundaries as read-only. Nothing changes until the final review is accepted.
+The Settings screen controls new and existing installations. Standard mode covers workflows, automation, schedules, every role's model settings, workspace specialists, tracing, and all four default profiles. Each selected row shows its purpose and its controls. Press Enter on a model ID to type any supported value. Press Enter on a provider or effort to see every choice.
+
+Profile instructions stay inside the TUI. Editing a profile creates a repository override for that role. Untouched defaults do not create files. Press `R` on a profile to remove its override and resume packaged updates. Press `A` for Advanced mode. Advanced shows every editable policy field. Protected release and safety boundaries stay fixed and appear in the final review. High-impact changes require a separate warning confirmation. Nothing changes until you accept the final review.
 
 | Choice | What it adds |
 |---|---|
@@ -49,28 +51,28 @@ The Settings screen is the command centre for both new and existing installation
 
 The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and accepts any model ID for each provider. Coordinator selection is independent from the optional OpenAI Codex workspace specialist. OpenAI traces are optional. When traces are on, the installer requests a separate OpenAI Platform trace-export key. A ChatGPT subscription is not an API key.
 
-After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
+After choosing the settings, the TUI shows a five-page final review. The pages group the setup, credentials, files, behavior, and confirmation. You can inspect every changed file without opening more review pages. The installer then:
 
 1. Generates `.github/codekeeper.json`, `.github/codekeeper-release.json`, the always-installed repository-assistant caller, and the selected role callers. It creates an `.github/codekeeper/agents/*.md` file only for a profile explicitly edited in Settings.
 2. Keeps every generated caller pinned to one exact package version and npm SHA-512 integrity. The bootstrap verifies the tarball before trusting its internal closed manifest or runtime.
-3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
+3. Opens a prefilled GitHub App registration page. The adopter creates and installs the App. Codekeeper hosts no callback. Paste the saved App settings URL into the TUI. Codekeeper extracts the bot name.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
-6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add setup`, pushes the branch, and opens a setup pull request.
+6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add setup`, pushes the branch, and creates a setup pull request. The TUI then opens the pull request in the browser.
 
 It never merges the pull request, runs a workflow, publishes an npm package, copies the runtime, or creates a hosted service.
 
 ## Change an existing installation
 
-Run `npx codekeeper init` again from the current default branch to edit configuration. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and any repository profile overrides into the same Settings screen. Missing overrides display the current packaged defaults. You can add or remove role workflows, change every editable policy value, open any profile in `$EDITOR` without losing prior customizations, or press `R` to reset an override to the packaged default.
+Run `npx codekeeper init` again from the current default branch to edit settings. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and repository profile overrides into the same Settings screen. Missing overrides display the current packaged defaults. You can add or remove role workflows, change every editable policy value, edit profiles inside the TUI, or press `R` to restore the default profile.
 
-The installer writes only values that changed. It preserves every untouched existing profile override byte-for-byte and does not ask for secrets again; an override is removed only when it is explicitly reset with `R`. Editing one packaged default creates only that role's override. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
+The installer writes only values that changed. It preserves every untouched profile override. It does not ask for existing secrets again. Press `R` to remove an override. Editing one default creates only that role's override. A settings change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
 
 ## Update an existing installation
 
 Run `codekeeper update` from a clean, current default-branch checkout. The command resolves the registry's current `latest` version and `dist.integrity` together, launches that exact package with install scripts disabled, and refuses a missing, malformed, or mismatched receipt. The update refreshes every release-owned caller, local bootstrap/runtime workflow, provider definition, policy/schema safety boundary, and generated-file inventory. New generated files are added and retired release-owned files are removed in the same reviewed pull request after preflight validates their ownership and binds the plan to the exact inspected bytes. Existing source-pinned installations migrate to package execution through that pull request; the historical commit remains valid until it merges.
 
-The published tarball is the update boundary. New CLI/TUI modules and package assets are included recursively from `packages/codekeeper`; new runtime modules, agent tools, agent Markdown, presets, and integration code are included recursively from their approved production roots. The package verifier rejects missing, extra, changed, hidden, or symlinked files. Repository-installed payload files are driven by one strict artifact catalog; `.github/codekeeper-release.json` is the separate control record that inventories them. Adding a copied Markdown, configuration, or workflow asset requires one catalog record with its fixed destination, ownership, activation, renderer, validation rule, and purpose; the existing renderer, ledger contents, preflight, planner, and TUI then add or update it without another file-specific reconciliation branch. Renames list the prior target, and removals retain a release-owned retirement record until every supported installation has migrated.
+The published tarball is the update boundary. New CLI and TUI modules come from `packages/codekeeper`. New runtime modules, agent tools, profiles, presets, and integration code come from their approved production roots. The package verifier rejects missing, extra, changed, hidden, or linked files. One strict artifact catalog controls repository-installed files. The `.github/codekeeper-release.json` file records their inventory. Each copied Markdown, settings, or workflow asset needs one catalog record. The record defines its destination, owner, activation, renderer, validation rule, and purpose. The existing systems then add or update it. Renames list the previous target. Removal records stay until every supported installation has migrated.
 
 The update preserves adopter-owned selections and data: selected workflows, repository settings, model and automation choices, GitHub variables and secrets, and existing profile overrides. A repository with no overrides stays that way; new packaged defaults arrive with the runtime instead of creating adopter files. The TUI shows the exact changed files before creating an update pull request. Codekeeper keeps running the current default-branch release until that pull request merges. If the installation already uses the release bundled with the latest CLI, the command exits successfully without writing. `update --current-package` skips registry bootstrapping only for exact local-tarball and offline release testing.
 
@@ -105,7 +107,7 @@ If setup fails, follow the recovery command printed by the installed binary. The
 
 The GitHub App needs contents, issues, and pull requests read-write plus metadata read-only, with webhooks disabled. Its settings page shows both a numeric **App ID** and a string **Client ID**. Codekeeper uses the **Client ID** (typically beginning `Iv`) for `CODEKEEPER_APP_CLIENT_ID`; the numeric App ID is not a substitute.
 
-The App settings URL ends with the App URL name. For example, `github.com/settings/apps/my-codekeeper-app` uses `my-codekeeper-app`. Review setup asks for this name and derives `my-codekeeper-app[bot]`.
+The App settings URL ends with the App URL name. For example, `github.com/settings/apps/my-codekeeper-app` uses `my-codekeeper-app`. Paste this URL during setup. Codekeeper then derives `my-codekeeper-app[bot]`.
 
 Paste API keys into the Codekeeper terminal UI and press Enter. Codekeeper sends each key directly to `gh secret set` through standard input. It does not put the value in command arguments, environment variables, generated files, output, plans, receipts, or snapshots.
 
@@ -151,7 +153,7 @@ The bundled preset is a starting point, not an installer lock. Change provider, 
 }
 ```
 
-The installer renders the policy, caller controls, schedule, and provider-secret mappings from that one validated settings object in a single configuration pull request.
+The installer renders the policy, caller controls, schedule, and credential mappings from one validated settings object in one pull request.
 
 ## Workflow lifecycle and records
 
@@ -168,7 +170,7 @@ There is no hosted Codekeeper service, dashboard, webhook receiver, or central c
 
 ## After the setup PR merges
 
-An enabled installation starts its selected workflows as soon as the setup pull request merges. An update keeps running the current default-branch configuration until its setup pull request merges, then uses the updated configuration. No separate dry run or controlled test is required.
+An enabled installation starts its selected workflows after the setup pull request merges. An update keeps running the current default-branch settings until its pull request merges. It then uses the updated settings. No separate dry run or controlled test is required.
 
 If you chose a disabled installation, Codekeeper stays off until you set `CODEKEEPER_ENABLED=true`. Keep the review gate optional while Codekeeper is disabled.
 

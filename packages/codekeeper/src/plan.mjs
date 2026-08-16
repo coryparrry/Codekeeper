@@ -35,6 +35,13 @@ const BOT_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,99})\[bot\]$/;
 const APP_SLUG = /^[a-z0-9](?:[a-z0-9-]{0,99})$/;
 const CLIENT_ID = /^(?:Iv[A-Za-z0-9]{18,253}|Iv1\.[A-Za-z0-9]{16,253})$/;
 
+function appSlugFromInput(value) {
+  const input = String(value ?? "").trim().toLowerCase();
+  const match = input.match(/^(?:https:\/\/github\.com)?\/(?:organizations\/[^/]+\/)?settings\/apps\/([a-z0-9-]+)\/?$/);
+  const slug = match?.[1] ?? input;
+  return APP_SLUG.test(slug) ? slug : null;
+}
+
 function tuiOptions(prompt, plain, tui) {
   return prompt?.kind === "ink" ? { ...plain, ...tui } : plain;
 }
@@ -522,7 +529,18 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     policy: effectivePolicy,
     files: changedFiles,
     variables,
-    secrets: secretNames.map((name) => ({ name })),
+    secrets: secretNames.map((name) => {
+      const provider = Object.entries(MODEL_PROVIDER_SECRETS).find(([, secretName]) => secretName === name)?.[0];
+      const roles = provider
+        ? modelAssignments(modes)
+          .filter(({ key }) => models[key]?.provider === provider)
+          .map(({ label }) => label)
+        : [];
+      const purpose = roles.length
+        ? `${SECRET_PURPOSES[name].replace(/[.]$/, "")}. Used by: ${roles.join(", ")}.`
+        : SECRET_PURPOSES[name];
+      return { name, purpose };
+    }),
     branch: installation ? snapshot.updateBranch : SETUP_BRANCH,
     commitMessage: operation === "release-update"
       ? "chore(codekeeper): update release"
@@ -548,7 +566,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
     : "This creates a setup pull request. It does not run a model, merge the pull request, or put secrets in generated files.\n\n");
   const repositoryConfirmed = await prompt.confirm({
     message: `${installation ? "Edit Codekeeper in" : "Install into"} ${snapshot.repository} on default branch ${snapshot.defaultBranch}?`,
-    defaultValue: false,
+    defaultValue: true,
     ...(prompt?.kind === "ink" ? {
       step: "repository",
       description: [
@@ -840,18 +858,21 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output }) 
 }
 
 export async function collectAutomationBotLogin({ prompt, output }) {
-  output.write("  - App URL name: find the name at the end of the App settings URL\n");
+  output.write("  - App settings URL: copy it from the browser after GitHub saves the App\n");
   if (prompt?.kind === "ink") {
-    const appSlug = await prompt.inputText({
+    const appInput = await prompt.inputText({
       step: "GitHub App",
-      message: "GitHub App name from the settings URL",
+      message: "Paste the GitHub App settings URL",
       description: [
-        "GitHub uses this name in the App settings URL.",
-        "For github.com/settings/apps/my-codekeeper-app, enter my-codekeeper-app. Codekeeper then uses my-codekeeper-app[bot]."
+        "Copy the GitHub App settings URL after GitHub saves the App.",
+        "For https://github.com/settings/apps/my-codekeeper-app, Codekeeper uses my-codekeeper-app[bot].",
+        "You can also enter only my-codekeeper-app."
       ],
-      validate: (value) => APP_SLUG.test(value.toLowerCase()) || "Enter the lowercase App name from its settings URL, without [bot]."
+      validate: (value) => Boolean(appSlugFromInput(value)) || "Paste a GitHub App settings URL, or enter its lowercase URL name."
     });
-    return `${appSlug.toLowerCase()}[bot]`;
+    const appSlug = appSlugFromInput(appInput);
+    if (!appSlug) throw new InstallerError("The GitHub App settings URL is invalid.", { code: "PLAN_INVALID" });
+    return `${appSlug}[bot]`;
   }
   const automationBotLogin = await prompt.inputText({
     message: "GitHub App bot login (<app-slug>[bot], for example my-app[bot])",

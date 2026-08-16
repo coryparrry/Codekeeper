@@ -1,4 +1,4 @@
-import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODEL_OPTIONS, MODEL_PROVIDER_SECRETS, MODES, SOURCE_COMMIT, SOURCE_REPOSITORY } from "./constants.mjs";
+import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS, MODEL_OPTIONS, MODEL_PROVIDER_SECRETS, MODES } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
 import { isReleaseOwnedPolicyPath, RELEASE_OWNED_POLICY_PATHS } from "./policy.mjs";
 import { validatePolicy } from "./policy-validator.mjs";
@@ -22,6 +22,71 @@ const STANDARD_PATHS = Object.freeze([
   ["automation.maintenanceSchedule", "Maintenance schedule"],
   ["ai.tracing.enabled", "OpenAI tracing"]
 ]);
+
+const STANDARD_DESCRIPTIONS = Object.freeze({
+  "automation.automaticPrReview": "Run a review when a pull request opens or changes.",
+  "automation.reviewFeedbackTriage": "Check review comments and decide whether Codekeeper must respond.",
+  "automation.issueTriage": "Classify new and changed issues with the issue triage workflow.",
+  "automation.ownerRequests": "Allow approved owners to start Codekeeper from GitHub comments.",
+  "review.createDeferredIssues": "Create an issue when a review finds useful work that does not block the pull request.",
+  "review.autoRepair": "Let the fixer update a pull request after the review finds a repairable problem.",
+  "audit.repair.enabled": "Let repository maintenance create a repair pull request.",
+  "issues.allowAiImplementation": "Let the fixer implement issues that Codekeeper marks as ready.",
+  "issues.closeExactDuplicates": "Close an issue when Codekeeper finds an exact open duplicate.",
+  "issues.closeResolvedIssues": "Close an issue after its linked fix is merged.",
+  "merge.enabled": "Let Codekeeper merge a pull request after every required check passes.",
+  "automation.maintenanceSchedule": "Set when scheduled repository maintenance runs. This value uses GitHub cron syntax.",
+  "ai.tracing.enabled": "Send OpenAI trace data when an OpenAI trace key is available."
+});
+
+const RISK_WARNINGS = Object.freeze({
+  "review.createDeferredIssues": "This setting can create GitHub issues.",
+  "review.autoRepair": "This setting can change pull request branches.",
+  "audit.repair.enabled": "This setting can create repository repair pull requests.",
+  "issues.allowAiImplementation": "This setting can create code changes from ready issues.",
+  "issues.closeExactDuplicates": "This setting can close GitHub issues.",
+  "issues.closeResolvedIssues": "This setting can close GitHub issues after a merge.",
+  "merge.enabled": "This setting can merge pull requests without another manual action."
+});
+
+function words(value) {
+  return String(value)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[._:-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sentence(value) {
+  const text = words(value);
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "Setting";
+}
+
+function agentName(path) {
+  const id = path.match(/^ai\.agents\.([^.]+)/)?.[1];
+  return ({ review: "Pull request reviewer", audit: "Repository auditor", issue: "Issue triager", fix: "Fixer" })[id] ?? "Agent";
+}
+
+function advancedDescription(path) {
+  if (path.startsWith("ai.agents.")) return `Set ${words(path.split(".").slice(3).join(" "))} for the ${agentName(path).toLowerCase()}.`;
+  if (path.startsWith("labels.")) return "Set the name, color, or description for this GitHub label.";
+  if (path.startsWith("review.")) return "Set a pull request review limit, label, or escalation rule.";
+  if (path.startsWith("audit.")) return "Set a repository maintenance limit or repair rule.";
+  if (path.startsWith("issues.")) return "Set an issue triage or issue closure rule.";
+  if (path.startsWith("merge.")) return "Set an automatic merge rule or safety limit.";
+  if (path.startsWith("automation.")) return "Set when Codekeeper starts an automated workflow.";
+  if (path.startsWith("repository.")) return "Set the repository identity or automation branch prefix.";
+  if (path === "projectInvariants") return "List project rules that every Codekeeper role must preserve.";
+  return `Set ${words(path)}.`;
+}
+
+function rowWarning(path) {
+  if (RISK_WARNINGS[path]) return RISK_WARNINGS[path];
+  if (/^ai\.agents\.[^.]+\.provider$/.test(path)) return "Changing the provider also selects its default model and can require another API key.";
+  if (path.startsWith("audit.repair.")) return "This change affects the files or changes that repository repair can make.";
+  if (path.startsWith("merge.")) return "This change affects the conditions for automatic merge.";
+  return null;
+}
 
 function clone(value) {
   return structuredClone(value);
@@ -77,6 +142,7 @@ function policyRow(policy, path, label = path, keys = pathParts(path)) {
     id: `policy:${path}`,
     section: path.split(".")[0],
     label,
+    description: STANDARD_DESCRIPTIONS[path] ?? advancedDescription(path),
     path,
     ...(keys.length === canonicalKeys.length && keys.every((key, index) => key === canonicalKeys[index]) ? {} : { keys }),
     value,
@@ -87,7 +153,8 @@ function policyRow(policy, path, label = path, keys = pathParts(path)) {
           : typeof value === "number" ? "number"
             : typeof value === "string" || /^ai\.agents\.[^.]+\.workspace\.model$/.test(path) ? "string"
               : "json",
-    ...(choices ? { choices } : {})
+    ...(choices ? { choices } : {}),
+    ...(rowWarning(path) ? { warning: rowWarning(path) } : {})
   };
 }
 
@@ -159,11 +226,22 @@ export function settingsRows(settings, { advanced = false } = {}) {
       id: `workflow:${mode}`,
       section: "workflows",
       label: MODES[mode].label,
+      description: MODES[mode].description,
       kind: "boolean",
-      value: settings.modes.includes(mode)
+      value: settings.modes.includes(mode),
+      warning: settings.modes.includes(mode)
+        ? "Turning this workflow off removes its generated caller after the setup pull request merges."
+        : "Turning this workflow on adds its generated caller and can require another API key."
     })),
-    { id: "workflow:assistant", section: "workflows", label: "Repository assistant", kind: "readonly", value: "always installed", readOnly: true },
-    { id: "enabled", section: "workflows", label: "Global enablement", kind: "boolean", value: settings.enabled },
+    {
+      id: "enabled",
+      section: "workflows",
+      label: "Start Codekeeper after merge",
+      description: "Turn all installed Codekeeper workflows on or off.",
+      kind: "boolean",
+      value: settings.enabled,
+      warning: settings.enabled ? "Codekeeper stays installed, but its workflows stop after this change merges." : "Codekeeper workflows can run after this change merges."
+    },
     ...STANDARD_PATHS.map(([path, label]) => policyRow(settings.policy, path, label))
   ];
   for (const agent of AGENT_IDS) {
@@ -181,7 +259,10 @@ export function settingsRows(settings, { advanced = false } = {}) {
     rows.push({
       id: `profile:${profile}`,
       section: "profiles",
-      label: `${settings.profileSources?.[profile] === "repository" ? "Repository override" : "Packaged default"} · ${AGENT_PROFILES[profile].purpose}`,
+      label: `${AGENT_PROFILES[profile].purpose}`,
+      description: settings.profileSources?.[profile] === "repository"
+        ? "Uses custom repository instructions. Press Enter to edit them in this TUI."
+        : "Uses Codekeeper's default instructions. Press Enter to create custom repository instructions.",
       kind: "profile",
       value: settings.profiles[profile],
       profile,
@@ -191,12 +272,13 @@ export function settingsRows(settings, { advanced = false } = {}) {
   if (!advanced) return rows;
   const seen = new Set(rows.map((row) => row.id));
   for (const row of flattenPolicy(settings.policy)) {
-    if (!seen.has(row.id)) rows.push(row);
+    if (!seen.has(row.id) && !row.readOnly) {
+      rows.push({
+        ...row,
+        label: `${sentence(row.path.split(".").at(-1))} · ${sentence(row.path.split(".").slice(0, -1).join(" "))}`
+      });
+    }
   }
-  rows.push(
-    { id: "release:repository", section: "release", label: "Pinned source repository", kind: "readonly", value: SOURCE_REPOSITORY, readOnly: true },
-    { id: "release:commit", section: "release", label: "Pinned source commit", kind: "readonly", value: SOURCE_COMMIT, readOnly: true }
-  );
   return rows;
 }
 

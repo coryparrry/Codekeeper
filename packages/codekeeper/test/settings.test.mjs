@@ -29,24 +29,25 @@ function row(settings, id, advanced = false) {
   return match;
 }
 
-test("standard and advanced settings expose behavior, arbitrary models, profiles, and read-only boundaries", async () => {
+test("standard and advanced settings expose only editable choices with clear controls", async () => {
   const { settings } = await fixture();
   const standard = settingsRows(settings);
   const advanced = settingsRows(settings, { advanced: true });
   assert.ok(advanced.length > standard.length);
-  assert.equal(row(settings, "workflow:assistant").readOnly, true);
+  assert.equal(standard.some((candidate) => candidate.id === "workflow:assistant"), false);
   assert.equal(row(settings, "policy:automation.reviewFeedbackTriage").kind, "boolean");
   assert.deepEqual(row(settings, "policy:ai.agents.review.provider").choices, ["openai", "deepseek", "openrouter"]);
   assert.deepEqual(row(settings, "policy:ai.agents.review.effort").choices, ["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
   assert.equal(row(settings, "policy:ai.agents.review.model").kind, "string");
   assert.equal(row(settings, "policy:ai.agents.review.modelSettings", true).kind, "json");
-  const providers = row(settings, "policy:ai.providers", true);
-  assert.equal(providers.readOnly, true);
-  assert.throws(() => setSetting(settings, providers, {}), /read-only/);
-  assert.equal(row(settings, "policy:ai.agents.review.maxTurns", true).readOnly, true);
-  assert.equal(row(settings, "policy:audit.repair.protectedPaths", true).readOnly, true);
+  assert.equal(advanced.some((candidate) => candidate.id === "policy:ai.providers"), false);
+  assert.equal(advanced.some((candidate) => candidate.readOnly), false);
+  assert.equal(advanced.some((candidate) => candidate.id === "policy:ai.agents.review.maxTurns"), false);
+  assert.equal(advanced.some((candidate) => candidate.id === "policy:audit.repair.protectedPaths"), false);
+  assert.ok(advanced.every((candidate) => typeof candidate.description === "string" && candidate.description.length > 10));
   assert.equal(standard.filter((candidate) => candidate.kind === "profile").length, 4);
-  assert.equal(row(settings, "profile:pr-reviewer").label, "Packaged default · Pull-request review judgment rules");
+  assert.equal(row(settings, "profile:pr-reviewer").label, "Pull-request review judgment rules");
+  assert.match(row(settings, "profile:pr-reviewer").description, /Codekeeper's default instructions/);
   const withOverride = createEditableSettings({
     policy: settings.policy,
     modes: settings.modes,
@@ -54,8 +55,8 @@ test("standard and advanced settings expose behavior, arbitrary models, profiles
     profiles: settings.profiles,
     profileOverrides: ["pr-reviewer"]
   });
-  assert.equal(row(withOverride, "profile:pr-reviewer").label, "Repository override · Pull-request review judgment rules");
-  assert.equal(advanced.filter((candidate) => candidate.id.startsWith("release:")).every((candidate) => candidate.readOnly), true);
+  assert.match(row(withOverride, "profile:pr-reviewer").description, /custom repository instructions/);
+  assert.equal(advanced.some((candidate) => candidate.id.startsWith("release:")), false);
 });
 
 test("profile source state survives answers and can reset an override to the packaged default", async () => {
@@ -64,7 +65,7 @@ test("profile source state survives answers and can reset an override to the pac
   const overridden = setSetting(settings, profileRow, profiles["pr-reviewer"]);
   assert.equal(overridden.profileSources["pr-reviewer"], "repository");
   assert.equal(settingsAnswers(overridden).profileSources["pr-reviewer"], "repository");
-  assert.match(row(overridden, "profile:pr-reviewer").label, /^Repository override/);
+  assert.match(row(overridden, "profile:pr-reviewer").description, /custom repository instructions/);
 
   const reset = resetProfileOverride(overridden, "pr-reviewer");
   assert.equal(reset.profileSources["pr-reviewer"], "package");
