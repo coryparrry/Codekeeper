@@ -590,7 +590,7 @@ test("existing generated files with every optional profile missing are recognize
   assert.equal(legacyIssuesOnly.existingSettings.automationBotLogin, "codekeeper-widget[bot]");
 });
 
-test("setup branch collision detection covers local refs, remote refs, and prior pull requests", async () => {
+test("setup branch collision detection covers local refs, remote refs, and open pull requests", async () => {
   for (const [name, options] of [
     ["local", { localRefs: "refs/heads/codekeeper/setup\n" }],
     ["local namespace", { localRefs: "refs/heads/codekeeper/setup/child\n" }],
@@ -604,6 +604,24 @@ test("setup branch collision detection covers local refs, remote refs, and prior
       name
     );
   }
+});
+
+test("setup branch collision detection ignores closed pull requests", async () => {
+  const runner = preflightRunner("/tmp/widget");
+  await assertNoSetupBranch({ runner, root: "/tmp/widget", repository: "acme/widget" });
+  const pullRequestQuery = runner.calls.find((call) => call.command === "gh" && call.args[0] === "pr" && call.args[1] === "list");
+  assert.deepEqual(pullRequestQuery?.args, [
+    "pr",
+    "list",
+    "--repo",
+    "acme/widget",
+    "--state",
+    "open",
+    "--head",
+    "codekeeper/setup",
+    "--json",
+    "number,url"
+  ]);
 });
 
 test("repository preflight returns a frozen snapshot only after every local and GitHub check passes", async (t) => {
