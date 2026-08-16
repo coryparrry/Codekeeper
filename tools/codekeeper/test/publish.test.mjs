@@ -67,6 +67,10 @@ test.after(() => {
 
 const fingerprint = "a".repeat(64);
 const identity = { login: "codekeeper[bot]", id: "123456" };
+const secondaryIssueMutationStub = {
+  async beginSecondaryIssueMutation() {},
+  endSecondaryIssueMutation() {},
+};
 const trustedPull = {
   body: `A maintainer may edit this description without affecting deduplication.\n${repairMarker(fingerprint)}`,
   user: { login: identity.login, id: Number(identity.id), type: "Bot" },
@@ -308,6 +312,7 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
   const existing = [];
   const calls = { created: [], updated: [], replies: [], labels: [] };
   const github = {
+    ...secondaryIssueMutationStub,
     async listMaintenanceIssues() { return existing; },
     async ensureLabels(_definitions, labels) { calls.labels.push(labels); },
     async createIssue(input) {
@@ -378,6 +383,7 @@ test("deferred feedback identity stays per-source when the model regroups findin
   const created = [];
   const updated = [];
   const github = {
+    ...secondaryIssueMutationStub,
     async listMaintenanceIssues() { return existing; },
     async ensureLabels() {},
     async createIssue(input) {
@@ -439,6 +445,7 @@ test("deferred review issues close when their source is no longer deferred", asy
   const marker = deferredReviewMarker(fingerprint);
   const updates = [];
   const github = {
+    ...secondaryIssueMutationStub,
     async listMaintenanceIssues() {
       return [{
         number: 51,
@@ -480,6 +487,7 @@ ${marker}`,
 test("owner-requested deferral does not reconcile unrelated deferred issues", async () => {
   const updates = [];
   const github = {
+    ...secondaryIssueMutationStub,
     async listMaintenanceIssues() {
       return [{
         number: 51,
@@ -519,6 +527,7 @@ test("automatically reconciled deferred issues reopen when the source is deferre
   const marker = deferredReviewMarker(fingerprint);
   const updates = [];
   const github = {
+    ...secondaryIssueMutationStub,
     async listMaintenanceIssues() {
       return [{
         number: 51,
@@ -1095,13 +1104,13 @@ test("branch tips normalize GitHub branch data and treat a missing branch as abs
     globalThis.fetch = async (url) => {
       if (String(url).endsWith("/branches/existing")) {
         return new Response(JSON.stringify({
-          commit: { commit: { tree: { sha: "tree" } }, parents: [{ sha: "base" }] }
+          commit: { sha: "head", commit: { tree: { sha: "tree" } }, parents: [{ sha: "base" }] }
         }));
       }
       return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
     };
     const github = new GitHubClient({ token: "token", repository: "owner/repository" });
-    assert.deepEqual(await github.getBranchTip("existing"), { treeSha: "tree", parentShas: ["base"] });
+    assert.deepEqual(await github.getBranchTip("existing"), { headSha: "head", treeSha: "tree", parentShas: ["base"] });
     assert.equal(await github.getBranchTip("missing"), null);
   } finally {
     globalThis.fetch = originalFetch;
@@ -2371,6 +2380,7 @@ test("maintenance publication adopts only the issue whose App marker survived re
   let remoteBaseSha;
   const restoreGitHub = replaceGitHubMethods({
     async getBranch() { return { commit: { sha: remoteBaseSha } }; },
+    async getIssue(number) { return issues.find((issue) => issue.number === number); },
     async listMaintenanceIssues() { return issues; },
     async listIssueComments(number) { return comments.filter((comment) => comment.issueNumber === number); },
     async ensureLabels() {},
@@ -2379,6 +2389,8 @@ test("maintenance publication adopts only the issue whose App marker survived re
       const issue = {
         number: creates,
         state: "open",
+        updated_at: "2026-08-05T10:00:00Z",
+        labels: [],
         body: input.body,
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
       };
@@ -2389,8 +2401,11 @@ test("maintenance publication adopts only the issue whose App marker survived re
     async createComment(issueNumber, body) {
       markerAttempts += 1;
       comments.push({
+        id: markerAttempts,
         issueNumber,
         body,
+        created_at: "2026-08-05T10:00:00Z",
+        updated_at: "2026-08-05T10:00:00Z",
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
       });
       if (markerAttempts === 1) throw new Error("connection lost after marker creation");
@@ -2487,7 +2502,8 @@ test("maintenance repair notification remains singular after response loss", asy
       },
       noActionReason: null
     };
-    const patch = Buffer.from("");
+    await writeFile(path.join(repository, "README.md"), "# Example\n\nRepair.\n", "utf8");
+    const patch = execFileSync("git", ["diff", "--binary", "--full-index", "HEAD"], { cwd: repository });
     await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
     const integrity = await writeSealedArtifact(artifactDirectory, {
       mode: "audit",
@@ -2495,11 +2511,21 @@ test("maintenance repair notification remains singular after response loss", asy
       result,
       configSha256,
       artifactConfig: auditConfig,
-      patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: [] }
+      patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: ["README.md"] }
     });
+    const branch = repairBranch(auditConfig, "audit", repairFingerprint);
+    git(repository, ["checkout", "-b", "seed-repair"]);
+    git(repository, ["add", "README.md"]);
+    git(repository, ["commit", "-qm", "seed repair"]);
+    const remoteHeadSha = git(repository, ["rev-parse", "HEAD"]);
+    const remoteTreeSha = git(repository, ["rev-parse", "HEAD^{tree}"]);
+    git(repository, ["checkout", "main"]);
+    git(repository, ["branch", "-D", "seed-repair"]);
     const maintenanceIssue = {
       number: 1,
       state: "open",
+      updated_at: "2026-08-05T10:00:00Z",
+      labels: [],
       body: `Existing maintenance finding\n${findingMarker(repairFingerprint)}`,
       user: { login: identity.login, id: Number(identity.id), type: "Bot" }
     };
@@ -2508,15 +2534,25 @@ test("maintenance repair notification remains singular after response loss", asy
       html_url: "https://example.test/pull/12",
       body: `Repair\n${repairMarker(repairFingerprint)}`,
       user: { login: identity.login, id: Number(identity.id), type: "Bot" },
-      head: { ref: repairBranch(auditConfig, "audit", repairFingerprint), repo: { full_name: context.repository } },
-      base: { repo: { full_name: context.repository } }
+      state: "open",
+      head: { sha: remoteHeadSha, ref: branch, repo: { full_name: context.repository } },
+      base: { sha: baseSha, ref: auditConfig.repository.defaultBranch, repo: { full_name: context.repository } }
     };
     const restoreGitHub = replaceGitHubMethods({
       async getBranch() { return { commit: { sha: context.baseSha } }; },
+      async getBranchTip(requestedBranch) {
+        assert.equal(requestedBranch, branch);
+        return { headSha: remoteHeadSha, treeSha: remoteTreeSha, parentShas: [baseSha] };
+      },
+      async getPull() { return structuredClone(repairPull); },
+      async getIssue(number) { return number === maintenanceIssue.number ? maintenanceIssue : null; },
       async listMaintenanceIssues() { return [maintenanceIssue]; },
       async listIssueComments() {
         return [{
+          id: 1,
           body: findingMarker(repairFingerprint),
+          created_at: "2026-08-05T10:00:00Z",
+          updated_at: "2026-08-05T10:00:00Z",
           user: { login: identity.login, id: Number(identity.id), type: "Bot" }
         }];
       },
@@ -2543,6 +2579,8 @@ test("maintenance repair notification remains singular after response loss", asy
         publishAudit({ artifactDirectory, config: auditConfig, configSha256, ...integrity, token: "token" }),
         /connection lost after repair notification/
       );
+      git(repository, ["checkout", "main"]);
+      git(repository, ["branch", "-D", branch]);
       await publishAudit({ artifactDirectory, config: auditConfig, configSha256, ...integrity, token: "token" });
       assert.equal(notificationAttempts, 2);
       assert.deepEqual(notifications, [
@@ -2563,18 +2601,28 @@ test("maintenance repair notification remains singular after response loss", asy
 });
 
 test("fix repair notification remains singular after response loss", async () => {
+  const repository = await mkdtemp(path.join(os.tmpdir(), "codekeeper-fix-repair-retry-test-"));
   const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-fix-repair-retry-artifact-"));
   const configSha256 = "f".repeat(64);
+  const originalDirectory = process.cwd();
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   const notification = [];
   let notificationAttempts = 0;
   let labelReconciliations = 0;
   try {
-    const patch = Buffer.from("");
+    await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
+    git(repository, ["init", "-q", "-b", "main"]);
+    git(repository, ["config", "user.name", "Test"]);
+    git(repository, ["config", "user.email", "test@example.com"]);
+    git(repository, ["add", "README.md"]);
+    git(repository, ["commit", "-qm", "initial"]);
+    const baseSha = git(repository, ["rev-parse", "HEAD"]);
+    await writeFile(path.join(repository, "README.md"), "# Example\n\nRepair.\n", "utf8");
+    const patch = execFileSync("git", ["diff", "--binary", "--full-index", "HEAD"], { cwd: repository });
     await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
     const context = {
-      mode: "fix", repository: "owner/repository", configSha256, baseSha: "base",
+      mode: "fix", repository: "owner/repository", configSha256, baseSha,
       defaultBranch: config.repository.defaultBranch, target: { kind: "issue", number: 7 },
       issue: { number: 7, title: "Repair", updatedAt: "2026-08-05T10:00:00Z" }
     };
@@ -2587,19 +2635,38 @@ test("fix repair notification remains singular after response loss", async () =>
       context,
       result,
       configSha256,
-      patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: [] }
+      patch: { valid: true, fileName: "patch.diff", sha256: sha256(patch), files: ["README.md"] }
     });
     const repairFingerprint = sha256("issue|owner/repository|7");
+    const branch = repairBranch(config, "fix", repairFingerprint);
+    git(repository, ["checkout", "-b", "seed-repair"]);
+    git(repository, ["add", "README.md"]);
+    git(repository, ["commit", "-qm", "seed repair"]);
+    const remoteHeadSha = git(repository, ["rev-parse", "HEAD"]);
+    const remoteTreeSha = git(repository, ["rev-parse", "HEAD^{tree}"]);
+    git(repository, ["checkout", "main"]);
+    git(repository, ["branch", "-D", "seed-repair"]);
     const repairPull = {
       number: 12,
       html_url: "https://example.test/pull/12",
       body: `Repair\n${repairMarker(repairFingerprint)}`,
       user: { login: identity.login, id: Number(identity.id), type: "Bot" },
-      head: { ref: repairBranch(config, "fix", repairFingerprint), repo: { full_name: context.repository } },
-      base: { repo: { full_name: context.repository } }
+      state: "open",
+      head: { sha: remoteHeadSha, ref: branch, repo: { full_name: context.repository } },
+      base: { sha: baseSha, ref: config.repository.defaultBranch, repo: { full_name: context.repository } }
+    };
+    let liveRemoteTreeSha = remoteTreeSha;
+    const resetCheckout = () => {
+      git(repository, ["checkout", "main"]);
+      git(repository, ["branch", "-D", branch]);
     };
     const restoreGitHub = replaceGitHubMethods({
-      async getIssue(number) { return { number, state: "open", updated_at: context.issue.updatedAt }; },
+      async getIssue(number) { return { number, title: context.issue.title, state: "open", updated_at: context.issue.updatedAt, labels: [] }; },
+      async getBranchTip(requestedBranch) {
+        assert.equal(requestedBranch, branch);
+        return { headSha: remoteHeadSha, treeSha: liveRemoteTreeSha, parentShas: [baseSha] };
+      },
+      async getPull() { return structuredClone(repairPull); },
       async findOpenPullByHead() { return repairPull; },
       async ensureLabels() {},
       async replaceManagedLabels() { labelReconciliations += 1; },
@@ -2617,10 +2684,62 @@ test("fix repair notification remains singular after response loss", async () =>
     try {
       process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
       process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+      process.chdir(repository);
+      const unexpectedPath = path.join(repository, "unexpected.txt");
+      await writeFile(unexpectedPath, "not part of the sealed repair\n", "utf8");
+      await assert.rejects(
+        publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+        /Expected a clean worktree/
+      );
+      await rm(unexpectedPath);
+      assert.equal(labelReconciliations, 0);
+      assert.equal(notificationAttempts, 0);
+
+      liveRemoteTreeSha = "0".repeat(40);
+      await assert.rejects(
+        publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+        /sealed repair tree/
+      );
+      assert.equal(labelReconciliations, 0);
+      assert.equal(notificationAttempts, 0);
+      resetCheckout();
+      liveRemoteTreeSha = remoteTreeSha;
+
+      repairPull.head.sha = "f".repeat(40);
+      await assert.rejects(
+        publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+        /sealed repair target/
+      );
+      assert.equal(labelReconciliations, 0);
+      assert.equal(notificationAttempts, 0);
+      resetCheckout();
+      repairPull.head.sha = remoteHeadSha;
+
+      repairPull.base.ref = "release";
+      await assert.rejects(
+        publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+        /sealed repair target/
+      );
+      assert.equal(labelReconciliations, 0);
+      assert.equal(notificationAttempts, 0);
+      resetCheckout();
+      repairPull.base.ref = config.repository.defaultBranch;
+
+      repairPull.base.sha = "e".repeat(40);
+      await assert.rejects(
+        publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
+        /sealed repair target/
+      );
+      assert.equal(labelReconciliations, 0);
+      assert.equal(notificationAttempts, 0);
+      resetCheckout();
+      repairPull.base.sha = baseSha;
+
       await assert.rejects(
         publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" }),
         /connection lost after repair notification/
       );
+      resetCheckout();
       const retry = await publishFix({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
       assert.equal(retry.created, false);
       assert.equal(retry.reason, "Existing repair PR");
@@ -2633,10 +2752,12 @@ test("fix repair notification remains singular after response loss", async () =>
       restoreGitHub();
     }
   } finally {
+    process.chdir(originalDirectory);
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
     else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
     if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
     else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(repository, { recursive: true, force: true });
     await rm(artifactDirectory, { recursive: true, force: true });
   }
 });

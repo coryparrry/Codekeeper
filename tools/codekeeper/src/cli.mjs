@@ -49,8 +49,9 @@ function stringList(value, name) {
 }
 
 function bundleFile(directory, filePath, flag) {
-  const resolved = path.resolve(filePath);
-  const relative = path.relative(directory, resolved);
+  const runnerDirectory = assertRunnerOwnedDirectory(directory);
+  const resolved = runnerFile(filePath, flag);
+  const relative = path.relative(runnerDirectory, resolved);
   if (relative === "" || relative.startsWith(`..${path.sep}`) || relative === "..") {
     throw new Error(`--${flag} must be a file inside the runner-owned --directory`);
   }
