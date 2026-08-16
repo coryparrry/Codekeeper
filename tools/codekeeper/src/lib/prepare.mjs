@@ -52,14 +52,16 @@ function ensureSameRepositoryPullRequest(event, repository) {
 }
 
 async function writeBundle({ directory, context, prompt, workspacePrompt, schema, agentProfile }) {
-  assertRunnerOwnedDirectory(directory);
+  directory = assertRunnerOwnedDirectory(directory);
   await mkdir(path.dirname(directory), { recursive: true });
+  directory = assertRunnerOwnedDirectory(directory);
   try {
     await mkdir(directory);
   } catch (error) {
     if (error.code === "EEXIST") throw new Error(`Runner-owned bundle directory already exists: ${directory}`);
     throw error;
   }
+  directory = assertRunnerOwnedDirectory(directory);
   await writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), agentProfile.bytes, { flag: "wx" });
   await writeJson(path.join(directory, "context.json"), context);
   await writeText(path.join(directory, "prompt.md"), `${prompt}\n`);

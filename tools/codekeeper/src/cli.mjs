@@ -59,8 +59,8 @@ function bundleFile(directory, filePath, flag) {
 
 function runnerFile(filePath, flag) {
   const resolved = path.resolve(filePath);
-  assertRunnerOwnedDirectory(path.dirname(resolved));
-  return resolved;
+  const directory = assertRunnerOwnedDirectory(path.dirname(resolved));
+  return path.join(directory, path.basename(resolved));
 }
 
 function agentProfileInputs(args, toolingSha) {

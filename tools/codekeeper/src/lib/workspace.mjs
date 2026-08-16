@@ -1,8 +1,25 @@
+import { realpathSync } from "node:fs";
 import path from "node:path";
 
 function isWithin(parent, child) {
   const relative = path.relative(parent, child);
   return relative === "" || (!path.isAbsolute(relative) && !relative.startsWith(`..${path.sep}`) && relative !== "..");
+}
+
+function canonicalPath(candidate) {
+  let existing = path.resolve(candidate);
+  const missing = [];
+  while (true) {
+    try {
+      return path.join(realpathSync(existing), ...missing);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) throw error;
+      missing.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
 }
 
 // Prompts, model output, and generated artifacts must never be written through
@@ -15,8 +32,8 @@ export function assertRunnerOwnedDirectory(directory, cwd = process.cwd()) {
   if (!path.isAbsolute(directory)) {
     throw new Error("--directory must be an absolute runner-owned path");
   }
-  const resolvedDirectory = path.resolve(directory);
-  const resolvedCwd = path.resolve(cwd);
+  const resolvedDirectory = canonicalPath(directory);
+  const resolvedCwd = canonicalPath(cwd);
   if (isWithin(resolvedCwd, resolvedDirectory) || isWithin(resolvedDirectory, resolvedCwd)) {
     throw new Error("--directory must be outside the checked-out repository");
   }
