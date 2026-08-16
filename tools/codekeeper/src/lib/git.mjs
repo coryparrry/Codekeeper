@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { copyFile, lstat, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdtemp, open, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { superviseProcess } from "./process-supervisor.mjs";
@@ -10,7 +10,7 @@ const MAX_CAPTURE_PATCH_BYTES = 5 * 1024 * 1024;
 const CAPTURE_GIT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_VALIDATION_TIMEOUT_MS = 5 * 60 * 1000;
 const VALIDATION_ENVIRONMENT_KEYS = Object.freeze([
-  "PATH", "Path", "PATHEXT", "HOME", "TMPDIR", "TMP", "TEMP",
+  "PATH", "Path", "PATHEXT", "TMPDIR", "TMP", "TEMP",
   "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "CI",
   "SystemRoot", "ComSpec"
 ]);
@@ -351,6 +351,28 @@ export function applyPatch(patchPath, cwd = process.cwd()) {
   git(["apply", "--whitespace=error-all", patchPath], { cwd });
 }
 
+async function verifiedRustupHome(environment) {
+  const candidate = typeof environment.RUSTUP_HOME === "string" ? environment.RUSTUP_HOME.trim() : "";
+  if (!candidate || !path.isAbsolute(candidate)) return null;
+  try {
+    const details = await lstat(candidate);
+    if (!details.isDirectory() || details.isSymbolicLink()) return null;
+    return realpath(candidate);
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
+    throw error;
+  }
+}
+
+export async function validationEnvironment(environment = process.env) {
+  const sanitized = Object.fromEntries(VALIDATION_ENVIRONMENT_KEYS
+    .filter((key) => typeof environment[key] === "string")
+    .map((key) => [key, environment[key]]));
+  const rustupHome = await verifiedRustupHome(environment);
+  if (rustupHome) sanitized.RUSTUP_HOME = rustupHome;
+  return sanitized;
+}
+
 export async function runValidationCommands(
   commands,
   cwd = process.cwd(),
@@ -359,37 +381,41 @@ export async function runValidationCommands(
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new Error("Validation timeout must be a positive integer");
   }
-  const environment = Object.fromEntries(VALIDATION_ENVIRONMENT_KEYS
-    .filter((key) => typeof process.env[key] === "string")
-    .map((key) => [key, process.env[key]]));
-  const results = [];
-  for (const command of commands) {
-    let result;
-    try {
-      result = await superviseProcess("bash", ["-c", command], { cwd, environment, timeoutMs });
-    } catch (error) {
-      const failure = new Error(`Validation command could not run: ${command}: ${error.message}`);
-      failure.validationResults = results;
-      throw failure;
+  const environment = await validationEnvironment();
+  const home = await mkdtemp(path.join(os.tmpdir(), "codekeeper-validation-home-"));
+  environment.HOME = home;
+  try {
+    const results = [];
+    for (const command of commands) {
+      let result;
+      try {
+        result = await superviseProcess("bash", ["-c", command], { cwd, environment, timeoutMs });
+      } catch (error) {
+        const failure = new Error(`Validation command could not run: ${command}: ${error.message}`);
+        failure.validationResults = results;
+        throw failure;
+      }
+      if (result.timedOut) {
+        const failure = new Error(`Validation command timed out after ${timeoutMs}ms: ${command}`);
+        failure.validationResults = results;
+        throw failure;
+      }
+      results.push({
+        command,
+        success: result.status === 0,
+        stdout: result.stdout.toString("utf8"),
+        stderr: result.stderr.toString("utf8")
+      });
+      if (result.status !== 0) {
+        const error = new Error(`Validation command failed: ${command}`);
+        error.validationResults = results;
+        throw error;
+      }
     }
-    if (result.timedOut) {
-      const failure = new Error(`Validation command timed out after ${timeoutMs}ms: ${command}`);
-      failure.validationResults = results;
-      throw failure;
-    }
-    results.push({
-      command,
-      success: result.status === 0,
-      stdout: result.stdout.toString("utf8"),
-      stderr: result.stderr.toString("utf8")
-    });
-    if (result.status !== 0) {
-      const error = new Error(`Validation command failed: ${command}`);
-      error.validationResults = results;
-      throw error;
-    }
+    return results;
+  } finally {
+    await rm(home, { recursive: true, force: true });
   }
-  return results;
 }
 
 export function configureAutomationIdentity({ login, id, cwd = process.cwd() } = {}) {
