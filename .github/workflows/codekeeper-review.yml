@@ -48,26 +48,6 @@ on:
         description: GitHub App client ID. This identifier is not secret.
         required: true
         type: string
-      trace_exporter:
-        description: Trace exporter for the coordinator. Supported values are openai and braintrust.
-        required: false
-        default: openai
-        type: string
-      braintrust_project:
-        description: Braintrust project name used when trace_exporter=braintrust.
-        required: false
-        default: Codekeeper
-        type: string
-      braintrust_api_url:
-        description: Optional Braintrust API URL, including regional endpoints.
-        required: false
-        default: ""
-        type: string
-      braintrust_include_sensitive_data:
-        description: Include prompts and responses in Braintrust traces for this run.
-        required: false
-        default: false
-        type: boolean
     secrets:
       model_api_key:
         description: API key for the provider selected by ai.agents.review.provider.
@@ -79,10 +59,7 @@ on:
         description: Deprecated compatibility fallback for the Codex workspace specialist only.
         required: false
       trace_api_key:
-        description: Dedicated OpenAI API key used only when trace_exporter=openai.
-        required: false
-      braintrust_api_key:
-        description: Dedicated Braintrust API key used only when trace_exporter=braintrust.
+        description: Dedicated OpenAI API key used only for trace export.
         required: false
       app_private_key:
         required: true
@@ -351,15 +328,6 @@ jobs:
       - name: Install exact Codekeeper runtime
         run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
 
-      - name: Validate coordinator trace exporter
-        env:
-          TRACE_EXPORTER: ${{ inputs.trace_exporter }}
-        run: |
-          case "$TRACE_EXPORTER" in
-            openai|braintrust) ;;
-            *) echo "trace_exporter must be openai or braintrust"; exit 1 ;;
-          esac
-
       - name: Download untrusted workspace evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -409,7 +377,6 @@ jobs:
           }
 
       - name: Finalize review with configured Agents SDK model
-        if: inputs.trace_exporter == 'openai'
         working-directory: worktree
         env:
           CODEKEEPER_MODEL_API_KEY: ${{ secrets.model_api_key }}
@@ -419,26 +386,6 @@ jobs:
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
         run: |
           node ../tooling/codekeeper-runtime/src/cli.mjs run-agent \
-            --config "$CONFIG" \
-            --mode review \
-            --directory "$BUNDLE" \
-            --workspace-result "$WORKSPACE/workspace-result.json" \
-            --result "$BUNDLE/agent-result.json"
-
-      - name: Finalize review with Braintrust tracing
-        if: inputs.trace_exporter == 'braintrust'
-        working-directory: worktree
-        env:
-          CODEKEEPER_MODEL_API_KEY: ${{ secrets.model_api_key }}
-          BRAINTRUST_API_KEY: ${{ secrets.braintrust_api_key }}
-          BRAINTRUST_API_URL: ${{ inputs.braintrust_api_url }}
-          BRAINTRUST_PROJECT: ${{ inputs.braintrust_project }}
-          BRAINTRUST_INCLUDE_SENSITIVE_DATA: ${{ inputs.braintrust_include_sensitive_data }}
-          BUNDLE: ${{ runner.temp }}/codekeeper-bundle
-          WORKSPACE: ${{ runner.temp }}/codekeeper-workspace
-          CONFIG: ${{ runner.temp }}/codekeeper-config.json
-        run: |
-          node ../tooling/codekeeper-runtime/integrations/braintrust/run-agent.mjs \
             --config "$CONFIG" \
             --mode review \
             --directory "$BUNDLE" \

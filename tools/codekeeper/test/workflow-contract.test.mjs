@@ -819,7 +819,7 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
   assert.match(selfTest, /npm run check/);
 });
 
-test("review tracing keeps OpenAI as the default and supports an isolated Braintrust choice", async () => {
+test("review tracing uses the OpenAI exporter without alternate exporter credentials", async () => {
   const source = await workflow("review");
   const caller = await repositoryFile(
     "examples/workflows/codekeeper-review.yml.example",
@@ -827,54 +827,26 @@ test("review tracing keeps OpenAI as the default and supports an isolated Braint
   const workspace = jobSection(source, "workspace", "analyze");
   const analyze = jobSection(source, "analyze", "seal");
 
-  assert.match(
-    source,
-    /trace_exporter:\n\s+description: Trace exporter for the coordinator\. Supported values are openai and braintrust\.\n\s+required: false\n\s+default: openai\n\s+type: string/,
-  );
-  assert.match(
-    source,
-    /braintrust_api_key:\n\s+description: Dedicated Braintrust API key used only when trace_exporter=braintrust\.\n\s+required: false/,
-  );
-  assert.doesNotMatch(workspace, /braintrust_api_key|BRAINTRUST_API_KEY/);
-  assert.match(
-    analyze,
-    /name: Validate coordinator trace exporter[\s\S]*openai\|braintrust/,
-  );
+  assert.doesNotMatch(source, /trace_exporter|braintrust/i);
+  assert.doesNotMatch(workspace, /trace_exporter|braintrust/i);
+  assert.doesNotMatch(analyze, /trace_exporter|braintrust/i);
   assert.match(
     analyze,
     /bin\/install-runtime\.mjs/,
   );
-  assert.doesNotMatch(analyze, /Install pinned Braintrust trace exporter/);
   const packagedRuntime = JSON.parse(
     await repositoryFile("packages/codekeeper/runtime-package/package.json"),
   );
-  assert.equal(packagedRuntime.dependencies["@braintrust/openai-agents"], "0.1.5");
-  assert.equal(packagedRuntime.dependencies.braintrust, "3.27.0");
+  assert.deepEqual(packagedRuntime.dependencies, {
+    "@openai/agents": "0.14.3",
+    "@openai/codex": "0.146.0",
+    zod: "4.4.3",
+  });
   assert.match(
     analyze,
-    /name: Finalize review with configured Agents SDK model\n\s+if: inputs\.trace_exporter == 'openai'/,
+    /name: Finalize review with configured Agents SDK model/,
   );
-  assert.match(
-    analyze,
-    /name: Finalize review with Braintrust tracing\n\s+if: inputs\.trace_exporter == 'braintrust'/,
-  );
-  assert.match(
-    analyze,
-    /BRAINTRUST_API_KEY: \$\{\{ secrets\.braintrust_api_key \}\}/,
-  );
-  assert.match(
-    analyze,
-    /BRAINTRUST_INCLUDE_SENSITIVE_DATA: \$\{\{ inputs\.braintrust_include_sensitive_data \}\}/,
-  );
-  assert.match(analyze, /integrations\/braintrust\/run-agent\.mjs/);
-  assert.match(
-    caller,
-    /trace_exporter: \$\{\{ vars\.CODEKEEPER_TRACE_EXPORTER \|\| 'openai' \}\}/,
-  );
-  assert.match(
-    caller,
-    /braintrust_api_key: \$\{\{ secrets\.BRAINTRUST_API_KEY \}\}/,
-  );
+  assert.doesNotMatch(caller, /trace_exporter|braintrust/i);
 });
 
 test("self-test reports through annotations with read-only repository permissions", async () => {
