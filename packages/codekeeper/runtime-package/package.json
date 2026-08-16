@@ -1,0 +1,17 @@
+{
+  "name": "codekeeper-runtime",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Private runtime dependency graph embedded in the codekeeper release",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@braintrust/openai-agents": "0.1.5",
+    "@openai/agents": "0.14.3",
+    "@openai/codex": "0.146.0",
+    "braintrust": "3.27.0",
+    "zod": "4.4.3"
+  }
+}

@@ -5,7 +5,8 @@
   "description": "Complete CLI, TUI, runtime, and workflow release package for Codekeeper",
   "type": "module",
   "bin": {
-    "codekeeper": "bin/codekeeper.mjs"
+    "codekeeper": "bin/codekeeper.mjs",
+    "codekeeper-verify-package": "bin/verify-package.mjs"
   },
   "files": [
     "assets/",
@@ -31,12 +32,7 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@braintrust/openai-agents": "0.1.5",
-    "@openai/agents": "0.14.3",
-    "@openai/codex": "0.146.0",
-    "braintrust": "3.27.0",
     "ink": "7.1.1",
-    "react": "19.2.8",
-    "zod": "4.4.3"
+    "react": "19.2.8"
   }
 }

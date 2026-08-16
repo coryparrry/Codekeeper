@@ -59,7 +59,7 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.check, /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
 });
 
-test("release packaging uses the deterministic stage and one publishable shrinkwrap", async () => {
+test("release packaging uses one deterministic tarball with separate installer and runtime shrinkwraps", async () => {
   const rootPackage = JSON.parse(
     await readFile(new URL("../../../package.json", import.meta.url), "utf8"),
   );
@@ -68,8 +68,13 @@ test("release packaging uses the deterministic stage and one publishable shrinkw
   assert.match(rootPackage.scripts["package:stage:check"], /package-stage\.test\.mjs/);
   assert.ok(packageManifest.files.includes("release/"));
   assert.ok(packageManifest.files.includes("runtime/"));
+  assert.equal(packageManifest.bin["codekeeper-verify-package"], "bin/verify-package.mjs");
+  assert.deepEqual(packageManifest.dependencies, { ink: "7.1.1", react: "19.2.8" });
   await access(new URL("../npm-shrinkwrap.json", import.meta.url));
+  await access(new URL("../runtime-package/package.json", import.meta.url));
+  await access(new URL("../runtime-package/npm-shrinkwrap.json", import.meta.url));
   await assert.rejects(access(new URL("../package-lock.json", import.meta.url)), /ENOENT/);
+  await assert.rejects(access(new URL("../runtime-package/package-lock.json", import.meta.url)), /ENOENT/);
 });
 
 test("installer source pin is a full reviewed checkpoint reachable from the repository default branch", () => {

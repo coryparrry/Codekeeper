@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { access, cp, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -142,7 +143,7 @@ test("command runner bounds captured output and requireSuccess rejects failure, 
   );
 });
 
-test("npm tarball contains only the declared runtime and its local entrypoint works without registry access", async (t) => {
+test("one npm tarball installs a lightweight CLI then its copied runtime graph entirely offline", async (t) => {
   const npmCache = await temporaryDirectory(t, "codekeeper-npm-cache-");
   const packDestination = await temporaryDirectory(t, "codekeeper-pack-");
   const npmInstallRoot = await temporaryDirectory(t, "codekeeper-npm-install-");
@@ -228,14 +229,22 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   ], { cwd: npmInstallRoot, ...npmOptions });
   const npmInstalledRoot = path.join(npmInstallRoot, "node_modules", "codekeeper");
   const npmInstalledPackage = JSON.parse(await readFile(path.join(npmInstalledRoot, "package.json"), "utf8"));
-  assert.deepEqual(npmInstalledPackage.bin, { codekeeper: "bin/codekeeper.mjs" });
+  const expectedBins = {
+    codekeeper: "bin/codekeeper.mjs",
+    "codekeeper-verify-package": "bin/verify-package.mjs"
+  };
+  assert.deepEqual(npmInstalledPackage.bin, expectedBins);
   assert.deepEqual(npmInstalledPackage.dependencies, packageManifest.dependencies);
+  assert.deepEqual(npmInstalledPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
+  assert.equal(await pathExists(path.join(npmInstallRoot, "node_modules", "@openai", "agents")), false);
+  assert.equal(await pathExists(path.join(npmInstallRoot, "node_modules", "@openai", "codex")), false);
+  assert.equal(await pathExists(path.join(npmInstallRoot, "node_modules", "braintrust")), false);
   const npmShim = path.join(npmInstallRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper.cmd" : "codekeeper");
   const installedRoot = npmInstalledRoot;
   const shim = npmShim;
   const installedPackage = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8"));
   const installedReadme = await readFile(path.join(installedRoot, "README.md"), "utf8");
-  assert.deepEqual(installedPackage.bin, { codekeeper: "bin/codekeeper.mjs" });
+  assert.deepEqual(installedPackage.bin, expectedBins);
   assert.deepEqual(installedPackage.dependencies, packageManifest.dependencies);
   assert.deepEqual([...new Set(installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? [])], [PINNED_COMMIT]);
   const shimEnvironment = Object.fromEntries(Object.entries({
@@ -260,20 +269,6 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     "src",
     "tui.mjs"
   )).href);
-  const installedRuntimePaths = await import(pathToFileURL(path.join(
-    installedRoot,
-    "runtime",
-    "src",
-    "lib",
-    "runtime-paths.mjs"
-  )).href);
-  const installedAgentProfiles = await import(pathToFileURL(path.join(
-    installedRoot,
-    "runtime",
-    "src",
-    "lib",
-    "agent-profiles.mjs"
-  )).href);
   assert.match(help, /^Usage:\n  codekeeper init/m);
   assert.match(help, /^  codekeeper update$/m);
   assert.match(npmInstallHelp, /^Usage:\n  codekeeper init/m);
@@ -284,10 +279,6 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   assert.match(npxHelp, /^  codekeeper update$/m);
   assert.equal(version, "0.2.0\n");
   assert.equal(npmInstallVersion, "0.2.0\n");
-  assert.equal(
-    await realpath(installedRuntimePaths.CODEX_BIN),
-    await realpath(path.join(npmInstallRoot, "node_modules", "@openai", "codex", "bin", "codex.js"))
-  );
   assert.equal(typeof installedTui.createInkPrompter, "function");
   assert.equal(installedTui.shouldUseInkTui({
     interactive: true,
@@ -295,6 +286,74 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
     output: { isTTY: true },
     environment: { TERM: "xterm-256color" }
   }), true);
+
+  const tarballBytes = await readFile(tarball);
+  const expectedIntegrity = `sha512-${createHash("sha512").update(tarballBytes).digest("base64")}`;
+  const installedReleaseManifestBytes = await readFile(path.join(installedRoot, "release", "manifest.json"));
+  const expectedManifestSha256 = createHash("sha256").update(installedReleaseManifestBytes).digest("hex");
+  await writeFile(path.join(installedRoot, "release", "package-integrity.json"), `${JSON.stringify({
+    version: 1,
+    algorithm: "sha512",
+    integrity: expectedIntegrity
+  })}\n`);
+  const verifier = path.join(
+    npmInstallRoot,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "codekeeper-verify-package.cmd" : "codekeeper-verify-package"
+  );
+  const verifierOutput = invoke(verifier, [
+    "--root", installedRoot,
+    "--expected-name", "codekeeper",
+    "--expected-version", packageManifest.version,
+    "--expected-integrity", expectedIntegrity,
+    "--expected-manifest-sha256", expectedManifestSha256,
+    "--expected-source-commit", releaseManifest.source.commit
+  ]);
+  assert.match(verifierOutput, /^CODEKEEPER_PACKAGE_VERIFIED name=codekeeper version=0\.2\.0 source=[0-9a-f]{40}$/m);
+
+  const runtimeInstallParent = await temporaryDirectory(t, "codekeeper-runtime-install-");
+  const runtimeRoot = path.join(runtimeInstallParent, "runtime");
+  await cp(path.join(installedRoot, "runtime"), runtimeRoot, { recursive: true });
+  const runtimeLock = JSON.parse(await readFile(path.join(runtimeRoot, "npm-shrinkwrap.json"), "utf8"));
+  for (const [index, [packagePath, metadata]] of Object.entries(runtimeLock.packages).entries()) {
+    if (!packagePath.startsWith("node_modules/")) continue;
+    assert.equal(typeof metadata.version, "string", `${packagePath} is runtime-version-locked`);
+    assert.match(metadata.integrity, /^sha512-/, `${packagePath} is runtime-integrity-locked`);
+    const installedDependencyPath = path.join(PACKAGE_ROOT, packagePath);
+    if (!(await pathExists(installedDependencyPath))) {
+      assert.equal(metadata.optional, true, `${packagePath} is absent only when optional for this platform`);
+      continue;
+    }
+    const installedManifestPath = path.join(installedDependencyPath, "package.json");
+    const installedManifest = JSON.parse(await readFile(installedManifestPath, "utf8"));
+    const hasLifecycleScript = ["preinstall", "install", "postinstall", "prepare"].some(
+      (name) => typeof installedManifest.scripts?.[name] === "string"
+    );
+    let resolvedPath = installedDependencyPath;
+    if (hasLifecycleScript) {
+      resolvedPath = path.join(dependencyStaging, `runtime-${index}`);
+      await cp(installedDependencyPath, resolvedPath, { recursive: true });
+      delete installedManifest.scripts;
+      await writeFile(path.join(resolvedPath, "package.json"), JSON.stringify(installedManifest));
+    }
+    delete metadata.integrity;
+    metadata.resolved = `file:${resolvedPath}`;
+  }
+  await writeFile(path.join(runtimeRoot, "npm-shrinkwrap.json"), JSON.stringify(runtimeLock));
+  execFileSync("npm", [
+    "ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"
+  ], { cwd: runtimeRoot, ...npmOptions });
+  const installedRuntimePaths = await import(pathToFileURL(path.join(runtimeRoot, "src", "lib", "runtime-paths.mjs")).href);
+  const installedAgentProfiles = await import(pathToFileURL(path.join(runtimeRoot, "src", "lib", "agent-profiles.mjs")).href);
+  const installedBraintrust = await import(pathToFileURL(path.join(runtimeRoot, "integrations", "braintrust", "run-agent.mjs")).href);
+  assert.equal(
+    await realpath(installedRuntimePaths.CODEX_BIN),
+    await realpath(path.join(runtimeRoot, "node_modules", "@openai", "codex", "bin", "codex.js"))
+  );
+  assert.equal(typeof installedBraintrust.runBraintrustAgent, "function");
+  assert.ok(await pathExists(path.join(runtimeRoot, "node_modules", "@openai", "agents")));
+  assert.ok(await pathExists(path.join(runtimeRoot, "node_modules", "braintrust")));
   const packagedProfile = await installedAgentProfiles.loadTrustedAgentProfile({
     mode: "review",
     source: installedAgentProfiles.AGENT_PROFILE_SOURCES.package,
@@ -304,6 +363,6 @@ test("npm tarball contains only the declared runtime and its local entrypoint wo
   assert.equal(packagedProfile.metadata.path, "runtime/agents/pr-reviewer.md");
   assert.equal(
     packagedProfile.text,
-    await readFile(path.join(installedRoot, "runtime", "agents", "pr-reviewer.md"), "utf8")
+    await readFile(path.join(runtimeRoot, "agents", "pr-reviewer.md"), "utf8")
   );
 });
