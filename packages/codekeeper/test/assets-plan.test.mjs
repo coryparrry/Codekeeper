@@ -411,6 +411,38 @@ test("generated callers honor the rendered policy automation controls", async ()
   assert.match(contents[MODES.maintain.target], /cron: "5 4 \* \* 1"/);
 });
 
+test("maintenance scheduling can be disabled without removing manual dispatch or the policy cron", async () => {
+  const bundle = await loadVerifiedAssets();
+  const implicit = renderWorkflow(bundle.contents[MODES.maintain.asset], {
+    packageRelease: TEST_PACKAGE_RELEASE,
+    mode: "maintain",
+    preset: "openai"
+  });
+  const explicitlyScheduled = renderWorkflow(bundle.contents[MODES.maintain.asset], {
+    packageRelease: TEST_PACKAGE_RELEASE,
+    mode: "maintain",
+    preset: "openai",
+    maintenanceScheduled: true
+  });
+  assert.equal(explicitlyScheduled, implicit);
+
+  const files = renderInstallFiles(bundle, {
+    modes: ["maintain"],
+    preset: "openai",
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    maintenanceScheduled: false
+  });
+  const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
+  const policy = JSON.parse(contents[".github/codekeeper.json"]);
+  const caller = contents[MODES.maintain.target];
+  assert.equal(policy.version, 3);
+  assert.equal(policy.automation.maintenanceSchedule, "17 7 * * *");
+  assert.doesNotMatch(caller, /^  schedule:/m);
+  assert.match(caller, /^  workflow_dispatch:/m);
+});
+
 test("renderInstallFiles omits packaged profiles unless an explicit repository override is provided", async () => {
   const bundle = await loadVerifiedAssets();
   const files = renderInstallFiles(bundle, {

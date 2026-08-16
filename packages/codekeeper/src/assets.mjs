@@ -246,7 +246,14 @@ function renderPackageReceipt(template, packageRelease, label) {
   return rendered;
 }
 
-export function renderWorkflow(template, { packageRelease, mode, provider, preset, policy = null }) {
+export function renderWorkflow(template, {
+  packageRelease,
+  mode,
+  provider,
+  preset,
+  policy = null,
+  maintenanceScheduled = true
+}) {
   if (!MODE_IDS.includes(mode)) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   let rendered = renderPackageReceipt(template, packageRelease, mode)
     .replaceAll("codekeeper:ready", "ready");
@@ -279,8 +286,17 @@ export function renderWorkflow(template, { packageRelease, mode, provider, prese
         || count(rendered, 'cron: "17 7 * * *"') !== 1) {
         throw new InstallerError("Maintenance automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
       }
-      rendered = rendered.replace('cron: "17 7 * * *"', `cron: ${JSON.stringify(automation.maintenanceSchedule)}`);
+      if (maintenanceScheduled !== false) {
+        rendered = rendered.replace('cron: "17 7 * * *"', `cron: ${JSON.stringify(automation.maintenanceSchedule)}`);
+      }
     }
+  }
+  if (mode === "maintain" && maintenanceScheduled === false) {
+    const scheduleBlock = rendered.match(/^  schedule:\n    - cron: "[^"\n]*"\n/m)?.[0];
+    if (!scheduleBlock || count(rendered, scheduleBlock) !== 1 || !/^  workflow_dispatch:/m.test(rendered)) {
+      throw new InstallerError("Maintenance workflow must retain manual dispatch when scheduling is disabled.", { code: "WORKFLOW_RENDER_INVALID" });
+    }
+    rendered = rendered.replace(scheduleBlock, "");
   }
   assertLocalPackageWorkflow(rendered, mode);
   return rendered;
@@ -306,6 +322,7 @@ export function renderInstallFiles(bundle, {
   capabilities = {},
   models = {},
   tracing = true,
+  maintenanceScheduled = true,
   policySource = bundle.contents[`policies/${preset}.json`],
   profileSources = {},
   enforceBundledDefaults = true,
@@ -358,7 +375,8 @@ export function renderInstallFiles(bundle, {
           mode,
           provider: models[mode]?.provider,
           preset,
-          policy: renderedPolicy
+          policy: renderedPolicy,
+          maintenanceScheduled
         }),
         artifact
       };
