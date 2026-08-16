@@ -134,7 +134,7 @@ runs:
           const manifestBytes = await regular(join(process.env.TOOLING_ROOT, "release", "manifest.json"), "release manifest");
           const manifestSha256 = digest(manifestBytes);
           const manifest = JSON.parse(manifestBytes);
-          if (manifest?.package?.name !== "codekeeper" || manifest.package.version !== process.env.CODEKEEPER_PACKAGE_VERSION || manifest?.source?.repository !== "https://github.com/coryparry/Codekeeper" || !/^[0-9a-f]{40}$/.test(manifest?.source?.commit ?? "")) throw new Error("Codekeeper package manifest identity mismatch");
+          if (manifest?.package?.name !== "codekeeper" || manifest.package.version !== process.env.CODEKEEPER_PACKAGE_VERSION || manifest?.source?.repository !== "https://github.com/coryparrry/Codekeeper" || !/^[0-9a-f]{40}$/.test(manifest?.source?.commit ?? "")) throw new Error("Codekeeper package manifest identity mismatch");
           if (process.env.CODEKEEPER_PACKAGE_SOURCE === "artifact") {
             if (!/^[0-9a-f]{64}$/.test(process.env.CODEKEEPER_EXPECTED_MANIFEST_SHA256 ?? "") || manifestSha256 !== process.env.CODEKEEPER_EXPECTED_MANIFEST_SHA256) throw new Error("Codekeeper package manifest digest mismatch");
             if (!/^[0-9a-f]{40}$/.test(process.env.CODEKEEPER_EXPECTED_SOURCE_COMMIT ?? "") || manifest.source.commit !== process.env.CODEKEEPER_EXPECTED_SOURCE_COMMIT) throw new Error("Codekeeper package source commit mismatch");

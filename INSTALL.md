@@ -7,8 +7,8 @@ The separate [`codekeeper` installer](packages/codekeeper/README.md) is the pref
 ```bash
 PACKAGE_DESTINATION=/absolute/path/outside/source-checkout/codekeeper-dist
 mkdir -p "$PACKAGE_DESTINATION"
-cd packages/codekeeper
-PACK_REPORT="$(npm pack --json --pack-destination "$PACKAGE_DESTINATION")"
+npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
+PACK_REPORT="$(npm run --silent package:pack -- --destination "$PACKAGE_DESTINATION")"
 PACKAGE_FILE="$(node -e '
 const report = JSON.parse(process.argv[1]);
 const reports = Array.isArray(report)
@@ -36,6 +36,8 @@ process.stdout.write(entry.integrity);
 cd /absolute/path/to/adopter-repository
 npm exec --package "$PACKAGE_DESTINATION/$PACKAGE_FILE" -- codekeeper init --current-package --package-integrity "$PACKAGE_INTEGRITY"
 ```
+
+The pack command refuses any npm version other than the repository's exact `packageManager` pin. It also requires the release snapshot to be reachable from the single fetched remote `main` ref and requires embedded metadata to pin that branch's latest production checkpoint, so an unmerged branch or stale pin cannot produce a publication artifact. npm 12 no longer honors published shrinkwraps, so the tarball bundles the locked Ink/React installer graph and retains a separate nested `package-lock.json` for the private runtime installation.
 
 The installer opens one tabbed Settings screen and generates a setup or configuration PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Simple mode puts provider, model, and effort choices first. Advanced mode uses the same sections and exposes every editable policy field while keeping deterministic safety and release boundaries read-only. Review the short summary or return to Settings at the final mutation boundary. If the installer cannot be used, the numbered steps below remain the manual fallback.
 

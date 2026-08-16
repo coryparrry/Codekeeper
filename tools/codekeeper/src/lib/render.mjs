@@ -28,7 +28,7 @@ export function normalizeReleaseOwnedPinReview(result, files) {
     const changed = file.patch.split("\n").filter((line) => /^[+-](?![+-])/.test(line));
     const removed = changed.filter((line) => line.startsWith("-"));
     const added = changed.filter((line) => line.startsWith("+"));
-    if (removed.length !== 3 || added.length !== 3 || !removed.every((line) => line.includes("coryparry/Codekeeper"))) return result;
+    if (removed.length !== 3 || added.length !== 3 || !removed.every((line) => line.includes("coryparrry/Codekeeper"))) return result;
     const removedShas = new Set(removed.flatMap((line) => line.match(/\b[a-f0-9]{40}\b/g) ?? []));
     const addedShas = new Set(added.flatMap((line) => line.match(/\b[a-f0-9]{40}\b/g) ?? []));
     if (removedShas.size !== 1 || addedShas.size !== 1) return result;

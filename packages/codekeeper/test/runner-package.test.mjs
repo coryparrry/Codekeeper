@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { access, cp, readFile, realpath, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildCodekeeperPackageStage } from "../../../scripts/build-codekeeper-package.mjs";
+import { normalizeNpmPackReport, packCodekeeperPackage, verifyReleaseAuthority } from "../../../scripts/pack-codekeeper-package.mjs";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
 import { git, PACKAGE_ROOT, PINNED_COMMIT, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
@@ -27,35 +27,6 @@ async function pathExists(filePath) {
   } catch {
     return false;
   }
-}
-
-function normalizeNpmPackReport(output) {
-  const parsed = JSON.parse(output);
-  if (Array.isArray(parsed)) {
-    if (parsed.length !== 1)
-      throw new TypeError("npm pack returned an invalid number of reports");
-    return normalizeNpmPackReportValue(parsed[0]);
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError("npm pack returned an invalid report");
-  }
-  if (Array.isArray(parsed.files)) return parsed;
-  const reports = Object.values(parsed);
-  if (reports.length !== 1)
-    throw new TypeError("npm pack returned an invalid number of reports");
-  return normalizeNpmPackReportValue(reports[0]);
-}
-
-function normalizeNpmPackReportValue(report) {
-  if (
-    report === null ||
-    typeof report !== "object" ||
-    Array.isArray(report) ||
-    !Array.isArray(report.files)
-  ) {
-    throw new TypeError("npm pack returned an invalid report");
-  }
-  return report;
 }
 
 test("normalizes object- and single-element array-shaped npm pack reports", () => {
@@ -87,6 +58,85 @@ test("rejects invalid and multiple npm pack reports", () => {
   assert.throws(
     () => normalizeNpmPackReport(JSON.stringify([null])),
     /invalid report/,
+  );
+});
+
+test("pack destination rejects an ancestor symlink into the source repository", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("directory symlink creation requires platform-specific privileges");
+    return;
+  }
+  const fixture = await temporaryDirectory(t, "codekeeper-pack-symlink-");
+  const repositoryRoot = path.join(fixture, "repository");
+  await mkdir(path.join(repositoryRoot, "packages", "codekeeper", "assets"), { recursive: true });
+  await writeFile(
+    path.join(repositoryRoot, "package.json"),
+    JSON.stringify({ packageManager: "npm@12.0.2" }),
+  );
+  await writeFile(
+    path.join(repositoryRoot, "packages", "codekeeper", "package.json"),
+    JSON.stringify({ version: "0.2.0" }),
+  );
+  await writeFile(
+    path.join(repositoryRoot, "packages", "codekeeper", "assets", "metadata.json"),
+    JSON.stringify({ source: { commit: "0".repeat(40) } }),
+  );
+  const redirectedParent = path.join(fixture, "redirected-parent");
+  await symlink(repositoryRoot, redirectedParent);
+
+  await assert.rejects(
+    packCodekeeperPackage({
+      repositoryRoot,
+      destination: path.join(redirectedParent, "release"),
+      sourceCommit: "0".repeat(40),
+      requireClean: false,
+    }),
+    /pack destination must be outside the source repository/,
+  );
+  assert.equal(await pathExists(path.join(repositoryRoot, "release")), false);
+});
+
+test("release authority accepts a merged snapshot and rejects an unmerged branch", async (t) => {
+  const repositoryRoot = await temporaryDirectory(t, "codekeeper-pack-authority-");
+  git(repositoryRoot, ["init", "--initial-branch=main"]);
+  git(repositoryRoot, ["config", "user.name", "Codekeeper Test"]);
+  git(repositoryRoot, ["config", "user.email", "codekeeper-test@example.invalid"]);
+  await mkdir(path.join(repositoryRoot, "tools", "codekeeper"), { recursive: true });
+  await writeFile(path.join(repositoryRoot, "tools", "codekeeper", "runtime.mjs"), "export {};\n");
+  git(repositoryRoot, ["add", "."]);
+  git(repositoryRoot, ["commit", "-m", "production checkpoint"]);
+  const productionCommit = git(repositoryRoot, ["rev-parse", "HEAD"]).trim();
+  await writeFile(path.join(repositoryRoot, "README.md"), "release snapshot\n");
+  git(repositoryRoot, ["add", "README.md"]);
+  git(repositoryRoot, ["commit", "-m", "release pin"]);
+  const releaseCommit = git(repositoryRoot, ["rev-parse", "HEAD"]).trim();
+  git(repositoryRoot, ["remote", "add", "origin", "."]);
+  git(repositoryRoot, ["fetch", "origin", "main:refs/remotes/origin/main"]);
+
+  assert.deepEqual(
+    verifyReleaseAuthority(repositoryRoot, {
+      releaseCommit,
+      pinnedSourceCommit: productionCommit,
+    }),
+    {
+      defaultBranchRef: "refs/remotes/origin/main",
+      latestProductionCheckpoint: productionCommit,
+      releaseCommit,
+    },
+  );
+
+  git(repositoryRoot, ["checkout", "-b", "feature"]);
+  await writeFile(path.join(repositoryRoot, "feature.txt"), "unmerged\n");
+  git(repositoryRoot, ["add", "feature.txt"]);
+  git(repositoryRoot, ["commit", "-m", "unmerged feature"]);
+  const featureCommit = git(repositoryRoot, ["rev-parse", "HEAD"]).trim();
+  assert.throws(
+    () =>
+      verifyReleaseAuthority(repositoryRoot, {
+        releaseCommit: featureCommit,
+        pinnedSourceCommit: productionCommit,
+      }),
+    /must be reachable from the fetched default branch/,
   );
 });
 
@@ -211,13 +261,19 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   const packDestination = await temporaryDirectory(t, "codekeeper-pack-");
   const npmInstallRoot = await temporaryDirectory(t, "codekeeper-npm-install-");
   const dependencyStaging = await temporaryDirectory(t, "codekeeper-dependency-staging-");
-  const packageStageParent = await temporaryDirectory(t, "codekeeper-package-runner-stage-");
-  const packageStage = path.join(packageStageParent, "package");
-  const { manifest: releaseManifest } = await buildCodekeeperPackageStage({
+  const packEnvironment = {
+    ...process.env,
+    npm_config_cache: npmCache,
+    npm_config_update_notifier: "false",
+    npm_config_audit: "false",
+    npm_config_fund: "false"
+  };
+  const { manifest: releaseManifest, report: packed } = await packCodekeeperPackage({
     repositoryRoot: REPOSITORY_ROOT,
-    destination: packageStage,
+    destination: packDestination,
     sourceCommit: git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim(),
-    requireClean: false
+    requireClean: false,
+    environment: packEnvironment
   });
   const npmEnvironment = {
     ...process.env,
@@ -228,67 +284,38 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     npm_config_fund: "false"
   };
   const npmOptions = { encoding: "utf8", env: npmEnvironment, timeout: 60_000 };
-  const output = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-    cwd: packageStage,
-    ...npmOptions
-  });
-  const report = normalizeNpmPackReport(output);
-  const files = report.files.map((file) => file.path).sort();
+  const files = packed.files.map((file) => file.path).filter((file) => !file.startsWith("node_modules/")).sort();
   const expected = [...releaseManifest.files.map((file) => file.path), "release/manifest.json"].sort();
-  assert.equal(report.name, "codekeeper");
-  assert.equal(report.version, "0.2.0");
+  assert.equal(packed.name, "codekeeper");
+  assert.equal(packed.version, "0.2.0");
   assert.deepEqual(files, expected);
-  assert.ok(files.every((file) => !file.includes("/test/") && !file.includes("package-lock")));
+  assert.ok(files.every((file) => !file.includes("/test/") && file !== "package-lock.json"));
+  assert.ok(["ink", "react"].every((dependency) => packed.bundled.includes(dependency)));
+  assert.ok(packed.files.some((file) => file.path === "node_modules/ink/package.json"));
+  assert.ok(packed.files.some((file) => file.path === "node_modules/react/package.json"));
 
-  const packed = normalizeNpmPackReport(execFileSync("npm", [
-    "pack", "--json", "--ignore-scripts", "--pack-destination", packDestination
-  ], { cwd: packageStage, ...npmOptions }));
-  assert.deepEqual(packed.files.map((file) => file.path).sort(), expected);
   const tarball = path.join(packDestination, packed.filename);
-  const shrinkwrap = JSON.parse(await readFile(path.join(packageStage, "npm-shrinkwrap.json"), "utf8"));
-  const packageManifest = JSON.parse(await readFile(path.join(packageStage, "package.json"), "utf8"));
-  assert.deepEqual(shrinkwrap.packages[""].dependencies, packageManifest.dependencies);
-  const installerLock = structuredClone(shrinkwrap);
-  for (const [index, [packagePath, metadata]] of Object.entries(installerLock.packages).entries()) {
+  const packageLock = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package-lock.json"), "utf8"));
+  const packageManifest = JSON.parse(await readFile(path.join(PACKAGE_ROOT, "package.json"), "utf8"));
+  assert.deepEqual(packageLock.packages[""].dependencies, packageManifest.dependencies);
+  assert.deepEqual(packageLock.packages[""].bundleDependencies, packageManifest.bundleDependencies);
+  for (const [packagePath, metadata] of Object.entries(packageLock.packages)) {
     if (!packagePath.startsWith("node_modules/")) continue;
     assert.equal(typeof metadata.version, "string", `${packagePath} is version-locked`);
     assert.match(metadata.integrity, /^sha512-/, `${packagePath} is integrity-locked`);
     const installedDependencyPath = path.join(PACKAGE_ROOT, packagePath);
     if (!(await pathExists(installedDependencyPath))) {
       assert.equal(metadata.optional, true, `${packagePath} is absent only when optional for this platform`);
-      continue;
     }
-    const installedManifestPath = path.join(installedDependencyPath, "package.json");
-    const installedManifest = JSON.parse(await readFile(installedManifestPath, "utf8"));
-    const hasLifecycleScript = ["preinstall", "install", "postinstall", "prepare"].some(
-      (name) => typeof installedManifest.scripts?.[name] === "string"
-    );
-    let resolvedPath = installedDependencyPath;
-    if (hasLifecycleScript) {
-      resolvedPath = path.join(dependencyStaging, String(index));
-      await cp(installedDependencyPath, resolvedPath, { recursive: true });
-      delete installedManifest.scripts;
-      await writeFile(path.join(resolvedPath, "package.json"), JSON.stringify(installedManifest));
-    }
-    delete metadata.integrity;
-    metadata.resolved = `file:${resolvedPath}`;
   }
   const installerManifest = {
     name: "codekeeper-install-test",
     private: true,
     dependencies: { codekeeper: `file:${tarball}` }
   };
-  installerLock.packages[""] = installerManifest;
-  installerLock.packages["node_modules/codekeeper"] = {
-    version: packageManifest.version,
-    resolved: `file:${tarball}`,
-    bin: packageManifest.bin,
-    dependencies: packageManifest.dependencies
-  };
   await writeFile(path.join(npmInstallRoot, "package.json"), JSON.stringify(installerManifest));
-  await writeFile(path.join(npmInstallRoot, "package-lock.json"), JSON.stringify(installerLock));
   execFileSync("npm", [
-    "install", "--offline", "--ignore-scripts", "--prefix", npmInstallRoot
+    "install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--allow-file=root", "--prefix", npmInstallRoot
   ], { cwd: npmInstallRoot, ...npmOptions });
   const npmInstalledRoot = path.join(npmInstallRoot, "node_modules", "codekeeper");
   const npmInstalledPackage = JSON.parse(await readFile(path.join(npmInstalledRoot, "package.json"), "utf8"));
@@ -385,7 +412,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   const runtimeInstallParent = await temporaryDirectory(t, "codekeeper-runtime-install-");
   const runtimeRoot = path.join(runtimeInstallParent, "runtime");
   await cp(path.join(installedRoot, "runtime"), runtimeRoot, { recursive: true });
-  const runtimeLock = JSON.parse(await readFile(path.join(runtimeRoot, "npm-shrinkwrap.json"), "utf8"));
+  const runtimeLock = JSON.parse(await readFile(path.join(runtimeRoot, "package-lock.json"), "utf8"));
   for (const [index, [packagePath, metadata]] of Object.entries(runtimeLock.packages).entries()) {
     if (!packagePath.startsWith("node_modules/")) continue;
     assert.equal(typeof metadata.version, "string", `${packagePath} is runtime-version-locked`);
@@ -410,7 +437,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     delete metadata.integrity;
     metadata.resolved = `file:${resolvedPath}`;
   }
-  await writeFile(path.join(runtimeRoot, "npm-shrinkwrap.json"), JSON.stringify(runtimeLock));
+  await writeFile(path.join(runtimeRoot, "package-lock.json"), JSON.stringify(runtimeLock));
   execFileSync("npm", [
     "ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"
   ], { cwd: runtimeRoot, ...npmOptions });

@@ -446,7 +446,7 @@ test("package acquisition validates tarball SRI before deriving package provenan
       source.indexOf("printf 'package_manifest_sha256="),
   );
   assert.match(source, /package-integrity\.json/);
-  assert.match(source, /https:\/\/github\.com\/coryparry\/Codekeeper/);
+  assert.match(source, /https:\/\/github\.com\/coryparrry\/Codekeeper/);
   assert.match(
     source,
     /const receipt = \{ version: 1, algorithm: "sha512", integrity: process\.env\.CODEKEEPER_PACKAGE_INTEGRITY \}/,

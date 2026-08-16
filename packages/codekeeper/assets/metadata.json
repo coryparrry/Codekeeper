@@ -1,7 +1,7 @@
 {
   "version": 1,
   "source": {
-    "repository": "coryparry/Codekeeper",
+    "repository": "coryparrry/Codekeeper",
     "commit": "0cceb845ed7212d7f4d69fe7863d45f37647864d"
   },
   "assets": {
@@ -66,8 +66,8 @@
       "sourcePath": "examples/workflows/codekeeper-fix.yml.example"
     },
     "runtime-actions/acquire-package/action.yml": {
-      "sha256": "ead95bcde95242974de6fc9dfcc4583f7f9451311b55c6d4b1b5ee2e690a7307",
-      "bytes": 10443,
+      "sha256": "1818e5810f202a8ebf9933eec52564033d3e71904f81a34f2faefd1c1009ca3f",
+      "bytes": 10444,
       "sourcePath": ".github/codekeeper/actions/acquire-package/action.yml",
       "packagePath": "release/actions/acquire-package/action.yml"
     },

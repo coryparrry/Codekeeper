@@ -15,8 +15,11 @@
     "runtime/",
     "src/",
     "LICENSE",
-    "README.md",
-    "npm-shrinkwrap.json"
+    "README.md"
+  ],
+  "bundleDependencies": [
+    "ink",
+    "react"
   ],
   "engines": {
     "node": ">=22"
