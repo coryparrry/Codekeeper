@@ -1,8 +1,26 @@
 # Install in a GitHub.com repository
 
-## Guided installer status
+## Published installer
 
-The separate [`codekeeper` installer](packages/codekeeper/README.md) is the preferred guided path. It opens a keyboard-driven terminal UI on Node.js 22+, but remains private and unpublished during acceptance. Do not assume `npx codekeeper init` resolves to this project from the public npm registry yet. Build a local tarball from this checkout and invoke that exact file instead:
+Codekeeper `0.2.0` is published on npm. From a clean, current checkout of the adopter repository's default branch, run:
+
+```bash
+npx --yes codekeeper@0.2.0 init
+```
+
+The installer requires Node.js 22 or newer, Git, and an authenticated current GitHub CLI. It opens a keyboard-driven terminal UI, resolves the exact published package receipt and SHA-512 integrity, and generates a setup pull request from verified release assets. No source checkout, local package build, or source-repository token is required. To update an existing installation, run `npx --yes codekeeper@0.2.0 update` from a clean, current checkout of the default branch.
+
+The installer opens one tabbed Settings screen. Simple mode puts provider, model, and effort choices first. Advanced mode uses the same sections and exposes every editable policy field while keeping deterministic safety and release boundaries read-only. Review the short summary or return to Settings at the final mutation boundary.
+
+If you are unsure which options to choose, accept the recommended starter setup: pull-request review plus repository maintenance, the `openai` preset, the repository name as the comment display name, and your authenticated GitHub login as the owner-command user. Issue triage and the separately gated fix path can be added later through a reviewed policy/workflow change.
+
+Before the installer's final confirmation, choose the newly downloaded GitHub App `.pem` file in its metadata-only picker. Do not open or paste the PEM contents. The picker ignores symlinks and does not read the file; after confirmation, the installer opens it read-only and passes its descriptor directly to GitHub CLI. It does not expose the path or key through terminal output, argv, environment variables, logs, generated files, or snapshots.
+
+After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller retains its schedule, but its runtime jobs skip package acquisition and analysis while disabled.
+
+## Maintainer/recovery: reproduce a package from source
+
+Adopters should use the published installer above. This procedure is for maintainers who need to test an exact local release tarball or recover an installation when the registry is unavailable. Run it from this source checkout and pass the resulting receipt to the installer from a clean adopter checkout:
 
 ```bash
 PACKAGE_DESTINATION=/absolute/path/outside/source-checkout/codekeeper-dist
@@ -37,17 +55,13 @@ cd /absolute/path/to/adopter-repository
 npm exec --package "$PACKAGE_DESTINATION/$PACKAGE_FILE" -- codekeeper init --current-package --package-integrity "$PACKAGE_INTEGRITY"
 ```
 
-The pack command refuses any npm version other than the repository's exact `packageManager` pin. It also requires the release snapshot to be reachable from the single fetched remote `main` ref and requires embedded metadata to pin that branch's latest production checkpoint, so an unmerged branch or stale pin cannot produce a publication artifact. npm 12 no longer honors published shrinkwraps, so the tarball bundles the locked Ink/React installer graph and retains a separate nested `package-lock.json` for the private runtime installation.
+The pack command refuses any npm version other than the repository's exact `packageManager` pin. It also requires the release snapshot to be reachable from the fetched default-branch ref and requires embedded metadata to pin that branch's latest production checkpoint. The tarball bundles the locked Ink/React installer graph and retains a separate nested `package-lock.json` for the runtime installation.
 
-The installer opens one tabbed Settings screen and generates a setup or configuration PR from assets pinned to the proven source checkpoint; it does not deliver the private runtime through npm. Simple mode puts provider, model, and effort choices first. Advanced mode uses the same sections and exposes every editable policy field while keeping deterministic safety and release boundaries read-only. Review the short summary or return to Settings at the final mutation boundary. If the installer cannot be used, the numbered steps below remain the manual fallback.
+## Maintainer/recovery: manual repository payload installation
 
-If you are unsure which options to choose, accept the recommended starter setup: pull-request review plus repository maintenance, the `openai` preset, the repository name as the comment display name, and your authenticated GitHub login as the owner-command user. Issue triage and the separately gated fix path can be added later through a reviewed policy/workflow change.
+The numbered steps below are retained for source recovery and audits. They are not the normal adopter installation flow: use `npx --yes codekeeper@0.2.0 init` above to generate the same release-owned payloads from npm.
 
-Before the installer's final confirmation, choose the newly downloaded GitHub App `.pem` file in its metadata-only picker. Do not open or paste the PEM contents. The picker ignores symlinks and does not read the file; after confirmation, the installer opens it read-only and passes its descriptor directly to GitHub CLI. It does not expose the path or key through terminal output, argv, environment variables, logs, generated files, or snapshots.
-
-After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller retains its schedule, but its runtime jobs skip package acquisition and analysis while disabled.
-
-## 1. Add policy and caller workflows
+### 1. Add policy and caller workflows
 
 Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter repository's default branch. The pinned runtime supplies the default profile for every coordinator, so a new installation does not create `.github/codekeeper/agents/`. To opt into repository-specific judgment, copy only the profiles you intend to override into their exact paths:
 
@@ -60,16 +74,16 @@ Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter reposit
 
 The default content is under [`tools/codekeeper/agents`](tools/codekeeper/agents). The guided installer creates an override only after that profile is edited in Settings. Missing paths remain valid and track future packaged defaults.
 
-Always copy `codekeeper-assistant.yml.example`, then copy the role caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/` and remove `.example`. Copy the matching reusable workflows from this repository's `.github/workflows/codekeeper-<role>.yml` files to `.github/workflows/codekeeper-runtime-<role>.yml` in the adopter repository. Also copy [the exact-package acquisition action](.github/codekeeper/actions/acquire-package/action.yml) to the same path in the adopter repository. Replace both package placeholders in every caller:
+For source recovery or a manual audit, copy `codekeeper-assistant.yml.example`, then copy the role caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/` and remove `.example`. Copy the matching reusable workflows from this repository's `.github/workflows/codekeeper-<role>.yml` files to `.github/workflows/codekeeper-runtime-<role>.yml` in the adopter repository. Also copy [the exact-package acquisition action](.github/codekeeper/actions/acquire-package/action.yml) to the same path in the adopter repository. Replace both package placeholders in every caller:
 
 ```text
 PACKAGE_VERSION
 PACKAGE_INTEGRITY
 ```
 
-`PACKAGE_VERSION` must be one exact published Codekeeper version. `PACKAGE_INTEGRITY` must be that same npm release's exact `dist.integrity` SHA-512 value. The first runtime job uses the local action to download those exact package bytes, reject a registry receipt or tarball mismatch, and verify the package's source identity and closed file manifest. It shares the verified package as a one-day, run-scoped artifact. Every later isolated job downloads and independently reverifies that artifact before installing the runtime without lifecycle scripts. The caller owns triggers and credentials; it needs no PAT, App installation on the source repository, or caller-controlled source trust. The review caller uses `pull_request_target`, so GitHub evaluates its definition and secret mapping from the default branch; the caller only invokes local reusable workflows and never checks out or executes PR code. Do not copy this repository's `tools/` directory or agent-profile files unless you are intentionally creating one of the four documented overrides.
+For the published release, `PACKAGE_VERSION` is `0.2.0` and `PACKAGE_INTEGRITY` is that release's exact npm `dist.integrity` SHA-512 value. The first runtime job uses the local action to download those exact package bytes, reject a registry receipt or tarball mismatch, and verify the package's source identity and closed file manifest. It shares the verified package as a one-day, run-scoped artifact. Every later isolated job downloads and independently reverifies that artifact before installing the runtime without lifecycle scripts. The caller owns triggers and credentials; it needs no PAT, App installation on the source repository, or caller-controlled source trust. The review caller uses `pull_request_target`, so GitHub evaluates its definition and secret mapping from the default branch; the caller only invokes local reusable workflows and never checks out or executes PR code. Do not copy this repository's `tools/` directory or agent-profile files unless you are intentionally creating one of the four documented overrides.
 
-## 2. Tailor the policy before enabling
+### 2. Tailor the policy before enabling
 
 Update these values in the adopter's `.github/codekeeper.json`:
 
@@ -100,7 +114,7 @@ node tools/codekeeper/src/cli.mjs check-config --config .github/codekeeper.json
 
 That command is available from a local checkout of this source repository. The reusable workflows run the same validation before analysis.
 
-## 3. Create an adopter-owned GitHub App
+### 3. Create an adopter-owned GitHub App
 
 Create a GitHub App and install it only where automation is intended. No webhook URL is needed.
 
@@ -134,7 +148,7 @@ The App token is present only in publication jobs. Maintenance and fix callers m
 
 When updating an installation that used the retired alternate trace exporter, configure `OPENAI_TRACE_API_KEY` or disable tracing before merging the update. After merge, remove the now-ignored alternate-exporter variables and secrets.
 
-## 4. Prove the configuration before making the gate required
+### 4. Prove the configuration before making the gate required
 
 Commit the configuration, callers, and any intentional profile overrides to the default branch. Run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests, and does not require the maintenance App client ID or private-key mapping.
 
@@ -142,7 +156,7 @@ Then open a small same-repository pull request targeting the default branch. The
 
 Branch protection remains the source of truth. Keep normal build, test, approval, and deployment checks required independently of this workflow.
 
-## 5. Choose automatic triage and issue implementation
+### 5. Choose automatic triage and issue implementation
 
 The supplied issue caller opts in to `auto_triage: true`, so opened, reopened, and edited issues receive bounded automatic triage. Automatic triage can label, comment, and identify a duplicate candidate; it does not close an issue because `issues.closeExactDuplicates` remains false by default. Set `auto_triage: false` in the caller to skip those automatic events.
 
@@ -160,7 +174,7 @@ The same exact owner command can be added to an eligible open, non-draft, same-r
 
 A maintenance run is report-only when `dry_run=true` or `audit.repair.enabled=false`. When repository repair is on, a live manual or scheduled run may make one repair that passes the configured path, size, and validation limits.
 
-## Limits to keep in branch rules
+### Limits to keep in branch rules
 
 - GitHub Enterprise Server is unsupported.
 - Fork pull requests, drafts, disabled runs, and non-default-branch PR targets fail the review gate closed and need manual review.

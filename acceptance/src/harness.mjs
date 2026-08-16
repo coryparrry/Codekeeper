@@ -10,6 +10,8 @@ const SHA_PATTERN = "[0-9A-Fa-f]{40}";
 const REPOSITORY_PATTERN = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
 const SHA = new RegExp(`^${SHA_PATTERN}$`, "i");
 const REPOSITORY = new RegExp(`^${REPOSITORY_PATTERN}$`);
+const PACKAGE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const SHA512_INTEGRITY = /^sha512-([A-Za-z0-9+/]+={0,2})$/;
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
 const ISO_8601_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 const SAFE_PREFIX = /^(?!\/)(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)+$/;
@@ -83,6 +85,23 @@ function assert(condition, message) {
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function validatePackageRelease(value) {
+  const integrityMatch = SHA512_INTEGRITY.exec(value?.integrity ?? "");
+  const digest = integrityMatch ? Buffer.from(integrityMatch[1], "base64") : null;
+  assert(
+    value
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && value.name === "codekeeper"
+      && typeof value.version === "string"
+      && PACKAGE_VERSION.test(value.version)
+      && digest?.length === 64
+      && digest.toString("base64").replace(/=+$/, "") === integrityMatch[1].replace(/=+$/, ""),
+    "Caller workflow requires a valid exact Codekeeper package receipt"
+  );
+  return Object.freeze({ name: value.name, version: value.version, integrity: value.integrity });
 }
 
 function repairMarker(fingerprint) {
@@ -356,10 +375,6 @@ function acceptanceTagName(scenario, headSha) {
   return name;
 }
 
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function stripYamlComment(line) {
   let quote = null;
   let escaped = false;
@@ -467,16 +482,17 @@ function recordUse(entries, mapping, location) {
 }
 
 function unsupportedUse(mapping) {
-  if (mapping?.key === "uses") throw new AcceptanceError("Caller workflow contains a uses entry outside the supported bootstrap or reusable-workflow locations");
+  if (mapping?.key === "uses") throw new AcceptanceError("Caller workflow contains a uses entry outside the supported local reusable-workflow location");
 }
 
-export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
+export function parsePinnedWorkflowUses(yaml, workflow, packageRelease) {
   const reusableJob = expectedCallerJob(workflow);
-  assert(typeof sourceSha === "string" && SHA.test(sourceSha), "Caller workflow requires the supplied immutable source SHA");
+  const expectedPackage = validatePackageRelease(packageRelease);
 
   let jobsIndent = null;
   let currentJob = null;
   let steps = null;
+  let withInputs = null;
   let currentStepIndent = null;
   let sawJobs = false;
   const jobNames = new Set();
@@ -512,6 +528,7 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
       jobsIndent = null;
       currentJob = null;
       steps = null;
+      withInputs = null;
       currentStepIndent = null;
       if (line.indentation === 0 && mapping?.key === "jobs") {
         assert(false, "Caller workflow contains duplicate jobs mappings");
@@ -524,9 +541,10 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
       assert(mapping && !mapping.sequence && mapping.value.trim() === "", "Caller workflow contains an unsupported job mapping");
       assert(!jobNames.has(mapping.key), "Caller workflow contains duplicate job names");
       jobNames.add(mapping.key);
-      currentJob = { name: mapping.key, indentation: line.indentation, stepsSeen: false, needs: [], conditions: [] };
-      if (mapping.key === "bootstrap" || mapping.key === reusableJob) expectedJobs.set(mapping.key, currentJob);
+      currentJob = { name: mapping.key, indentation: line.indentation, stepsSeen: false, needs: [], conditions: [], inputs: new Map() };
+      if (mapping.key === reusableJob) expectedJobs.set(mapping.key, currentJob);
       steps = null;
+      withInputs = null;
       currentStepIndent = null;
       continue;
     }
@@ -534,22 +552,37 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
     assert(currentJob !== null, "Caller workflow contains an unsupported jobs structure");
     if (line.indentation === currentJob.indentation + 2) {
       assert(mapping && !mapping.sequence, "Caller workflow contains an unsupported job property");
-      if (mapping.key === "if" && (currentJob.name === "bootstrap" || currentJob.name === reusableJob)) {
+      if (mapping.key === "if" && currentJob.name === reusableJob) {
         currentJob.conditions.push(mapping.value.trim());
       }
-      if (mapping.key === "needs" && (currentJob.name === "bootstrap" || currentJob.name === reusableJob)) {
+      if (mapping.key === "needs" && currentJob.name === reusableJob) {
         currentJob.needs.push(mapping.value.trim());
       }
       if (mapping.key === "steps") {
         assert(mapping.value.trim() === "" && !currentJob.stepsSeen, "Caller workflow contains an unsupported steps mapping");
         currentJob.stepsSeen = true;
         steps = { indentation: line.indentation };
+        withInputs = null;
+        currentStepIndent = null;
+      } else if (mapping.key === "with") {
+        assert(mapping.value.trim() === "" && withInputs === null, "Caller workflow contains an unsupported with mapping");
+        withInputs = { indentation: line.indentation, job: currentJob };
+        steps = null;
         currentStepIndent = null;
       } else {
         recordUse(entries, mapping, { kind: "job", job: currentJob.name });
         steps = null;
+        withInputs = null;
         currentStepIndent = null;
       }
+      continue;
+    }
+
+    if (withInputs && line.indentation === withInputs.indentation + 2) {
+      assert(mapping && !mapping.sequence, "Caller workflow contains an unsupported reusable-workflow input");
+      unsupportedUse(mapping);
+      assert(!withInputs.job.inputs.has(mapping.key), "Caller workflow contains duplicate reusable-workflow inputs");
+      withInputs.job.inputs.set(mapping.key, mapping.value.trim());
       continue;
     }
 
@@ -573,43 +606,31 @@ export function parsePinnedWorkflowUses(yaml, workflow, sourceSha) {
   }
 
   assert(sawJobs, "Caller workflow is missing a supported jobs mapping");
-  assert(entries.length === 2, "Caller workflow must contain exactly one bootstrap action and one reusable-workflow uses entry");
-  const bootstrapEntries = entries.filter((entry) => entry.kind === "step" && entry.job === "bootstrap");
+  assert(entries.length === 1, "Caller workflow must contain exactly one local Codekeeper reusable-workflow uses entry");
   const reusableEntries = entries.filter((entry) => entry.kind === "job" && entry.job === reusableJob);
-  assert(bootstrapEntries.length === 1, "Caller workflow must contain exactly one direct Codekeeper bootstrap action step");
   assert(reusableEntries.length === 1, "Caller workflow must contain exactly one Codekeeper reusable-workflow call");
-  assert(!bootstrapEntries[0].step.hasIf, "Caller workflow must not gate the direct Codekeeper bootstrap action step");
-  const bootstrapJobDefinition = expectedJobs.get("bootstrap");
   const reusableJobDefinition = expectedJobs.get(reusableJob);
-  const simpleDependencyShape = bootstrapJobDefinition
-    && reusableJobDefinition
-    && bootstrapJobDefinition.needs.length === 0
-    && bootstrapJobDefinition.conditions.length === 0
-    && reusableJobDefinition.needs.length === 1
-    && reusableJobDefinition.needs[0] === "bootstrap"
+  const simpleDependencyShape = reusableJobDefinition
+    && reusableJobDefinition.needs.length === 0
     && reusableJobDefinition.conditions.length === 0;
   const routedReviewShape = workflow === "codekeeper-review.yml"
-    && bootstrapJobDefinition
     && reusableJobDefinition
-    && bootstrapJobDefinition.needs.length === 1
-    && bootstrapJobDefinition.needs[0] === "intent"
-    && bootstrapJobDefinition.conditions.length === 1
-    && bootstrapJobDefinition.conditions[0] === "needs.intent.outputs.route == 'true'"
     && reusableJobDefinition.needs.length === 1
-    && reusableJobDefinition.needs[0] === "[intent, bootstrap]"
+    && reusableJobDefinition.needs[0] === "intent"
     && reusableJobDefinition.conditions.length === 1
-    && reusableJobDefinition.conditions[0] === "needs.intent.outputs.route == 'true' && needs.bootstrap.result == 'success'";
+    && reusableJobDefinition.conditions[0] === "needs.intent.outputs.route == 'true'";
   assert(simpleDependencyShape || routedReviewShape, "Caller workflow must use the exact supported Codekeeper dependency and routing shape");
 
-  const bootstrap = new RegExp(`^(${REPOSITORY_PATTERN})/tools/codekeeper@(${SHA_PATTERN})$`).exec(bootstrapEntries[0].value);
-  const reusable = new RegExp(`^(${REPOSITORY_PATTERN})/\\.github/workflows/${escapeRegExp(workflow)}@(${SHA_PATTERN})$`).exec(reusableEntries[0].value);
-  assert(bootstrap, "Caller workflow must pin the direct Codekeeper bootstrap action to an immutable SHA with exact action path casing");
-  assert(reusable, "Caller workflow must pin the expected Codekeeper reusable workflow to an immutable SHA with exact workflow path casing");
+  const expectedRuntime = `./.github/workflows/codekeeper-runtime-${reusableJob === "triage" ? "issues" : reusableJob}.yml`;
   assert(
-    bootstrap[1].toLowerCase() === reusable[1].toLowerCase() &&
-      bootstrap[2].toLowerCase() === sourceSha.toLowerCase() &&
-      reusable[2].toLowerCase() === sourceSha.toLowerCase(),
-    "Caller workflow bootstrap and reusable workflow must use the same supplied source repository and immutable SHA"
+    reusableEntries[0].value === expectedRuntime,
+    "Caller workflow must invoke the expected local Codekeeper runtime workflow"
+  );
+  const packageVersion = yamlScalar(reusableJobDefinition.inputs.get("package_version") ?? "");
+  const packageIntegrity = yamlScalar(reusableJobDefinition.inputs.get("package_integrity") ?? "");
+  assert(
+    packageVersion === expectedPackage.version && packageIntegrity === expectedPackage.integrity,
+    "Caller workflow package receipt must exactly match the installed Codekeeper release"
   );
   return true;
 }
@@ -647,17 +668,38 @@ async function repositoryFileAtImmutableSnapshot({ repo, file, snapshot, expecte
   return bySha;
 }
 
-async function assertPinnedSource({ repo, scenario, sourceSha, revision, snapshot, expectedSource, gh }) {
+function releasePackageReceipt(source, sourceSha) {
+  const manifest = parseJson(source, "Codekeeper release manifest");
+  assert(
+    manifest?.version === 2
+      && typeof manifest?.source?.repository === "string"
+      && REPOSITORY.test(manifest.source.repository)
+      && typeof manifest?.source?.commit === "string"
+      && SHA.test(manifest.source.commit)
+      && manifest.source.commit.toLowerCase() === sourceSha.toLowerCase(),
+    "Codekeeper release manifest must prove the supplied immutable source SHA"
+  );
+  return validatePackageRelease(manifest.package);
+}
+
+async function assertPinnedRelease({ repo, scenario, sourceSha, revision, snapshot, expectedSource, gh }) {
   const workflow = SCENARIO_DETAILS[scenario].workflow;
   const file = `.github/workflows/${workflow}`;
-  const source = snapshot
-    ? await repositoryFileAtImmutableSnapshot({ repo, file, snapshot, expectedSource, gh })
-    : await repositoryFile({ repo, file, ref: revision, gh });
-  parsePinnedWorkflowUses(source, workflow, sourceSha);
+  const releaseFile = ".github/codekeeper-release.json";
+  const [source, releaseSource] = snapshot
+    ? await Promise.all([
+      repositoryFileAtImmutableSnapshot({ repo, file, snapshot, expectedSource: expectedSource?.callerSource, gh }),
+      repositoryFileAtImmutableSnapshot({ repo, file: releaseFile, snapshot, expectedSource: expectedSource?.releaseSource, gh })
+    ])
+    : await Promise.all([
+      repositoryFile({ repo, file, ref: revision, gh }),
+      repositoryFile({ repo, file: releaseFile, ref: revision, gh })
+    ]);
+  parsePinnedWorkflowUses(source, workflow, releasePackageReceipt(releaseSource, sourceSha));
   if (scenario === "review-introduced-defect" || scenario === "issue-triage-related" || scenario === "issue-resolved-by-pr") {
     parseEventCallerRunName(source, scenario);
   }
-  return source;
+  return { callerSource: source, releaseSource };
 }
 
 async function listWorkflowRuns({ repo, workflow, event, gh }) {
@@ -798,11 +840,11 @@ async function acceptanceTagRef({ repo, tag, gh }) {
 
 async function prevalidateDispatchSnapshot({ repo, scenario, sourceSha, preflight, gh }) {
   const headSha = (await defaultBranchRevision({ repo, defaultBranch: preflight.defaultBranch, gh })).toLowerCase();
-  const callerSource = await assertPinnedSource({ repo, scenario, sourceSha, revision: headSha, gh });
+  const callerEvidence = await assertPinnedRelease({ repo, scenario, sourceSha, revision: headSha, gh });
   const fixPolicy = scenario === "controlled-fix"
     ? await configuredFixPolicy({ repo, revision: headSha, gh })
     : null;
-  return { headSha, callerSource, fixPolicy };
+  return { headSha, callerEvidence, fixPolicy };
 }
 
 async function createImmutableDispatchSnapshot({ repo, scenario, sourceSha, prevalidated, gh, onSnapshot = () => {} }) {
@@ -812,7 +854,7 @@ async function createImmutableDispatchSnapshot({ repo, scenario, sourceSha, prev
   const snapshot = { headSha, dispatchRef };
   onSnapshot(snapshot);
   assert(await acceptanceTagRef({ repo, tag: dispatchRef, gh }) === headSha, "Acceptance tag did not resolve to the recorded default-branch SHA");
-  await assertPinnedSource({ repo, scenario, sourceSha, snapshot, expectedSource: prevalidated.callerSource, gh });
+  await assertPinnedRelease({ repo, scenario, sourceSha, snapshot, expectedSource: prevalidated.callerEvidence, gh });
   return snapshot;
 }
 
@@ -1130,7 +1172,7 @@ async function verifyReview({ request, preflightResult, gh, sleep }) {
   assertSupportedReviewShape(initialPull, preflightResult.defaultBranch);
   const initialTitle = reviewRunTitle(request.pr, initialPull.headRefOid);
   const run = await waitForRun({ repo: request.repo, runId: request.runId, expectedEvent: SCENARIO_DETAILS["review-introduced-defect"].event, expectedWorkflowName: SCENARIO_DETAILS["review-introduced-defect"].workflowName, expectedDisplayTitle: initialTitle, gh, sleep, boundary: { dispatchedAt: request.runCreatedAfter } });
-  await assertPinnedSource({ repo: request.repo, scenario: "review-introduced-defect", sourceSha: request.sourceSha, revision: run.headSha, gh });
+  await assertPinnedRelease({ repo: request.repo, scenario: "review-introduced-defect", sourceSha: request.sourceSha, revision: run.headSha, gh });
   const pull = await pullRequest({ repo: request.repo, number: request.pr, gh });
   assertSupportedReviewShape(pull, preflightResult.defaultBranch);
   const matchesCurrentPull = run.displayTitle === reviewRunTitle(request.pr, pull.headRefOid)
@@ -1152,7 +1194,7 @@ async function verifyReview({ request, preflightResult, gh, sleep }) {
 async function verifyIssue({ request, gh, sleep }) {
   const assertions = [];
   const run = await waitForRun({ repo: request.repo, runId: request.runId, expectedEvent: SCENARIO_DETAILS["issue-triage-related"].event, expectedWorkflowName: SCENARIO_DETAILS["issue-triage-related"].workflowName, expectedDisplayTitle: issueRunTitle(request.issue), gh, sleep, boundary: { dispatchedAt: request.runCreatedAfter } });
-  await assertPinnedSource({ repo: request.repo, scenario: "issue-triage-related", sourceSha: request.sourceSha, revision: run.headSha, gh });
+  await assertPinnedRelease({ repo: request.repo, scenario: "issue-triage-related", sourceSha: request.sourceSha, revision: run.headSha, gh });
   const targetIssue = await issue({ repo: request.repo, number: request.issue, gh });
   const marker = await currentMarkerComment({ repo: request.repo, kind: "issue", number: request.issue, marker: ISSUE_TRIAGE_MARKER, app: request.app, expectedRunUrl: expectedRunUrl(request.repo, run.databaseId), gh });
   const labels = labelsFrom(targetIssue);
@@ -1177,7 +1219,7 @@ async function verifyResolvedIssue({ request, gh, sleep }) {
   const assertions = [];
   const detail = SCENARIO_DETAILS["issue-resolved-by-pr"];
   const run = await waitForRun({ repo: request.repo, runId: request.runId, expectedEvent: detail.event, expectedWorkflowName: detail.workflowName, expectedDisplayTitle: issueRunTitle(request.issue), gh, sleep, boundary: { dispatchedAt: request.runCreatedAfter } });
-  await assertPinnedSource({ repo: request.repo, scenario: "issue-resolved-by-pr", sourceSha: request.sourceSha, revision: run.headSha, gh });
+  await assertPinnedRelease({ repo: request.repo, scenario: "issue-resolved-by-pr", sourceSha: request.sourceSha, revision: run.headSha, gh });
   const [targetIssue, marker, references] = await Promise.all([
     issue({ repo: request.repo, number: request.issue, gh }),
     currentMarkerComment({ repo: request.repo, kind: "issue", number: request.issue, marker: ISSUE_TRIAGE_MARKER, app: request.app, expectedRunUrl: expectedRunUrl(request.repo, run.databaseId), gh }),
@@ -1252,7 +1294,7 @@ async function verifyRecoveredFix({ request, preflightResult, gh, now }) {
 
   const snapshot = { headSha: run.headSha.toLowerCase(), dispatchRef: request.dispatchRef };
   const [, policy] = await Promise.all([
-    assertPinnedSource({ repo: request.repo, scenario: "controlled-fix", sourceSha: request.sourceSha, snapshot, gh }),
+    assertPinnedRelease({ repo: request.repo, scenario: "controlled-fix", sourceSha: request.sourceSha, snapshot, gh }),
     configuredFixPolicy({ repo: request.repo, snapshot, gh })
   ]);
   const fingerprint = sha256(`issue|${request.repo}|${request.issue}`);
@@ -1293,7 +1335,7 @@ async function verifyRecoveredFix({ request, preflightResult, gh, now }) {
 
   expect(assertions, "explicit completed run has unique retained controlled-fix attribution", true);
   expect(assertions, `controlled fix retained exact immutable acceptance tag ${request.dispatchRef}`, true);
-  expect(assertions, "caller source pins and bounded fix policy match at the run SHA and retained tag", true);
+  expect(assertions, "caller package receipt, release provenance, and bounded fix policy match at the run SHA and retained tag", true);
   expect(assertions, "fix pull request is open, App-owned, unmerged, and has no auto-merge request", appOwnedOpenPull);
   expect(assertions, `explicit pull request is the single-marker canonical repair for issue #${request.issue}`, canonicalRepair);
   expect(assertions, "explicit pull request head is the single App-authored and App-committed publication within the selected run", isAppOwnedPublicationCommit({ commit, pull, app: request.app, run }));

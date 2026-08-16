@@ -4,15 +4,17 @@ Run these checks before publishing a source release or changing reusable workflo
 
 ```bash
 npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
-node tools/codekeeper/src/cli.mjs check-config
-cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
+npm ci --ignore-scripts --no-audit --no-fund && npm run check
+cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund
+node src/cli.mjs check-config --config ../../.github/codekeeper.json
+npm run check
 cd ../../packages/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
 cd ../../acceptance && npm run check
 ```
 
 The root `packageManager` and self-test workflow pin the same npm release. Package publication must use `npm run package:pack -- --destination /absolute/output/directory`; that command builds the verified stage, installs the exact installer lock, bundles the complete Ink/React graph required by npm 12, and rejects a mismatched npm executable before creating the tarball.
 
-The maintainer `npm run check` also verifies the complete source-release inventory and fails unless [`MANIFEST.sha256`](MANIFEST.sha256) exactly covers every tracked file except itself. It also regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. The tooling manifest's SHA-256 is deliberately embedded in the four source workflows: release changes to the production tooling must update the generated manifest and its four pinned workflow digests together. The installer suite covers the strict repository-artifact catalog, copied Markdown rendering and digest checks, generated assets, fixed agent-profile paths, preflight failures, secret boundaries, Git recovery, the terminal flow, and the packed entrypoint. The catalog tests must prove additions, prior-target renames, release-owned retirements, duplicate rejection, destination confinement, and optional activation without adding another reconciliation path. The acceptance suite remains offline and uses only its deterministic fixture.
+The maintainer `npm run check` also verifies the complete source-release inventory and fails unless [`MANIFEST.sha256`](MANIFEST.sha256) exactly covers every tracked file except itself. The runtime check regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. Reusable workflows acquire and reverify the exact package by version, SRI, manifest digest, and source commit; they deliberately do not embed a second tooling-manifest digest. The installer suite covers the strict repository-artifact catalog, copied Markdown rendering and digest checks, generated assets, fixed agent-profile paths, preflight failures, secret boundaries, Git recovery, the terminal flow, and the packed entrypoint. The catalog tests must prove additions, prior-target renames, release-owned retirements, duplicate rejection, destination confinement, and optional activation without adding another reconciliation path. The acceptance suite remains offline and uses only its deterministic fixture.
 
 ## Decision-quality evaluation
 

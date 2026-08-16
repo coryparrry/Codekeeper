@@ -581,7 +581,7 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
         run: |
-          node tools/codekeeper/src/cli.mjs publish-review \
+          node codekeeper-runtime/src/cli.mjs publish-review \
             --config "$CONFIG" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
@@ -614,8 +614,8 @@ jobs:
             exit 0
           }
           [[ "$IS_OWNER_COMMAND_REVIEW" == "true" ]] && {
-            echo "Owner review command is intentionally routed by the repository assistant."
-            exit 0
+            echo "Owner review commands must be routed by the repository assistant, not the required review gate."
+            exit 1
           }
           [[ "$ENABLED" == "true" ]] || { echo "Codekeeper is disabled; this required gate fails closed."; exit 1; }
           [[ "$IS_COMMAND_REVIEW" == "true" || ("$IS_REVIEW_FEEDBACK" == "true" && "$AUTO_REVIEW_FEEDBACK" == "true") || ("$IS_REVIEW_FEEDBACK" != "true" && "$AUTO_REVIEW" == "true") ]] || { echo "The matching automatic review policy is disabled; this required gate fails closed."; exit 1; }

@@ -128,6 +128,24 @@ function releaseReceipt(source, requestedVersion) {
   return Object.freeze({ version, integrity });
 }
 
+function normalizeNpmPackReport(report) {
+  if (Array.isArray(report)) {
+    if (report.length !== 1) failReleaseResolution("npm pack returned an invalid report.");
+    return report[0];
+  }
+  if (!report || typeof report !== "object") failReleaseResolution("npm pack returned an invalid report.");
+  const keys = Object.keys(report);
+  const directReportFields = ["name", "version", "integrity", "filename"];
+  if (directReportFields.every((field) => Object.hasOwn(report, field))) {
+    if (Object.values(report).some((value) => value && typeof value === "object" && !Array.isArray(value))) {
+      failReleaseResolution("npm pack returned an invalid report.");
+    }
+    return report;
+  }
+  if (keys.length !== 1) failReleaseResolution("npm pack returned an invalid report.");
+  return report[keys[0]];
+}
+
 export async function verifyDownloadedTarball({ downloadRoot, reportSource, receipt, fsImpl = DEFAULT_FILE_SYSTEM }) {
   let report;
   try {
@@ -135,8 +153,7 @@ export async function verifyDownloadedTarball({ downloadRoot, reportSource, rece
   } catch {
     failReleaseResolution("npm pack returned an invalid report.");
   }
-  if (!Array.isArray(report) || report.length !== 1) failReleaseResolution("npm pack returned an invalid report.");
-  const entry = report[0];
+  const entry = normalizeNpmPackReport(report);
   if (
     entry?.name !== PACKAGE_NAME
     || entry.version !== receipt.version

@@ -64,14 +64,19 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.check, /npm run test:unit/);
 });
 
-test("root private-tarball instructions use the exact npm pack receipt", async () => {
+test("published installer leads while recovery tarball preserves the exact npm pack receipt", async () => {
   const installGuide = await readFile(new URL("../../../INSTALL.md", import.meta.url), "utf8");
   const packageReadme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-  const rootTarballCommands = installGuide.match(/```bash\n(.*?)\n```/s)?.[1] ?? "";
+  const bashBlocks = [...installGuide.matchAll(/```bash\n(.*?)\n```/gs)].map(([, block]) => block);
+  assert.match(bashBlocks[0] ?? "", /^npx --yes codekeeper@0\.2\.0 init$/);
+  const rootTarballCommands = bashBlocks.find((block) => block.includes("PACK_REPORT=")) ?? "";
   assert.match(rootTarballCommands, /npm install --global npm@12\.0\.2/);
   assert.match(rootTarballCommands, /PACK_REPORT=.*npm run --silent package:pack -- --destination/);
   assert.match(rootTarballCommands, /npm exec --package .*-- codekeeper init --current-package --package-integrity "\$PACKAGE_INTEGRITY"/);
+  assert.match(packageReadme, /npx --yes codekeeper@0\.2\.0 init/);
+  assert.match(packageReadme, /npx --yes codekeeper@0\.2\.0 update/);
   assert.match(packageReadme, /codekeeper init --current-package --package-integrity 'sha512-\.\.\.'/);
+  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /unpublished|private acceptance|Do not assume npx/i);
   const extractionScripts = [...rootTarballCommands.matchAll(/node -e '\n([\s\S]*?)\n' "\$PACK_REPORT"/g)].map(([, script]) => script);
   assert.equal(extractionScripts.length, 2);
   const keyedReport = {
@@ -113,6 +118,11 @@ test("release packaging uses npm 12 with bundled installer dependencies and a lo
   assert.equal(packageManifest.bin["codekeeper-verify-package"], "bin/verify-package.mjs");
   assert.deepEqual(packageManifest.dependencies, { ink: "7.1.1", react: "19.2.8" });
   assert.deepEqual(packageManifest.bundleDependencies, ["ink", "react"]);
+  assert.equal(packageManifest.private, undefined);
+  assert.deepEqual(packageManifest.publishConfig, {
+    access: "public",
+    registry: "https://registry.npmjs.org/",
+  });
   await access(new URL("../package-lock.json", import.meta.url));
   await access(new URL("../runtime-package/package.json", import.meta.url));
   await access(new URL("../runtime-package/package-lock.json", import.meta.url));

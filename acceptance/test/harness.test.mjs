@@ -24,6 +24,11 @@ import { EvidenceError, prepareEvidenceDestination, validateEvidence, writeEvide
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const HEAD = "fedcba9876543210fedcba9876543210fedcba98";
+const PACKAGE_RELEASE = Object.freeze({
+  name: "codekeeper",
+  version: "0.2.0",
+  integrity: `sha512-${Buffer.alloc(64).toString("base64")}`
+});
 const DISPATCH_REF = `codekeeper-acceptance/dispatch-controlled-fix-${HEAD.slice(0, 12)}-9b635c89-b4c7-4316-b704-af6a81585ddb`;
 const REPO = "owner/codekeeper-acceptance-fixture";
 const APP = { login: "codekeeper-acceptance[bot]", graphqlLogin: "codekeeper-acceptance", id: "99" };
@@ -57,16 +62,11 @@ function metadata(repository = REPO) {
 }
 
 function callerSource(workflow, {
-  bootstrapRepository = "owner/codekeeper",
-  bootstrapPath = "tools/codekeeper",
-  bootstrapSha = SHA,
-  reusableRepository = "owner/codekeeper",
-  reusablePath = `.github/workflows/${workflow}`,
-  reusableSha = SHA,
-  bootstrapJobIf = null,
-  bootstrapStepIf = null,
-  reusableJobIf = null,
-  reusableNeeds = "bootstrap",
+  reusablePath = null,
+  packageVersion = PACKAGE_RELEASE.version,
+  packageIntegrity = PACKAGE_RELEASE.integrity,
+  reusableJobIf = workflow === "codekeeper-review.yml" ? "needs.intent.outputs.route == 'true'" : null,
+  reusableNeeds = workflow === "codekeeper-review.yml" ? "intent" : null,
   extraUses = ""
 } = {}) {
   const reusableJob = {
@@ -81,17 +81,26 @@ function callerSource(workflow, {
     : workflow === "codekeeper-issues.yml"
       ? 'run-name: "Codekeeper issue triage #${{ github.event.issue.number || github.event.client_payload.number }}"\n'
       : "";
-  const bootstrapJobGate = bootstrapJobIf === null ? "" : `    if: ${bootstrapJobIf}\n`;
-  const bootstrapStep = bootstrapStepIf === null
-    ? `      - uses: ${bootstrapRepository}/${bootstrapPath}@${bootstrapSha}\n`
-    : `      - if: ${bootstrapStepIf}\n        uses: ${bootstrapRepository}/${bootstrapPath}@${bootstrapSha}\n`;
   const reusableJobGate = reusableJobIf === null ? "" : `    if: ${reusableJobIf}\n`;
   const needs = reusableNeeds === null ? "" : `    needs: ${reusableNeeds}\n`;
-  return `${runName}jobs:\n  bootstrap:\n${bootstrapJobGate}    steps:\n${bootstrapStep}  ${reusableJob}:\n${reusableJobGate}${needs}    uses: ${reusableRepository}/${reusablePath}@${reusableSha}\n${extraUses}`;
+  const path = reusablePath ?? `./.github/workflows/codekeeper-runtime-${reusableJob === "triage" ? "issues" : reusableJob}.yml`;
+  return `${runName}jobs:\n  ${reusableJob}:\n${reusableJobGate}${needs}    uses: ${path}\n    with:\n      package_version: "${packageVersion}"\n      package_integrity: "${packageIntegrity}"\n${extraUses}`;
 }
 
-function workflowPin(workflow, options) {
+function encodedCallerSource(workflow, options) {
   return encoded(callerSource(workflow, options));
+}
+
+function releaseManifest({
+  sourceCommit = SHA,
+  packageRelease = PACKAGE_RELEASE
+} = {}) {
+  return JSON.stringify({
+    version: 2,
+    package: packageRelease,
+    source: { repository: "owner/codekeeper", commit: sourceCommit },
+    managedFiles: { ".github/workflows/codekeeper-maintain.yml": "a".repeat(64) }
+  });
 }
 
 async function freshEvidencePath(name = "evidence") {
@@ -141,7 +150,7 @@ function fakeClock(start = NOW) {
   };
 }
 
-function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = false, publicRepository = false, currentDefaultBranch = "main", markerHasPreviousPage = false, fixDraft = false, fixFork = false, fixRetarget = false, invalidFixHead = false, alteredFixHead = false, multipleFixCommits = false, foreignFixCommit = false, lateFixCommit = false, lateFixPull = false, lateMarker = false, missingPublicationParent = false, multiplePublicationParents = false, malformedPublicationParent = false, mismatchedPublicationParent = false, wrongRunActor = false, wrongAttributedActor = false, jobTotalCount = null, staleMarker = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, fullPullInventory = false, commandFailure = false, workflowSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, wrongReviewRunBaseBranch = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
+function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = false, publicRepository = false, currentDefaultBranch = "main", markerHasPreviousPage = false, fixDraft = false, fixFork = false, fixRetarget = false, invalidFixHead = false, alteredFixHead = false, multipleFixCommits = false, foreignFixCommit = false, lateFixCommit = false, lateFixPull = false, lateMarker = false, missingPublicationParent = false, multiplePublicationParents = false, malformedPublicationParent = false, mismatchedPublicationParent = false, wrongRunActor = false, wrongAttributedActor = false, jobTotalCount = null, staleMarker = false, concurrentDispatch = false, concurrentDispatchAfterCompletion = false, invalidFixPolicy = false, fullPullInventory = false, commandFailure = false, workflowSource = null, releaseManifestSource = null, wrongRepairMarker = false, foreignAppMarker = false, wrongDisplayTitle = false, wrongReviewGateName = false, reviewDraft = false, reviewRetarget = false, reviewHeadChanges = false, wrongReviewRunBaseBranch = false, baselineRun = false, baselineRerun = false, tagMismatch = false, tagCreationFailure = false, completionAfterRunView = 0, neverCompletes = false, onRunMetadata = null } = {}) {
   const calls = [];
   let workflowListCount = 0;
   let runViewCount = 0;
@@ -216,7 +225,8 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
       if (decodeURIComponent(encodedTag) !== tag) throw new Error(`Unexpected acceptance tag lookup: ${text}`);
       return response({ ref: `refs/tags/${tag}`, object: { type: "commit", sha: tagMismatch ? SHA : HEAD } });
     }
-    if (text.includes(`/contents/.github/workflows/${detail?.[0]}`)) return response(workflowSource ? encoded(workflowSource) : workflowPin(detail[0]));
+    if (text.includes(`/contents/.github/workflows/${detail?.[0]}`)) return response(workflowSource ? encoded(workflowSource) : encodedCallerSource(detail[0]));
+    if (text.includes("/contents/.github/codekeeper-release.json")) return response(encoded(releaseManifestSource ?? releaseManifest()));
     if (text.includes("/contents/.github/codekeeper.json")) {
       return response(encoded(JSON.stringify({
         repository: { defaultBranch: "main", automationBranchPrefix: "codekeeper/fix/" },
@@ -425,57 +435,41 @@ function fakeGh({ scenario, recoveryDispatchRef = null, duplicateRecoveredRun = 
   };
 }
 
-test("source pin parser requires exact matching bootstrap and reusable workflow pins", () => {
+test("package-pinned caller parser requires the local runtime workflow and exact receipt", () => {
   const workflow = "codekeeper-maintain.yml";
-  const bootstrap = `owner/codekeeper/tools/codekeeper@${SHA}`;
-  const reusable = `owner/codekeeper/.github/workflows/${workflow}@${SHA}`;
   const exact = callerSource(workflow);
   const quoted = exact
-    .replace(`- uses: ${bootstrap}`, `- uses: "${bootstrap}"`)
-    .replace(`uses: ${reusable}`, `uses: '${reusable}'`);
-  assert.equal(parsePinnedWorkflowUses(exact, workflow, SHA), true);
-  assert.equal(parsePinnedWorkflowUses(quoted, workflow, SHA), true);
-  assert.equal(parsePinnedWorkflowUses(`# - uses: ${bootstrap}\n# uses: ${reusable}\n${exact}`, workflow, SHA), true);
+    .replace("uses: ./.github/workflows/codekeeper-runtime-maintain.yml", "uses: './.github/workflows/codekeeper-runtime-maintain.yml'")
+    .replace(`package_version: "${PACKAGE_RELEASE.version}"`, `package_version: '${PACKAGE_RELEASE.version}'`);
+  assert.equal(parsePinnedWorkflowUses(exact, workflow, PACKAGE_RELEASE), true);
+  assert.equal(parsePinnedWorkflowUses(quoted, workflow, PACKAGE_RELEASE), true);
+  assert.equal(parsePinnedWorkflowUses(`# uses: owner/other@main\n${exact}`, workflow, PACKAGE_RELEASE), true);
   assert.equal(parsePinnedWorkflowUses(exact.replace(
-    `- uses: ${bootstrap}`,
-    `- name: Route review feedback\n        run: |\n          const fake = "uses: owner/other@main";\n          process.stdout.write(fake);\n      - uses: ${bootstrap}`
-  ), workflow, SHA), true);
-  assert.equal(parsePinnedWorkflowUses(callerSource("codekeeper-review.yml", {
-    bootstrapJobIf: "needs.intent.outputs.route == 'true'",
-    reusableJobIf: "needs.intent.outputs.route == 'true' && needs.bootstrap.result == 'success'",
-    reusableNeeds: "[intent, bootstrap]"
-  }).replace("  bootstrap:\n", "  bootstrap:\n    needs: intent\n"), "codekeeper-review.yml", SHA), true);
+    "uses: ./.github/workflows/codekeeper-runtime-maintain.yml",
+    "steps:\n      - name: Explain\n        run: |\n          const fake = \"uses: owner/other@main\";\n          process.stdout.write(fake);\n    uses: ./.github/workflows/codekeeper-runtime-maintain.yml"
+  ), workflow, PACKAGE_RELEASE), true);
+  assert.equal(parsePinnedWorkflowUses(callerSource("codekeeper-review.yml"), "codekeeper-review.yml", PACKAGE_RELEASE), true);
 
   for (const source of [
-    exact.replace(`- uses: ${bootstrap}`, `# - uses: ${bootstrap}`),
-    exact.replace(`uses: ${reusable}`, `# uses: ${reusable}`),
-    exact.replace(bootstrap, `owner/other/tools/codekeeper@${SHA}`),
-    exact.replace(bootstrap, `owner/codekeeper/tools/other@${SHA}`),
-    exact.replace(bootstrap, `owner/codekeeper/tools/codekeeper@${"f".repeat(40)}`),
-    exact.replace(reusable, `owner/codekeeper/.github/workflows/${workflow}@${"f".repeat(40)}`),
-    exact.replace(reusable, `owner/codekeeper/.github/workflows/codekeeper-fix.yml@${SHA}`),
-    exact.replace("/tools/codekeeper@", "/Tools/codekeeper@"),
-    exact.replace("/.github/workflows/", "/.github/Workflows/"),
-    exact.replace(bootstrap, "*bootstrap"),
-    exact.replace(bootstrap, `\${{ github.repository }}/tools/codekeeper@${SHA}`),
-    exact.replace(bootstrap, "owner/codekeeper/tools/codekeeper@main"),
-    callerSource(workflow, { bootstrapJobIf: "always()" }),
-    callerSource(workflow, { bootstrapStepIf: "always()" }),
+    exact.replace("uses: ./.github/workflows/codekeeper-runtime-maintain.yml", "# uses: ./.github/workflows/codekeeper-runtime-maintain.yml"),
+    callerSource(workflow, { reusablePath: "./.github/workflows/codekeeper-runtime-other.yml" }),
+    callerSource(workflow, { reusablePath: "./.github/Workflows/codekeeper-runtime-maintain.yml" }),
+    callerSource(workflow, { reusablePath: "owner/codekeeper/.github/workflows/codekeeper-maintain.yml@main" }),
+    callerSource(workflow, { packageVersion: "0.2.1" }),
+    callerSource(workflow, { packageIntegrity: `sha512-${Buffer.alloc(64, 1).toString("base64")}` }),
     callerSource(workflow, { reusableJobIf: "always()" }),
-    callerSource(workflow, { reusableNeeds: null }),
     callerSource(workflow, { reusableNeeds: "other" }),
-    callerSource(workflow, { reusableNeeds: '"bootstrap"' }),
+    callerSource(workflow, { reusableNeeds: '"intent"' }),
     callerSource(workflow, { reusableNeeds: "${{ github.job }}" }),
-    callerSource(workflow, { reusableNeeds: "[bootstrap]" }),
-    callerSource(workflow, { reusableNeeds: "*bootstrap" }),
-    `${exact}  extra:\n    uses: owner/codekeeper/.github/workflows/${workflow}@${SHA}`,
-    `${exact}  bootstrap:\n    uses: ${bootstrap}`,
-    exact.replace(`- uses: ${bootstrap}`, `- uses: ${bootstrap}\n        if: always()`),
-    exact.replace(`- uses: ${bootstrap}`, `- name: bootstrap\n        with:\n          uses: ${bootstrap}`),
-    `notes: |\n  - uses: ${bootstrap}\n  uses: ${reusable}`,
-    `jobs:\n  note: ${reusable}`
+    `${exact}  extra:\n    uses: ./.github/workflows/codekeeper-runtime-maintain.yml`,
+    exact.replace(`      package_version: "${PACKAGE_RELEASE.version}"`, `      uses: ./.github/workflows/codekeeper-runtime-maintain.yml\n      package_version: "${PACKAGE_RELEASE.version}"`),
+    exact.replace(`package_version: "${PACKAGE_RELEASE.version}"`, "package_version: ${{ vars.CODEKEEPER_VERSION }}"),
+    exact.replace(`package_integrity: "${PACKAGE_RELEASE.integrity}"`, "package_integrity: invalid"),
+    exact.replace("    with:\n", ""),
+    `notes: |\n  uses: ./.github/workflows/codekeeper-runtime-maintain.yml`,
+    "jobs:\n  note: uses: ./.github/workflows/codekeeper-runtime-maintain.yml"
   ]) {
-    assert.throws(() => parsePinnedWorkflowUses(source, "codekeeper-maintain.yml", SHA), /Caller workflow/);
+    assert.throws(() => parsePinnedWorkflowUses(source, "codekeeper-maintain.yml", PACKAGE_RELEASE), /Caller workflow/);
   }
 });
 
@@ -536,8 +530,8 @@ test("scenario gates reject acknowledgements, non-SHAs, missing App identity, an
   await assert.rejects(() => runScenario({ scenario: "maintenance-dry-run", options: oversizedRepository, gh: never }), /bounded repository limits/);
 });
 
-test("a malformed two-pin source caller fails before a scenario can dispatch", async () => {
-  const source = callerSource("codekeeper-maintain.yml", { reusableSha: "main" });
+test("a malformed package-pinned caller fails before a scenario can dispatch", async () => {
+  const source = callerSource("codekeeper-maintain.yml", { packageIntegrity: "invalid" });
   const fake = fakeGh({ scenario: "maintenance-dry-run", workflowSource: source });
   const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: () => new Date(NOW), sleep: async () => {} });
   assert.equal(result.passed, false);
@@ -546,15 +540,26 @@ test("a malformed two-pin source caller fails before a scenario can dispatch", a
   assert.equal(fake.calls.some((args) => args[0] === "workflow"), false);
 });
 
-test("misplaced and gated caller pins fail before an acceptance tag can be created", async () => {
-  const bootstrap = `owner/codekeeper/tools/codekeeper@${SHA}`;
-  const reusable = `owner/codekeeper/.github/workflows/codekeeper-maintain.yml@${SHA}`;
+test("package receipt and release provenance mismatches fail before a scenario can dispatch", async () => {
+  const cases = [
+    { workflowSource: callerSource("codekeeper-maintain.yml", { packageVersion: "0.2.1" }) },
+    { releaseManifestSource: releaseManifest({ packageRelease: { ...PACKAGE_RELEASE, version: "0.2.1" } }) },
+    { releaseManifestSource: releaseManifest({ sourceCommit: HEAD }) }
+  ];
+  for (const options of cases) {
+    const fake = fakeGh({ scenario: "maintenance-dry-run", ...options });
+    const result = await runScenario({ scenario: "maintenance-dry-run", options: await scenarioOptions(), gh: fake.runner, now: () => new Date(NOW), sleep: async () => {} });
+    assert.equal(result.passed, false);
+    assert.equal(result.evidence.dispatchRef, null);
+    assert.equal(fake.calls.some((args) => args.includes(`repos/${REPO}/git/refs`)), false);
+    assert.equal(fake.calls.some((args) => args[0] === "workflow"), false);
+  }
+});
+
+test("misplaced and gated package caller references fail before an acceptance tag can be created", async () => {
   for (const source of [
-    `${callerSource("codekeeper-maintain.yml")}  observer:\n    steps:\n      - uses: ${bootstrap}`,
-    callerSource("codekeeper-maintain.yml", { bootstrapJobIf: "always()" }),
-    callerSource("codekeeper-maintain.yml", { bootstrapStepIf: "always()" }),
+    `${callerSource("codekeeper-maintain.yml")}  observer:\n    uses: ./.github/workflows/codekeeper-runtime-maintain.yml`,
     callerSource("codekeeper-maintain.yml", { reusableJobIf: "always()" }),
-    callerSource("codekeeper-maintain.yml", { reusableNeeds: null }),
     callerSource("codekeeper-maintain.yml", { reusableNeeds: "other" })
   ]) {
     const fake = fakeGh({ scenario: "maintenance-dry-run", workflowSource: source });
