@@ -106,7 +106,7 @@ function flattenPolicy(policy, value = policy, prefix = "", rows = [], parentKey
   return rows;
 }
 
-export function createEditableSettings({ policy, modes, enabled, profiles = {} }) {
+export function createEditableSettings({ policy, modes, enabled, profiles = {}, profileOverrides = [] }) {
   const editablePolicy = clone(policy);
   if (!modes.includes("issues")) {
     editablePolicy.review.createDeferredIssues = false;
@@ -116,7 +116,8 @@ export function createEditableSettings({ policy, modes, enabled, profiles = {} }
     policy: editablePolicy,
     modes: [...modes],
     enabled: enabled !== false,
-    profiles: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, profiles[id] ?? profiles[AGENT_PROFILES[id].target] ?? ""]))
+    profiles: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, profiles[id] ?? profiles[AGENT_PROFILES[id].target] ?? ""])),
+    profileOverrides: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, profileOverrides.includes(id)]))
   };
 }
 
@@ -148,7 +149,7 @@ export function settingsRows(settings, { advanced = false } = {}) {
     rows.push({
       id: `profile:${profile}`,
       section: "profiles",
-      label: AGENT_PROFILES[profile].purpose,
+      label: `${settings.profileOverrides?.[profile] ? "Repository override" : "Packaged default"} · ${AGENT_PROFILES[profile].purpose}`,
       kind: "profile",
       value: settings.profiles[profile],
       profile
@@ -176,6 +177,7 @@ export function setSetting(settings, row, value) {
       ? MODE_IDS.filter((candidate) => candidate === mode || next.modes.includes(candidate))
       : next.modes.filter((candidate) => candidate !== mode);
   } else if (row.id.startsWith("profile:")) {
+    if (value !== next.profiles[row.profile]) next.profileOverrides[row.profile] = true;
     next.profiles[row.profile] = value;
   } else {
     setPath(next.policy, row.keys ?? row.path, value);

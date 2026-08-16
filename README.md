@@ -14,7 +14,7 @@ It is not a hosted service, webhook receiver, or multi-tenant GitHub App. The re
 | `codekeeper-fix.yml` | Implement an issue that trusted triage marks ready when issue implementation is on. A configured owner can also request exactly `/codekeeper fix` on an existing pull request. |
 | `codekeeper-assistant.yml` | Always-installed, lightweight owner-request router for issue and pull-request comments; it routes only actions whose role caller is installed. |
 
-The guided installer performs this generation from release-pinned assets. Until it is published, use a locally built installer tarball for private acceptance or follow the [manual installation guide](INSTALL.md). The generated setup includes [`.github/codekeeper.json`](.github/codekeeper.json), the selected callers, and four adopter-owned Markdown profiles under `.github/codekeeper/agents/`. The manual path copies the matching non-executable templates from [`examples/workflows`](examples/workflows), replaces `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copies the policy and profiles into the adopter's default branch. Each caller pins the direct Codekeeper bootstrap action and its reusable workflow to the same immutable commit. The action stages only the production `tools/codekeeper` payload as a one-day artifact; every reusable job verifies that payload against the source-controlled manifest before using it. Adopters do not copy `tools/codekeeper` or source workflow files, and do not provide a source-repository token.
+The guided installer performs this generation from release-pinned assets. Until it is published, use a locally built installer tarball for private acceptance or follow the [manual installation guide](INSTALL.md). The generated setup includes [`.github/codekeeper.json`](.github/codekeeper.json) and the selected callers. Agent profiles come from the pinned runtime by default; an adopter file under `.github/codekeeper/agents/` exists only when a maintainer opts into a repository-specific override. The manual path copies the matching non-executable templates from [`examples/workflows`](examples/workflows), replaces `OWNER/REPOSITORY` and `FULL_COMMIT_SHA`, and copies the policy into the adopter's default branch. Each caller pins the direct Codekeeper bootstrap action and its reusable workflow to the same immutable commit. The action stages only the production `tools/codekeeper` payload as a one-day artifact; every reusable job verifies that payload against the source-controlled manifest before using it. Adopters do not copy `tools/codekeeper` or source workflow files, and do not provide a source-repository token.
 
 The root policy is a valid starter, not a safe default for every repository. Before enabling it, replace `repository.ownerLogins`, verify the default branch and automation prefix, and tailor repair, validation, and auto-merge paths. Each mode has its own `ai.agents.<mode>` provider, model, settings, and optional Codex workspace specialist. The runtime label names are intentionally namespaced and must remain defined exactly as supplied. See [configuration](docs/CONFIGURATION.md).
 
@@ -44,11 +44,11 @@ Configured owners can use these exact commands:
 
 Configured owners can also use the exact mention form `@<app-slug> review`, substituting the installed App slug and one supported action. The entire comment must match that form; free-form requests such as `@<app-slug> please review this` are ignored. The always-installed assistant supplies the router, and each model-backed command requires its matching selected role workflow. Non-owner content and model output cannot grant mutation authority.
 
-## Adopter-owned coordinator profiles
+## Packaged coordinator profiles and adopter overrides
 
-Each installation has four fixed Markdown files. They are normal reviewed repository files, so maintainers can change Codekeeper's evidence thresholds, prioritization, test expectations, duplicate criteria, no-action decisions, and reporting style without rebuilding the runtime.
+Each release has four fixed packaged Markdown defaults. Maintainers can optionally create normal reviewed repository overrides to change Codekeeper's evidence thresholds, prioritization, test expectations, duplicate criteria, no-action decisions, and reporting style without rebuilding the runtime.
 
-| Coordinator | Installed path | Bundled seed |
+| Coordinator | Optional override path | Packaged default |
 |---|---|---|
 | Pull request reviewer | `.github/codekeeper/agents/pr-reviewer.md` | [`tools/codekeeper/agents/pr-reviewer.md`](tools/codekeeper/agents/pr-reviewer.md) |
 | Issue triager | `.github/codekeeper/agents/issue-triager.md` | [`tools/codekeeper/agents/issue-triager.md`](tools/codekeeper/agents/issue-triager.md) |
@@ -57,7 +57,7 @@ Each installation has four fixed Markdown files. They are normal reviewed reposi
 
 Profiles tune priorities, work selection, implementation approach, review standards, and reporting. Capability switches control repair, issue implementation, issue closure, and merge actions. Profiles cannot enable a disabled capability, expand allowed paths, bypass protected paths or validation, change the target, expose credentials, or grant tools and network access.
 
-Every run reads the applicable profile from the trusted default-branch checkout, records its source commit and SHA-256, and freezes the exact bytes used by the workspace and coordinator. Publication fails if the trusted profile has changed since preparation. Content from a pull-request branch, issue, comment, diff, or repository file is evidence only and cannot replace the trusted profile. To change behavior, edit the relevant installed Markdown file in a normal pull request and merge it; later runs use the new default-branch version.
+Every run selects either the packaged default or the fixed override path from the trusted default-branch checkout, records explicit source provenance and SHA-256, and freezes the exact bytes used by the workspace and coordinator. Publication fails if that selected source has changed since preparation. Content from a pull-request branch, issue, comment, diff, or unrelated repository file is evidence only and cannot replace the selected profile. To change behavior, create or edit the relevant override in a normal pull request and merge it; later runs use the new default-branch version.
 
 ## Security model
 
@@ -65,7 +65,7 @@ Every run reads the applicable profile from the trusted default-branch checkout,
 - Every Codex workspace uses a fresh runner-owned home with repository project documents disabled. Repository `.agents/skills` and `.codex/skills` are quarantined for the model run and restored before patch capture.
 - The GitHub App write token exists only in publication; verification and sealing remain credential-free.
 - A direct action at the caller's pinned source revision uses GitHub's private-action access to stage the production runtime as a one-day artifact. Every reusable job verifies the source-pinned manifest, exact inventory, hashes, and absence of symlinks or hidden paths before it runs Codekeeper. Adopter policy is read only from its default branch.
-- The selected adopter-owned agent profile is also read only from the default branch, frozen into the run artifact, and checked for drift before publication.
+- The selected agent profile is loaded from either the verified package or its fixed adopter override path, frozen into the run artifact with source provenance, and checked for drift before publication.
 - The review caller is a default-branch `pull_request_target` definition: it only invokes the reusable workflow and never checks out or executes PR code.
 - Event fields, issue text, comments, repository files, and model output are treated as untrusted data. Frozen workflow context is embedded in the model prompt.
 - Candidate output is structurally validated, copied into a sealed artifact, and published only by a later App-token job. Repository code is never executed in that publishing job.

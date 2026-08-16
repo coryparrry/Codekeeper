@@ -335,8 +335,7 @@ export async function inspectInstallationFiles(root, {
     const target = AGENT_PROFILES[profile].target;
     const filePath = path.join(root, ...target.split("/"));
     const stat = await exists(fsImpl, filePath);
-    if (!stat && profile === "fixer") continue;
-    if (!stat) throw new InstallerError(`The existing installation is missing ${target}.`, { code: "EXISTING_INSTALLATION_INVALID" });
+    if (!stat) continue;
     contents[target] = await fsImpl.readFile(filePath, "utf8");
   }
   const modes = [];

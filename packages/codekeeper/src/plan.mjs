@@ -252,7 +252,7 @@ export function completionGuidance(modes, enabled = true, update = false) {
         ? "Codekeeper keeps running the current default-branch configuration. The change takes effect when the pull request merges; no separate validation run is required."
         : "Codekeeper is ready. It starts the selected workflows when the setup pull request merges; no separate dry run or controlled test is required."
       : "Codekeeper stays off after merge. Set CODEKEEPER_ENABLED=true when you want it to start; no separate validation run is required.",
-    profileGuidance: "Edit .github/codekeeper/agents/*.md to change priorities, work selection, implementation, review standards, and reporting. Capability switches control repair, issue implementation, issue closure, and merge actions.",
+    profileGuidance: "Packaged agent profiles are the default. Edit a profile in Settings to create an optional .github/codekeeper/agents/*.md repository override. Capability switches control repair, issue implementation, issue closure, and merge actions.",
     reviewGateWarning: !enabled && normalizedModes.includes("review")
       ? "Keep the Codekeeper review gate optional while Codekeeper is disabled."
       : null,
@@ -276,7 +276,8 @@ function editableSettingsForInstallation(snapshot, bundle) {
     policy: installation.policy,
     modes: installation.modes,
     enabled: snapshot.existingSettings.enabled,
-    profiles
+    profiles,
+    profileOverrides: AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
   });
   return { preset, settings };
 }
@@ -285,7 +286,7 @@ export function buildUpdateAnswers({ snapshot, bundle, output }) {
   const { preset, settings } = editableSettingsForInstallation(snapshot, bundle);
   output.write("Codekeeper release update\n\n");
   output.write("This advances the release-owned workflow and runtime pins, policy safety boundaries, and provider definitions.\n");
-  output.write("Your selected workflows, repository settings, model choices, automation choices, and edited agent profiles stay unchanged.\n\n");
+  output.write("Your selected workflows, repository settings, model choices, automation choices, and existing agent profile overrides stay unchanged.\n\n");
   return Object.freeze({
     ...settingsAnswers(settings),
     preset,
@@ -354,7 +355,7 @@ ${plan.enabled
       : "Codekeeper starts running the selected workflows when this pull request merges; no separate dry run or controlled test is required."
     : "Codekeeper stays off. Set `CODEKEEPER_ENABLED=true` when you want it to start; no separate validation run is required."}
 
-Edit \`.github/codekeeper/agents/*.md\` to tune priorities, work selection, implementation approach, review standards, and reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
+Packaged agent profiles are used by default. Edit a profile in Settings to create an optional \`.github/codekeeper/agents/*.md\` repository override for priorities, work selection, implementation approach, review standards, or reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
 
 The installer did not merge this pull request or run a workflow.
 `;
@@ -388,8 +389,16 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
   const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models, policySource });
   const tracing = answers.policy ? answers.policy.ai.tracing.enabled : answers.tracing !== false;
-  const profileSources = { ...bundle.contents, ...(installation?.contents ?? {}) };
-  for (const id of AGENT_PROFILE_IDS) profileSources[AGENT_PROFILES[id].target] = answers.profiles?.[id] ?? profileDefaults[id];
+  const desiredProfiles = answers.profiles ?? profileDefaults;
+  const profileSources = {};
+  for (const id of AGENT_PROFILE_IDS) {
+    const { asset, target } = AGENT_PROFILES[id];
+    const desired = desiredProfiles[id] ?? profileDefaults[id];
+    const existingOverride = installation
+      ? Object.hasOwn(installation.contents, target)
+      : false;
+    if (existingOverride || desired !== bundle.contents[asset]) profileSources[target] = desired;
+  }
   const files = renderInstallFiles(bundle, {
     modes,
     preset: answers.preset,
@@ -410,7 +419,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     policy: effectivePolicy,
     modes,
     enabled: answers.enabled !== false,
-    profiles: answers.profiles ?? profileDefaults
+    profiles: desiredProfiles
   }, validationBaselinePolicy);
   const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, effectivePolicy.automation.ownerRequests);
   const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;

@@ -46,6 +46,15 @@ test("standard and advanced settings expose behavior, arbitrary models, profiles
   assert.equal(row(settings, "policy:ai.agents.review.maxTurns", true).readOnly, true);
   assert.equal(row(settings, "policy:audit.repair.protectedPaths", true).readOnly, true);
   assert.equal(standard.filter((candidate) => candidate.kind === "profile").length, 4);
+  assert.match(row(settings, "profile:pr-reviewer").label, /^Packaged default · Optional .* override$/);
+  const withOverride = createEditableSettings({
+    policy: settings.policy,
+    modes: settings.modes,
+    enabled: settings.enabled,
+    profiles: settings.profiles,
+    profileOverrides: ["pr-reviewer"]
+  });
+  assert.match(row(withOverride, "profile:pr-reviewer").label, /^Repository override · Optional .* override$/);
   assert.equal(advanced.filter((candidate) => candidate.id.startsWith("release:")).every((candidate) => candidate.readOnly), true);
 });
 

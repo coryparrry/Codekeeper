@@ -20,9 +20,9 @@ Before the installer's final confirmation, choose the newly downloaded GitHub Ap
 
 After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller also retains its schedule, although only its pinned bootstrap can run while disabled.
 
-## 1. Add policy, profiles, and caller workflows
+## 1. Add policy and caller workflows
 
-Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter repository's default branch. Create `.github/codekeeper/agents/` and copy all four bundled seed profiles into these exact paths:
+Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter repository's default branch. The pinned runtime supplies the default profile for every coordinator, so a new installation does not create `.github/codekeeper/agents/`. To opt into repository-specific judgment, copy only the profiles you intend to override into their exact paths:
 
 ```text
 .github/codekeeper/agents/pr-reviewer.md
@@ -31,7 +31,7 @@ Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter reposit
 .github/codekeeper/agents/fixer.md
 ```
 
-The seed content is under [`tools/codekeeper/agents`](tools/codekeeper/agents). The guided installer always creates all four profiles, even when only some workflows are selected, so later mode additions start from the same reviewed checkpoint.
+The default content is under [`tools/codekeeper/agents`](tools/codekeeper/agents). The guided installer creates an override only after that profile is edited in Settings. Missing paths remain valid and track future packaged defaults.
 
 Always copy `codekeeper-assistant.yml.example`, then copy the role caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/`. Remove `.example` and replace both placeholders in every caller:
 
@@ -52,16 +52,16 @@ Update these values in the adopter's `.github/codekeeper.json`:
 - Auto-merge paths and eligible authors. The supplied policy permits only small Markdown changes to auto-merge.
 - Per-mode `ai.agents.<mode>` provider/model/settings and any optional Codex workspace. `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled` are all false by default.
 - `automation` controls for automatic PR review, review-feedback triage, issue triage, owner requests, and the maintenance schedule. `review.createDeferredIssues` is independently configurable.
-- The four Markdown profiles under `.github/codekeeper/agents/`. Use them to tune evidence thresholds, prioritization, test expectations, duplicate decisions, no-action behavior, and report wording.
+- Optional Markdown overrides under `.github/codekeeper/agents/`. Use them only to diverge from packaged evidence thresholds, prioritization, test expectations, duplicate decisions, no-action behavior, or report wording.
 
-| Coordinator | Adopter-owned profile path |
+| Coordinator | Optional adopter override path |
 |---|---|
 | Pull request reviewer | `.github/codekeeper/agents/pr-reviewer.md` |
 | Issue triager | `.github/codekeeper/agents/issue-triager.md` |
 | Repository auditor | `.github/codekeeper/agents/repository-auditor.md` |
 | Fixer | `.github/codekeeper/agents/fixer.md` |
 
-Profiles change judgment, not authorization. They cannot enable Codekeeper, permit maintenance or issue repair, weaken allowed/protected paths, bypass validation, authorize merge, change the run target, or grant credentials, tools, or network access. The workflow reads the selected profile from the trusted default branch, freezes its source commit and digest with the run, and refuses publication if that trusted file drifts before publication. A profile change on an unmerged pull-request branch cannot affect that pull request's run.
+Profiles change judgment, not authorization. They cannot enable Codekeeper, permit maintenance or issue repair, weaken allowed/protected paths, bypass validation, authorize merge, change the run target, or grant credentials, tools, or network access. The workflow loads the selected profile from the verified package or the trusted default-branch override, freezes its source provenance and digest with the run, and refuses publication if that selected source drifts before publication. A profile change on an unmerged pull-request branch cannot affect that pull request's run.
 
 The workflow rejects a policy whose `defaultBranch` differs from GitHub's repository default branch. Keep the supplied labels, plus explicit `review.managedLabels` and `issues.managedLabels`; runtime emission depends on those exact names.
 
@@ -111,7 +111,7 @@ The App token is present only in publication jobs. Maintenance and fix callers m
 
 ## 4. Prove the configuration before making the gate required
 
-Commit the configuration, profiles, and callers to the default branch. Run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests, and does not require the maintenance App client ID or private-key mapping.
+Commit the configuration, callers, and any intentional profile overrides to the default branch. Run the maintenance caller manually with `dry_run=true` first. It validates and seals an artifact but does not mutate labels, issues, branches, or pull requests, and does not require the maintenance App client ID or private-key mapping.
 
 Then open a small same-repository pull request targeting the default branch. The supplied caller sets `auto_review: true`; keep it true while proving the required review gate. Confirm that the caller's **Codekeeper review gate** completes and the App identity, labels, and `PR review summary` comment are correct before adding the gate to branch protection.
 

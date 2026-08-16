@@ -391,12 +391,7 @@ test("real Git integration creates one exact generated-only commit without broad
   assert.equal(git(root, ["branch", "--show-current"]).trim(), "codekeeper/setup");
   assert.equal(git(root, ["rev-parse", "HEAD^"]).trim(), head);
   assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), plan.files.map((file) => file.path).sort());
-  assert.deepEqual(plan.files.filter((file) => file.path.startsWith(".github/codekeeper/agents/")).map((file) => file.path), [
-    ".github/codekeeper/agents/pr-reviewer.md",
-    ".github/codekeeper/agents/repository-auditor.md",
-    ".github/codekeeper/agents/issue-triager.md",
-    ".github/codekeeper/agents/fixer.md"
-  ]);
+  assert.deepEqual(plan.files.filter((file) => file.path.startsWith(".github/codekeeper/agents/")), []);
   assert.equal(git(root, ["status", "--porcelain=v1"]), "");
   assert.deepEqual(calls.find((call) => call.command === "git" && call.args[0] === "add").args, [
     "add", "--", ...plan.files.map((file) => file.path)
@@ -431,12 +426,16 @@ test("real Git integration reruns can change configuration and remove a workflow
     await mkdir(path.dirname(path.join(root, file.path)), { recursive: true });
     await writeFile(path.join(root, file.path), file.contents);
   }
-  await writeFile(path.join(root, ".github/codekeeper/agents/pr-reviewer.md"), `${initial.files.find((file) => file.path.endsWith("pr-reviewer.md")).contents}\nTeam preference: report API regressions first.\n`);
+  const profileTarget = ".github/codekeeper/agents/pr-reviewer.md";
+  const profileContents = `${bundle.contents["agents/pr-reviewer.md"]}\nTeam preference: report API regressions first.\n`;
+  await mkdir(path.dirname(path.join(root, profileTarget)), { recursive: true });
+  await writeFile(path.join(root, profileTarget), profileContents);
   git(root, ["add", ".github"]);
   git(root, ["commit", "-m", "install codekeeper"]);
   const installedHead = git(root, ["rev-parse", "HEAD"]).trim();
   const contents = {};
   for (const file of initial.files) contents[file.path] = await readFile(path.join(root, file.path), "utf8");
+  contents[profileTarget] = profileContents;
   const update = buildInstallPlan({
     bundle,
     snapshot: {

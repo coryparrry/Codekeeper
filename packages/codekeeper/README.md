@@ -26,16 +26,16 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Document | Purpose | When to use |
 |---|---|---|
 | This `README.md` | Installer boundary, prerequisites, generated setup, and operating model. | Before and during `codekeeper init`. |
-| [Source installation guide](https://github.com/coryparry/Codekeeper/blob/ab3c817d98721248c675350a514ca0a3734adff0/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
+| [Source installation guide](https://github.com/coryparry/Codekeeper/blob/46d5eef7a4d1a73f4fd3d1962713489e32fd8f68/INSTALL.md) | Full manual installation and credential boundaries at the pinned runtime checkpoint. | When auditing the generated setup or using the manual fallback. |
 | Generated `.github/codekeeper.json` | Repository policy, model choices, protected paths, and startup controls. | Before merging the setup PR and whenever policy changes. |
 | Generated `.github/codekeeper-release.json` | Installed package/source version and digest-bound inventory of release-managed generated files. | When reviewing an update that adds, replaces, renames, or removes generated callers. |
-| Generated `.github/codekeeper/agents/*.md` | Adopter-editable evidence, risk, duplicate, test-adequacy, and no-action judgment for all four agents. | When tuning how Codekeeper reasons about repository evidence. |
+| Optional `.github/codekeeper/agents/*.md` overrides | Adopter-owned overrides for evidence, risk, duplicate, test-adequacy, and no-action judgment. Absent files use the packaged defaults. | Only when repository-specific behavior should differ from the release default. |
 | Generated `.github/workflows/codekeeper-*.yml` | Selected callers pinned to the exact tested Codekeeper source commit. | When reviewing triggers, permissions, or secret mappings. |
-| [Canonical starter profiles](https://github.com/coryparry/Codekeeper/tree/ab3c817d98721248c675350a514ca0a3734adff0/tools/codekeeper/agents) | Immutable source and provenance for the four starter Markdown files copied by this installer. | When comparing local profile changes with the release baseline. |
+| [Packaged default profiles](https://github.com/coryparry/Codekeeper/tree/46d5eef7a4d1a73f4fd3d1962713489e32fd8f68/tools/codekeeper/agents) | Immutable source and provenance for the four defaults bundled with this release. | When comparing an optional repository override with the release baseline. |
 
 ## What `init` does
 
-The Settings screen is the command centre for both new and existing installations. Standard mode covers workflows, autonomy, schedules, every role's provider/model/effort, workspace specialists, tracing, and all four profiles. Press `A` for Advanced mode, which exposes every editable policy field and shows immutable safety and release boundaries as read-only. Nothing changes until the final review is accepted.
+The Settings screen is the command centre for both new and existing installations. Standard mode covers workflows, autonomy, schedules, every role's provider/model/effort, workspace specialists, tracing, and all four packaged profile defaults. Editing a profile opts that role into a repository override; untouched defaults do not create files. Press `A` for Advanced mode, which exposes every editable policy field and shows immutable safety and release boundaries as read-only. Nothing changes until the final review is accepted.
 
 | Choice | What it adds |
 |---|---|
@@ -48,8 +48,8 @@ The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and acc
 
 After choosing the starter or custom path, the flow explains that the display name appears only in Codekeeper's GitHub comments and that owner logins control owner-only commands. It then confirms conservative policy invariants and:
 
-1. Generates `.github/codekeeper.json`, `.github/codekeeper-release.json`, all four editable profiles under `.github/codekeeper/agents/`, the always-installed repository-assistant caller, and the selected role callers.
-2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `ab3c817d98721248c675350a514ca0a3734adff0`.
+1. Generates `.github/codekeeper.json`, `.github/codekeeper-release.json`, the always-installed repository-assistant caller, and the selected role callers. It creates an `.github/codekeeper/agents/*.md` file only for a profile explicitly edited in Settings.
+2. Keeps every reusable-workflow and bootstrap reference pinned to source commit `46d5eef7a4d1a73f4fd3d1962713489e32fd8f68`.
 3. Prints and best-effort opens the prefilled GitHub App registration page. The adopter creates and installs the App; Codekeeper hosts no callback.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
@@ -59,26 +59,26 @@ It never merges the pull request, runs a workflow, publishes an npm package, cop
 
 ## Change an existing installation
 
-Run `npx codekeeper init` again from the current default branch to edit configuration. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and edited profiles into the same Settings screen. You can add or remove role workflows, change every editable policy value, and open any profile in `$EDITOR` without losing prior customizations.
+Run `npx codekeeper init` again from the current default branch to edit configuration. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and any repository profile overrides into the same Settings screen. Missing overrides display the current packaged defaults. You can add or remove role workflows, change every editable policy value, and open any profile in `$EDITOR` without losing prior customizations.
 
-The installer writes only values that changed. It preserves edited profiles and does not ask for secrets again. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
+The installer writes only values that changed. It preserves every existing profile override byte-for-byte and does not ask for secrets again. Editing one packaged default creates only that role's override. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
 
 ## Update an existing installation
 
 Run `codekeeper update` from a clean, current default-branch checkout. The command resolves the registry's current `latest` version, launches that exact package with install scripts disabled, verifies the launched version, and uses the release's published npm shrinkwrap to install the complete package dependency graph. During the compatibility phase, the latest CLI advances every generated caller to the new immutable source commit, which makes GitHub Actions install the matching runtime dependency lock. It also refreshes release-owned provider definitions, policy/schema safety boundaries, and the generated-file inventory. New generated files are added and retired digest-matched generated workflows are removed in the same reviewed pull request.
 
-The update preserves adopter-owned selections and data: selected workflows, repository settings, model and automation choices, GitHub variables and secrets, and edited agent profiles. The TUI shows the exact changed files before creating an update pull request. Codekeeper keeps running the current default-branch release until that pull request merges. If the installation already uses the release bundled with the latest CLI, the command exits successfully without writing. `update --current-package` skips registry bootstrapping only for exact local-tarball and offline release testing.
+The update preserves adopter-owned selections and data: selected workflows, repository settings, model and automation choices, GitHub variables and secrets, and existing profile overrides. A repository with no overrides stays that way; new packaged defaults arrive with the runtime instead of creating adopter files. The TUI shows the exact changed files before creating an update pull request. Codekeeper keeps running the current default-branch release until that pull request merges. If the installation already uses the release bundled with the latest CLI, the command exits successfully without writing. `update --current-package` skips registry bootstrapping only for exact local-tarball and offline release testing.
 
 ## Editable agent behavior
 
-Every installation includes these fixed, versioned starter files:
+Every release includes four fixed, versioned packaged defaults:
 
 - `.github/codekeeper/agents/pr-reviewer.md`
 - `.github/codekeeper/agents/repository-auditor.md`
 - `.github/codekeeper/agents/issue-triager.md`
 - `.github/codekeeper/agents/fixer.md`
 
-Edit and review these Markdown files through an ordinary pull request. After merge, their trusted default-branch versions tune priorities, work selection, implementation approach, review standards, evidence thresholds, duplicate criteria, risk decisions, writing, and when the right result is no action.
+New installations do not copy these files into the adopter repository. The runtime uses the packaged default while the corresponding repository path is absent. Editing a profile in Settings creates that one optional override. Review an override through an ordinary pull request; after merge, its trusted default-branch bytes tune priorities, work selection, implementation approach, review standards, evidence thresholds, duplicate criteria, risk decisions, writing, and when the right result is no action.
 
 Profiles control how an agent does its selected job. Capability switches control what GitHub actions it may take. Profiles cannot enable a disabled capability, change an event trigger, expand allowed paths, remove protected paths, expose a secret, or change GitHub App permissions.
 
@@ -92,7 +92,7 @@ When repository repair is on, a live maintenance run may make one bounded repair
 - a dirty checkout, detached `HEAD`, stale local checkout, or a `HEAD` that is not the remote default branch;
 - an incomplete existing Codekeeper installation, an existing setup or update branch for the same source commit, or a generated-file collision.
 
-The same collision checks cover all four agent profiles and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written.
+The same collision checks reserve all four optional profile paths and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written. A genuinely absent profile is valid.
 
 If setup fails, follow the recovery command printed by the installed binary. The installer preserves recoverable branch or pull-request state. Do not merge a partial setup.
 
@@ -123,7 +123,7 @@ Review all triggers before you merge the setup pull request. If you chose a disa
 
 Review protected paths, allowed repair paths, deterministic validation commands, owner logins, and `git diff --check` before merging. Enabling one control never implicitly enables another.
 
-Review all four generated agent profiles as well. They are the intended quick-edit surface for judgment and writing behavior, but cannot weaken any deterministic control above.
+Review any repository profile overrides as well. The packaged defaults need no adopter file, and neither defaults nor overrides can weaken any deterministic control above.
 
 ## Change models
 

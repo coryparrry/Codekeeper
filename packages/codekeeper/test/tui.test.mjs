@@ -658,6 +658,9 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
     assert.match(tui.output.lastSemanticFrame(), /STANDARD/);
     assert.match(tui.output.lastSemanticFrame(), /no changes applied yet/);
     await tui.send("G");
+    await tui.send("k");
+    await tui.waitForText("Packaged default");
+    await tui.send("G");
     await tui.send("\r");
     const result = await answers;
     assert.deepEqual(result.modes, ["review", "maintain"]);
@@ -955,7 +958,6 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
     ["Workflows", "Pull request review"],
     ["Models (editable", "gpt-5.6"],
     ["Policy and caller documents", ".github/codekeeper.json"],
-    ["Editable agent profiles"],
     ["Repository variables", "CODEKEEPER_ENABLED"],
     ["Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
     ["Settings", "Codekeeper starts after merge"],
@@ -1011,7 +1013,7 @@ test("all-four-mode review and completion fit bounded terminal dimensions", asyn
       kind: "review",
       markers: [
         ["Workflows", "Models (editable", "gpt-5.6"],
-        ["Document map", ".github/codekeeper/agents/pr-reviewer.md", "Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
+        ["Document map", ".github/codekeeper.json", "Secrets requested through GitHub CLI", "OPENAI_TRACE_API_KEY"],
         ["Settings", "Create setup", "› Cancel"]
       ],
       ...dimensions
@@ -1174,9 +1176,9 @@ test("NO_COLOR and narrow terminals retain visible selection semantics without o
   });
   const review = tui.prompt.reviewInstallPlan(plan);
   const reviewCancellation = assert.rejects(review, (error) => error.code === "PROMPT_ABORTED");
-  for (let page = 1; page <= 10; page += 1) {
-    await tui.waitForText(`Review the setup · ${page} of 10`);
-    if (page < 10) await tui.send("\r");
+  for (let page = 1; page <= 9; page += 1) {
+    await tui.waitForText(`Review the setup · ${page} of 9`);
+    if (page < 9) await tui.send("\r");
   }
   assert.match(tui.output.lastSemanticFrame(), /› Cancel/);
   await tui.send("\u001b[D");
