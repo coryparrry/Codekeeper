@@ -54,21 +54,16 @@ export function freezeInstallerReceipt(receipt) {
 
 function formatReceiptProgress(receipt) {
   if (!receipt) return "";
-  const completedSecrets = receipt.completedSecrets?.join(", ") || "none";
-  const pendingSecrets = receipt.pendingSecrets?.join(", ") || "none";
-  const completedVariables = receipt.completedVariables?.join(", ") || "none";
-  const pendingVariables = receipt.pendingVariables?.join(", ") || "none";
-  const startup = receipt.startupState ?? "unknown";
-  const unknown = receipt.unknownMutation ? "yes" : "no";
-  return [
-    `Receipt phase: ${receipt.phase ?? "unknown"}`,
-    `completed secrets: ${completedSecrets}`,
-    `not completed secrets: ${pendingSecrets}`,
-    `completed variables: ${completedVariables}`,
-    `not completed variables: ${pendingVariables}`,
-    `startup: ${startup}`,
-    `unknown mutation: ${unknown}`
-  ].join("; ");
+  const completed = [];
+  const pending = [];
+  if (receipt.remoteSha) completed.push(`✓ Setup branch pushed: ${receipt.branch} @ ${receipt.remoteSha}`);
+  for (const name of receipt.completedSecrets ?? []) completed.push(`✓ Secret configured: ${name}`);
+  for (const name of receipt.completedVariables ?? []) completed.push(`✓ Variable configured: ${name}`);
+  if (receipt.pullRequestUrl) completed.push(`✓ Setup pull request created: ${receipt.pullRequestUrl}`);
+  for (const name of receipt.pendingSecrets ?? []) pending.push(`✕ Secret not confirmed: ${name}`);
+  for (const name of receipt.pendingVariables ?? []) pending.push(`✕ Variable not confirmed: ${name}`);
+  if (receipt.remoteSha && !receipt.pullRequestUrl) pending.push("✕ Setup pull request was not created");
+  return ["Installation receipt", "Completed", ...(completed.length ? completed : ["· None"]), "Not completed", ...(pending.length ? pending : ["· None"]), `Phase: ${receipt.phase ?? "unknown"}`, `Startup: ${receipt.startupState ?? "unknown"}`, `Last mutation unconfirmed: ${receipt.unknownMutation ? "yes" : "no"}`, ...(receipt.remoteSha && !receipt.pullRequestUrl ? ["Nothing is running because the setup pull request has not merged."] : [])].join("\n");
 }
 
 export class InstallerError extends Error {

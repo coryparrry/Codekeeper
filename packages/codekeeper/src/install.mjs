@@ -25,7 +25,9 @@ function assertRelativeTarget(relativePath) {
   }
   const parts = relativePath.split("/");
   if (!parts.length || parts.some((part) => !part || part === "." || part === ".." || part.includes("\\"))) {
-    throw new InstallerError("Generated file path is unsafe.", { code: "PLAN_INVALID" });
+    throw new InstallerError("Generated file path is unsafe.", {
+      code: "PLAN_INVALID"
+    });
   }
   return parts;
 }
@@ -83,9 +85,33 @@ function statusCommand(platform) {
   return formatCommand("git", ["status", "--short"], platform);
 }
 
+export function remoteSetupRecovery(plan, receipt, platform = process.platform) {
+  const lines = [`The setup branch ${plan.branch} is already pushed. Do not rerun Codekeeper init.`];
+  if (receipt?.unknownMutation) {
+    lines.push("Inspect the setting named by the receipt phase before replacing it; GitHub may have applied the last command even though its result was not confirmed.");
+  }
+  if (receipt?.pendingSecrets?.length) {
+    lines.push(`Configure or confirm these GitHub Actions secrets for ${plan.repository}: ${receipt.pendingSecrets.join(", ")}.`);
+  }
+  const pendingVariables = (plan.variables ?? []).filter((variable) => receipt?.pendingVariables?.includes(variable.name) && variable.name !== "CODEKEEPER_ENABLED");
+  for (const variable of pendingVariables) {
+    lines.push(formatCommand("gh", ["variable", "set", variable.name, "--body", variable.value, "--repo", plan.repository], platform));
+  }
+  const startup = (plan.variables ?? []).find((variable) => variable.name === "CODEKEEPER_ENABLED" && receipt?.pendingVariables?.includes(variable.name));
+  if (startup) {
+    lines.push("Set the startup choice last:");
+    lines.push(formatCommand("gh", ["variable", "set", startup.name, "--body", startup.value, "--repo", plan.repository], platform));
+  }
+  lines.push(pullRequestListCommand(plan, platform));
+  lines.push(`If no pull request is listed: ${pullRequestCreateCommand(plan, platform)}`);
+  return lines.join("\n");
+}
+
 async function rollbackPreCommit(plan, { runner, fsImpl }) {
   const paths = plan.files.map((file) => file.path);
-  const head = await runner.run("git", ["rev-parse", "HEAD"], { cwd: plan.root });
+  const head = await runner.run("git", ["rev-parse", "HEAD"], {
+    cwd: plan.root
+  });
   if (head.status !== 0 || head.timedOut || head.truncated || head.stdout.trim() !== plan.originalHead) return false;
 
   for (const file of plan.files) {
@@ -115,9 +141,13 @@ async function rollbackPreCommit(plan, { runner, fsImpl }) {
     }
     const status = await runner.run("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: plan.root });
     if (status.status !== 0 || status.timedOut || status.truncated || status.stdout) return false;
-    const switched = await runner.run("git", ["switch", plan.defaultBranch], { cwd: plan.root });
+    const switched = await runner.run("git", ["switch", plan.defaultBranch], {
+      cwd: plan.root
+    });
     if (switched.status !== 0 || switched.timedOut || switched.truncated) return false;
-    const deleted = await runner.run("git", ["branch", "-d", plan.branch], { cwd: plan.root });
+    const deleted = await runner.run("git", ["branch", "-d", plan.branch], {
+      cwd: plan.root
+    });
     return deleted.status === 0 && !deleted.timedOut && !deleted.truncated;
   }
 
@@ -129,9 +159,13 @@ async function rollbackPreCommit(plan, { runner, fsImpl }) {
   }
   const status = await runner.run("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: plan.root });
   if (status.status !== 0 || status.timedOut || status.truncated || status.stdout) return false;
-  const switched = await runner.run("git", ["switch", plan.defaultBranch], { cwd: plan.root });
+  const switched = await runner.run("git", ["switch", plan.defaultBranch], {
+    cwd: plan.root
+  });
   if (switched.status !== 0 || switched.timedOut || switched.truncated) return false;
-  const deleted = await runner.run("git", ["branch", "-d", plan.branch], { cwd: plan.root });
+  const deleted = await runner.run("git", ["branch", "-d", plan.branch], {
+    cwd: plan.root
+  });
   return deleted.status === 0 && !deleted.timedOut && !deleted.truncated;
 }
 
@@ -323,7 +357,11 @@ export async function configureRepositorySettings(plan, {
           },
           `GitHub CLI did not set ${secret.name}.`,
           resumeCommand,
-          { tracker, phase: "settings:secrets" }
+          {
+            tracker,
+            phase: `settings:secret:${secret.name}`,
+            ambiguousOnFailure: true
+          }
         );
         tracker.addSecret(secret.name);
         reportProgress(onProgress, "secret:app", "done");
@@ -351,20 +389,33 @@ export async function configureRepositorySettings(plan, {
           },
           `GitHub CLI did not set ${secret.name}.`,
           resumeCommand,
-          { tracker, phase: "settings:secrets" }
+          {
+            tracker,
+            phase: `settings:secret:${secret.name}`,
+            ambiguousOnFailure: true
+          }
         );
       } else {
         output.write(`\nEnter ${secret.name} in the GitHub CLI prompt. Press Ctrl-D when you finish.\n`);
         await withInteractiveTerminal(
-          () => runMutation(
-            runner,
-            "gh",
-            ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
-            { cwd: plan.root, stdio: "inherit", timeoutMs: SECRET_UPLOAD_TIMEOUT_MS },
-            `GitHub CLI did not set ${secret.name}.`,
-            resumeCommand,
-            { tracker, phase: "settings:secrets" }
-          ),
+          () =>
+            runMutation(
+              runner,
+              "gh",
+              ["secret", "set", secret.name, "--app", "actions", "--repo", plan.repository],
+              {
+                cwd: plan.root,
+                stdio: "inherit",
+                timeoutMs: SECRET_UPLOAD_TIMEOUT_MS
+              },
+              `GitHub CLI did not set ${secret.name}.`,
+              resumeCommand,
+              {
+                tracker,
+                phase: `settings:secret:${secret.name}`,
+                ambiguousOnFailure: true
+              }
+            ),
           Object.freeze({ name: secret.name, purpose })
         );
       }
@@ -375,15 +426,11 @@ export async function configureRepositorySettings(plan, {
     tracker.set({ phase: "settings:variables" });
     reportProgress(onProgress, "variables:configure", "active");
     for (const variable of remainingVariables) {
-      await runMutation(
-        runner,
-        "gh",
-        ["variable", "set", variable.name, "--body", variable.value, "--repo", plan.repository],
-        { cwd: plan.root },
-        `GitHub CLI did not set ${variable.name}.`,
-        resumeCommand,
-        { tracker, phase: "settings:variables" }
-      );
+      await runMutation(runner, "gh", ["variable", "set", variable.name, "--body", variable.value, "--repo", plan.repository], { cwd: plan.root }, `GitHub CLI did not set ${variable.name}.`, resumeCommand, {
+        tracker,
+        phase: `settings:variable:${variable.name}`,
+        ambiguousOnFailure: true
+      });
       tracker.addVariable(variable.name);
     }
     reportProgress(onProgress, "variables:configure", "done");
@@ -393,17 +440,15 @@ export async function configureRepositorySettings(plan, {
     tracker.set({ phase: "settings:startup" });
     reportProgress(onProgress, "settings:disable", "active");
     if (enabledVariable) {
-      await runMutation(
-        runner,
-        "gh",
-        ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository],
-        { cwd: plan.root },
-        "GitHub CLI failed to set the Codekeeper startup state. Secrets and non-startup variables may already be configured.",
-        resumeCommand,
-        { tracker, phase: "settings:startup" }
-      );
+      await runMutation(runner, "gh", ["variable", "set", enabledVariable.name, "--body", enabledVariable.value, "--repo", plan.repository], { cwd: plan.root }, "GitHub CLI failed to set the Codekeeper startup state. Secrets and non-startup variables may already be configured.", resumeCommand, {
+        tracker,
+        phase: `settings:variable:${enabledVariable.name}`,
+        ambiguousOnFailure: true
+      });
       tracker.addVariable(enabledVariable.name);
-      tracker.set({ startupState: enabledVariable.value === "true" ? "enabled" : "disabled" });
+      tracker.set({
+        startupState: enabledVariable.value === "true" ? "enabled" : "disabled"
+      });
     } else {
       tracker.set({ startupState: "unchanged" });
     }
@@ -459,9 +504,14 @@ export async function createSetupCommit(plan, {
   }
 
   try {
-    await assertNoInstallationFiles(plan.root, { fsImpl, allowExisting: plan.update === true });
+    await assertNoInstallationFiles(plan.root, {
+      fsImpl,
+      allowExisting: plan.update === true
+    });
     for (const file of plan.files) {
-      const target = await ensureSafeParents(fsImpl, plan.root, file.path, { allowExisting: plan.update === true });
+      const target = await ensureSafeParents(fsImpl, plan.root, file.path, {
+        allowExisting: plan.update === true
+      });
       if (plan.update) {
         const stat = await maybeLstat(fsImpl, target);
         if (file.previousSha256 === null ? stat !== null : !stat || sha256(await fsImpl.readFile(target)) !== file.previousSha256) {
@@ -472,7 +522,10 @@ export async function createSetupCommit(plan, {
         await fsImpl.unlink(target);
         continue;
       }
-      await fsImpl.writeFile(target, file.contents, { flag: !plan.update || file.previousSha256 === null ? "wx" : "w", mode: 0o644 });
+      await fsImpl.writeFile(target, file.contents, {
+        flag: !plan.update || file.previousSha256 === null ? "wx" : "w",
+        mode: 0o644
+      });
       const written = await fsImpl.readFile(target);
       if (written.byteLength !== file.bytes || sha256(written) !== file.sha256) {
         throw new InstallerError(`Generated file verification failed: ${file.path}`, { code: "GENERATED_FILE_MISMATCH" });
@@ -533,7 +586,9 @@ export async function createSetupCommit(plan, {
     );
     exactPathSet(committed.split("\0").filter(Boolean), paths, "Setup commit");
     for (const file of plan.files) {
-      const blob = await runner.run("git", ["show", `HEAD:${file.path}`], { cwd: plan.root });
+      const blob = await runner.run("git", ["show", `HEAD:${file.path}`], {
+        cwd: plan.root
+      });
       if (file.delete === true) {
         if (blob.status === 0) throw new InstallerError(`The deleted workflow still exists in the setup commit: ${file.path}`, { code: "COMMITTED_FILE_MISMATCH" });
         continue;
@@ -709,8 +764,14 @@ export async function openSetupPullRequest(plan, commit, {
 export async function pushAndOpenSetupPullRequest(plan, commit, dependencies = {}) {
   const tracker = trackerFor(plan, dependencies.receiptTracker ?? null);
   try {
-    await pushSetupCommit(plan, commit, { ...dependencies, receiptTracker: tracker });
-    return await openSetupPullRequest(plan, commit, { ...dependencies, receiptTracker: tracker });
+    await pushSetupCommit(plan, commit, {
+      ...dependencies,
+      receiptTracker: tracker
+    });
+    return await openSetupPullRequest(plan, commit, {
+      ...dependencies,
+      receiptTracker: tracker
+    });
   } catch (error) {
     throw attachReceipt(error, tracker);
   }
@@ -720,17 +781,40 @@ export async function installPlan(plan, dependencies = {}) {
   const tracker = createReceiptTracker(plan);
   try {
     if (plan.settingsOnly) {
-      await configureRepositorySettings(plan, { ...dependencies, receiptTracker: tracker });
-      tracker.set({ pullRequestUrl: "No pull request was needed.", phase: "complete" });
+      await configureRepositorySettings(plan, {
+        ...dependencies,
+        receiptTracker: tracker
+      });
+      tracker.set({
+        pullRequestUrl: "No pull request was needed.",
+        phase: "complete"
+      });
       return tracker.complete({ phase: "complete" });
     }
 
-    const commit = await createSetupCommit(plan, { ...dependencies, receiptTracker: tracker });
+    const commit = await createSetupCommit(plan, {
+      ...dependencies,
+      receiptTracker: tracker
+    });
     tracker.set({ localSha: commit, phase: "local-commit-verified" });
-    await pushSetupCommit(plan, commit, { ...dependencies, receiptTracker: tracker });
-    await configureRepositorySettings(plan, { ...dependencies, receiptTracker: tracker });
-    const pullRequestUrl = await openSetupPullRequest(plan, commit, { ...dependencies, receiptTracker: tracker });
-    tracker.set({ localSha: commit, remoteSha: commit, pullRequestUrl, phase: "complete" });
+    await pushSetupCommit(plan, commit, {
+      ...dependencies,
+      receiptTracker: tracker
+    });
+    await configureRepositorySettings(plan, {
+      ...dependencies,
+      receiptTracker: tracker
+    });
+    const pullRequestUrl = await openSetupPullRequest(plan, commit, {
+      ...dependencies,
+      receiptTracker: tracker
+    });
+    tracker.set({
+      localSha: commit,
+      remoteSha: commit,
+      pullRequestUrl,
+      phase: "complete"
+    });
     return Object.freeze({
       ...tracker.complete({ phase: "complete" }),
       branch: plan.branch,
@@ -738,6 +822,10 @@ export async function installPlan(plan, dependencies = {}) {
       pullRequestUrl
     });
   } catch (error) {
-    throw attachReceipt(error, tracker);
+    const attached = attachReceipt(error, tracker);
+    if (attached instanceof InstallerError && !plan.settingsOnly && attached.receipt?.remoteSha) {
+      attached.resume = remoteSetupRecovery(plan, attached.receipt, dependencies.platform);
+    }
+    throw attached;
   }
 }

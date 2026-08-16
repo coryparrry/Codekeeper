@@ -71,18 +71,10 @@ function runnerFor({
     if (key === "git status --porcelain=v1 --untracked-files=all")
       return result(status);
     if (key === "git rev-parse HEAD") return result(`${head}\n`);
-    if (key === `git ls-remote origin refs/heads/${defaultBranch}`)
-      return result(`${remote}\trefs/heads/${defaultBranch}\n`);
-    if (key === `gh variable list --repo ${repository} --json name`)
-      return result(JSON.stringify(variableNames.map((name) => ({ name }))));
-    if (key === `gh secret list --repo ${repository} --json name`)
-      return result(JSON.stringify(secretNames.map((name) => ({ name }))));
-    if (
-      command === "gh" &&
-      args[0] === "api" &&
-      args.includes("user/installations")
-    )
-      return appResult;
+    if (key === `git ls-remote origin refs/heads/${defaultBranch}`) return result(`${remote}\trefs/heads/${defaultBranch}\n`);
+    if (key === `gh variable list --repo ${repository} --json name,value`) return result(JSON.stringify(variableNames.map((name) => ({ name, value: "configured" }))));
+    if (key === `gh secret list --repo ${repository} --json name`) return result(JSON.stringify(secretNames.map((name) => ({ name }))));
+    if (command === "gh" && args[0] === "api" && args.includes("user/installations")) return appResult;
     throw new Error(`Unexpected command: ${key}`);
   });
 }
@@ -151,6 +143,17 @@ test("verify fails stale and non-default local checkout evidence", async () => {
   );
   assert.equal(check(wrongBranch, "checkout").status, "fail");
   assert.match(check(wrongBranch, "checkout").remediation, /default branch/);
+
+  const malformedRemote = await verifyCodekeeperReadiness(
+    baseOptions({
+      runner: runnerFor({
+        remote: `${HEAD}\trefs/heads/main\n${"b".repeat(40)}`
+      }),
+      inspectApp: async () => true,
+      verifyPackage: async () => true
+    })
+  );
+  assert.equal(check(malformedRemote, "checkout").status, "not-provable");
 });
 
 test("verify reports a missing managed file without attempting settings or package evidence", async () => {
@@ -189,9 +192,9 @@ test("verify checks only repository variable and secret names", async () => {
   assert.deepEqual(
     settingCalls.map((call) => call.args.slice(-2)),
     [
-      ["--json", "name"],
-      ["--json", "name"],
-    ],
+      ["--json", "name,value"],
+      ["--json", "name"]
+    ]
   );
 });
 
@@ -262,6 +265,36 @@ test("controlled checks stay skipped unless explicitly requested and supplied", 
   );
   assert.equal(check(optedIn, "controlled-check").status, "pass");
   assert.equal(runs, 1);
+
+  const failed = await verifyCodekeeperReadiness(
+    baseOptions({
+      controlledCheck: true,
+      inspectApp: async () => true,
+      verifyPackage: async () => true,
+      runControlledCheck: async () => false
+    })
+  );
+  assert.equal(check(failed, "controlled-check").status, "fail");
+  assert.equal(failed.ready, false);
+});
+
+test("controlled checks do not dispatch until every required readiness check passes", async () => {
+  let runs = 0;
+  const report = await verifyCodekeeperReadiness(
+    baseOptions({
+      runner: runnerFor({ branch: "feature/verify" }),
+      controlledCheck: true,
+      inspectApp: async () => true,
+      verifyPackage: async () => true,
+      runControlledCheck: async () => {
+        runs += 1;
+        return true;
+      }
+    })
+  );
+  assert.equal(runs, 0);
+  assert.equal(check(report, "controlled-check").status, "skipped");
+  assert.match(check(report, "controlled-check").detail, /not dispatched/);
 });
 
 test("reports are deeply frozen and redact command stderr, secrets, PEM paths, and model content", async () => {
