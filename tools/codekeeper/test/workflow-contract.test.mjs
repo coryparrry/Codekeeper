@@ -135,7 +135,7 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
         verify,
         /openai\/codex-action@|create-github-app-token|secrets\./,
       );
-      assert.match(source, /needs: \[analyze, verify\]/);
+      assert.match(source, /needs: \[workspace, analyze, verify\]/);
     }
 
     assert.match(seal, /codekeeper-candidate/);
@@ -189,7 +189,7 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(publish, /--config "\$CONFIG"/);
     assert.match(
       publish,
-      /CODEKEEPER_TOOLING_SHA: \$\{\{ inputs\.package_source_commit \}\}/,
+      /CODEKEEPER_TOOLING_SHA: \$\{\{ needs\.workspace\.outputs\.package_source_commit \}\}/,
     );
     assert.match(publish, /--agent-profile "\$AGENT_PROFILE"/);
     assert.match(
@@ -236,7 +236,12 @@ test("workflow handoff artifacts survive failed-job reruns and producers replace
     ].map((match) => match[1]);
     assert.deepEqual(
       replaceableUploads,
-      [workspaceArtifactName, candidateArtifactName, sealedArtifactName],
+      [
+        `codekeeper-tooling-\${{ github.run_id }}`,
+        workspaceArtifactName,
+        candidateArtifactName,
+        sealedArtifactName,
+      ],
       `${mode} must replace each run-stable handoff when every job is rerun`,
     );
   }
@@ -523,13 +528,10 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
     caller,
     /const commandIntent = eventName === "pull_request_review_comment" && trustedAssociation && \(slash \|\| mentioned\)/,
   );
+  assert.doesNotMatch(caller, /bootstrap:|needs\.bootstrap/);
   assert.match(
     caller,
-    /bootstrap:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/,
-  );
-  assert.match(
-    caller,
-    /review:\n\s+needs: \[intent, bootstrap\]\n\s+if: needs\.intent\.outputs\.route == 'true' && needs\.bootstrap\.result == 'success'/,
+    /review:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/,
   );
   assert.match(
     source,
@@ -644,9 +646,10 @@ test("owner-commanded pull request repair can update only the frozen existing he
     /issue_comment:[\s\S]*pull_request_review_comment:/,
   );
   assert.match(assistantCaller, /intent:\n[\s\S]*route=/);
+  assert.doesNotMatch(assistantCaller, /bootstrap:|needs\.bootstrap/);
   assert.match(
     assistantCaller,
-    /bootstrap:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/,
+    /assistant:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/,
   );
   assert.match(assistantCaller, /installed_modes: review,maintain,issues,fix/);
   assert.match(

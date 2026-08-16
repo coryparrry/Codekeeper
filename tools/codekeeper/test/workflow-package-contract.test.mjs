@@ -3,7 +3,6 @@ import { readdir } from "node:fs/promises";
 import test from "node:test";
 import {
   actionPins,
-  bootstrapToolingArtifactName,
   jobSection,
   modes,
   repositoryFile,
@@ -61,10 +60,7 @@ test("four generic mode workflows expose workflow_call and caller templates rema
     const caller = await repositoryFile(
       `examples/workflows/codekeeper-${mode}.yml.example`,
     );
-    assert.match(
-      caller,
-      /uses: \.\/\.github\/workflows\/codekeeper-bootstrap\.yml/,
-    );
+    assert.doesNotMatch(caller, /codekeeper-bootstrap|needs\.bootstrap/);
     assert.match(
       caller,
       new RegExp(
@@ -145,12 +141,11 @@ test("callers authorize one exact package and use only adopter-local reusable wo
     const template = await repositoryFile(
       `examples/workflows/codekeeper-${mode}.yml.example`,
     );
-    assert.equal([...template.matchAll(/"PACKAGE_VERSION"/g)].length, 2);
-    assert.equal([...template.matchAll(/"PACKAGE_INTEGRITY"/g)].length, 2);
-    assert.doesNotMatch(template, /PACKAGE_MANIFEST_SHA256/);
-    assert.match(
+    assert.equal([...template.matchAll(/"PACKAGE_VERSION"/g)].length, 1);
+    assert.equal([...template.matchAll(/"PACKAGE_INTEGRITY"/g)].length, 1);
+    assert.doesNotMatch(
       template,
-      /uses: \.\/\.github\/workflows\/codekeeper-bootstrap\.yml/,
+      /PACKAGE_MANIFEST_SHA256|codekeeper-bootstrap|needs\.bootstrap/,
     );
     assert.match(
       template,
@@ -158,40 +153,28 @@ test("callers authorize one exact package and use only adopter-local reusable wo
         `uses: \\.\\/\\.github\\/workflows\\/codekeeper-runtime-${mode}\\.yml`,
       ),
     );
-    assert.match(
-      template,
-      /package_manifest_sha256: \$\{\{ needs\.bootstrap\.outputs\.package_manifest_sha256 \}\}/,
-    );
-    assert.match(
-      template,
-      /package_source_commit: \$\{\{ needs\.bootstrap\.outputs\.source_commit \}\}/,
-    );
+    assert.doesNotMatch(template, /package_manifest_sha256|package_source_commit/);
     assert.doesNotMatch(
       template,
       /uses:\s+[^.\s][^\n]*codekeeper|@latest|@[~^*]|OWNER\/REPOSITORY|FULL_COMMIT_SHA/,
     );
-    const role = mode === "issues" ? "triage" : mode;
-    const bootstrap = jobSection(template, "bootstrap", role);
-    assert.match(bootstrap, /permissions:\n\s+contents: read/);
-    assert.doesNotMatch(
-      bootstrap,
-      /secrets:|GITHUB_TOKEN|GH_TOKEN|APP_PRIVATE_KEY/,
-    );
   }
 });
 
-test("reusable workflows reverify the exact closed package before every consumer", async () => {
-  const expectedConsumers = { maintain: 5, fix: 5, issues: 4, review: 4 };
-  for (const [mode, count] of Object.entries(expectedConsumers)) {
+test("reusable workflows acquire one exact package and reverify it in every isolated consumer", async () => {
+  const consumerJobs = {
+    assistant: ["route"],
+    maintain: ["workspace", "analyze", "verify", "seal", "publish"],
+    fix: ["workspace", "analyze", "verify", "seal", "publish"],
+    issues: ["workspace", "analyze", "seal", "publish"],
+    review: ["workspace", "analyze", "seal", "gate"],
+  };
+  for (const [mode, jobs] of Object.entries(consumerJobs)) {
+    const count = jobs.length;
     const source = await workflow(mode);
     assert.equal(
-      [...source.matchAll(/name: Download bootstrap Codekeeper package/g)]
-        .length,
-      count,
-    );
-    assert.equal(
-      [...source.matchAll(/name: Verify bootstrap Codekeeper package/g)].length,
-      count,
+      [...source.matchAll(/name: Acquire exact Codekeeper package/g)].length,
+      1,
     );
     assert.equal(
       [...source.matchAll(/name: Install exact Codekeeper runtime/g)].length,
@@ -202,58 +185,22 @@ test("reusable workflows reverify the exact closed package before every consumer
       0,
     );
     assert.equal(
-      [...source.matchAll(/bin\/verify-package\.mjs/g)].length,
+      [...source.matchAll(/uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/g)].length,
       count,
     );
-    assert.equal(
-      [...source.matchAll(/--expected-name "\$CODEKEEPER_PACKAGE_NAME"/g)]
-        .length,
-      count,
-    );
-    assert.equal(
-      [...source.matchAll(/--expected-version "\$CODEKEEPER_PACKAGE_VERSION"/g)]
-        .length,
-      count,
-    );
-    assert.equal(
-      [
-        ...source.matchAll(
-          /--expected-integrity "\$CODEKEEPER_PACKAGE_INTEGRITY"/g,
-        ),
-      ].length,
-      count,
-    );
-    assert.equal(
-      [
-        ...source.matchAll(
-          /--expected-manifest-sha256 "\$CODEKEEPER_PACKAGE_MANIFEST_SHA256"/g,
-        ),
-      ].length,
-      count,
-    );
-    assert.equal(
-      [
-        ...source.matchAll(
-          /--expected-source-commit "\$CODEKEEPER_PACKAGE_SOURCE_COMMIT"/g,
-        ),
-      ].length,
-      count,
-    );
-    assert.match(
+    if (mode !== "assistant") {
+      assert.match(
+        source,
+        /CODEKEEPER_PACKAGE_VERSION: \$\{\{ inputs\.package_version \}\}/,
+      );
+      assert.match(
+        source,
+        /CODEKEEPER_PACKAGE_INTEGRITY: \$\{\{ inputs\.package_integrity \}\}/,
+      );
+    }
+    assert.doesNotMatch(
       source,
-      /CODEKEEPER_PACKAGE_VERSION: \$\{\{ inputs\.package_version \}\}/,
-    );
-    assert.match(
-      source,
-      /CODEKEEPER_PACKAGE_INTEGRITY: \$\{\{ inputs\.package_integrity \}\}/,
-    );
-    assert.match(
-      source,
-      /CODEKEEPER_PACKAGE_MANIFEST_SHA256: \$\{\{ inputs\.package_manifest_sha256 \}\}/,
-    );
-    assert.match(
-      source,
-      /CODEKEEPER_PACKAGE_SOURCE_COMMIT: \$\{\{ inputs\.package_source_commit \}\}/,
+      /inputs\.package_(?:manifest_sha256|source_commit)/,
     );
     assert.equal(
       [
@@ -272,40 +219,102 @@ test("reusable workflows reverify the exact closed package before every consumer
       source,
       /verify-tooling-artifact|CODEKEEPER_TOOLING_MANIFEST|job\.workflow_sha/,
     );
-    const bootstrapArtifactNames = [
-      ...source.matchAll(/^ {10}name: (codekeeper-tooling-[^\n]+)$/gm),
-    ].map((match) => match[1]);
-    assert.deepEqual(
-      bootstrapArtifactNames,
-      Array(count).fill(bootstrapToolingArtifactName),
-      `${mode} must consume the caller bootstrap artifact by run ID only so failed-job reruns reuse verified tooling`,
-    );
-    const workspaceArtifactName = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-workspace-\${{ github.run_id }}`;
-    const workspaceArtifactNames = [
-      ...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-workspace-[^\n]+)$/gm),
-    ].map((match) => match[1]);
-    assert.deepEqual(
-      workspaceArtifactNames,
-      [workspaceArtifactName, workspaceArtifactName],
-      `${mode} workspace handoff must remain available to failed-job reruns`,
-    );
+    if (mode === "assistant") {
+      assert.doesNotMatch(
+        source,
+        /Upload verified Codekeeper package|Download verified Codekeeper package|Verify downloaded Codekeeper package|codekeeper-tooling-\$\{\{ github\.run_id \}\}/,
+      );
+    } else {
+      assert.equal(
+        [...source.matchAll(/name: Upload verified Codekeeper package/g)].length,
+        1,
+      );
+      assert.equal(
+        [...source.matchAll(/name: Download verified Codekeeper package/g)].length,
+        count - 1,
+      );
+      assert.equal(
+        [...source.matchAll(/name: Verify downloaded Codekeeper package/g)].length,
+        count - 1,
+      );
+      assert.equal(
+        [...source.matchAll(/name: codekeeper-tooling-\$\{\{ github\.run_id \}\}/g)].length,
+        count,
+      );
+      assert.match(
+        source,
+        /package_manifest_sha256: \$\{\{ steps\.codekeeper-package\.outputs\.package_manifest_sha256 \}\}/,
+      );
+      assert.match(
+        source,
+        /package_source_commit: \$\{\{ steps\.codekeeper-package\.outputs\.source_commit \}\}/,
+      );
+      assert.equal(
+        [
+          ...source.matchAll(
+            /expected_manifest_sha256: \$\{\{ needs\.workspace\.outputs\.package_manifest_sha256 \}\}/g,
+          ),
+        ].length,
+        count - 1,
+      );
+      assert.equal(
+        [
+          ...source.matchAll(
+            /expected_source_commit: \$\{\{ needs\.workspace\.outputs\.package_source_commit \}\}/g,
+          ),
+        ].length,
+        count - 1,
+      );
+      const workspaceArtifactName = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}-workspace-\${{ github.run_id }}`;
+      const workspaceArtifactNames = [
+        ...source.matchAll(
+          /^ {10}name: (codekeeper-[^\n]*-workspace-[^\n]+)$/gm,
+        ),
+      ].map((match) => match[1]);
+      assert.deepEqual(
+        workspaceArtifactNames,
+        [workspaceArtifactName, workspaceArtifactName],
+        `${mode} workspace handoff must remain available to failed-job reruns`,
+      );
+    }
     assert.doesNotMatch(source, /job\.workflow_repository/);
     assert.doesNotMatch(
       source,
       /repository: \$\{\{ job\.workflow_repository \}\}/,
     );
+    for (const [index, jobName] of jobs.entries()) {
+      const job = jobSection(source, jobName, jobs[index + 1]);
+      const node = job.indexOf("uses: actions/setup-node@");
+      const checkout = job.indexOf("path: repository");
+      const install = job.indexOf("name: Install exact Codekeeper runtime");
+      assert.ok(checkout >= 0, `${mode}.${jobName} checks out repository`);
+      assert.ok(node > checkout, `${mode}.${jobName} sets up Node after checkout`);
+      if (index === 0) {
+        const acquire = job.indexOf(
+          "uses: ./repository/.github/codekeeper/actions/acquire-package",
+        );
+        const upload = job.indexOf("name: Upload verified Codekeeper package");
+        assert.ok(acquire > node, `${mode}.${jobName} acquires after Node setup`);
+        if (mode !== "assistant") {
+          assert.ok(upload > acquire, `${mode}.${jobName} uploads only after acquisition`);
+          assert.ok(install > upload, `${mode}.${jobName} installs after upload`);
+        } else {
+          assert.ok(install > acquire, `${mode}.${jobName} installs after acquisition`);
+        }
+      } else {
+        const download = job.indexOf("name: Download verified Codekeeper package");
+        const verify = job.indexOf("name: Verify downloaded Codekeeper package");
+        assert.ok(download >= 0, `${mode}.${jobName} downloads the run package`);
+        assert.ok(verify > node, `${mode}.${jobName} verifies after Node setup`);
+        assert.match(
+          job.slice(verify),
+          /uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package[\s\S]*package_source: artifact/,
+        );
+        assert.ok(install > verify, `${mode}.${jobName} installs only after verification`);
+        assert.match(job, /needs: \[[^\]]*workspace[^\]]*\]|needs: workspace/);
+      }
+    }
   }
-  const assistant = await workflow("assistant");
-  assert.equal(
-    [...assistant.matchAll(/name: Verify bootstrap Codekeeper package/g)]
-      .length,
-    1,
-  );
-  assert.match(assistant, /bin\/verify-package\.mjs/);
-  assert.doesNotMatch(
-    assistant,
-    /job\.workflow_sha|verify-tooling-artifact|CODEKEEPER_TOOLING_MANIFEST/,
-  );
 });
 
 test("reusable workflows default to GitHub runners and allow a trusted caller override", async () => {
@@ -383,19 +392,21 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
   }
 });
 
-test("bootstrap validates tarball SRI before deriving and publishing package provenance", async () => {
-  const source = await workflow("bootstrap");
+test("package acquisition validates tarball SRI before deriving package provenance", async () => {
+  const source = await repositoryFile(
+    ".github/codekeeper/actions/acquire-package/action.yml",
+  );
   assert.match(
     source,
     /package_version:[\s\S]*required: true[\s\S]*package_integrity:[\s\S]*required: true/,
   );
-  assert.doesNotMatch(
-    source.slice(0, source.indexOf("    outputs:")),
-    /package_manifest_sha256:/,
+  assert.match(
+    source,
+    /package_source:[\s\S]*default: registry[\s\S]*expected_manifest_sha256:[\s\S]*expected_source_commit:/,
   );
   assert.match(
     source,
-    /package_manifest_sha256:\n\s+description:[^\n]+\n\s+value: \$\{\{ jobs\.bootstrap\.outputs\.package_manifest_sha256 \}\}/,
+    /package_manifest_sha256:\n\s+description:[^\n]+\n\s+value: \$\{\{ steps\.acquire\.outputs\.package_manifest_sha256 \}\}/,
   );
   assert.match(
     source,
@@ -411,15 +422,31 @@ test("bootstrap validates tarball SRI before deriving and publishing package pro
   );
   assert.ok(
     source.indexOf("actualIntegrity !== integrity") <
-      source.indexOf("Extract verified tarball without installer dependencies"),
+      source.indexOf('tar -tzf "$CODEKEEPER_TARBALL"'),
   );
   assert.match(source, /tar -tzf "\$CODEKEEPER_TARBALL"/);
   assert.match(source, /types\.some\(\(line\) => !new Set\(\["-", "d"\]\)\.has\(line\[0\]\)\)/);
   assert.match(source, /tar -xzf "\$CODEKEEPER_TARBALL" --strip-components=1 --no-same-owner --no-same-permissions/);
   assert.doesNotMatch(source, /npm install --prefix "\$install_root"/);
   assert.match(source, /const manifestSha256 = digest\(manifestBytes\)/);
-  assert.match(source, /package_manifest_sha256=\$\{manifestSha256\}/);
-  assert.match(source, /release\/package-integrity\.json/);
+  assert.ok(
+    source.indexOf("manifestSha256 !== process.env.CODEKEEPER_EXPECTED_MANIFEST_SHA256") <
+      source.indexOf('node "$tooling_root/bin/verify-package.mjs"'),
+  );
+  assert.ok(
+    source.indexOf("digest(verifierBytes) !== verifier.sha256") <
+      source.indexOf('node "$tooling_root/bin/verify-package.mjs"'),
+  );
+  assert.match(
+    source,
+    /printf 'package_manifest_sha256=%s\\nsource_commit=%s\\n'/,
+  );
+  assert.ok(
+    source.indexOf("--expected-source-commit") <
+      source.indexOf("printf 'package_manifest_sha256="),
+  );
+  assert.match(source, /package-integrity\.json/);
+  assert.match(source, /https:\/\/github\.com\/coryparry\/Codekeeper/);
   assert.match(
     source,
     /const receipt = \{ version: 1, algorithm: "sha512", integrity: process\.env\.CODEKEEPER_PACKAGE_INTEGRITY \}/,
@@ -433,17 +460,9 @@ test("bootstrap validates tarball SRI before deriving and publishing package pro
   ]) {
     assert.match(source, new RegExp(`--expected-${argument}`));
   }
-  assert.match(
-    source,
-    /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/,
-  );
-  assert.match(
-    source,
-    /name: codekeeper-tooling-\$\{\{ github\.run_id \}\}[\s\S]*retention-days: 1[\s\S]*overwrite: true/,
-  );
   assert.doesNotMatch(
     source,
-    /secrets\.|GITHUB_TOKEN|GH_TOKEN|actions\/checkout|@latest|OWNER\/REPOSITORY/,
+    /secrets\.|GITHUB_TOKEN|GH_TOKEN|actions\/(?:checkout|upload-artifact|download-artifact)|@latest|OWNER\/REPOSITORY/,
   );
 });
 

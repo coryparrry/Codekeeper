@@ -1,4 +1,4 @@
-import { RELEASE_WORKFLOW_ASSETS } from "./constants.mjs";
+import { RELEASE_PACKAGE_ASSETS } from "./constants.mjs";
 
 export const RELEASE_DIRECTORY_MAPPINGS = Object.freeze([
   ["packages/codekeeper/assets", "assets"],
@@ -30,7 +30,7 @@ const STATIC_FILE_MAPPINGS = Object.freeze([
 
 export const RELEASE_FILE_MAPPINGS = Object.freeze([
   ...STATIC_FILE_MAPPINGS,
-  ...RELEASE_WORKFLOW_ASSETS.map(({ sourcePath, packagePath }) => [sourcePath, packagePath]),
+  ...RELEASE_PACKAGE_ASSETS.map(({ sourcePath, packagePath }) => [sourcePath, packagePath]),
 ]);
 
 export const RELEASE_PUBLISHED_PATHS = Object.freeze([...new Set([

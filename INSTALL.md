@@ -18,7 +18,7 @@ If you are unsure which options to choose, accept the recommended starter setup:
 
 Before the installer's final confirmation, choose the newly downloaded GitHub App `.pem` file in its metadata-only picker. Do not open or paste the PEM contents. The picker ignores symlinks and does not read the file; after confirmation, the installer opens it read-only and passes its descriptor directly to GitHub CLI. It does not expose the path or key through terminal output, argv, environment variables, logs, generated files, or snapshots.
 
-After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller also retains its schedule, although only its pinned bootstrap can run while disabled.
+After the setup PR merges, review events intentionally fail the `Codekeeper review gate` while `CODEKEEPER_ENABLED=false`; do not make that gate required until the controlled review proof passes. The maintenance caller retains its schedule, but its runtime jobs skip package acquisition and analysis while disabled.
 
 ## 1. Add policy and caller workflows
 
@@ -33,14 +33,14 @@ Copy [`.github/codekeeper.json`](.github/codekeeper.json) to the adopter reposit
 
 The default content is under [`tools/codekeeper/agents`](tools/codekeeper/agents). The guided installer creates an override only after that profile is edited in Settings. Missing paths remain valid and track future packaged defaults.
 
-Always copy `codekeeper-assistant.yml.example`, then copy the role caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/`. Remove `.example` and replace both placeholders in every caller:
+Always copy `codekeeper-assistant.yml.example`, then copy the role caller templates needed from [`examples/workflows`](examples/workflows) to `.github/workflows/` and remove `.example`. Copy the matching reusable workflows from this repository's `.github/workflows/codekeeper-<role>.yml` files to `.github/workflows/codekeeper-runtime-<role>.yml` in the adopter repository. Also copy [the exact-package acquisition action](.github/codekeeper/actions/acquire-package/action.yml) to the same path in the adopter repository. Replace both package placeholders in every caller:
 
 ```text
-OWNER/REPOSITORY
-FULL_COMMIT_SHA
+PACKAGE_VERSION
+PACKAGE_INTEGRITY
 ```
 
-`FULL_COMMIT_SHA` must be the full immutable commit SHA of a reviewed release of this repository. Replace it identically in both the direct bootstrap-action pin and reusable-workflow pin that each template contains. The bootstrap action accepts no caller-provided secrets and, using GitHub's private-action access, stages only the production Codekeeper runtime as a per-run one-day artifact. Every reusable job rejects that artifact unless it matches the source-pinned manifest, inventory, file hashes, and no-symlink/no-hidden-path rules before `npm` or the CLI runs. Hidden paths are refused to match GitHub artifact uploads' secure default. The caller owns triggers and credentials; it needs no PAT, App installation on the source repository, or caller-controlled source trust. Configure the private source repository's Actions access policy to allow the adopter repository to use the pinned action. The review caller uses `pull_request_target`, so GitHub evaluates its definition and secret mapping from the default branch; the caller only invokes the reusable workflow and never checks out or executes PR code. Do not copy this repository's `tools/` directory or reusable workflow files beyond the four Markdown seeds listed above.
+`PACKAGE_VERSION` must be one exact published Codekeeper version. `PACKAGE_INTEGRITY` must be that same npm release's exact `dist.integrity` SHA-512 value. The first runtime job uses the local action to download those exact package bytes, reject a registry receipt or tarball mismatch, and verify the package's source identity and closed file manifest. It shares the verified package as a one-day, run-scoped artifact. Every later isolated job downloads and independently reverifies that artifact before installing the runtime without lifecycle scripts. The caller owns triggers and credentials; it needs no PAT, App installation on the source repository, or caller-controlled source trust. The review caller uses `pull_request_target`, so GitHub evaluates its definition and secret mapping from the default branch; the caller only invokes local reusable workflows and never checks out or executes PR code. Do not copy this repository's `tools/` directory or agent-profile files unless you are intentionally creating one of the four documented overrides.
 
 ## 2. Tailor the policy before enabling
 

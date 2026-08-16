@@ -75,9 +75,10 @@ function isInstalledCodekeeperWorkflow(source, mode) {
     .map((line) => line.replace(/^-\s+/, ""));
   const actionPrefix = `uses: ${SOURCE_REPOSITORY}/tools/codekeeper@`;
   const workflowPrefix = `uses: ${SOURCE_REPOSITORY}/.github/workflows/codekeeper-${mode}.yml@`;
-  if (activeUses.length !== 2) return false;
   const localBootstrap = "uses: ./.github/workflows/codekeeper-bootstrap.yml";
   const localWorkflow = `uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`;
+  if (activeUses.length === 1 && activeUses[0] === localWorkflow) return true;
+  if (activeUses.length !== 2) return false;
   if (activeUses.includes(localBootstrap) && activeUses.includes(localWorkflow)) return true;
   const action = activeUses.find((line) => line.startsWith(actionPrefix));
   const workflow = activeUses.find((line) => line.startsWith(workflowPrefix));

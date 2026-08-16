@@ -33,7 +33,7 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 | Generated `.github/codekeeper/README.md` | Release-owned explanation of the installed files and update commands. | When orienting maintainers inside an adopter repository. |
 | Generated `.github/codekeeper-release.json` | Installed package/source version and inventory of release-managed files, with exact digests for copied artifacts and semantic validation for generated callers. | When reviewing an update that adds, replaces, renames, or removes generated callers. |
 | Optional `.github/codekeeper/agents/*.md` overrides | Adopter-owned overrides for evidence, risk, duplicate, test-adequacy, and no-action judgment. Absent files use the packaged defaults. | Only when repository-specific behavior should differ from the release default. |
-| Generated `.github/workflows/codekeeper-*.yml` | Selected callers plus local package bootstrap/runtime workflows pinned to the exact npm version and SHA-512 integrity. | When reviewing triggers, permissions, package identity, or secret mappings. |
+| Generated `.github/workflows/codekeeper-*.yml` and `.github/codekeeper/actions/acquire-package/action.yml` | Selected callers, local runtime workflows, and the exact-package acquisition action pinned to the npm version and SHA-512 integrity. | When reviewing triggers, permissions, package identity, or secret mappings. |
 | [Packaged default profiles](https://github.com/coryparry/Codekeeper/tree/a562cef322a2ee4e3395bb2d3528995e403f93ba/tools/codekeeper/agents) | Immutable source and provenance for the four defaults bundled with this release. | When comparing an optional repository override with the release baseline. |
 
 ## What `init` does
@@ -54,7 +54,7 @@ The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and acc
 After choosing the settings, the TUI shows one short summary of the repository, workflows, models, required credential names, file count, and startup choice. Select **Back to settings** to make another change. The installer then:
 
 1. Generates `.github/codekeeper.json`, `.github/codekeeper-release.json`, the always-installed repository-assistant caller, and the selected role callers. It creates an `.github/codekeeper/agents/*.md` file only for a profile explicitly edited in Settings.
-2. Keeps every generated caller pinned to one exact package version and npm SHA-512 integrity. The bootstrap verifies the tarball before trusting its internal closed manifest or runtime.
+2. Keeps every generated caller pinned to one exact package version and npm SHA-512 integrity. The first runtime job verifies the registry tarball and shares it as a run-scoped artifact; every later isolated job reverifies the artifact before trusting its closed manifest or runtime.
 3. Opens a prefilled GitHub App registration page. The adopter creates and installs the App. Codekeeper hosts no callback. Paste the saved App settings URL into the TUI. Codekeeper extracts the bot name.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
 5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
@@ -70,7 +70,7 @@ The installer writes only values that changed. It preserves every untouched prof
 
 ## Update an existing installation
 
-Run `codekeeper update` from a clean, current default-branch checkout. The command resolves the registry's current `latest` version and `dist.integrity` together, launches that exact package with install scripts disabled, and refuses a missing, malformed, or mismatched receipt. The update refreshes every release-owned caller, local bootstrap/runtime workflow, provider definition, policy/schema safety boundary, and generated-file inventory. New generated files are added and retired release-owned files are removed in the same reviewed pull request after preflight validates their ownership and binds the plan to the exact inspected bytes. Existing source-pinned installations migrate to package execution through that pull request; the historical commit remains valid until it merges.
+Run `codekeeper update` from a clean, current default-branch checkout. The command resolves the registry's current `latest` version and `dist.integrity` together, launches that exact package with install scripts disabled, and refuses a missing, malformed, or mismatched receipt. The update refreshes every release-owned caller, local package action/runtime workflow, provider definition, policy/schema safety boundary, and generated-file inventory. New generated files are added and retired release-owned files are removed in the same reviewed pull request after preflight validates their ownership and binds the plan to the exact inspected bytes. Existing source-pinned installations migrate to package execution through that pull request; the historical commit remains valid until it merges.
 
 The published tarball is the update boundary. New CLI and TUI modules come from `packages/codekeeper`. New runtime modules, agent tools, profiles, presets, and integration code come from their approved production roots. The package verifier rejects missing, extra, changed, hidden, or linked files. One strict artifact catalog controls repository-installed files. The `.github/codekeeper-release.json` file records their inventory. Each copied Markdown, settings, or workflow asset needs one catalog record. The record defines its destination, owner, activation, renderer, validation rule, and purpose. The existing systems then add or update it. Renames list the previous target. Removal records stay until every supported installation has migrated.
 
@@ -160,7 +160,7 @@ The installer renders the policy, caller controls, schedule, and credential mapp
 | Stage | What happens | Durable record |
 |---|---|---|
 | Trigger | A selected caller receives a supported GitHub event or manual dispatch. | GitHub event and workflow run. |
-| Pinned bootstrap | The caller fetches the runtime at the exact source SHA and verifies its manifest. | Workflow job and source reference. |
+| Exact package acquisition | Each isolated runtime job fetches the pinned npm tarball and verifies its integrity, manifest, inventory, and source commit. | Workflow job and package receipt. |
 | Frozen decision | Trusted context and the selected policy/model are frozen before analysis. Repository content remains untrusted evidence. | Sealed run inputs and logs within their retention boundary. |
 | Sealed artifact | Structured output and any bounded patch pass deterministic validation without App credentials. | Verified workflow artifact. |
 | App publication | A separate job mints an installation token and publishes only validated output. | App-authored review, issue comment, label, or PR. |

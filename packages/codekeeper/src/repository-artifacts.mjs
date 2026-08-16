@@ -4,7 +4,7 @@ import {
   ASSISTANT_WORKFLOW,
   MODE_IDS,
   MODES,
-  PACKAGE_BOOTSTRAP_WORKFLOW,
+  PACKAGE_ACQUIRE_ACTION,
   POLICY_TARGET,
   RELEASE_MANIFEST_TARGET,
   RUNTIME_WORKFLOWS,
@@ -12,7 +12,7 @@ import {
 
 const ARTIFACT_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const ASSET_PATH =
-  /^(?:agents|policies|repository|runtime-workflows|workflows)\/[A-Za-z0-9._/-]+$/;
+  /^(?:agents|policies|repository|runtime-actions|runtime-workflows|workflows)\/[A-Za-z0-9._/-]+$/;
 const CODEKEEPER_TARGET =
   /^(?:\.github\/codekeeper\.json|\.github\/codekeeper\/[A-Za-z0-9._/-]+|\.github\/workflows\/codekeeper-[a-z0-9-]+\.yml)$/;
 const OWNERSHIP = new Set(["mixed", "release", "user"]);
@@ -65,15 +65,15 @@ const ASSISTANT_ARTIFACT = {
   callerMode: ASSISTANT_WORKFLOW.id,
   purpose: ASSISTANT_WORKFLOW.description,
 };
-const BOOTSTRAP_ARTIFACT = {
-  id: "repository.workflow.bootstrap",
-  target: PACKAGE_BOOTSTRAP_WORKFLOW.target,
-  asset: PACKAGE_BOOTSTRAP_WORKFLOW.asset,
+const PACKAGE_ACTION_ARTIFACT = {
+  id: "repository.action.acquire-package",
+  target: PACKAGE_ACQUIRE_ACTION.target,
+  asset: PACKAGE_ACQUIRE_ACTION.asset,
   ownership: "release",
   activation: { kind: "always" },
   renderer: "copy",
   validation: "digest",
-  purpose: PACKAGE_BOOTSTRAP_WORKFLOW.description,
+  purpose: PACKAGE_ACQUIRE_ACTION.description,
 };
 const GUIDE_ARTIFACT = {
   id: "repository.guide",
@@ -111,7 +111,7 @@ export const REPOSITORY_ARTIFACTS = Object.freeze(
       callerMode: mode,
       purpose: MODES[mode].label,
     })),
-    BOOTSTRAP_ARTIFACT,
+    PACKAGE_ACTION_ARTIFACT,
     {
       id: "repository.workflow.runtime.assistant",
       target: RUNTIME_WORKFLOWS.assistant.target,
@@ -138,7 +138,15 @@ export const REPOSITORY_ARTIFACTS = Object.freeze(
 
 // Retired release-owned targets stay here until every supported installed
 // manifest can migrate past them. This keeps deletion authority explicit.
-export const RETIRED_REPOSITORY_ARTIFACTS = Object.freeze([]);
+export const RETIRED_REPOSITORY_ARTIFACTS = Object.freeze([
+  freezeArtifact({
+    id: "repository.workflow.bootstrap",
+    target: ".github/workflows/codekeeper-bootstrap.yml",
+    ownership: "release",
+    validation: "digest",
+    purpose: "Retired per-run package bootstrap workflow",
+  }),
+]);
 
 export function validateRepositoryArtifactCatalog({
   artifacts = REPOSITORY_ARTIFACTS,
