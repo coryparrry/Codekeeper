@@ -39,16 +39,6 @@ const STANDARD_DESCRIPTIONS = Object.freeze({
   "ai.tracing.enabled": "Send OpenAI trace data when an OpenAI trace key is available."
 });
 
-const RISK_WARNINGS = Object.freeze({
-  "review.createDeferredIssues": "This setting can create GitHub issues.",
-  "review.autoRepair": "This setting can change pull request branches.",
-  "audit.repair.enabled": "This setting can create repository repair pull requests.",
-  "issues.allowAiImplementation": "This setting can create code changes from ready issues.",
-  "issues.closeExactDuplicates": "This setting can close GitHub issues.",
-  "issues.closeResolvedIssues": "This setting can close GitHub issues after a merge.",
-  "merge.enabled": "This setting can merge pull requests without another manual action."
-});
-
 function words(value) {
   return String(value)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -78,14 +68,6 @@ function advancedDescription(path) {
   if (path.startsWith("repository.")) return "Set the repository identity or automation branch prefix.";
   if (path === "projectInvariants") return "List project rules that every Codekeeper role must preserve.";
   return `Set ${words(path)}.`;
-}
-
-function rowWarning(path) {
-  if (RISK_WARNINGS[path]) return RISK_WARNINGS[path];
-  if (/^ai\.agents\.[^.]+\.provider$/.test(path)) return "Changing the provider also selects its default model and can require another API key.";
-  if (path.startsWith("audit.repair.")) return "This change affects the files or changes that repository repair can make.";
-  if (path.startsWith("merge.")) return "This change affects the conditions for automatic merge.";
-  return null;
 }
 
 function clone(value) {
@@ -134,9 +116,22 @@ function enumChoices(path, policy) {
   return null;
 }
 
+function modelChoices(path, policy) {
+  const coordinator = path.match(/^ai\.agents\.([^.]+)\.model$/);
+  const workspace = path.match(/^ai\.agents\.([^.]+)\.workspace\.model$/);
+  if (!coordinator && !workspace) return null;
+  const provider = coordinator ? policy.ai.agents[coordinator[1]].provider : "openai";
+  const current = getPath(policy, path);
+  return [...new Set([
+    current,
+    ...(MODEL_OPTIONS[provider] ?? []).map((option) => option.model)
+  ].filter(Boolean))];
+}
+
 function policyRow(policy, path, label = path, keys = pathParts(path)) {
   const value = getPath(policy, keys);
-  const choices = enumChoices(path, policy);
+  const models = modelChoices(path, policy);
+  const choices = models ?? enumChoices(path, policy);
   const canonicalKeys = pathParts(path);
   return {
     id: `policy:${path}`,
@@ -148,13 +143,13 @@ function policyRow(policy, path, label = path, keys = pathParts(path)) {
     value,
     readOnly: readOnlyPolicyPath(path),
     kind: readOnlyPolicyPath(path) ? "readonly"
-      : choices ? "enum"
+      : models ? "model"
+        : choices ? "enum"
         : typeof value === "boolean" ? "boolean"
           : typeof value === "number" ? "number"
             : typeof value === "string" || /^ai\.agents\.[^.]+\.workspace\.model$/.test(path) ? "string"
               : "json",
-    ...(choices ? { choices } : {}),
-    ...(rowWarning(path) ? { warning: rowWarning(path) } : {})
+    ...(choices ? { choices } : {})
   };
 }
 
@@ -228,10 +223,7 @@ export function settingsRows(settings, { advanced = false } = {}) {
       label: MODES[mode].label,
       description: MODES[mode].description,
       kind: "boolean",
-      value: settings.modes.includes(mode),
-      warning: settings.modes.includes(mode)
-        ? "Turning this workflow off removes its generated caller after the setup pull request merges."
-        : "Turning this workflow on adds its generated caller and can require another API key."
+      value: settings.modes.includes(mode)
     })),
     {
       id: "enabled",
@@ -239,8 +231,7 @@ export function settingsRows(settings, { advanced = false } = {}) {
       label: "Start Codekeeper after merge",
       description: "Turn all installed Codekeeper workflows on or off.",
       kind: "boolean",
-      value: settings.enabled,
-      warning: settings.enabled ? "Codekeeper stays installed, but its workflows stop after this change merges." : "Codekeeper workflows can run after this change merges."
+      value: settings.enabled
     },
     ...STANDARD_PATHS.map(([path, label]) => policyRow(settings.policy, path, label))
   ];

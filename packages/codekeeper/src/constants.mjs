@@ -159,10 +159,17 @@ export const MODEL_OPTIONS = Object.freeze({
     Object.freeze({ id: "luna-max", provider: "openai", model: "gpt-5.6-luna", effort: "max", label: "OpenAI · GPT-5.6 Luna · max effort" }),
     Object.freeze({ id: "sol-high", provider: "openai", model: "gpt-5.6-sol", effort: "high", label: "OpenAI · GPT-5.6 Sol · high effort" }),
     Object.freeze({ id: "terra-high", provider: "openai", model: "gpt-5.6-terra", effort: "high", label: "OpenAI · GPT-5.6 Terra · high effort" }),
-    Object.freeze({ id: "terra-medium", provider: "openai", model: "gpt-5.6-terra", effort: "medium", label: "OpenAI · GPT-5.6 Terra · medium effort" })
+    Object.freeze({ id: "terra-medium", provider: "openai", model: "gpt-5.6-terra", effort: "medium", label: "OpenAI · GPT-5.6 Terra · medium effort" }),
+    Object.freeze({ id: "gpt-5.5-medium", provider: "openai", model: "gpt-5.5", effort: "medium", label: "OpenAI · GPT-5.5 · medium effort" }),
+    Object.freeze({ id: "gpt-5.5-pro-high", provider: "openai", model: "gpt-5.5-pro", effort: "high", label: "OpenAI · GPT-5.5 Pro · high effort" }),
+    Object.freeze({ id: "gpt-5.4-medium", provider: "openai", model: "gpt-5.4", effort: "medium", label: "OpenAI · GPT-5.4 · medium effort" }),
+    Object.freeze({ id: "gpt-5.4-mini-medium", provider: "openai", model: "gpt-5.4-mini", effort: "medium", label: "OpenAI · GPT-5.4 mini · medium effort" }),
+    Object.freeze({ id: "gpt-5.4-nano-low", provider: "openai", model: "gpt-5.4-nano", effort: "low", label: "OpenAI · GPT-5.4 nano · low effort" }),
+    Object.freeze({ id: "gpt-5.3-codex-high", provider: "openai", model: "gpt-5.3-codex", effort: "high", label: "OpenAI · GPT-5.3 Codex · high effort" })
   ]),
   deepseek: Object.freeze([
-    Object.freeze({ id: "deepseek-v4-flash", provider: "deepseek", model: "deepseek-v4-flash", effort: "none", label: "DeepSeek · V4 Flash" })
+    Object.freeze({ id: "deepseek-v4-flash", provider: "deepseek", model: "deepseek-v4-flash", effort: "none", label: "DeepSeek · V4 Flash" }),
+    Object.freeze({ id: "deepseek-v4-pro", provider: "deepseek", model: "deepseek-v4-pro", effort: "none", label: "DeepSeek · V4 Pro" })
   ]),
   openrouter: Object.freeze([
     Object.freeze({ id: "openrouter-sol", provider: "openrouter", model: "openai/gpt-5.6-sol", effort: "none", label: "OpenRouter · OpenAI GPT-5.6 Sol" })
