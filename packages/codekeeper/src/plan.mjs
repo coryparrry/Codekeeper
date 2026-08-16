@@ -71,10 +71,15 @@ function validClientId(value) {
 }
 
 export function normalizeModes(modes) {
-  if (!Array.isArray(modes)) throw new InstallerError("Select at least one Codekeeper mode.", { code: "PLAN_INVALID" });
+  if (!Array.isArray(modes))
+    throw new InstallerError("Select at least one Codekeeper mode.", {
+      code: "PLAN_INVALID"
+    });
   const selected = [...new Set(modes)];
   if (!selected.length || selected.some((mode) => !MODE_IDS.includes(mode))) {
-    throw new InstallerError("Select at least one supported Codekeeper mode.", { code: "PLAN_INVALID" });
+    throw new InstallerError("Select at least one supported Codekeeper mode.", {
+      code: "PLAN_INVALID"
+    });
   }
   return MODE_IDS.filter((mode) => selected.includes(mode));
 }
@@ -89,7 +94,10 @@ export function modelAssignments(modes) {
 }
 
 export function normalizeOwnerLogins(ownerLogins) {
-  if (!Array.isArray(ownerLogins) || !ownerLogins.length) throw new InstallerError("At least one owner login is required.", { code: "PLAN_INVALID" });
+  if (!Array.isArray(ownerLogins) || !ownerLogins.length)
+    throw new InstallerError("At least one owner login is required.", {
+      code: "PLAN_INVALID"
+    });
   const normalized = ownerLogins.map((login) => String(login).trim().toLowerCase());
   if (normalized.some((login) => !LOGIN.test(login)) || new Set(normalized).size !== normalized.length) {
     throw new InstallerError("Owner logins must be unique GitHub login names.", { code: "PLAN_INVALID" });
@@ -105,7 +113,10 @@ export function applicableCapabilityIds(modes) {
 }
 
 export function normalizeCapabilities(modes, selected = []) {
-  if (!Array.isArray(selected)) throw new InstallerError("Capability choices are invalid.", { code: "PLAN_INVALID" });
+  if (!Array.isArray(selected))
+    throw new InstallerError("Capability choices are invalid.", {
+      code: "PLAN_INVALID"
+    });
   const applicable = applicableCapabilityIds(modes);
   if (selected.some((id) => !applicable.includes(id)) || new Set(selected).size !== selected.length) {
     throw new InstallerError("Capability choices do not match the selected workflows.", { code: "PLAN_INVALID" });
@@ -128,7 +139,7 @@ export function capabilitySummary(capabilities, modes = null) {
 export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET, tracing = true, policy = null }) {
   const selected = normalizeModes(modes);
   const names = [];
-  const providers = new Set(modelAssignments(selected).map(({ key }) => models?.[key]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
+  const providers = new Set(modelAssignments(selected).map(({ key, agent }) => models?.[key]?.provider ?? policy?.ai?.agents?.[agent]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
   for (const mode of selected) {
     const agent = policy?.ai?.agents?.[MODES[mode].policyAgent];
     if (MODES[mode].workspaceProvider && (!policy || agent?.workspace?.enabled === true)) {
@@ -169,18 +180,18 @@ export function normalizeModelChoices({ modes, preset, bundle, choices = {}, pol
     const agent = policy.ai.agents[agentId];
     const defaultOption = ALL_MODEL_OPTIONS.find((option) => option.provider === agent.provider && option.model === agent.model && option.effort === agent.effort);
     const requested = choices[key] ?? defaultOption?.id;
-    const choice = typeof requested === "string"
-      ? ALL_MODEL_OPTIONS.find((option) => option.id === requested)
-      : requested;
-    if (!choice || typeof choice !== "object") throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    const choice = typeof requested === "string" ? ALL_MODEL_OPTIONS.find((option) => option.id === requested) : requested;
+    if (!choice || typeof choice !== "object")
+      throw new InstallerError(`Model choice is invalid for ${workflow}.`, {
+        code: "PLAN_INVALID"
+      });
     const provider = String(choice.provider ?? "").trim();
     const model = String(choice.model ?? "").trim();
     const effort = String(choice.effort ?? "none").trim();
-    if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, provider) || !policy.ai.providers[provider]
-      || !model || model.length > 256 || /[\s\u0000-\u001f\u007f]/.test(model)
-      || !["none", "minimal", "low", "medium", "high", "max", "xhigh"].includes(effort)
-      || (effort !== "none" && !policy.ai.providers[provider]?.supportsReasoningEffort)) {
-      throw new InstallerError(`Model choice is invalid for ${workflow}.`, { code: "PLAN_INVALID" });
+    if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, provider) || !policy.ai.providers[provider] || !model || model.length > 256 || /[\s\u0000-\u001f\u007f]/.test(model) || !["none", "minimal", "low", "medium", "high", "max", "xhigh"].includes(effort) || (effort !== "none" && !policy.ai.providers[provider]?.supportsReasoningEffort)) {
+      throw new InstallerError(`Model choice is invalid for ${workflow}.`, {
+        code: "PLAN_INVALID"
+      });
     }
     const preservesCurrentSettings = provider === agent.provider
       && model === agent.model
@@ -239,30 +250,26 @@ export function documentMap(files) {
   });
 }
 
-export function workflowMap(modes) {
-  return normalizeModes(modes).map((mode) => Object.freeze({
-    mode,
-    label: MODES[mode].label,
-    description: MODES[mode].description,
-    workflow: MODES[mode].target,
-    trigger: MODES[mode].trigger,
-    policyAgent: MODES[mode].policyAgent
-  }));
+export function workflowMap(modes, { maintenanceScheduled = true } = {}) {
+  return normalizeModes(modes).map((mode) =>
+    Object.freeze({
+      mode,
+      label: MODES[mode].label,
+      description: MODES[mode].description,
+      workflow: MODES[mode].target,
+      trigger: mode === "maintain" && !maintenanceScheduled ? "manual run" : MODES[mode].trigger,
+      policyAgent: MODES[mode].policyAgent
+    })
+  );
 }
 
 export function completionGuidance(modes, enabled = true, update = false) {
   const normalizedModes = normalizeModes(modes);
   return Object.freeze({
-    heading: enabled
-      ? update
-        ? "Codekeeper keeps running the current default-branch configuration. The change takes effect when the pull request merges; no separate validation run is required."
-        : "Codekeeper is ready. It starts the selected workflows when the setup pull request merges; no separate dry run or controlled test is required."
-      : "Codekeeper stays off after merge. Set CODEKEEPER_ENABLED=true when you want it to start; no separate validation run is required.",
+    heading: enabled ? (update ? "Codekeeper keeps running the current default-branch configuration. Verify the updated installation after this pull request merges." : "The setup pull request is ready. Codekeeper is not proven ready until the pull request merges and codekeeper verify passes.") : "Codekeeper stays off after merge. Verify the installation before setting CODEKEEPER_ENABLED=true.",
     profileGuidance: "Packaged agent profiles are the default. Edit a profile in Settings to create an optional .github/codekeeper/agents/*.md repository override. Capability switches control repair, issue implementation, issue closure, and merge actions.",
-    reviewGateWarning: !enabled && normalizedModes.includes("review")
-      ? "Keep the Codekeeper review gate optional while Codekeeper is disabled."
-      : null,
-    closing: "The installer did not run a workflow or merge the pull request."
+    reviewGateWarning: !enabled && normalizedModes.includes("review") ? "Keep the Codekeeper review gate optional while Codekeeper is disabled." : null,
+    closing: "After merge, run codekeeper verify from a clean, current default-branch checkout."
   });
 }
 
@@ -283,6 +290,7 @@ function editableSettingsForInstallation(snapshot, bundle) {
     policy: installation.policy,
     modes: installation.modes,
     enabled: snapshot.existingSettings.enabled,
+    maintenanceScheduled: installation.maintenanceScheduled,
     profiles,
     profileDefaults,
     profileOverrides: AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
@@ -317,12 +325,17 @@ export function setupPullRequestBody(plan) {
     ["Document", "Purpose"],
     documentMap(plan.files).map((item) => [`\`${item.path}\``, item.purpose])
   );
+  const workflowDetails = new Map(
+    workflowMap(plan.modes, {
+      maintenanceScheduled: plan.maintenanceScheduled
+    }).map((item) => [item.mode, item])
+  );
   const workflows = markdownTable(
     ["Workflow", "Role", "What it does", "Trigger", "Provider and model"],
     modelAssignments(plan.modes).map(({ key, label, workflow }) => {
       const mode = plan.modes.find((candidate) => MODES[candidate].label === workflow);
       const selection = plan.models[key];
-      return [MODES[mode].label, label, MODES[mode].description, MODES[mode].trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
+      return [MODES[mode].label, label, MODES[mode].description, workflowDetails.get(mode).trigger, `\`${selection.provider} / ${selection.model} / ${selection.effort}\``];
     })
   );
   const reviewDisabledNote = plan.modes.includes("review") && !plan.enabled
@@ -337,6 +350,8 @@ export function setupPullRequestBody(plan) {
 Codekeeper CLI release **${plan.packageVersion}** uses the **${plan.preset}** starting model set at source commit \`${plan.source.commit}\`. Each role has its selected provider and model below. ${plan.update && plan.enabled ? "It is enabled now with the current default-branch configuration; this update applies after the pull request merges." : plan.update ? `It will be ${plan.enabled ? "enabled" : "disabled"} after this update pull request merges.` : `It will be ${plan.enabled ? "enabled" : "disabled"} after this setup pull request merges.`}
 
 OpenAI traces are **${plan.tracing ? "enabled" : "disabled"}**.
+
+Scheduled maintenance is **${plan.maintenanceScheduled ? "enabled" : "disabled; manual maintenance remains available"}**.
 
 Source: [${plan.source.repository}@${plan.source.commit}](https://github.com/${plan.source.repository}/tree/${plan.source.commit})
 
@@ -357,25 +372,30 @@ ${requiredSettings ? `\n${requiredSettings}\n` : ""}
 
 ## After merge
 
-${plan.enabled
-    ? plan.update
-      ? "Codekeeper keeps running the current default-branch configuration. The update takes effect when this pull request merges; no separate validation run is required."
-      : "Codekeeper starts running the selected workflows when this pull request merges; no separate dry run or controlled test is required."
-    : "Codekeeper stays off. Set `CODEKEEPER_ENABLED=true` when you want it to start; no separate validation run is required."}
+${plan.enabled ? (plan.update ? "Codekeeper keeps running the current default-branch configuration. After this pull request merges, run `codekeeper verify` from a clean, current default-branch checkout." : "Codekeeper can start the selected workflows when this pull request merges. After merge, run `codekeeper verify` from a clean, current default-branch checkout before treating the installation as ready.") : "Codekeeper stays off. After merge, run `codekeeper verify`, then set `CODEKEEPER_ENABLED=true` when you want it to start."}
 
 Packaged agent profiles are used by default. Edit a profile in Settings to create an optional \`.github/codekeeper/agents/*.md\` repository override for priorities, work selection, implementation approach, review standards, or reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
 
-The installer did not merge this pull request or run a workflow.
+The installer did not merge this pull request or prove a workflow. A successful setup pull request is not a readiness result.
 `;
 }
 
 export function buildInstallPlan({ bundle, snapshot, answers }) {
   const modes = normalizeModes(answers.modes);
   const installation = snapshot.installation ?? null;
+  const maintenanceScheduled = answers.maintenanceScheduled ?? installation?.maintenanceScheduled ?? true;
+  if (typeof maintenanceScheduled !== "boolean") {
+    throw new InstallerError("Scheduled maintenance choice is invalid.", {
+      code: "PLAN_INVALID"
+    });
+  }
   const releaseUpdate = Boolean(installation && answers.releaseUpdate === true);
   const operation = releaseUpdate ? "release-update" : installation ? "configuration-update" : "setup";
   const policySource = installation?.policySource ?? bundle.contents[`policies/${answers.preset}.json`];
-  if (!PRESET_IDS.includes(answers.preset)) throw new InstallerError(`Unsupported preset: ${answers.preset}`, { code: "PLAN_INVALID" });
+  if (!PRESET_IDS.includes(answers.preset))
+    throw new InstallerError(`Unsupported preset: ${answers.preset}`, {
+      code: "PLAN_INVALID"
+    });
   const baselinePolicy = upgradePolicy(JSON.parse(policySource));
   const validationBaselinePolicy = releaseUpdate
     ? upgradePolicy(JSON.parse(bundle.contents[`policies/${answers.preset}.json`]))
@@ -385,23 +405,36 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
   const packagedProfileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
-  const inputPolicy = answers.policy ?? createEditableSettings({
-    policy: baselinePolicy,
-    modes,
-    enabled: answers.enabled !== false,
-    profiles: answers.profiles ?? effectiveProfiles,
-    profileDefaults: packagedProfileDefaults,
-    profileSources: answers.profileSources,
-    profileOverrides: installation
-      ? AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
-      : []
-  }).policy;
+  const inputPolicy =
+    answers.policy ??
+    createEditableSettings({
+      policy: baselinePolicy,
+      modes,
+      enabled: answers.enabled !== false,
+      maintenanceScheduled,
+      profiles: answers.profiles ?? effectiveProfiles,
+      profileDefaults: packagedProfileDefaults,
+      profileSources: answers.profileSources,
+      profileOverrides: installation ? AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target)) : []
+    }).policy;
   const displayName = answers.policy?.repository.displayName ?? answers.displayName;
-  if (!validDisplayName(displayName)) throw new InstallerError("Repository display name is invalid.", { code: "PLAN_INVALID" });
+  if (!validDisplayName(displayName))
+    throw new InstallerError("Repository display name is invalid.", {
+      code: "PLAN_INVALID"
+    });
   const ownerLogins = normalizeOwnerLogins(answers.policy?.repository.ownerLogins ?? answers.ownerLogins);
-  if (!validClientId(answers.appClientId)) throw new InstallerError("GitHub App Client ID is invalid.", { code: "PLAN_INVALID" });
+  if (!validClientId(answers.appClientId))
+    throw new InstallerError("GitHub App Client ID is invalid.", {
+      code: "PLAN_INVALID"
+    });
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
-  const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models, policySource });
+  const models = normalizeModelChoices({
+    modes,
+    preset: answers.preset,
+    bundle,
+    choices: answers.models,
+    policySource
+  });
   const tracing = answers.policy ? answers.policy.ai.tracing.enabled : answers.tracing !== false;
   const desiredProfileSettings = normalizeProfileSettings({
     profiles: answers.profiles ?? effectiveProfiles,
@@ -427,6 +460,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     capabilities,
     models,
     tracing,
+    maintenanceScheduled,
     policySource: answers.policy ? policySource : JSON.stringify(inputPolicy),
     profileSources,
     enforceBundledDefaults: !installation,
@@ -434,21 +468,35 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     refreshReleaseBoundaries: releaseUpdate
   });
   const effectivePolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
-  validateEditableSettings({
-    policy: effectivePolicy,
-    modes,
-    enabled: answers.enabled !== false,
-    profiles: desiredProfileSettings.profiles,
-    profileDefaults: desiredProfileSettings.profileDefaults,
-    profileSources: desiredProfileSettings.profileSources
-  }, validationBaselinePolicy);
+  validateEditableSettings(
+    {
+      policy: effectivePolicy,
+      modes,
+      enabled: answers.enabled !== false,
+      maintenanceScheduled,
+      profiles: desiredProfileSettings.profiles,
+      profileDefaults: desiredProfileSettings.profileDefaults,
+      profileSources: desiredProfileSettings.profileSources
+    },
+    validationBaselinePolicy
+  );
   const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, effectivePolicy.automation.ownerRequests);
-  const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
-  if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin)) throw new InstallerError("GitHub App bot login is invalid.", { code: "PLAN_INVALID" });
+  const automationBotLogin = needsAutomationBotLogin
+    ? String(answers.automationBotLogin ?? "")
+        .trim()
+        .toLowerCase()
+    : null;
+  if (needsAutomationBotLogin && !BOT_LOGIN.test(automationBotLogin))
+    throw new InstallerError("GitHub App bot login is invalid.", {
+      code: "PLAN_INVALID"
+    });
   const changedFiles = installation
     ? files
-      .filter((file) => installation.contents[file.path] !== file.contents)
-      .map((file) => ({ ...file, previousSha256: installation.contents[file.path] === undefined ? null : sha256(installation.contents[file.path]) }))
+        .filter((file) => installation.contents[file.path] !== file.contents)
+        .map((file) => ({
+          ...file,
+          previousSha256: installation.contents[file.path] === undefined ? null : sha256(installation.contents[file.path])
+        }))
     : files;
   if (installation) {
     for (const id of AGENT_PROFILE_IDS) {
@@ -491,23 +539,25 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     }
   }
   const enabled = answers.enabled !== false;
-  const variables = installation
-    ? (enabled === snapshot.existingSettings.enabled ? [] : [{ name: ENABLED_VARIABLE, value: String(enabled) }])
-    : [
-    { name: ENABLED_VARIABLE, value: String(enabled) },
-    { name: CLIENT_ID_VARIABLE, value: answers.appClientId }
-  ];
+  const variables = installation ? [] : [{ name: CLIENT_ID_VARIABLE, value: answers.appClientId }];
   if (!installation && needsAutomationBotLogin) variables.push({ name: BOT_LOGIN_VARIABLE, value: automationBotLogin });
   if (installation && needsAutomationBotLogin && automationBotLogin !== snapshot.existingSettings.automationBotLogin) {
     variables.push({ name: BOT_LOGIN_VARIABLE, value: automationBotLogin });
   }
+  if (!installation || enabled !== snapshot.existingSettings.enabled) {
+    variables.push({ name: ENABLED_VARIABLE, value: String(enabled) });
+  }
   if (installation && !changedFiles.length && !variables.length) {
     throw new InstallerError("The selected configuration does not change the current installation.", { code: "NO_CHANGES" });
   }
-  const requiredSecrets = requiredSecretNames({ modes, models, tracing, policy: effectivePolicy });
-  const secretNames = installation
-    ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))
-    : requiredSecrets;
+  const requiredSecrets = requiredSecretNames({
+    modes,
+    models,
+    tracing,
+    policy: effectivePolicy
+  });
+  const secretNames = installation ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name)) : requiredSecrets;
+  const assignments = modelAssignments(modes);
   const plan = {
     packageVersion: bundle.packageRelease.version,
     source: {
@@ -525,20 +575,39 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     enabled,
     capabilities,
     models,
+    modelSummary: Object.freeze(
+      Object.fromEntries(
+        modes.map((mode) => {
+          const agent = effectivePolicy.ai.agents[MODES[mode].policyAgent];
+          return [
+            mode,
+            Object.freeze({
+              coordinator: Object.freeze({
+                provider: agent.provider,
+                model: agent.model,
+                effort: agent.effort
+              }),
+              workspace: Object.freeze({
+                provider: MODES[mode].workspaceProvider,
+                enabled: agent.workspace?.enabled === true,
+                model: agent.workspace?.model ?? "",
+                effort: agent.workspace?.effort ?? "none",
+                allowWrites: agent.workspace?.allowWrites === true
+              })
+            })
+          ];
+        })
+      )
+    ),
     tracing,
+    maintenanceScheduled,
     policy: effectivePolicy,
     files: changedFiles,
     variables,
     secrets: secretNames.map((name) => {
       const provider = Object.entries(MODEL_PROVIDER_SECRETS).find(([, secretName]) => secretName === name)?.[0];
-      const roles = provider
-        ? modelAssignments(modes)
-          .filter(({ key }) => models[key]?.provider === provider)
-          .map(({ label }) => label)
-        : [];
-      const purpose = roles.length
-        ? `${SECRET_PURPOSES[name].replace(/[.]$/, "")}. Used by: ${roles.join(", ")}.`
-        : SECRET_PURPOSES[name];
+      const roles = provider ? assignments.filter(({ key }) => models[key]?.provider === provider).map(({ label }) => label) : [];
+      const purpose = roles.length ? `${SECRET_PURPOSES[name].replace(/[.]$/, "")}. Used by: ${roles.join(", ")}.` : SECRET_PURPOSES[name];
       return { name, purpose };
     }),
     branch: installation ? snapshot.updateBranch : SETUP_BRANCH,
@@ -556,6 +625,40 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   };
   plan.pullRequest.body = setupPullRequestBody(plan);
   return deepFreeze(plan);
+}
+
+function freshSettings(snapshot, bundle, preset = RECOMMENDED_PRESET) {
+  const baselinePolicy = upgradePolicy(JSON.parse(bundle.contents[`policies/${preset}.json`]));
+  baselinePolicy.repository.displayName = snapshot.displayName;
+  baselinePolicy.repository.ownerLogins = [snapshot.viewerLogin.toLowerCase()];
+  baselinePolicy.merge.allowedUserAuthors = [...baselinePolicy.repository.ownerLogins];
+  baselinePolicy.ai.tracing.enabled = false;
+  baselinePolicy.review.autoRepair = false;
+  baselinePolicy.audit.repair.enabled = false;
+  baselinePolicy.issues.allowAiImplementation = false;
+  baselinePolicy.issues.closeExactDuplicates = false;
+  baselinePolicy.merge.enabled = false;
+  const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  return {
+    preset,
+    baselinePolicy,
+    profileDefaults,
+    settings: createEditableSettings({
+      policy: baselinePolicy,
+      modes: RECOMMENDED_MODES,
+      enabled: true,
+      maintenanceScheduled: false,
+      profiles: profileDefaults
+    })
+  };
+}
+
+function recommendedAnswers(snapshot, bundle) {
+  const fresh = freshSettings(snapshot, bundle);
+  return Object.freeze({
+    ...settingsAnswers(fresh.settings),
+    preset: fresh.preset
+  });
 }
 
 export async function collectSetupAnswers({ prompt, snapshot, bundle, output, initialAnswers = null }) {
@@ -578,34 +681,50 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
         noLabel: "Cancel"
       } : {})
     });
-    if (!repositoryConfirmed) throw new InstallerError("Setup was cancelled before any mutation.", { code: "USER_CANCELLED" });
+    if (!repositoryConfirmed)
+      throw new InstallerError("Setup was cancelled before any mutation.", {
+        code: "USER_CANCELLED"
+      });
   }
-  if (prompt?.kind === "ink" && typeof prompt.editSettings === "function") {
+  const canEditSettings = prompt?.kind === "ink" && typeof prompt.editSettings === "function";
+  let chooseCustom = Boolean(installation || initialAnswers);
+  if (!chooseCustom && canEditSettings) {
+    chooseCustom =
+      (await prompt.select({
+        step: "setup",
+        message: "Choose a starting setup",
+        description: ["Recommended starts with automatic pull-request review and manual maintenance.", "Tracing, schedules, repository repair, issue implementation, and automatic merge start off."],
+        defaultValue: "recommended",
+        choices: [
+          {
+            value: "recommended",
+            label: "Recommended — review on, manual maintenance available"
+          },
+          { value: "custom", label: "Customize — open all settings" }
+        ]
+      })) === "custom";
+    if (!chooseCustom) {
+      output.write("Using the recommended setup: review on, manual maintenance available, tracing and code-changing automation off.\n");
+      return recommendedAnswers(snapshot, bundle);
+    }
+  }
+  if (canEditSettings && chooseCustom) {
     const installed = installation ? editableSettingsForInstallation(snapshot, bundle) : null;
     const preset = initialAnswers?.preset ?? installed?.preset ?? "openai";
-    const baselinePolicy = installed?.settings.policy
-      ?? upgradePolicy(JSON.parse(bundle.contents[`policies/${preset}.json`]));
-    if (!installation) {
-      baselinePolicy.repository.displayName = snapshot.displayName;
-      baselinePolicy.repository.ownerLogins = [snapshot.viewerLogin.toLowerCase()];
-      baselinePolicy.merge.allowedUserAuthors = [...baselinePolicy.repository.ownerLogins];
-    }
-    const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+    const fresh = installation ? null : freshSettings(snapshot, bundle, preset);
+    const baselinePolicy = installed?.settings.policy ?? fresh.baselinePolicy;
+    const profileDefaults = fresh?.profileDefaults ?? Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
     const settings = initialAnswers
       ? createEditableSettings({
-        policy: initialAnswers.policy,
-        modes: initialAnswers.modes,
-        enabled: initialAnswers.enabled,
-        profiles: initialAnswers.profiles,
-        profileDefaults,
-        profileSources: initialAnswers.profileSources
-      })
-      : installed?.settings ?? createEditableSettings({
-        policy: baselinePolicy,
-        modes: RECOMMENDED_MODES,
-        enabled: true,
-        profiles: profileDefaults
-      });
+          policy: initialAnswers.policy,
+          modes: initialAnswers.modes,
+          enabled: initialAnswers.enabled,
+          maintenanceScheduled: initialAnswers.maintenanceScheduled,
+          profiles: initialAnswers.profiles,
+          profileDefaults,
+          profileSources: initialAnswers.profileSources
+        })
+      : (installed?.settings ?? fresh.settings);
     const edited = await prompt.editSettings({
       settings,
       baselinePolicy,
@@ -622,28 +741,23 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
   if (!installation) output.write("Recommended starter setup\n");
   if (!installation) {
     output.write("  - Pull request review: your GitHub App posts comments, labels, and a blocking result on controlled same-repository PRs\n");
-    output.write("  - Repository maintenance: manual or scheduled audits; live runs can repair when repository repair is on\n");
+    output.write("  - Repository maintenance: installed for manual runs; its schedule starts off\n");
     output.write("  - OpenAI starting models: you can assign any supported provider and model to each role\n");
     output.write("  - Issue triage and issue fix are not included\n");
-    output.write("  - You choose whether Codekeeper starts when the setup pull request merges\n");
-    output.write("  - The maintenance workflow includes a schedule after merge\n");
+    output.write("  - Tracing, repository repair, issue implementation, and automatic merge start off\n");
+    output.write("  - Codekeeper starts after merge; run codekeeper verify before treating it as ready\n");
     output.write("Press Return at the next question to accept these choices.\n");
   }
-  const useRecommended = installation ? false : prompt?.kind === "ink"
-    ? await prompt.select({
-      step: "setup",
-      message: "Choose a starting setup",
-      description: [
-        "Recommended installs pull-request review and maintenance with OpenAI models.",
-        "Custom lets you select each workflow and its provider and model."
-      ],
-      defaultValue: "recommended",
-      choices: [
-        { value: "recommended", label: "Recommended — review + maintenance, OpenAI models" },
-        { value: "custom", label: "Custom — choose workflows and models" }
-      ]
-    }) === "recommended"
-    : await prompt.confirm({ message: "Use the recommended starter setup?", defaultValue: true });
+  const useRecommended = installation
+    ? false
+    : await prompt.confirm({
+        message: "Use the recommended starter setup?",
+        defaultValue: true
+      });
+  if (useRecommended) {
+    output.write("Using the recommended setup: review on, manual maintenance available, tracing and code-changing automation off.\n");
+    return recommendedAnswers(snapshot, bundle);
+  }
 
   let modes;
   let preset;
@@ -654,31 +768,48 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
     if (installation.legacyFiles?.length) {
       output.write(`Legacy inactive file remains unchanged: ${installation.legacyFiles.join(", ")}. Remove it in a separately reviewed pull request when ready.\n`);
     }
-  } else if (useRecommended) {
-    modes = [...RECOMMENDED_MODES];
-    preset = RECOMMENDED_PRESET;
-    output.write("Using pull request review and repository maintenance with OpenAI starting models.\n");
   } else {
     output.write("\nCustom setup: install only the workflows that you want to use. Issue triage responds to issue events. You choose issue implementation separately.\n");
-    modes = await prompt.multiselect(tuiOptions(prompt, {
-      message: "Choose workflows to generate:",
-      defaultValues: RECOMMENDED_MODES,
-      choices: MODE_IDS.map((mode) => ({ value: mode, label: `${MODES[mode].label} — ${MODES[mode].description}` }))
-    }, {
-      step: "workflows",
-      description: ["Install only the workflows you intend to prove in this repository."]
-    }));
-    preset = await prompt.select(tuiOptions(prompt, {
-      message: "Choose the starting model set:",
-      defaultValue: RECOMMENDED_PRESET,
-      choices: [
-        { value: "openai", label: "openai — use OpenAI for every selected workflow (recommended)" },
-        { value: "mixed", label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows" }
-      ]
-    }, {
-      step: "models",
-      description: ["This choice supplies starting models. You can change every role on the next screens."]
-    }));
+    modes = await prompt.multiselect(
+      tuiOptions(
+        prompt,
+        {
+          message: "Choose workflows to generate:",
+          defaultValues: RECOMMENDED_MODES,
+          choices: MODE_IDS.map((mode) => ({
+            value: mode,
+            label: `${MODES[mode].label} — ${MODES[mode].description}`
+          }))
+        },
+        {
+          step: "workflows",
+          description: ["Install only the workflows you intend to prove in this repository."]
+        }
+      )
+    );
+    preset = await prompt.select(
+      tuiOptions(
+        prompt,
+        {
+          message: "Choose the starting model set:",
+          defaultValue: RECOMMENDED_PRESET,
+          choices: [
+            {
+              value: "openai",
+              label: "openai — use OpenAI for every selected workflow (recommended)"
+            },
+            {
+              value: "mixed",
+              label: "mixed — use DeepSeek for issue triage and OpenAI for other workflows"
+            }
+          ]
+        },
+        {
+          step: "models",
+          description: ["This choice supplies starting models. You can change every role on the next screens."]
+        }
+      )
+    );
   }
   const presetPolicy = installation?.policy ?? JSON.parse(bundle.contents[`policies/${preset}.json`]);
   const models = {};
@@ -696,33 +827,54 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
       ...ALL_MODEL_OPTIONS,
       { id: newCustomChoiceId, label: "Custom provider and model" }
     ];
-    const selectedModel = await prompt.select(tuiOptions(prompt, {
-      message: `Assign a model to the ${label}:`,
-      defaultValue: defaultChoice?.id ?? customChoiceId,
-      choices: choices.map((choice) => ({ value: choice.id, label: choice.label }))
-    }, {
-      step: "models",
-      description: [
-        `${workflow} uses this role. The role is not tied to one provider.`,
-        "You can change this choice later in .github/codekeeper.json."
-      ]
-    }));
+    const selectedModel = await prompt.select(
+      tuiOptions(
+        prompt,
+        {
+          message: `Assign a model to the ${label}:`,
+          defaultValue: defaultChoice?.id ?? customChoiceId,
+          choices: choices.map((choice) => ({
+            value: choice.id,
+            label: choice.label
+          }))
+        },
+        {
+          step: "models",
+          description: [`${workflow} uses this role. The role is not tied to one provider.`, "You can change this choice later in .github/codekeeper.json."]
+        }
+      )
+    );
     if (selectedModel === newCustomChoiceId) {
-      const provider = await prompt.select(tuiOptions(prompt, {
-        message: `Choose the provider for the ${label}:`,
-        defaultValue: agent.provider,
-        choices: Object.keys(MODEL_PROVIDER_SECRETS).map((value) => ({ value, label: value }))
-      }, {
-        step: "models",
-        description: ["Provider credentials are collected separately and never written to the repository."]
-      }));
-      const model = await prompt.inputText(tuiOptions(prompt, {
-        message: `Enter the model ID for the ${label}:`,
-        defaultValue: provider === agent.provider ? agent.model : ""
-      }, {
-        step: "models",
-        description: ["Use the exact model ID accepted by the selected provider."]
-      }));
+      const provider = await prompt.select(
+        tuiOptions(
+          prompt,
+          {
+            message: `Choose the provider for the ${label}:`,
+            defaultValue: agent.provider,
+            choices: Object.keys(MODEL_PROVIDER_SECRETS).map((value) => ({
+              value,
+              label: value
+            }))
+          },
+          {
+            step: "models",
+            description: ["Provider credentials are collected separately and never written to the repository."]
+          }
+        )
+      );
+      const model = await prompt.inputText(
+        tuiOptions(
+          prompt,
+          {
+            message: `Enter the model ID for the ${label}:`,
+            defaultValue: provider === agent.provider ? agent.model : ""
+          },
+          {
+            step: "models",
+            description: ["Use the exact model ID accepted by the selected provider."]
+          }
+        )
+      );
       const effort = presetPolicy.ai.providers[provider].supportsReasoningEffort
         ? await prompt.select(tuiOptions(prompt, {
           message: `Choose the reasoning effort for the ${label}:`,
@@ -736,51 +888,53 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
         : "none";
       models[key] = { provider, model, effort };
     } else {
-      models[key] = selectedModel === customChoiceId
-        ? { provider: agent.provider, model: agent.model, effort: agent.effort }
-        : selectedModel;
+      models[key] =
+        selectedModel === customChoiceId
+          ? {
+              provider: agent.provider,
+              model: agent.model,
+              effort: agent.effort
+            }
+          : selectedModel;
     }
   }
-  const tracing = prompt?.kind === "ink"
-    ? await prompt.select({
-      step: "tracing",
-      message: "Enable OpenAI traces?",
-      description: [
-        "Traces record model runs in OpenAI Platform Logs.",
-        "Enabled needs a separate OpenAI Platform API key. Disabled does not request the trace key."
-      ],
-      defaultValue: (installation ? installation.policy.ai.tracing.enabled : true) ? "enabled" : "disabled",
-      choices: [
-        { value: "enabled", label: "Enabled" },
-        { value: "disabled", label: "Disabled" }
-      ]
-    }) === "enabled"
-    : await prompt.confirm({ message: "Enable OpenAI traces?", defaultValue: installation ? installation.policy.ai.tracing.enabled : true });
-  const enabled = prompt?.kind === "ink"
-    ? await prompt.select({
-      step: "startup",
-      message: installation ? "Start Codekeeper now?" : "Start Codekeeper after the setup pull request merges?",
-      description: installation ? [
-        "Enabled changes the repository setting now and starts the current default-branch configuration.",
-        "Configuration changes from this update take effect after its pull request merges."
-      ] : [
-        "Enabled starts the workflows you selected as soon as this setup is merged.",
-        "Disabled installs the files and secrets but keeps every Codekeeper workflow off."
-      ],
-      defaultValue: (installation ? snapshot.existingSettings.enabled : true) ? "enabled" : "disabled",
-      choices: [
-        { value: "enabled", label: "Enabled (recommended)" },
-        { value: "disabled", label: "Disabled" }
-      ]
-    }) === "enabled"
-    : await prompt.confirm({
-      message: installation ? "Start Codekeeper now?" : "Start Codekeeper after the setup pull request merges?",
-      defaultValue: installation ? snapshot.existingSettings.enabled : true,
-      ...(installation ? { description: [
-        "Enabled changes the repository setting now and starts the current default-branch configuration.",
-        "Configuration changes from this update take effect after its pull request merges."
-      ] } : {})
-    });
+  const tracing =
+    prompt?.kind === "ink"
+      ? (await prompt.select({
+          step: "tracing",
+          message: "Enable OpenAI traces?",
+          description: ["Traces record model runs in OpenAI Platform Logs.", "Enabled needs a separate OpenAI Platform API key. Disabled does not request the trace key."],
+          defaultValue: (installation ? installation.policy.ai.tracing.enabled : false) ? "enabled" : "disabled",
+          choices: [
+            { value: "enabled", label: "Enabled" },
+            { value: "disabled", label: "Disabled" }
+          ]
+        })) === "enabled"
+      : await prompt.confirm({
+          message: "Enable OpenAI traces?",
+          defaultValue: installation ? installation.policy.ai.tracing.enabled : false
+        });
+  const enabled =
+    prompt?.kind === "ink"
+      ? (await prompt.select({
+          step: "startup",
+          message: installation ? "Start Codekeeper now?" : "Start Codekeeper after the setup pull request merges?",
+          description: installation ? ["Enabled changes the repository setting now and starts the current default-branch configuration.", "Configuration changes from this update take effect after its pull request merges."] : ["Enabled starts the workflows you selected as soon as this setup is merged.", "Disabled installs the files and secrets but keeps every Codekeeper workflow off."],
+          defaultValue: (installation ? snapshot.existingSettings.enabled : true) ? "enabled" : "disabled",
+          choices: [
+            { value: "enabled", label: "Enabled (recommended)" },
+            { value: "disabled", label: "Disabled" }
+          ]
+        })) === "enabled"
+      : await prompt.confirm({
+          message: installation ? "Start Codekeeper now?" : "Start Codekeeper after the setup pull request merges?",
+          defaultValue: installation ? snapshot.existingSettings.enabled : true,
+          ...(installation
+            ? {
+                description: ["Enabled changes the repository setting now and starts the current default-branch configuration.", "Configuration changes from this update take effect after its pull request merges."]
+              }
+            : {})
+        });
   const applicableCapabilities = applicableCapabilityIds(modes);
   const capabilities = applicableCapabilities.length
     ? await prompt.multiselect(tuiOptions(prompt, {
@@ -807,37 +961,76 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
       ]
     }))
     : [];
-  const displayName = await prompt.inputText(tuiOptions(prompt, {
-    message: "Name to show in Codekeeper comments",
-    defaultValue: installation?.policy.repository.displayName ?? snapshot.displayName,
-    validate: (value) => validDisplayName(value) || "Use 1–100 printable characters."
-  }, {
-    step: "identity",
-    description: ["This label appears in Codekeeper's GitHub comments. Your repository name is unchanged."],
-    maxLength: 100
-  }));
-  const ownersText = await prompt.inputText(tuiOptions(prompt, {
-    message: "GitHub users who can run owner-only /codekeeper commands (comma-separated)",
-    defaultValue: installation?.policy.repository.ownerLogins?.join(",") ?? snapshot.viewerLogin,
-    validate(value) {
-      try {
-        normalizeOwnerLogins(value.split(","));
-        return true;
-      } catch {
-        return "Enter one or more unique GitHub logins.";
+  const maintenanceScheduled = modes.includes("maintain")
+    ? await prompt.confirm(
+        tuiOptions(
+          prompt,
+          {
+            message: "Run maintenance on a schedule?",
+            defaultValue: installation?.maintenanceScheduled ?? false
+          },
+          {
+            step: "automation",
+            description: ["Manual maintenance remains available when the schedule is off."]
+          }
+        )
+      )
+    : false;
+  const displayName = await prompt.inputText(
+    tuiOptions(
+      prompt,
+      {
+        message: "Name to show in Codekeeper comments",
+        defaultValue: installation?.policy.repository.displayName ?? snapshot.displayName,
+        validate: (value) => validDisplayName(value) || "Use 1–100 printable characters."
+      },
+      {
+        step: "identity",
+        description: ["This label appears in Codekeeper's GitHub comments. Your repository name is unchanged."],
+        maxLength: 100
       }
-    }
-  }, {
-    step: "identity",
-    description: ["Keep the authenticated user unless another maintainer can run owner-only commands."]
-  }));
+    )
+  );
+  const ownersText = await prompt.inputText(
+    tuiOptions(
+      prompt,
+      {
+        message: "GitHub users who can run owner-only /codekeeper commands (comma-separated)",
+        defaultValue: installation?.policy.repository.ownerLogins?.join(",") ?? snapshot.viewerLogin,
+        validate(value) {
+          try {
+            normalizeOwnerLogins(value.split(","));
+            return true;
+          } catch {
+            return "Enter one or more unique GitHub logins.";
+          }
+        }
+      },
+      {
+        step: "identity",
+        description: ["Keep the authenticated user unless another maintainer can run owner-only commands."]
+      }
+    )
+  );
 
   if (!installation) {
     output.write("\nCredentials this setup will request later through GitHub CLI\n");
     output.write("Setup does not call a model. API keys go directly to GitHub CLI. Codekeeper does not display or store their values.\n");
     output.write("The installer sends the selected App key file directly to GitHub CLI. It does not read or display the key.\n");
-    const selectedModels = normalizeModelChoices({ modes, preset, bundle, choices: models, policySource: JSON.stringify(presetPolicy) });
-    for (const name of requiredSecretNames({ modes, models: selectedModels, tracing, policy: presetPolicy })) output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
+    const selectedModels = normalizeModelChoices({
+      modes,
+      preset,
+      bundle,
+      choices: models,
+      policySource: JSON.stringify(presetPolicy)
+    });
+    for (const name of requiredSecretNames({
+      modes,
+      models: selectedModels,
+      tracing,
+      policy: presetPolicy
+    }))
+      output.write(`  - ${name}: ${SECRET_PURPOSES[name]}\n`);
   } else {
     output.write("\nThe current GitHub App settings and existing API keys stay unchanged. If this edit needs a new key, the installer requests it after the final review.\n");
   }
@@ -847,20 +1040,25 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
   capabilitySummary(normalizeCapabilities(modes, capabilities), modes).forEach((item) => output.write(`  - ${item}\n`));
   CONSERVATIVE_BOUNDARIES.forEach((item) => output.write(`  - ${item}\n`));
   output.write(`The policy has ${policy.audit.repair.protectedPaths.length} protected-path rules. Review the full list in the setup pull request.\n`);
-  const confirmed = await prompt.confirm(tuiOptions(prompt, {
-    message: "Continue with these safety settings?",
-    defaultValue: false
-  }, {
-    step: "safety",
-    description: [
-      ...capabilitySummary(normalizeCapabilities(modes, capabilities), modes),
-      ...CONSERVATIVE_BOUNDARIES,
-      `${policy.audit.repair.protectedPaths.length} protected-path rules are bundled for review before merge.`
-    ],
-    yesLabel: "Continue",
-    noLabel: "Cancel"
-  }));
-  if (!confirmed) throw new InstallerError("Setup was cancelled before any mutation.", { code: "USER_CANCELLED" });
+  const confirmed = await prompt.confirm(
+    tuiOptions(
+      prompt,
+      {
+        message: "Continue with these safety settings?",
+        defaultValue: false
+      },
+      {
+        step: "safety",
+        description: [...capabilitySummary(normalizeCapabilities(modes, capabilities), modes), ...CONSERVATIVE_BOUNDARIES, `${policy.audit.repair.protectedPaths.length} protected-path rules are bundled for review before merge.`],
+        yesLabel: "Continue",
+        noLabel: "Cancel"
+      }
+    )
+  );
+  if (!confirmed)
+    throw new InstallerError("Setup was cancelled before any mutation.", {
+      code: "USER_CANCELLED"
+    });
   return Object.freeze({
     modes: normalizeModes(modes),
     preset,
@@ -869,6 +1067,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
     displayName,
     ownerLogins: normalizeOwnerLogins(ownersText.split(",")),
     enabled,
+    maintenanceScheduled,
     capabilities
   });
 }
@@ -887,7 +1086,10 @@ export async function collectAutomationBotLogin({ prompt, output }) {
       validate: (value) => Boolean(appSlugFromInput(value)) || "Paste a GitHub App settings URL, or enter its lowercase URL name."
     });
     const appSlug = appSlugFromInput(appInput);
-    if (!appSlug) throw new InstallerError("The GitHub App settings URL is invalid.", { code: "PLAN_INVALID" });
+    if (!appSlug)
+      throw new InstallerError("The GitHub App settings URL is invalid.", {
+        code: "PLAN_INVALID"
+      });
     return `${appSlug}[bot]`;
   }
   const automationBotLogin = await prompt.inputText({
@@ -900,20 +1102,24 @@ export async function collectAutomationBotLogin({ prompt, output }) {
 export async function collectAppAnswers({ prompt, modes, capabilities = [], ownerRequests = true, output }) {
   output.write("\nGitHub App identifiers\n");
   output.write("  - Client ID: find the value that starts with Iv in the App settings\n");
-  const appClientId = await prompt.inputText(tuiOptions(prompt, {
-    message: "GitHub App Client ID (starts with Iv, not the numeric App ID)",
-    validate: (value) => validClientId(value) || "Enter the App Client ID shown in GitHub App settings."
-  }, {
-    step: "GitHub App",
-    description: [
-      "Find Client ID in the App's General settings. It begins with Iv.",
-      "Do not enter the numeric App ID."
-    ]
-  }));
-  const automationBotLogin = requiresAutomationBotLogin(modes, capabilities, ownerRequests)
-    ? await collectAutomationBotLogin({ prompt, output })
-    : null;
-  return Object.freeze({ appClientId, automationBotLogin: automationBotLogin?.toLowerCase() ?? null });
+  const appClientId = await prompt.inputText(
+    tuiOptions(
+      prompt,
+      {
+        message: "GitHub App Client ID (starts with Iv, not the numeric App ID)",
+        validate: (value) => validClientId(value) || "Enter the App Client ID shown in GitHub App settings."
+      },
+      {
+        step: "GitHub App",
+        description: ["Find Client ID in the App's General settings. It begins with Iv.", "Do not enter the numeric App ID."]
+      }
+    )
+  );
+  const automationBotLogin = requiresAutomationBotLogin(modes, capabilities, ownerRequests) ? await collectAutomationBotLogin({ prompt, output }) : null;
+  return Object.freeze({
+    appClientId,
+    automationBotLogin: automationBotLogin?.toLowerCase() ?? null
+  });
 }
 
 export async function collectAppPrivateKeyPath({ prompt, output }) {

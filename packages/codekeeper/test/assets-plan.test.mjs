@@ -571,17 +571,17 @@ test("existing policies gain the default high-risk review escalation", async () 
   });
 });
 
-test("install plan is frozen, applies startup first, and documents selected workflows without credential values", async () => {
+test("install plan is frozen, applies startup last, and documents selected workflows without credential values", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers() });
   assert.ok(Object.isFrozen(plan));
   assert.ok(Object.isFrozen(plan.files));
   assert.ok(plan.files.every(Object.isFrozen));
-  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "true" });
-  assert.deepEqual(plan.variables.slice(1), [
+  assert.deepEqual(plan.variables.slice(0, -1), [
     { name: "CODEKEEPER_APP_CLIENT_ID", value: "Iv123456789012345678" },
     { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
   ]);
+  assert.deepEqual(plan.variables.at(-1), { name: "CODEKEEPER_ENABLED", value: "true" });
   assert.deepEqual(plan.ownerLogins, ["coryparrry", "acme-bot"]);
   assert.deepEqual(plan.capabilities, {
     reviewRepair: true,
@@ -606,10 +606,10 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.match(plan.pullRequest.body, /Edit a profile in Settings to create an optional `.github\/codekeeper\/agents\/\*\.md` repository override/);
   assert.match(plan.pullRequest.body, /capability switches above control which GitHub actions Codekeeper can take/);
   assert.match(plan.pullRequest.body, /live maintenance run can repair when repository repair is on/);
-  assert.match(plan.pullRequest.body, /no separate dry run or controlled test is required/i);
+  assert.match(plan.pullRequest.body, /run `codekeeper verify`/i);
   assert.doesNotMatch(plan.pullRequest.body, /Run maintenance manually|controlled same-repository pull request|controlled issue event|triage marks ready|test each updated workflow/i);
   assert.doesNotMatch(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
-  assert.match(plan.pullRequest.body, /did not merge this pull request or run a workflow/);
+  assert.match(plan.pullRequest.body, /did not merge this pull request or prove a workflow/);
   assert.doesNotMatch(plan.pullRequest.body, /PRIVATE KEY|sk-[A-Za-z0-9]/i);
   assert.deepEqual(documentMap(plan.files).map((item) => item.path), plan.files.map((file) => file.path));
   assert.deepEqual(documentMap(plan.files).filter((item) => item.path.startsWith(".github/codekeeper/agents/")), []);
@@ -617,12 +617,18 @@ test("install plan is frozen, applies startup first, and documents selected work
   assert.equal(setupPullRequestBody(plan), plan.pullRequest.body);
 });
 
-test("recommended starter plan selects review and maintenance with separate OpenAI model and trace keys", async () => {
+test("recommended starter plan selects review and manual maintenance without tracing", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
     bundle,
     snapshot: snapshot(),
-    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET })
+    answers: answers({
+      modes: RECOMMENDED_MODES,
+      preset: RECOMMENDED_PRESET,
+      capabilities: [],
+      maintenanceScheduled: false,
+      tracing: false
+    })
   });
   assert.deepEqual(plan.modes, ["review", "maintain"]);
   assert.equal(plan.preset, "openai");
@@ -638,11 +644,7 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/codekeeper/README.md",
     ".github/codekeeper-release.json"
   ]);
-  assert.deepEqual(plan.secrets.map((secret) => secret.name), [
-    "OPENAI_API_KEY",
-    "OPENAI_TRACE_API_KEY",
-    "CODEKEEPER_APP_PRIVATE_KEY"
-  ]);
+  assert.deepEqual(plan.secrets.map((secret) => secret.name), ["OPENAI_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]);
   assert.equal(plan.secrets.some((secret) => secret.name === "DEEPSEEK_API_KEY"), false);
   const policy = JSON.parse(plan.files[0].contents);
   assert.deepEqual(
@@ -653,6 +655,9 @@ test("recommended starter plan selects review and maintenance with separate Open
     [policy.ai.agents.audit.provider, policy.ai.agents.audit.model, policy.ai.agents.audit.effort],
     ["openai", "gpt-5.6-sol", "high"]
   );
+  assert.equal(policy.ai.tracing.enabled, false);
+  assert.equal(plan.maintenanceScheduled, false);
+  assert.match(plan.pullRequest.body, /Scheduled maintenance is \*\*disabled;/);
 });
 
 test("editing one packaged profile materializes only that repository override", async () => {
@@ -791,7 +796,7 @@ test("normal installation enables selected workflows after the setup pull reques
     snapshot: snapshot(),
     answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET, enabled: true })
   });
-  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "true" });
+  assert.deepEqual(plan.variables.at(-1), { name: "CODEKEEPER_ENABLED", value: "true" });
   assert.match(plan.pullRequest.body, /enabled after this setup pull request merges/i);
 });
 
@@ -1083,7 +1088,7 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
   assert.equal(update.pullRequest.title, "chore(codekeeper): update configuration");
   assert.match(update.pullRequest.body, /enabled now with the current default-branch configuration/i);
   assert.match(update.pullRequest.body, /keeps running the current default-branch configuration/i);
-  assert.match(update.pullRequest.body, /no separate validation run is required/i);
+  assert.match(update.pullRequest.body, /run `codekeeper verify`/i);
   assert.doesNotMatch(update.pullRequest.body, /Required (?:variables|secrets):/);
   assert.match(completionGuidance(update.modes, update.enabled, update.update).heading, /keeps running the current default-branch configuration/i);
 
@@ -1163,7 +1168,7 @@ test("a release update removes retired generated workflows recorded by the insta
 test("optional disabled installation keeps Codekeeper off after merge", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({ bundle, snapshot: snapshot(), answers: answers({ enabled: false }) });
-  assert.deepEqual(plan.variables[0], { name: "CODEKEEPER_ENABLED", value: "false" });
+  assert.deepEqual(plan.variables.at(-1), { name: "CODEKEEPER_ENABLED", value: "false" });
   assert.match(plan.pullRequest.body, /Codekeeper stays off/);
   assert.match(plan.pullRequest.body, /CODEKEEPER_ENABLED=false/);
 });

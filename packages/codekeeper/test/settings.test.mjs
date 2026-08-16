@@ -20,7 +20,17 @@ async function fixture(modes = ["review", "maintain"]) {
   const bundle = await loadVerifiedAssets();
   const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
   const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
-  return { bundle, policy, profiles, settings: createEditableSettings({ policy, modes, enabled: true, profiles }) };
+  return {
+    bundle,
+    policy,
+    profiles,
+    settings: createEditableSettings({
+      policy,
+      modes,
+      enabled: true,
+      profiles
+    })
+  };
 }
 
 function row(settings, id, advanced = false) {
@@ -88,8 +98,10 @@ test("scheduled maintenance is an explicit editable setting with a conservative 
 
   const omitted = structuredClone(disabled);
   delete omitted.maintenanceScheduled;
+  const beforeValidation = JSON.stringify(omitted);
   validateEditableSettings(omitted, policy);
-  assert.equal(omitted.maintenanceScheduled, true);
+  assert.equal(JSON.stringify(omitted), beforeValidation);
+  assert.equal(settingsAnswers(omitted).maintenanceScheduled, true);
 
   const removed = setSetting(disabled, row(disabled, "workflow:maintain"), false);
   assert.equal(removed.maintenanceScheduled, false);
@@ -275,18 +287,16 @@ test("settings preserve runtime-valid empty model-setting strings", async () => 
 test("settings reject runtime-incompatible model settings and managed-label removal", async () => {
   const { policy, settings } = await fixture(["review", "issues"]);
   const nestedEffort = structuredClone(settings);
-  nestedEffort.policy.ai.agents.review.modelSettings.reasoning = { effort: "high" };
-  assert.throws(
-    () => validateEditableSettings(nestedEffort, policy),
-    /modelSettings\.reasoning\.effort.*ai\.agents\.review\.effort/
-  );
+  nestedEffort.policy.ai.agents.review.modelSettings.reasoning = {
+    effort: "high"
+  };
+  assert.throws(() => validateEditableSettings(nestedEffort, policy), /modelSettings\.reasoning\.effort.*ai\.agents\.review\.effort/);
 
   const overlongKey = structuredClone(settings);
-  overlongKey.policy.ai.agents.review.modelSettings = { ["x".repeat(16_385)]: true };
-  assert.throws(
-    () => validateEditableSettings(overlongKey, policy),
-    /modelSettings.*overlong key/
-  );
+  overlongKey.policy.ai.agents.review.modelSettings = {
+    ["x".repeat(16_385)]: true
+  };
+  assert.throws(() => validateEditableSettings(overlongKey, policy), /modelSettings.*overlong key/);
 
   const missingReviewLabel = structuredClone(settings);
   missingReviewLabel.policy.review.managedLabels = missingReviewLabel.policy.review.managedLabels
@@ -327,15 +337,15 @@ test("settings keep unusable owner lists inside the editor", async () => {
   }
 });
 
-test("settings canonicalize runtime-valid owner logins before enforcing identity invariants", async () => {
+test("settings validation accepts compatible owner logins without mutating the editor state", async () => {
   const { policy, settings } = await fixture(["review"]);
   settings.policy.repository.ownerLogins = [" Repository-Owner "];
   settings.policy.merge.allowedUserAuthors = ["repository-owner"];
+  const beforeValidation = JSON.stringify(settings);
 
   validateEditableSettings(settings, policy);
 
-  assert.deepEqual(settings.policy.repository.ownerLogins, ["repository-owner"]);
-  assert.deepEqual(settings.policy.merge.allowedUserAuthors, ["repository-owner"]);
+  assert.equal(JSON.stringify(settings), beforeValidation);
 });
 
 test("Advanced owner edits synchronize canonical merge authors", async () => {
@@ -430,8 +440,9 @@ test("settings require each enabled capability to have its executing workflow", 
 
   const omittedModelSettings = structuredClone(settings);
   delete omittedModelSettings.policy.ai.agents.review.modelSettings;
+  const beforeValidation = JSON.stringify(omittedModelSettings);
   validateEditableSettings(omittedModelSettings, policy);
-  assert.deepEqual(omittedModelSettings.policy.ai.agents.review.modelSettings, {});
+  assert.equal(JSON.stringify(omittedModelSettings), beforeValidation);
 });
 
 test("settings preserve runtime-valid optional fields and display-name limits", async () => {
@@ -456,8 +467,9 @@ test("settings preserve runtime-valid optional fields and display-name limits", 
     delete agent.workspace.model;
     delete agent.workspace.effort;
   }
+  const beforeValidation = JSON.stringify(optional);
   validateEditableSettings(optional, policy);
-  assert.deepEqual(optional.policy.projectInvariants, []);
+  assert.equal(JSON.stringify(optional), beforeValidation);
   const workspaceModel = row(optional, "policy:ai.agents.review.workspace.model");
   assert.equal(workspaceModel.kind, "model");
   assert.equal(parseSettingValue(workspaceModel, "gpt-5.6-sol"), "gpt-5.6-sol");
@@ -604,7 +616,12 @@ test("existing installations can remove a workflow and change a profile in one c
   });
   const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
   const installedPolicy = JSON.parse(contents[".github/codekeeper.json"]);
-  let edited = createEditableSettings({ policy: installedPolicy, modes: ["review", "maintain"], enabled: true, profiles });
+  let edited = createEditableSettings({
+    policy: installedPolicy,
+    modes: ["review", "maintain"],
+    enabled: true,
+    profiles
+  });
   edited = setSetting(edited, row(edited, "workflow:maintain"), false);
   edited = setSetting(edited, row(edited, "profile:pr-reviewer"), `${profiles["pr-reviewer"]}\nPrioritise API regressions.\n`);
   edited = setSetting(edited, row(edited, "policy:automation.ownerRequests"), false);
