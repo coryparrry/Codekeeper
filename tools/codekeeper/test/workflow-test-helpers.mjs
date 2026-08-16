@@ -17,6 +17,7 @@ export const actionPins = Object.freeze({
   "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
   "actions/create-github-app-token": "bcd2ba49218906704ab6c1aa796996da409d3eb1",
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283",
+  "peter-evans/create-pull-request": "22a9089034f40e5a961c8808d113e2c98fb63676",
 });
 export async function repositoryFile(relativePath) {
   return readFile(path.join(repositoryRoot, relativePath), "utf8");
