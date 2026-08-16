@@ -1,0 +1,174 @@
+name: Codekeeper package bootstrap
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label used for the package bootstrap.
+        required: false
+        default: ubuntu-latest
+        type: string
+      package_version:
+        description: Exact published Codekeeper package version.
+        required: true
+        type: string
+      package_integrity:
+        description: Exact npm SHA-512 integrity for the published package tarball.
+        required: true
+        type: string
+    outputs:
+      package_manifest_sha256:
+        description: SHA-256 of the release manifest computed after tarball integrity verification.
+        value: ${{ jobs.bootstrap.outputs.package_manifest_sha256 }}
+      source_commit:
+        description: Source commit recorded by the verified package manifest.
+        value: ${{ jobs.bootstrap.outputs.source_commit }}
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: Download and verify exact Codekeeper package
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      package_manifest_sha256: ${{ steps.verify.outputs.package_manifest_sha256 }}
+      source_commit: ${{ steps.verify.outputs.source_commit }}
+    steps:
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Download exact package tarball
+        id: download
+        shell: bash
+        env:
+          CODEKEEPER_PACKAGE_VERSION: ${{ inputs.package_version }}
+          CODEKEEPER_PACKAGE_INTEGRITY: ${{ inputs.package_integrity }}
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+          NPM_CONFIG_UPDATE_NOTIFIER: "false"
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/codekeeper-empty-npmrc
+        run: |
+          set -euo pipefail
+          download_root="$RUNNER_TEMP/codekeeper-package-download"
+          if test -e "$download_root"; then
+            echo "Codekeeper package download path already exists" >&2
+            exit 1
+          fi
+          mkdir -p "$download_root"
+          : > "$NPM_CONFIG_USERCONFIG"
+          report="$download_root/npm-pack.json"
+          (
+            cd "$download_root"
+            npm pack --json --ignore-scripts --pack-destination "$download_root" "codekeeper@$CODEKEEPER_PACKAGE_VERSION" > "$report"
+          )
+          REPORT="$report" DOWNLOAD_ROOT="$download_root" node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { appendFileSync, readFileSync, realpathSync, statSync } from "node:fs";
+            import { basename, join, relative } from "node:path";
+            const version = process.env.CODEKEEPER_PACKAGE_VERSION;
+            const integrity = process.env.CODEKEEPER_PACKAGE_INTEGRITY;
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) throw new Error("Invalid Codekeeper package version");
+            if (!/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(integrity)) throw new Error("Invalid Codekeeper package integrity");
+            const report = JSON.parse(readFileSync(process.env.REPORT, "utf8"));
+            if (!Array.isArray(report) || report.length !== 1) throw new Error("npm pack returned an invalid report");
+            const entry = report[0];
+            if (entry?.name !== "codekeeper" || entry.version !== version || entry.integrity !== integrity) throw new Error("npm pack did not return the exact Codekeeper release");
+            if (typeof entry.filename !== "string" || basename(entry.filename) !== entry.filename || !entry.filename.endsWith(".tgz")) throw new Error("npm pack returned an unsafe filename");
+            const root = realpathSync(process.env.DOWNLOAD_ROOT);
+            const tarball = realpathSync(join(root, entry.filename));
+            if (relative(root, tarball).startsWith("..") || !statSync(tarball).isFile()) throw new Error("npm pack tarball escaped its staging directory");
+            const actualIntegrity = `sha512-${createHash("sha512").update(readFileSync(tarball)).digest("base64")}`;
+            if (actualIntegrity !== integrity) throw new Error("Codekeeper package tarball integrity mismatch");
+            appendFileSync(process.env.GITHUB_OUTPUT, `tarball=${tarball}\n`);
+          '
+
+      - name: Install tarball without lifecycle scripts
+        shell: bash
+        env:
+          CODEKEEPER_TARBALL: ${{ steps.download.outputs.tarball }}
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
+          NPM_CONFIG_UPDATE_NOTIFIER: "false"
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/codekeeper-empty-npmrc
+        run: |
+          set -euo pipefail
+          install_root="$RUNNER_TEMP/codekeeper-package-install"
+          if test -e "$install_root"; then
+            echo "Codekeeper package install path already exists" >&2
+            exit 1
+          fi
+          mkdir -p "$install_root"
+          npm install --prefix "$install_root" --ignore-scripts --no-audit --no-fund --no-save "$CODEKEEPER_TARBALL"
+
+      - name: Stage and verify closed package
+        id: verify
+        shell: bash
+        env:
+          CODEKEEPER_PACKAGE_NAME: codekeeper
+          CODEKEEPER_PACKAGE_VERSION: ${{ inputs.package_version }}
+          CODEKEEPER_PACKAGE_INTEGRITY: ${{ inputs.package_integrity }}
+          INSTALLED_ROOT: ${{ runner.temp }}/codekeeper-package-install/node_modules/codekeeper
+          STAGING_ROOT: ${{ runner.temp }}/codekeeper-tooling
+        run: |
+          set -euo pipefail
+          target="$STAGING_ROOT/tooling/tools/codekeeper"
+          receipt="$target/release/package-integrity.json"
+          if test -e "$STAGING_ROOT"; then
+            echo "Codekeeper package staging path already exists" >&2
+            exit 1
+          fi
+          mkdir -p "$(dirname "$target")"
+          cp -R "$INSTALLED_ROOT" "$target"
+          TOOLING_ROOT="$target" RECEIPT_PATH="$receipt" node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { appendFileSync } from "node:fs";
+            import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+            import { dirname, join } from "node:path";
+            const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+            const regular = async (file, label) => {
+              const stat = await lstat(file);
+              if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Codekeeper package bootstrap rejected ${label}`);
+              return readFile(file);
+            };
+            const manifestBytes = await regular(join(process.env.TOOLING_ROOT, "release", "manifest.json"), "release manifest");
+            const manifestSha256 = digest(manifestBytes);
+            const manifest = JSON.parse(manifestBytes);
+            if (manifest?.package?.name !== process.env.CODEKEEPER_PACKAGE_NAME || manifest?.package?.version !== process.env.CODEKEEPER_PACKAGE_VERSION || !/^[0-9a-f]{40}$/.test(manifest?.source?.commit ?? "")) throw new Error("Codekeeper package manifest identity mismatch");
+            const verifier = Array.isArray(manifest.files) && manifest.files.find((entry) => entry?.path === "bin/verify-package.mjs");
+            if (!verifier || !/^[0-9a-f]{64}$/.test(verifier.sha256 ?? "")) throw new Error("Codekeeper package manifest lacks its verifier");
+            const verifierBytes = await regular(join(process.env.TOOLING_ROOT, "bin", "verify-package.mjs"), "package verifier");
+            if (digest(verifierBytes) !== verifier.sha256) throw new Error("Codekeeper package verifier digest mismatch");
+            const receipt = { version: 1, algorithm: "sha512", integrity: process.env.CODEKEEPER_PACKAGE_INTEGRITY };
+            await mkdir(dirname(process.env.RECEIPT_PATH), { recursive: true });
+            await writeFile(process.env.RECEIPT_PATH, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
+            appendFileSync(process.env.GITHUB_OUTPUT, `package_manifest_sha256=${manifestSha256}\n`);
+            appendFileSync(process.env.GITHUB_OUTPUT, `source_commit=${manifest.source.commit}\n`);
+          '
+          source_commit="$(node -e 'const m=require(process.argv[1]);process.stdout.write(m.source.commit)' "$target/release/manifest.json")"
+          package_manifest_sha256="$(node -e 'const{createHash}=require("node:crypto"),{readFileSync}=require("node:fs");process.stdout.write(createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"))' "$target/release/manifest.json")"
+          node "$target/bin/verify-package.mjs" \
+            --root "$target" \
+            --expected-name "$CODEKEEPER_PACKAGE_NAME" \
+            --expected-version "$CODEKEEPER_PACKAGE_VERSION" \
+            --expected-integrity "$CODEKEEPER_PACKAGE_INTEGRITY" \
+            --expected-manifest-sha256 "$package_manifest_sha256" \
+            --expected-source-commit "$source_commit"
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ runner.temp }}/codekeeper-tooling
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
