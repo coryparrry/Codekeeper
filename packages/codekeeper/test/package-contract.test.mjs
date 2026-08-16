@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { SOURCE_COMMIT } from "../src/constants.mjs";
@@ -60,6 +61,37 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.check, /audit\/\*\.mjs/);
   assert.match(packageJson.scripts.check, /npm run prepare:runtime-test/);
   assert.match(packageJson.scripts.check, /npm run test:unit/);
+});
+
+test("root private-tarball instructions use the exact npm pack receipt", async () => {
+  const installGuide = await readFile(new URL("../../../INSTALL.md", import.meta.url), "utf8");
+  const packageReadme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const rootTarballCommands = installGuide.match(/```bash\n(.*?)\n```/s)?.[1] ?? "";
+  assert.match(rootTarballCommands, /PACK_REPORT=.*npm pack --json --pack-destination/);
+  assert.match(rootTarballCommands, /npm exec --package .*-- codekeeper init --current-package --package-integrity "\$PACKAGE_INTEGRITY"/);
+  assert.match(packageReadme, /codekeeper init --current-package --package-integrity 'sha512-\.\.\.'/);
+  const extractionScripts = [...rootTarballCommands.matchAll(/node -e '\n([\s\S]*?)\n' "\$PACK_REPORT"/g)].map(([, script]) => script);
+  assert.equal(extractionScripts.length, 2);
+  const keyedReport = {
+    "codekeeper-0.2.0.tgz": {
+      filename: "codekeeper-0.2.0.tgz",
+      integrity: "sha512-receipt"
+    }
+  };
+  const directReport = keyedReport["codekeeper-0.2.0.tgz"];
+  for (const validReport of [[directReport], directReport, keyedReport]) {
+    for (const [index, expected] of ["codekeeper-0.2.0.tgz", "sha512-receipt"].entries()) {
+      const result = spawnSync(process.execPath, ["-e", extractionScripts[index], JSON.stringify(validReport)], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, expected);
+    }
+  }
+  for (const invalidReport of [[], [keyedReport, keyedReport], {}, { filename: "missing-integrity.tgz", integrity: "sha256-wrong" }]) {
+    for (const script of extractionScripts) {
+      const result = spawnSync(process.execPath, ["-e", script, JSON.stringify(invalidReport)], { encoding: "utf8" });
+      assert.notEqual(result.status, 0, JSON.stringify(invalidReport));
+    }
+  }
 });
 
 test("release packaging uses one deterministic tarball with separate installer and runtime shrinkwraps", async () => {

@@ -81,9 +81,22 @@ async function bestEffortOpen(url, { runner, platform = process.platform }) {
   }
 }
 
-function assertSameSnapshot(expected, actual, resumeCommand) {
+function assertSameSnapshot(expected, actual, resumeCommand, { includeSettings = true } = {}) {
   for (const field of ["root", "originUrl", "repository", "defaultBranch", "headSha", "remoteDefaultSha", "viewerLogin"]) {
     if (expected[field] !== actual[field]) {
+      throw new InstallerError("The repository changed during setup. Run the installer again.", {
+        code: "PREFLIGHT_CHANGED",
+        resume: resumeCommand
+      });
+    }
+  }
+  if (includeSettings) {
+    const expectedSettings = expected.existingSettings ?? null;
+    const actualSettings = actual.existingSettings ?? null;
+    const settingsChanged = (expectedSettings === null) !== (actualSettings === null)
+      || (expectedSettings !== null && ["enabled", "appClientId", "automationBotLogin"]
+        .some((field) => expectedSettings[field] !== actualSettings[field]));
+    if (settingsChanged) {
       throw new InstallerError("The repository changed during setup. Run the installer again.", {
         code: "PREFLIGHT_CHANGED",
         resume: resumeCommand
@@ -309,7 +322,7 @@ export async function runCli({
       });
     } catch (error) {
       if (parsed.command !== "update" || error?.code !== "NO_CHANGES") throw error;
-      presentationOutput.write(`\nCodekeeper is already up to date at ${bundle.metadata.source.repository}@${bundle.metadata.source.commit}.\n`);
+      presentationOutput.write(`\nCodekeeper is already up to date at ${bundle.metadata.source.repository}@${bundle.metadata.source.commit}. No files or settings were changed. Required secret availability was not validated; secret values were not inspected or exposed.\n`);
       await activePrompt?.dispose?.();
       return 0;
     }
@@ -383,7 +396,7 @@ export async function runCli({
     } else {
       if (hasSettingsMutation) {
         const beforeGit = await inspect({ runner, cwd: snapshot.root, interactive });
-        assertSameSnapshot(snapshot, beforeGit, resumeCommand);
+        assertSameSnapshot(snapshot, beforeGit, resumeCommand, { includeSettings: false });
       }
       receipt = await installPlan(plan, {
         runner,

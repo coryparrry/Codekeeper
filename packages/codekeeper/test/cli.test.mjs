@@ -749,6 +749,7 @@ test("update exits successfully when the bundled release is already installed", 
   assert.equal(status, 0);
   assert.equal(rawModeCalls, 0);
   assert.match(output.toString(), new RegExp(`already up to date at ${bundle.metadata.source.repository}@${bundle.metadata.source.commit}`));
+  assert.match(output.toString(), /Required secret availability was not validated; secret values were not inspected or exposed/);
 });
 
 test("a plain-prompt rerun preserves disabled owner requests without asking for a bot login", async () => {
@@ -1027,4 +1028,49 @@ test("snapshot drift after confirmation aborts before settings or Git mutation",
   assert.match(errorOutput.toString(), /repository changed during setup/i);
   assert.match(errorOutput.toString(), /Resume: safe resume/);
   assert.deepEqual(runner.calls, []);
+});
+
+test("repository settings drift after confirmation aborts before any mutation", async (t) => {
+  for (const [field, value] of [
+    ["enabled", false],
+    ["appClientId", "Iv987654321098765432"],
+    ["automationBotLogin", "another-codekeeper-widget[bot]"]
+  ]) {
+    await t.test(`${field} drift`, async () => {
+      const output = textSink();
+      const errorOutput = textSink();
+      const runner = createRecordingRunner(() => {
+        throw new Error("mutation must not run after repository settings drift");
+      });
+      const initial = Object.freeze({
+        ...repositorySnapshot("/tmp/widget", HEAD_SHA),
+        existingSettings: Object.freeze({
+          enabled: true,
+          appClientId: "Iv123456789012345678",
+          automationBotLogin: "codekeeper-widget[bot]"
+        })
+      });
+      const changed = Object.freeze({
+        ...initial,
+        existingSettings: Object.freeze({ ...initial.existingSettings, [field]: value })
+      });
+      let inspections = 0;
+      const status = await runCli({
+        argv: ["init"],
+        output,
+        errorOutput,
+        runner,
+        prompt: guidedPrompt(),
+        interactive: true,
+        inspect: async () => (++inspections === 1 ? initial : changed),
+        openUrl: async () => {},
+        resumeCommand: "safe resume"
+      });
+      assert.equal(status, 1);
+      assert.equal(inspections, 2);
+      assert.match(errorOutput.toString(), /repository changed during setup/i);
+      assert.match(errorOutput.toString(), /Resume: safe resume/);
+      assert.deepEqual(runner.calls, []);
+    });
+  }
 });
