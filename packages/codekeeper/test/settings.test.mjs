@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
-import { loadVerifiedAssets } from "../src/assets.mjs";
 import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODES } from "../src/constants.mjs";
 import { buildInstallPlan } from "../src/plan.mjs";
 import { upgradePolicy } from "../src/policy.mjs";
@@ -15,7 +14,7 @@ import {
   settingsRows,
   validateEditableSettings
 } from "../src/settings.mjs";
-import { HEAD_SHA } from "./helpers.mjs";
+import { HEAD_SHA, loadVerifiedAssets } from "./helpers.mjs";
 
 async function fixture(modes = ["review", "maintain"]) {
   const bundle = await loadVerifiedAssets();

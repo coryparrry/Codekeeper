@@ -14,7 +14,7 @@ export function validSha512Integrity(value) {
     && digest.toString("base64").replace(/=+$/, "") === encoded.replace(/=+$/, "");
 }
 
-export function normalizePackageRelease(value, {
+export function normalizePackageIdentity(value, {
   expectedName = PACKAGE_NAME,
   expectedVersion = PACKAGE_VERSION,
   code = "PACKAGE_RELEASE_INVALID"
@@ -22,11 +22,22 @@ export function normalizePackageRelease(value, {
   if (
     !value
     || value.name !== expectedName
-    || value.version !== expectedVersion
+    || (expectedVersion !== undefined && value.version !== expectedVersion)
     || !RELEASE_VERSION.test(value.version)
-    || !validSha512Integrity(value.integrity)
   ) {
+    throw new InstallerError("The Codekeeper package identity is missing or invalid.", { code });
+  }
+  return Object.freeze({ name: value.name, version: value.version });
+}
+
+export function normalizePackageRelease(value, {
+  expectedName = PACKAGE_NAME,
+  expectedVersion = PACKAGE_VERSION,
+  code = "PACKAGE_RELEASE_INVALID"
+} = {}) {
+  const identity = normalizePackageIdentity(value, { expectedName, expectedVersion, code });
+  if (!validSha512Integrity(value.integrity)) {
     throw new InstallerError("The exact Codekeeper package release receipt is missing or invalid.", { code });
   }
-  return Object.freeze({ name: value.name, version: value.version, integrity: value.integrity });
+  return Object.freeze({ ...identity, integrity: value.integrity });
 }

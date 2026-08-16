@@ -244,6 +244,8 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   const shim = npmShim;
   const installedPackage = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8"));
   const installedReadme = await readFile(path.join(installedRoot, "README.md"), "utf8");
+  const tarballBytes = await readFile(tarball);
+  const expectedIntegrity = `sha512-${createHash("sha512").update(tarballBytes).digest("base64")}`;
   assert.deepEqual(installedPackage.bin, expectedBins);
   assert.deepEqual(installedPackage.dependencies, packageManifest.dependencies);
   assert.deepEqual([...new Set(installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? [])], [PINNED_COMMIT]);
@@ -279,6 +281,14 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   assert.match(npxHelp, /^  codekeeper update$/m);
   assert.equal(version, "0.2.0\n");
   assert.equal(npmInstallVersion, "0.2.0\n");
+  assert.throws(
+    () => invoke(shim, ["init", "--current-package", "--package-integrity", expectedIntegrity]),
+    (error) => {
+      const output = `${error.stdout ?? ""}${error.stderr ?? ""}`;
+      return !/release receipt is missing or invalid|Resolving the latest Codekeeper/.test(output);
+    },
+    "an explicit local tarball receipt enters the current package without registry bootstrapping",
+  );
   assert.equal(typeof installedTui.createInkPrompter, "function");
   assert.equal(installedTui.shouldUseInkTui({
     interactive: true,
@@ -287,8 +297,6 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     environment: { TERM: "xterm-256color" }
   }), true);
 
-  const tarballBytes = await readFile(tarball);
-  const expectedIntegrity = `sha512-${createHash("sha512").update(tarballBytes).digest("base64")}`;
   const installedReleaseManifestBytes = await readFile(path.join(installedRoot, "release", "manifest.json"));
   const expectedManifestSha256 = createHash("sha256").update(installedReleaseManifestBytes).digest("hex");
   await writeFile(path.join(installedRoot, "release", "package-integrity.json"), `${JSON.stringify({

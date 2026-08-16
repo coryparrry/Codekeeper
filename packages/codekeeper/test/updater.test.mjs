@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { createRecordingRunner, result, temporaryDirectory, textSink } from "./helpers.mjs";
-import { resolveNpmCliPath, resolveNpmRelease, runLatestInit, runLatestUpdate } from "../src/updater.mjs";
+import { resolveNpmCliPath, resolveNpmRelease, runLatestInit, runLatestUpdate, verifyDownloadedTarball } from "../src/updater.mjs";
 
 const RELEASE_INTEGRITY = `sha512-${Buffer.alloc(64, 0xab).toString("base64")}`;
 
@@ -27,6 +28,11 @@ test("the latest-release bootstrap resolves an exact receipt then runs that exac
     },
     platform: "linux",
     resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+    stagePackage: async ({ receipt }) => {
+      assert.equal(receipt.integrity, RELEASE_INTEGRITY);
+      return { executable: "/verified/codekeeper/bin/codekeeper.mjs", root: "/verified/codekeeper" };
+    },
+    fsImpl: { async rm() {} },
     runner
   });
   assert.equal(status, 0);
@@ -39,16 +45,11 @@ test("the latest-release bootstrap resolves an exact receipt then runs that exac
     "--json"
   ]);
   assert.deepEqual(calls[1].args, [
-    "/trusted/lib/node_modules/npm/bin/npm-cli.js",
-    "exec",
-    "--yes",
-    "--ignore-scripts",
-    "--prefer-online",
-    "--package=codekeeper@1.4.2",
-    "--",
-    "codekeeper",
+    "/verified/codekeeper/bin/codekeeper.mjs",
     "update",
-    "--current-package"
+    "--current-package",
+    "--package-integrity",
+    RELEASE_INTEGRITY,
   ]);
   assert.equal(calls[1].options.stdio, "inherit");
   assert.equal(calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_VERSION, "1.4.2");
@@ -68,10 +69,33 @@ test("init also re-enters through the exact latest package receipt", async () =>
     environment: { PATH: "/trusted/bin" },
     platform: "linux",
     resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+    stagePackage: async () => ({ executable: "/verified/codekeeper/bin/codekeeper.mjs", root: "/verified/codekeeper" }),
+    fsImpl: { async rm() {} },
     runner
   }), 0);
-  assert.deepEqual(runner.calls[1].args.slice(-3), ["codekeeper", "init", "--current-package"]);
+  assert.deepEqual(runner.calls[1].args.slice(-4), ["init", "--current-package", "--package-integrity", RELEASE_INTEGRITY]);
   assert.equal(runner.calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY, RELEASE_INTEGRITY);
+});
+
+test("the trusted launcher rejects changed tarball bytes for the same package version", async (t) => {
+  const downloadRoot = await temporaryDirectory(t, "codekeeper-updater-download-");
+  const filename = "codekeeper-1.4.2.tgz";
+  await writeFile(path.join(downloadRoot, filename), "changed package bytes");
+  const expectedBytes = Buffer.from("expected package bytes");
+  const expectedIntegrity = `sha512-${createHash("sha512").update(expectedBytes).digest("base64")}`;
+  await assert.rejects(
+    verifyDownloadedTarball({
+      downloadRoot,
+      reportSource: JSON.stringify([{
+        name: "codekeeper",
+        version: "1.4.2",
+        integrity: expectedIntegrity,
+        filename,
+      }]),
+      receipt: { version: "1.4.2", integrity: expectedIntegrity },
+    }),
+    (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /does not match.*SHA-512/.test(error.message),
+  );
 });
 
 test("the latest-release bootstrap rejects invalid registry versions before execution", async () => {

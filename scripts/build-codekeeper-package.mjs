@@ -14,7 +14,15 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SOURCE_REPOSITORY as SOURCE_REPOSITORY_SLUG } from "../packages/codekeeper/src/constants.mjs";
+import {
+  PACKAGE_SOURCE_REPOSITORY_URL,
+} from "../packages/codekeeper/src/package-identity.mjs";
+import {
+  RELEASE_DIRECTORY_EXCLUSIONS,
+  RELEASE_DIRECTORY_MAPPINGS,
+  RELEASE_FILE_MAPPINGS,
+  RELEASE_PUBLISHED_PATHS,
+} from "../packages/codekeeper/src/release-layout.mjs";
 import {
   RELEASE_MANIFEST_PATH,
   verifyCodekeeperRelease,
@@ -22,42 +30,7 @@ import {
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_REPOSITORY_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
-const SOURCE_REPOSITORY = `https://github.com/${SOURCE_REPOSITORY_SLUG}`;
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
-
-const DIRECTORY_MAPPINGS = Object.freeze([
-  ["packages/codekeeper/assets", "assets"],
-  ["packages/codekeeper/bin", "bin"],
-  ["packages/codekeeper/src", "src"],
-  ["tools/codekeeper/agents", "runtime/agents"],
-  ["tools/codekeeper/integrations", "runtime/integrations"],
-  ["tools/codekeeper/presets", "runtime/presets"],
-  ["tools/codekeeper/src", "runtime/src"],
-]);
-
-const DIRECTORY_EXCLUSIONS = Object.freeze(new Map([
-  ["tools/codekeeper/integrations", new Set([
-    "braintrust/package.json",
-    "braintrust/package-lock.json",
-    "braintrust/npm-shrinkwrap.json",
-  ])],
-]));
-
-const FILE_MAPPINGS = Object.freeze([
-  ["packages/codekeeper/LICENSE", "LICENSE"],
-  ["packages/codekeeper/README.md", "README.md"],
-  ["packages/codekeeper/package.json", "package.json"],
-  ["packages/codekeeper/npm-shrinkwrap.json", "npm-shrinkwrap.json"],
-  ["packages/codekeeper/runtime-package/package.json", "runtime/package.json"],
-  ["packages/codekeeper/runtime-package/npm-shrinkwrap.json", "runtime/npm-shrinkwrap.json"],
-  ["tools/codekeeper/scripts/verify-tooling-artifact.mjs", "runtime/scripts/verify-tooling-artifact.mjs"],
-  [".github/workflows/codekeeper-assistant.yml", "release/workflows/codekeeper-assistant.yml"],
-  [".github/workflows/codekeeper-bootstrap.yml", "release/workflows/codekeeper-bootstrap.yml"],
-  [".github/workflows/codekeeper-fix.yml", "release/workflows/codekeeper-fix.yml"],
-  [".github/workflows/codekeeper-issues.yml", "release/workflows/codekeeper-issues.yml"],
-  [".github/workflows/codekeeper-maintain.yml", "release/workflows/codekeeper-maintain.yml"],
-  [".github/workflows/codekeeper-review.yml", "release/workflows/codekeeper-review.yml"],
-]);
 
 function fail(message) {
   throw new Error(`Codekeeper package stage failed: ${message}`);
@@ -197,10 +170,10 @@ export async function buildCodekeeperPackageStage({
 
   try {
     const files = [];
-    for (const [sourceDirectory, stageDirectory] of DIRECTORY_MAPPINGS) {
+    for (const [sourceDirectory, stageDirectory] of RELEASE_DIRECTORY_MAPPINGS) {
       const sourceRoot = path.join(repositoryRoot, sourceDirectory);
       for (const relativePath of await collectDirectoryFiles(sourceRoot)) {
-        if (DIRECTORY_EXCLUSIONS.get(sourceDirectory)?.has(relativePath)) continue;
+        if (RELEASE_DIRECTORY_EXCLUSIONS.get(sourceDirectory)?.has(relativePath)) continue;
         files.push(
           await copyProductFile({
             repositoryRoot,
@@ -211,7 +184,7 @@ export async function buildCodekeeperPackageStage({
         );
       }
     }
-    for (const [sourcePath, stagePath, role] of FILE_MAPPINGS) {
+    for (const [sourcePath, stagePath, role] of RELEASE_FILE_MAPPINGS) {
       files.push(
         await copyProductFile({
           repositoryRoot,
@@ -227,10 +200,17 @@ export async function buildCodekeeperPackageStage({
     const packageManifest = JSON.parse(
       await readFile(path.join(repositoryRoot, "packages/codekeeper/package.json"), "utf8"),
     );
+    const publishedPaths = [...packageManifest.files].sort();
+    if (
+      publishedPaths.length !== RELEASE_PUBLISHED_PATHS.length
+      || publishedPaths.some((entry, index) => entry !== RELEASE_PUBLISHED_PATHS[index])
+    ) {
+      fail("package.json files must exactly cover the staged release roots");
+    }
     const manifest = {
       version: 1,
       package: { name: packageManifest.name, version: packageManifest.version },
-      source: { repository: SOURCE_REPOSITORY, commit },
+      source: { repository: PACKAGE_SOURCE_REPOSITORY_URL, commit },
       files,
     };
     await mkdir(path.join(temporaryDestination, "release"), { recursive: true });

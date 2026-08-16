@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadVerifiedAssets, sha256 } from "../src/assets.mjs";
+import { sha256 } from "../src/assets.mjs";
 import { createCommandRunner } from "../src/command-runner.mjs";
 import {
   configureRepositorySettings,
@@ -16,6 +16,7 @@ import {
   createRecordingRunner,
   git,
   HEAD_SHA,
+  loadVerifiedAssets,
   result,
   temporaryDirectory,
   textSink

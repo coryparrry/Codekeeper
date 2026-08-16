@@ -1,4 +1,6 @@
-import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { createCommandRunner, resolveRepositoryBoundary, sanitizedEnvironment } from "./command-runner.mjs";
 import { PACKAGE_NAME } from "./constants.mjs";
@@ -14,7 +16,7 @@ const NPM_ENV_NAMES = new Set([
   "npm_config_cache", "npm_config_userconfig", "npm_config_registry",
   "npm_config_proxy", "npm_config_https_proxy", "npm_config_cafile", "npm_config_strict_ssl"
 ]);
-const DEFAULT_FILE_SYSTEM = Object.freeze({ access, lstat, readFile, realpath, stat });
+const DEFAULT_FILE_SYSTEM = Object.freeze({ access, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat });
 
 function isWithin(root, target) {
   const relative = path.relative(root, target);
@@ -126,6 +128,100 @@ function releaseReceipt(source, requestedVersion) {
   return Object.freeze({ version, integrity });
 }
 
+export async function verifyDownloadedTarball({ downloadRoot, reportSource, receipt, fsImpl = DEFAULT_FILE_SYSTEM }) {
+  let report;
+  try {
+    report = JSON.parse(reportSource);
+  } catch {
+    failReleaseResolution("npm pack returned an invalid report.");
+  }
+  if (!Array.isArray(report) || report.length !== 1) failReleaseResolution("npm pack returned an invalid report.");
+  const entry = report[0];
+  if (
+    entry?.name !== PACKAGE_NAME
+    || entry.version !== receipt.version
+    || entry.integrity !== receipt.integrity
+    || typeof entry.filename !== "string"
+    || path.basename(entry.filename) !== entry.filename
+    || !entry.filename.endsWith(".tgz")
+  ) {
+    failReleaseResolution("npm pack did not return the exact Codekeeper release.");
+  }
+  const root = await fsImpl.realpath(downloadRoot);
+  const requestedTarball = path.join(root, entry.filename);
+  const metadata = await fsImpl.lstat(requestedTarball);
+  const tarball = await fsImpl.realpath(requestedTarball);
+  if (!isWithin(root, tarball) || metadata.isSymbolicLink() || !metadata.isFile()) {
+    failReleaseResolution("npm pack returned an unsafe Codekeeper tarball.");
+  }
+  const actualIntegrity = `sha512-${createHash("sha512").update(await fsImpl.readFile(tarball)).digest("base64")}`;
+  if (actualIntegrity !== receipt.integrity) {
+    failReleaseResolution("The downloaded Codekeeper tarball does not match the resolved SHA-512 integrity.");
+  }
+  return tarball;
+}
+
+export async function stageVerifiedPackage({
+  cwd,
+  environment,
+  platform,
+  receipt,
+  npmCli,
+  runner,
+  fsImpl = DEFAULT_FILE_SYSTEM,
+  temporaryDirectory = os.tmpdir(),
+} = {}) {
+  const root = await fsImpl.mkdtemp(path.join(temporaryDirectory, "codekeeper-update-"));
+  try {
+    const downloadRoot = path.join(root, "download");
+    const installRoot = path.join(root, "install");
+    await fsImpl.mkdir(downloadRoot, { recursive: true });
+    await fsImpl.mkdir(installRoot, { recursive: true });
+    const packResult = await runner.run("node", [
+      npmCli,
+      "pack",
+      "--json",
+      "--ignore-scripts",
+      "--pack-destination",
+      downloadRoot,
+      `${PACKAGE_NAME}@${receipt.version}`,
+    ], {
+      cwd,
+      env: updateEnvironment(environment, platform, receipt.version, receipt.integrity),
+      timeoutMs: NPM_TIMEOUT_MS,
+    });
+    const reportSource = requireCommandSuccess(packResult, "Could not download the exact Codekeeper release from npm.");
+    const tarball = await verifyDownloadedTarball({ downloadRoot, reportSource, receipt, fsImpl });
+    const installResult = await runner.run("node", [
+      npmCli,
+      "install",
+      "--prefix",
+      installRoot,
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--no-save",
+      tarball,
+    ], {
+      cwd,
+      env: updateEnvironment(environment, platform, receipt.version, receipt.integrity),
+      timeoutMs: NPM_TIMEOUT_MS,
+    });
+    requireCommandSuccess(installResult, "Could not install the verified Codekeeper release.");
+    const packageRoot = await fsImpl.realpath(path.join(installRoot, "node_modules", PACKAGE_NAME));
+    const requestedExecutable = path.join(packageRoot, "bin", "codekeeper.mjs");
+    const executableStat = await fsImpl.lstat(requestedExecutable);
+    const executable = await fsImpl.realpath(requestedExecutable);
+    if (!isWithin(packageRoot, executable) || executableStat.isSymbolicLink() || !executableStat.isFile()) {
+      failReleaseResolution("The verified Codekeeper release has an unsafe CLI entrypoint.");
+    }
+    return Object.freeze({ executable, root });
+  } catch (error) {
+    await fsImpl.rm(root, { force: true, recursive: true });
+    throw error;
+  }
+}
+
 export async function resolveNpmRelease({
   cwd = process.cwd(),
   environment = process.env,
@@ -157,6 +253,8 @@ export async function runLatestCommand(command, {
   environment = process.env,
   platform = process.platform,
   resolveNpm = resolveNpmCliPath,
+  stagePackage = stageVerifiedPackage,
+  fsImpl = DEFAULT_FILE_SYSTEM,
   runner = createCommandRunner({ commandPaths: { node: process.execPath }, environment, platform })
 } = {}) {
   if (!new Set(["init", "update"]).has(command)) throw new TypeError("command must be init or update");
@@ -170,29 +268,37 @@ export async function runLatestCommand(command, {
     version: "latest"
   });
   output.write(`Launching Codekeeper ${receipt.version} with its locked CLI dependencies...\n`);
-  const commandResult = await runner.run("node", [
-    receipt.npmCli,
-    "exec",
-    "--yes",
-    "--ignore-scripts",
-    "--prefer-online",
-    `--package=${PACKAGE_NAME}@${receipt.version}`,
-    "--",
-    PACKAGE_NAME,
-    command,
-    "--current-package"
-  ], {
+  const staged = await stagePackage({
     cwd,
-    env: updateEnvironment(environment, platform, receipt.version, receipt.integrity),
-    stdio: "inherit",
-    timeoutMs: NPM_TIMEOUT_MS
+    environment,
+    platform,
+    receipt,
+    npmCli: receipt.npmCli,
+    runner,
+    fsImpl,
   });
-  if (commandResult.status !== 0 || commandResult.timedOut) {
-    throw new InstallerError(`The latest Codekeeper CLI did not complete ${command}.`, {
-      code: "UPDATE_BOOTSTRAP_FAILED"
+  try {
+    const commandResult = await runner.run("node", [
+      staged.executable,
+      command,
+      "--current-package",
+      "--package-integrity",
+      receipt.integrity,
+    ], {
+      cwd,
+      env: updateEnvironment(environment, platform, receipt.version, receipt.integrity),
+      stdio: "inherit",
+      timeoutMs: NPM_TIMEOUT_MS
     });
+    if (commandResult.status !== 0 || commandResult.timedOut) {
+      throw new InstallerError(`The latest Codekeeper CLI did not complete ${command}.`, {
+        code: "UPDATE_BOOTSTRAP_FAILED"
+      });
+    }
+    return 0;
+  } finally {
+    await fsImpl.rm(staged.root, { force: true, recursive: true });
   }
-  return 0;
 }
 
 export function runLatestUpdate(options = {}) {

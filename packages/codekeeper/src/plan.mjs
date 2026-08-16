@@ -15,7 +15,6 @@ import {
   MODES,
   MODEL_PROVIDER_SECRETS,
   OPENAI_SECRET,
-  PACKAGE_VERSION,
   PRESET_IDS,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
@@ -505,7 +504,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     ? requiredSecrets.filter((name) => !existingSecretNames(installation).has(name))
     : requiredSecrets;
   const plan = {
-    packageVersion: PACKAGE_VERSION,
+    packageVersion: bundle.packageRelease.version,
     source: {
       repository: bundle.metadata.source.repository,
       commit: bundle.metadata.source.commit

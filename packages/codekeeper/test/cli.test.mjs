@@ -2,12 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadVerifiedAssets } from "../src/assets.mjs";
-import { currentResumeCommand, parseCliArgs, runCli, USAGE } from "../src/cli.mjs";
+import { currentResumeCommand, parseCliArgs, runCli as runProductionCli, USAGE } from "../src/cli.mjs";
 import { createCommandRunner } from "../src/command-runner.mjs";
 import { buildInstallPlan, completionGuidance } from "../src/plan.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
-import { createRecordingRunner, git, HEAD_SHA, result, temporaryDirectory, textSink } from "./helpers.mjs";
+import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, result, temporaryDirectory, testPackageEnvironment, textSink } from "./helpers.mjs";
+
+function runCli(options = {}) {
+  return runProductionCli({
+    ...options,
+    environment: testPackageEnvironment(options.environment),
+  });
+}
 
 function guidedPrompt(confirmations = [true, true, true, true, true, true], { privateKeyPath = "/private/tmp/codekeeper-test-private-key.pem" } = {}) {
   const answers = [...confirmations];

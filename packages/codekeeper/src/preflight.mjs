@@ -12,6 +12,7 @@ import {
   MODES,
   POLICY_TARGET,
   RELEASE_MANIFEST_TARGET,
+  RELEASE_MANAGED_WORKFLOW_TARGETS,
   RELEASE_WORKFLOW_ASSETS,
   SETUP_BRANCH,
   SOURCE_REPOSITORY
@@ -19,13 +20,13 @@ import {
 import { InstallerError } from "./errors.mjs";
 import { requireSuccess } from "./command-runner.mjs";
 import { upgradePolicy } from "./policy.mjs";
+import { normalizePackageIdentity, normalizePackageRelease } from "./package-release.mjs";
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const SHA512_INTEGRITY = /^sha512-[A-Za-z0-9+/]{86}==$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const GITHUB_WORKFLOW_REFERENCE = /(?:\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-|codekeeper@[0-9]|\.\/\.github\/workflows\/codekeeper-)/i;
-const RELEASE_MANAGED_WORKFLOW = /^\.github\/workflows\/codekeeper-[a-z0-9-]+\.ya?ml$/;
+const RELEASE_MANAGED_WORKFLOW = new Set(RELEASE_MANAGED_WORKFLOW_TARGETS);
 
 function sha256(source) {
   return createHash("sha256").update(source).digest("hex");
@@ -43,17 +44,19 @@ export function parseReleaseManifest(source) {
     : [];
   if (
     ![1, 2].includes(manifest?.version)
-    || manifest?.package?.name !== "codekeeper"
-    || typeof manifest.package.version !== "string"
-    || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(manifest.package.version)
     || manifest?.source?.repository !== SOURCE_REPOSITORY
     || !FULL_SHA.test(manifest?.source?.commit)
-    || (manifest.version === 2 && !SHA512_INTEGRITY.test(manifest.package.integrity ?? ""))
     || !managedEntries.length
     || managedEntries.length > 32
-    || managedEntries.some(([target, digest]) => !RELEASE_MANAGED_WORKFLOW.test(target) || !SHA256.test(digest))
+    || managedEntries.some(([target, digest]) => !RELEASE_MANAGED_WORKFLOW.has(target) || !SHA256.test(digest))
   ) {
     throw new InstallerError("The existing Codekeeper release manifest is invalid.", { code: "EXISTING_INSTALLATION_INVALID" });
+  }
+  try {
+    if (manifest.version === 2) normalizePackageRelease(manifest.package, { expectedVersion: undefined });
+    else normalizePackageIdentity(manifest.package, { expectedVersion: undefined });
+  } catch (cause) {
+    throw new InstallerError("The existing Codekeeper release manifest is invalid.", { code: "EXISTING_INSTALLATION_INVALID", cause });
   }
   return Object.freeze({
     version: manifest.version,

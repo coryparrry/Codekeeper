@@ -1,7 +1,9 @@
-export const PACKAGE_NAME = "codekeeper";
-export const PACKAGE_VERSION = "0.2.0";
+export {
+  PACKAGE_NAME,
+  PACKAGE_SOURCE_REPOSITORY as SOURCE_REPOSITORY,
+  PACKAGE_VERSION,
+} from "./package-identity.mjs";
 export const MINIMUM_NODE_MAJOR = 22;
-export const SOURCE_REPOSITORY = "coryparry/Codekeeper";
 export const SOURCE_COMMIT = "46d5eef7a4d1a73f4fd3d1962713489e32fd8f68";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
@@ -87,6 +89,11 @@ export const RUNTIME_WORKFLOW_IDS = Object.freeze(Object.keys(RUNTIME_WORKFLOWS)
 export const RELEASE_WORKFLOW_ASSETS = Object.freeze([
   PACKAGE_BOOTSTRAP_WORKFLOW,
   ...RUNTIME_WORKFLOW_IDS.map((id) => RUNTIME_WORKFLOWS[id])
+]);
+export const RELEASE_MANAGED_WORKFLOW_TARGETS = Object.freeze([
+  ASSISTANT_WORKFLOW.target,
+  ...MODE_IDS.map((mode) => MODES[mode].target),
+  ...RELEASE_WORKFLOW_ASSETS.map((workflow) => workflow.target),
 ]);
 export const AGENT_PROFILES = Object.freeze({
   "pr-reviewer": Object.freeze({

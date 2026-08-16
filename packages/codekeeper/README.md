@@ -1,12 +1,14 @@
 # Codekeeper package
 
-`codekeeper` is the complete Node.js release package for Codekeeper's versioned GitHub Actions workflows. It contains the installer and TUI, production runtime, default agents, integrations, reusable workflows, and exact installer/runtime dependency graphs. `npx codekeeper init` first resolves and re-enters through the exact latest package receipt, then opens a terminal UI, creates a setup branch, pushes it, and opens a pull request. After installation, `codekeeper update` advances the CLI and the complete release-owned repository installation. By default, the selected workflows start after the first pull request merges. You can choose a disabled install instead. The installer does not copy runtime source or dependencies into the adopter repository.
+`codekeeper` is the complete Node.js release package for Codekeeper's versioned GitHub Actions workflows. It contains the installer and TUI, production runtime, default agents, integrations, reusable workflows, and exact installer/runtime dependency graphs. `npx codekeeper init` first resolves and runs the exact latest package receipt, then opens a terminal UI, creates a setup branch, pushes it, and opens a pull request. After installation, `codekeeper update` runs the latest CLI to advance the complete release-owned repository installation and runtime dependency pins. By default, the selected workflows start after the first pull request merges. You can choose a disabled install instead. The installer does not copy runtime source or dependencies into the adopter repository.
 
 The package is currently **unpublished** while private acceptance is in progress. Exercise the exact local tarball from a clean adopter checkout:
 
+Use the `integrity` value returned by the same `npm pack --json` operation that created the tarball; do not calculate it from a different file or registry response.
+
 ```bash
-npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper init
-npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper update --current-package
+npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper init --current-package --package-integrity 'sha512-...'
+npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper update --current-package --package-integrity 'sha512-...'
 ```
 
 The v1 CLI surface is:
@@ -14,7 +16,7 @@ The v1 CLI surface is:
 ```bash
 npx codekeeper init
 codekeeper update
-codekeeper update --current-package
+codekeeper update --current-package --package-integrity 'sha512-...'
 npx codekeeper --help
 npx codekeeper --version
 ```

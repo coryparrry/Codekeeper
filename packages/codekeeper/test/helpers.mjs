@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadVerifiedAssets as loadProductionAssets } from "../src/assets.mjs";
 
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const REPOSITORY_ROOT = path.resolve(PACKAGE_ROOT, "../..");
@@ -15,8 +16,17 @@ export const TEST_PACKAGE_RELEASE = Object.freeze({
   integrity: TEST_PACKAGE_INTEGRITY
 });
 
-process.env.CODEKEEPER_UPDATE_EXPECTED_VERSION = TEST_PACKAGE_RELEASE.version;
-process.env.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY = TEST_PACKAGE_RELEASE.integrity;
+export function testPackageEnvironment(environment = {}) {
+  return {
+    CODEKEEPER_UPDATE_EXPECTED_VERSION: TEST_PACKAGE_RELEASE.version,
+    CODEKEEPER_UPDATE_EXPECTED_INTEGRITY: TEST_PACKAGE_RELEASE.integrity,
+    ...environment,
+  };
+}
+
+export function loadVerifiedAssets(options = {}) {
+  return loadProductionAssets({ packageRelease: TEST_PACKAGE_RELEASE, ...options });
+}
 
 export function result(stdout = "", overrides = {}) {
   return {

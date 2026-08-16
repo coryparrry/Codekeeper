@@ -4,8 +4,7 @@ import { formatInstallerError } from "../src/errors.mjs";
 import { runLatestInit } from "../src/updater.mjs";
 
 const argv = process.argv.slice(2);
-const exactPackage = typeof process.env.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
-  && typeof process.env.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY === "string";
+const exactPackage = argv.includes("--current-package");
 try {
   process.exitCode = argv.length === 1 && argv[0] === "init" && !exactPackage
     ? await runLatestInit()

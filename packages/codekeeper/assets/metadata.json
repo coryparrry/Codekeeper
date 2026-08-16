@@ -61,8 +61,8 @@
       "sourcePath": "examples/workflows/codekeeper-fix.yml.example"
     },
     "runtime-workflows/bootstrap.yml": {
-      "sha256": "dba0a3da830ed7f1f2add3dc60c7c0a99278dc3374782bb0a7c5bf1991949004",
-      "bytes": 9524,
+      "sha256": "51bbc32f391130d1f049f657e10145bd6117d6054d304bd368a7a6537014bb7f",
+      "bytes": 10598,
       "sourcePath": ".github/workflows/codekeeper-bootstrap.yml",
       "packagePath": "release/workflows/codekeeper-bootstrap.yml"
     },

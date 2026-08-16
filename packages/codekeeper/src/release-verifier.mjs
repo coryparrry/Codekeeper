@@ -1,14 +1,20 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import {
+  PACKAGE_NAME,
+  PACKAGE_SOURCE_REPOSITORY_URL,
+} from "./package-identity.mjs";
+import {
+  normalizePackageIdentity,
+  validSha512Integrity,
+} from "./package-release.mjs";
 
 export const RELEASE_MANIFEST_PATH = "release/manifest.json";
 export const INTEGRITY_RECEIPT_PATH = "release/package-integrity.json";
 
-const SOURCE_REPOSITORY = "https://github.com/coryparry/Codekeeper";
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const SHA512_INTEGRITY = /^sha512-[A-Za-z0-9+/]+={0,2}$/;
 const IGNORED_DEPENDENCY_DIRECTORIES = new Set(["node_modules", "runtime/node_modules"]);
 
 function fail(message) {
@@ -98,14 +104,18 @@ function parseManifest(bytes) {
   const manifest = parseJson(bytes, "release manifest");
   if (
     manifest?.version !== 1 ||
-    manifest?.package?.name !== "codekeeper" ||
-    typeof manifest?.package?.version !== "string" ||
-    manifest?.source?.repository !== SOURCE_REPOSITORY ||
+    manifest?.package?.name !== PACKAGE_NAME ||
+    manifest?.source?.repository !== PACKAGE_SOURCE_REPOSITORY_URL ||
     !FULL_COMMIT.test(manifest?.source?.commit ?? "") ||
     !Array.isArray(manifest.files) ||
     manifest.files.length === 0 ||
     manifest.files.length > 500
   ) {
+    fail("release manifest shape is invalid");
+  }
+  try {
+    normalizePackageIdentity(manifest.package, { expectedVersion: undefined });
+  } catch {
     fail("release manifest shape is invalid");
   }
   const files = new Map();
@@ -128,7 +138,7 @@ function parseManifest(bytes) {
 }
 
 async function verifyIntegrityReceipt(root, expectedIntegrity) {
-  if (!SHA512_INTEGRITY.test(expectedIntegrity ?? "")) fail("expected package integrity is invalid");
+  if (!validSha512Integrity(expectedIntegrity)) fail("expected package integrity is invalid");
   const receipt = parseJson(await readRegularFile(root, INTEGRITY_RECEIPT_PATH), "package integrity receipt");
   if (
     receipt?.version !== 1 ||

@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  loadVerifiedAssets,
   renderInstallFiles,
   renderPolicy,
   renderWorkflow,
@@ -45,6 +44,7 @@ import { upgradePolicy } from "../src/policy.mjs";
 import {
   assertInstallerCode,
   HEAD_SHA,
+  loadVerifiedAssets,
   PACKAGE_ROOT,
   PINNED_COMMIT,
   REPOSITORY_ROOT,
@@ -59,7 +59,7 @@ const EXPECTED_ASSETS = Object.freeze({
   "policies/mixed.json": "8431b2352fe5be158bdf3957b6077a86747ac199ae2fb4717b59a7cbe3620286",
   "policies/openai.json": "59a30700d883a117100b31f2a16675f48e8ba9eafe66d3b6e2a34dcce1aa4a10",
   "runtime-workflows/assistant.yml": "a1824ed06bf7d84ab9eda6e8a06416143608d7de30d500508f0eb04ff5b75423",
-  "runtime-workflows/bootstrap.yml": "dba0a3da830ed7f1f2add3dc60c7c0a99278dc3374782bb0a7c5bf1991949004",
+  "runtime-workflows/bootstrap.yml": "51bbc32f391130d1f049f657e10145bd6117d6054d304bd368a7a6537014bb7f",
   "runtime-workflows/fix.yml": "7265604325e47cd8ea066fb5d328847ee0c82c4f3ec0fe980573cc0d08d56230",
   "runtime-workflows/issues.yml": "7ff1b71bfd4e3c77fb6e84211bec3525caffbb456dda52f37dc1dc84816b9882",
   "runtime-workflows/maintain.yml": "cecc237dec02000884cd2cd516ff60831470fc261d9b76f0bc9c58bbdfebae1f",
@@ -1101,7 +1101,7 @@ test("a release update removes retired generated workflows recorded by the insta
     answers: answers({ modes: ["review"], preset: "openai" })
   });
   const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
-  const retiredTarget = ".github/workflows/codekeeper-retired.yml";
+  const retiredTarget = ".github/workflows/codekeeper-fix.yml";
   contents[retiredTarget] = contents[".github/workflows/codekeeper-assistant.yml"];
   const installedRelease = JSON.parse(contents[RELEASE_MANIFEST_TARGET]);
   installedRelease.managedFiles[retiredTarget] = sha256(contents[retiredTarget]);

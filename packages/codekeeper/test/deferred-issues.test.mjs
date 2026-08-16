@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { loadVerifiedAssets } from "../src/assets.mjs";
 import { buildInstallPlan } from "../src/plan.mjs";
 import { upgradePolicy } from "../src/policy.mjs";
 import { createEditableSettings, validateEditableSettings } from "../src/settings.mjs";
-import { HEAD_SHA } from "./helpers.mjs";
+import { HEAD_SHA, loadVerifiedAssets } from "./helpers.mjs";
 
 const policy = upgradePolicy(JSON.parse(
   await readFile(new URL("../assets/policies/openai.json", import.meta.url), "utf8")

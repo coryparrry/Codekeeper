@@ -1,16 +1,16 @@
 # Architecture
 
-Codekeeper is a source repository of reusable workflows. An adopter keeps the event trigger and policy in its own repository, then calls a reviewed source revision by full commit SHA. There is no shared database, webhook service, or hosted App.
+Codekeeper is distributed as one versioned npm package containing the installer, runtime, default agents, and reusable workflows. An adopter keeps its event triggers, policy, and small local reusable-workflow entrypoints in its own repository. There is no shared database, webhook service, or hosted App.
 
 ```text
-Adopter event and default-branch policy
+Adopter event, default-branch policy, and exact package receipt
         |
         v
-Pinned bootstrap action and reusable workflow revision (same full SHA)
+Local bootstrap workflow downloads one exact npm version and verifies its SHA-512
         |
-        +-- direct private action stages only tools/codekeeper as a one-day artifact
-        |     - no caller-provided source credential or source checkout
-        |     - every reusable job verifies pinned manifest, inventory, hashes, no symlinks or hidden paths
+        +-- verified package is staged as a one-day, run-scoped artifact
+        |     - closed manifest, exact inventory and hashes, no symlinks or hidden paths
+        |     - local runtime workflows consume only that verified artifact
         |
         +-- workspace specialist: optional workspace key and read-only GitHub token
         |     - frozen policy, exact-head context, bounded review diff, and schema
@@ -35,7 +35,11 @@ Pinned bootstrap action and reusable workflow revision (same full SHA)
 
 ## Trust boundaries
 
-The caller pins a direct Codekeeper action and reusable workflow to the same full commit SHA. GitHub's private-action access retrieves that action without a caller-provided PAT or source-repository App installation. The direct action stages only the production `tools/codekeeper` payload as a one-day artifact. Hidden paths are refused to match GitHub artifact uploads' secure default. That artifact is untrusted until every reusable job verifies the source-pinned manifest's raw SHA-256, the verifier's manifest hash, an exact inventory, every file hash, and the absence of symlinks or hidden paths; only then may `npm` or the Codekeeper CLI run. The reusable workflow uses `job.workflow_sha` for provenance and reads adopter policy only from the adopter default branch. The review caller is a default-branch `pull_request_target` definition that only invokes the reusable workflow; it never checks out or executes PR code. Pull request heads, issue data, comments, repository files, and model output are untrusted.
+The generated caller pins an exact npm package version and SHA-512 integrity, then invokes the adopter's local bootstrap and runtime workflows. The bootstrap downloads that exact tarball, independently hashes it, verifies the package's closed manifest, and stages it as a one-day run-scoped artifact. Every runtime job re-verifies the manifest digest, source commit, exact inventory, file hashes, and absence of symlinks or hidden paths before installing the nested locked runtime dependency graph. Only then may the Codekeeper CLI run. The local reusable workflow uses `job.workflow_sha` for adopter-workflow provenance and reads policy only from the adopter default branch. The review caller is a default-branch `pull_request_target` definition that only invokes local reusable workflows; it never checks out or executes PR code. Pull request heads, issue data, comments, repository files, package downloads before verification, and model output are untrusted.
+
+### Legacy source-pinned compatibility
+
+Installations created before the package-execution release may still call a historical Codekeeper action and reusable workflow by one full source commit. Those immutable revisions continue to use the source manifest and one-day tooling artifact recorded at that commit. `codekeeper update` migrates the repository to the package receipt and local-workflow model; the legacy path is compatibility behavior, not the primary release architecture.
 
 The workspace specialist and coordinator are separate jobs on fresh runners. The workspace job launches the pinned Codex CLI as a local stdio MCP server through the Agents SDK; there is no separately hosted MCP service or Codex GitHub Action. The MCP host receives only its workspace credential and passes a minimal environment to Codex, while Codex's shell policy excludes secret variables from spawned commands. It never receives the provider, trace, or App credential. The coordinator rebuilds its frozen bundle from trusted checkouts and must match that bundle’s context digest to the workspace job output before reading specialist data. It reads only the specialist JSON result and, for write-capable audit/fix modes, a patch artifact as untrusted evidence; it rejects non-regular artifact files and applies that patch only after the model call completes.
 

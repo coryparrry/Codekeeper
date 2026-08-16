@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadVerifiedAssets, sha256 } from "../src/assets.mjs";
+import { sha256 } from "../src/assets.mjs";
 import { SOURCE_COMMIT, SOURCE_REPOSITORY } from "../src/constants.mjs";
 import {
   assertNodeVersion,
@@ -17,6 +17,7 @@ import {
   commandKey,
   createRecordingRunner,
   HEAD_SHA,
+  loadVerifiedAssets,
   result,
   temporaryDirectory
 } from "./helpers.mjs";
@@ -261,8 +262,8 @@ test("installation-file collision checks reject known, case-colliding, and disgu
 test("release manifests admit only digest-bound retired Codekeeper workflows", async (t) => {
   const root = await temporaryDirectory(t);
   const bundle = await loadVerifiedAssets();
-  const retiredTarget = ".github/workflows/codekeeper-retired.yml";
-  const retiredSource = installedWorkflow(bundle.contents["workflows/review.yml"]);
+  const retiredTarget = ".github/workflows/codekeeper-runtime-fix.yml";
+  const retiredSource = bundle.contents["runtime-workflows/fix.yml"];
   await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
   await writeFile(path.join(root, ...retiredTarget.split("/")), retiredSource);
   const manifestPath = path.join(root, ".github", "codekeeper-release.json");
@@ -280,6 +281,12 @@ test("release manifests admit only digest-bound retired Codekeeper workflows", a
     assertInstallerCode(assert, "EXISTING_INSTALLATION_INVALID")
   );
   manifest.managedFiles = { "README.md": sha256("unsafe") };
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await assert.rejects(
+    assertNoInstallationFiles(root, { allowExisting: true }),
+    assertInstallerCode(assert, "EXISTING_INSTALLATION_INVALID")
+  );
+  manifest.managedFiles = { ".github/workflows/codekeeper-custom.yml": sha256("unsafe") };
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   await assert.rejects(
     assertNoInstallationFiles(root, { allowExisting: true }),
