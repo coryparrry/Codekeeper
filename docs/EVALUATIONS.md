@@ -26,7 +26,7 @@ Keep one deterministic failing test for each planted defect and passing tests fo
 
 Run the same immutable pull-request head at least three times. Repeats must not add empty commits because that changes the evaluated head. Request `/codekeeper rerun` through the configured owner command so the trusted GitHub App dispatches another review for the current SHA.
 
-For each run, retain the workflow URL, exact head SHA, sealed `codekeeper-review-artifact-<run-id>` artifact, Braintrust trace, and published review comment. The overall GitHub run is expected to be red when a correct review publishes blocking findings. Distinguish that intentional gate failure from failures in bootstrap, workspace analysis, Braintrust export, validation, sealing, or publication.
+For each run, retain the workflow URL, exact head SHA, sealed `codekeeper-review-artifact-<run-id>` artifact, Braintrust trace, and published review comment. The overall GitHub run is expected to be red when a correct review publishes blocking findings. Distinguish that intentional gate failure from failures in package acquisition, workspace analysis, Braintrust export, validation, sealing, or publication.
 
 ## Answer-key manifest
 

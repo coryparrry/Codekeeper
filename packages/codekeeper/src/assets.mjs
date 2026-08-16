@@ -8,7 +8,7 @@ import {
   MODES,
   PACKAGE_NAME,
   RELEASE_MANIFEST_TARGET,
-  RELEASE_WORKFLOW_ASSETS,
+  RELEASE_PACKAGE_ASSETS,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
@@ -24,7 +24,7 @@ const DEFAULT_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const RELEASE_WORKFLOW_ASSET_MAP = new Map(RELEASE_WORKFLOW_ASSETS.map((workflow) => [workflow.asset, workflow]));
+const RELEASE_PACKAGE_ASSET_MAP = new Map(RELEASE_PACKAGE_ASSETS.map((asset) => [asset.asset, asset]));
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -99,15 +99,15 @@ export async function loadVerifiedAssets({
     if (!record || !SHA256.test(record.sha256 ?? "") || !Number.isSafeInteger(record.bytes) || record.bytes < 1) {
       throw new InstallerError(`Asset metadata is invalid for ${assetKey}.`, { code: "ASSET_METADATA_INVALID" });
     }
-    const releaseWorkflow = RELEASE_WORKFLOW_ASSET_MAP.get(assetKey);
-    if (releaseWorkflow && (record.sourcePath !== releaseWorkflow.sourcePath || record.packagePath !== releaseWorkflow.packagePath)) {
+    const releaseAsset = RELEASE_PACKAGE_ASSET_MAP.get(assetKey);
+    if (releaseAsset && (record.sourcePath !== releaseAsset.sourcePath || record.packagePath !== releaseAsset.packagePath)) {
       throw new InstallerError(`Asset metadata is invalid for ${assetKey}.`, { code: "ASSET_METADATA_INVALID" });
     }
-    const assetPath = releaseWorkflow
+    const assetPath = releaseAsset
       ? stagedPackage
-        ? path.join(packageRoot, ...releaseWorkflow.packagePath.split("/"))
+        ? path.join(packageRoot, ...releaseAsset.packagePath.split("/"))
         : packageRoot === DEFAULT_PACKAGE_ROOT
-          ? path.resolve(packageRoot, "..", "..", ...releaseWorkflow.sourcePath.split("/"))
+          ? path.resolve(packageRoot, "..", "..", ...releaseAsset.sourcePath.split("/"))
           : path.join(assetsRoot, ...assetKey.split("/"))
       : path.join(assetsRoot, ...assetKey.split("/"));
     const bytes = await readRegularFile(fsImpl, assetPath, `Asset ${assetKey}`);
@@ -226,18 +226,15 @@ function assertLocalPackageWorkflow(source, mode) {
     .map((line) => line.trim())
     .filter((line) => /^(?:-\s+)?uses:/.test(line))
     .map((line) => line.replace(/^-\s+/, ""));
-  const expected = [
-    "uses: ./.github/workflows/codekeeper-bootstrap.yml",
-    `uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`
-  ];
+  const expected = [`uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`];
   if (activeUses.length !== expected.length || expected.some((line) => !activeUses.includes(line))) {
-    throw new InstallerError("Rendered workflow does not use the installed package bootstrap and runtime workflows.", { code: "WORKFLOW_RENDER_INVALID" });
+    throw new InstallerError("Rendered workflow does not use the installed package runtime workflow.", { code: "WORKFLOW_RENDER_INVALID" });
   }
 }
 
 function renderPackageReceipt(template, packageRelease, label) {
   const receipt = normalizePackageRelease(packageRelease);
-  if (count(template, "PACKAGE_VERSION") !== 2 || count(template, "PACKAGE_INTEGRITY") !== 2) {
+  if (count(template, "PACKAGE_VERSION") !== 1 || count(template, "PACKAGE_INTEGRITY") !== 1) {
     throw new InstallerError(`Bundled ${label} workflow has unexpected package placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
   }
   const rendered = template

@@ -39,26 +39,13 @@ jobs:
             const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
             appendFileSync(process.env.GITHUB_OUTPUT, `route=${trustedAssociation && (slash || mentioned)}\n`);
           '
-  bootstrap:
+  assistant:
     needs: intent
     if: needs.intent.outputs.route == 'true'
-    name: Codekeeper exact package bootstrap
-    permissions:
-      contents: read
-    uses: ./.github/workflows/codekeeper-bootstrap.yml
-    with:
-      runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
-      package_version: "PACKAGE_VERSION"
-      package_integrity: "PACKAGE_INTEGRITY"
-  assistant:
-    needs: [intent, bootstrap]
-    if: needs.intent.outputs.route == 'true' && needs.bootstrap.result == 'success'
     uses: ./.github/workflows/codekeeper-runtime-assistant.yml
     with:
       package_version: "PACKAGE_VERSION"
       package_integrity: "PACKAGE_INTEGRITY"
-      package_manifest_sha256: ${{ needs.bootstrap.outputs.package_manifest_sha256 }}
-      package_source_commit: ${{ needs.bootstrap.outputs.source_commit }}
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
       owner_requests: true

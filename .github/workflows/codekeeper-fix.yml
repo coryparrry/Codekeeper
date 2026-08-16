@@ -11,14 +11,6 @@ on:
         description: Exact npm SHA-512 integrity for the package tarball.
         required: true
         type: string
-      package_manifest_sha256:
-        description: SHA-256 of the closed package release manifest.
-        required: true
-        type: string
-      package_source_commit:
-        description: Source commit read from the verified package manifest.
-        required: true
-        type: string
       enabled:
         required: false
         default: true
@@ -73,8 +65,6 @@ env:
   CODEKEEPER_PACKAGE_NAME: codekeeper
   CODEKEEPER_PACKAGE_VERSION: ${{ inputs.package_version }}
   CODEKEEPER_PACKAGE_INTEGRITY: ${{ inputs.package_integrity }}
-  CODEKEEPER_PACKAGE_MANIFEST_SHA256: ${{ inputs.package_manifest_sha256 }}
-  CODEKEEPER_PACKAGE_SOURCE_COMMIT: ${{ inputs.package_source_commit }}
 
 concurrency:
   group: codekeeper-fix-${{ inputs.issue_number || github.event.issue.number || github.event.client_payload.number }}
@@ -103,6 +93,8 @@ jobs:
       base_sha: ${{ fromJSON(steps.prepare.outputs.result).baseSha }}
       repository_sha: ${{ steps.repository-source.outputs.sha }}
       target_kind: ${{ fromJSON(steps.prepare.outputs.result).target.kind }}
+      package_manifest_sha256: ${{ steps.codekeeper-package.outputs.package_manifest_sha256 }}
+      package_source_commit: ${{ steps.codekeeper-package.outputs.source_commit }}
     steps:
       - name: Resolve authorised repair target
         id: target
@@ -113,21 +105,6 @@ jobs:
           target="${MANUAL_ISSUE:-$EVENT_ISSUE}"
           [[ "$target" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue or pull request number"; exit 1; }
           echo "target_number=$target" >> "$GITHUB_OUTPUT"
-      - name: Download bootstrap Codekeeper package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}
-      - name: Verify bootstrap Codekeeper package
-        run: |
-          TOOLING_ROOT="$GITHUB_WORKSPACE/tooling/tools/codekeeper"
-          node "$TOOLING_ROOT/bin/verify-package.mjs" \
-            --root "$TOOLING_ROOT" \
-            --expected-name "$CODEKEEPER_PACKAGE_NAME" \
-            --expected-version "$CODEKEEPER_PACKAGE_VERSION" \
-            --expected-integrity "$CODEKEEPER_PACKAGE_INTEGRITY" \
-            --expected-manifest-sha256 "$CODEKEEPER_PACKAGE_MANIFEST_SHA256" \
-            --expected-source-commit "$CODEKEEPER_PACKAGE_SOURCE_COMMIT"
       - name: Check out trusted default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -145,13 +122,29 @@ jobs:
           node-version: 24.19.0
           package-manager-cache: false
 
+      - name: Acquire exact Codekeeper package
+        id: codekeeper-package
+        uses: ./repository/.github/codekeeper/actions/acquire-package
+        with:
+          package_version: ${{ inputs.package_version }}
+          package_integrity: ${{ inputs.package_integrity }}
+
+      - name: Upload verified Codekeeper package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ github.workspace }}/tooling
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+
       - name: Install exact Codekeeper runtime
         run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
       - name: Prepare runner-owned fixer bundle
         id: prepare
         working-directory: repository
         env:
-          CODEKEEPER_TOOLING_SHA: ${{ inputs.package_source_commit }}
+          CODEKEEPER_TOOLING_SHA: ${{ steps.codekeeper-package.outputs.source_commit }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
@@ -309,6 +302,11 @@ jobs:
       base_sha: ${{ fromJSON(steps.prepare.outputs.result).baseSha }}
       target_kind: ${{ fromJSON(steps.prepare.outputs.result).target.kind }}
     steps:
+      - name: Download verified Codekeeper package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ github.workspace }}/tooling
       - name: Resolve authorised repair target
         id: target
         env:
@@ -318,21 +316,6 @@ jobs:
           target="${MANUAL_ISSUE:-$EVENT_ISSUE}"
           [[ "$target" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue or pull request number"; exit 1; }
           echo "target_number=$target" >> "$GITHUB_OUTPUT"
-      - name: Download bootstrap Codekeeper package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}
-      - name: Verify bootstrap Codekeeper package
-        run: |
-          TOOLING_ROOT="$GITHUB_WORKSPACE/tooling/tools/codekeeper"
-          node "$TOOLING_ROOT/bin/verify-package.mjs" \
-            --root "$TOOLING_ROOT" \
-            --expected-name "$CODEKEEPER_PACKAGE_NAME" \
-            --expected-version "$CODEKEEPER_PACKAGE_VERSION" \
-            --expected-integrity "$CODEKEEPER_PACKAGE_INTEGRITY" \
-            --expected-manifest-sha256 "$CODEKEEPER_PACKAGE_MANIFEST_SHA256" \
-            --expected-source-commit "$CODEKEEPER_PACKAGE_SOURCE_COMMIT"
       - name: Check out trusted default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -346,6 +329,16 @@ jobs:
           node-version: 24.19.0
           package-manager-cache: false
 
+      - name: Verify downloaded Codekeeper package
+        id: codekeeper-package
+        uses: ./repository/.github/codekeeper/actions/acquire-package
+        with:
+          package_source: artifact
+          package_version: ${{ inputs.package_version }}
+          package_integrity: ${{ inputs.package_integrity }}
+          expected_manifest_sha256: ${{ needs.workspace.outputs.package_manifest_sha256 }}
+          expected_source_commit: ${{ needs.workspace.outputs.package_source_commit }}
+
       - name: Install exact Codekeeper runtime
         run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
       - name: Download untrusted workspace evidence
@@ -357,7 +350,7 @@ jobs:
         id: prepare
         working-directory: repository
         env:
-          CODEKEEPER_TOOLING_SHA: ${{ inputs.package_source_commit }}
+          CODEKEEPER_TOOLING_SHA: ${{ needs.workspace.outputs.package_source_commit }}
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
@@ -464,28 +457,18 @@ jobs:
 
   verify:
     name: Codekeeper implementation verification
-    needs: analyze
+    needs: [workspace, analyze]
     if: needs.analyze.result == 'success'
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 20
     permissions:
       contents: read
     steps:
-      - name: Download bootstrap Codekeeper package
+      - name: Download verified Codekeeper package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}
-      - name: Verify bootstrap Codekeeper package
-        run: |
-          TOOLING_ROOT="$GITHUB_WORKSPACE/tooling/tools/codekeeper"
-          node "$TOOLING_ROOT/bin/verify-package.mjs" \
-            --root "$TOOLING_ROOT" \
-            --expected-name "$CODEKEEPER_PACKAGE_NAME" \
-            --expected-version "$CODEKEEPER_PACKAGE_VERSION" \
-            --expected-integrity "$CODEKEEPER_PACKAGE_INTEGRITY" \
-            --expected-manifest-sha256 "$CODEKEEPER_PACKAGE_MANIFEST_SHA256" \
-            --expected-source-commit "$CODEKEEPER_PACKAGE_SOURCE_COMMIT"
+          path: ${{ github.workspace }}/tooling
       - name: Check out trusted default-branch configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -505,6 +488,16 @@ jobs:
         with:
           node-version: 24.19.0
           package-manager-cache: false
+
+      - name: Verify downloaded Codekeeper package
+        id: codekeeper-package
+        uses: ./repository/.github/codekeeper/actions/acquire-package
+        with:
+          package_source: artifact
+          package_version: ${{ inputs.package_version }}
+          package_integrity: ${{ inputs.package_integrity }}
+          expected_manifest_sha256: ${{ needs.workspace.outputs.package_manifest_sha256 }}
+          expected_source_commit: ${{ needs.workspace.outputs.package_source_commit }}
 
       - name: Install exact Codekeeper runtime
         run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
@@ -526,28 +519,18 @@ jobs:
             --expected-candidate-sha "$CANDIDATE_SHA256"
 
   seal:
-    needs: [analyze, verify]
+    needs: [workspace, analyze, verify]
     if: needs.analyze.result == 'success' && needs.verify.result == 'success'
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     outputs:
       manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
     steps:
-      - name: Download bootstrap Codekeeper package
+      - name: Download verified Codekeeper package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}
-      - name: Verify bootstrap Codekeeper package
-        run: |
-          TOOLING_ROOT="$GITHUB_WORKSPACE/tooling/tools/codekeeper"
-          node "$TOOLING_ROOT/bin/verify-package.mjs" \
-            --root "$TOOLING_ROOT" \
-            --expected-name "$CODEKEEPER_PACKAGE_NAME" \
-            --expected-version "$CODEKEEPER_PACKAGE_VERSION" \
-            --expected-integrity "$CODEKEEPER_PACKAGE_INTEGRITY" \
-            --expected-manifest-sha256 "$CODEKEEPER_PACKAGE_MANIFEST_SHA256" \
-            --expected-source-commit "$CODEKEEPER_PACKAGE_SOURCE_COMMIT"
+          path: ${{ github.workspace }}/tooling
       - name: Check out trusted default-branch configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -559,6 +542,16 @@ jobs:
         with:
           node-version: 24.19.0
           package-manager-cache: false
+
+      - name: Verify downloaded Codekeeper package
+        id: codekeeper-package
+        uses: ./repository/.github/codekeeper/actions/acquire-package
+        with:
+          package_source: artifact
+          package_version: ${{ inputs.package_version }}
+          package_integrity: ${{ inputs.package_integrity }}
+          expected_manifest_sha256: ${{ needs.workspace.outputs.package_manifest_sha256 }}
+          expected_source_commit: ${{ needs.workspace.outputs.package_source_commit }}
 
       - name: Install exact Codekeeper runtime
         run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
@@ -592,11 +585,16 @@ jobs:
           overwrite: true
 
   publish:
-    needs: [analyze, seal]
+    needs: [workspace, analyze, seal]
     if: needs.seal.result == 'success' && !inputs.dry_run
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 15
     steps:
+      - name: Download verified Codekeeper package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codekeeper-tooling-${{ github.run_id }}
+          path: ${{ github.workspace }}/tooling
       - name: Require GitHub App publication credentials
         env:
           APP_CLIENT_ID: ${{ inputs.app_client_id }}
@@ -622,21 +620,6 @@ jobs:
           identity="$(curl --globoff --fail-with-body --silent --show-error --header "Authorization: Bearer $GITHUB_TOKEN" --header "Accept: application/vnd.github+json" "$GITHUB_API_URL/users/${APP_SLUG}[bot]")"
           echo "login=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).login))')" >> "$GITHUB_OUTPUT"
           echo "id=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).id))')" >> "$GITHUB_OUTPUT"
-      - name: Download bootstrap Codekeeper package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}
-      - name: Verify bootstrap Codekeeper package
-        run: |
-          TOOLING_ROOT="$GITHUB_WORKSPACE/tooling/tools/codekeeper"
-          node "$TOOLING_ROOT/bin/verify-package.mjs" \
-            --root "$TOOLING_ROOT" \
-            --expected-name "$CODEKEEPER_PACKAGE_NAME" \
-            --expected-version "$CODEKEEPER_PACKAGE_VERSION" \
-            --expected-integrity "$CODEKEEPER_PACKAGE_INTEGRITY" \
-            --expected-manifest-sha256 "$CODEKEEPER_PACKAGE_MANIFEST_SHA256" \
-            --expected-source-commit "$CODEKEEPER_PACKAGE_SOURCE_COMMIT"
       - name: Check out current trusted policy without credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -659,6 +642,16 @@ jobs:
           node-version: 24.19.0
           package-manager-cache: false
 
+      - name: Verify downloaded Codekeeper package
+        id: codekeeper-package
+        uses: ./repository/.github/codekeeper/actions/acquire-package
+        with:
+          package_source: artifact
+          package_version: ${{ inputs.package_version }}
+          package_integrity: ${{ inputs.package_integrity }}
+          expected_manifest_sha256: ${{ needs.workspace.outputs.package_manifest_sha256 }}
+          expected_source_commit: ${{ needs.workspace.outputs.package_source_commit }}
+
       - name: Install exact Codekeeper runtime
         run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
       - name: Download sealed implementation artifact
@@ -669,7 +662,7 @@ jobs:
       - name: Publish sealed owner-commanded repair
         working-directory: repository
         env:
-          CODEKEEPER_TOOLING_SHA: ${{ inputs.package_source_commit }}
+          CODEKEEPER_TOOLING_SHA: ${{ needs.workspace.outputs.package_source_commit }}
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

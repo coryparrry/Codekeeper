@@ -349,7 +349,7 @@ test("openai preset changes only issue-triage model policy from the mixed preset
   });
 });
 
-test("each rendered workflow contains exactly the paired immutable bootstrap and reusable-workflow pins", async () => {
+test("each rendered workflow contains exactly one local runtime workflow and package pin", async () => {
   const bundle = await loadVerifiedAssets();
   for (const preset of ["mixed", "openai"]) {
     for (const mode of MODE_IDS) {
@@ -359,9 +359,8 @@ test("each rendered workflow contains exactly the paired immutable bootstrap and
         preset
       });
       const uses = rendered.split("\n").map((line) => line.trim()).filter((line) => /^(?:- )?uses:/.test(line));
-      assert.equal(uses.length, 2, `${preset}/${mode}`);
+      assert.equal(uses.length, 1, `${preset}/${mode}`);
       assert.deepEqual(uses, [
-        "uses: ./.github/workflows/codekeeper-bootstrap.yml",
         `uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`
       ]);
       assert.match(rendered, new RegExp(TEST_PACKAGE_RELEASE.integrity.replaceAll("+", "\\+")));
@@ -426,7 +425,7 @@ test("renderInstallFiles omits packaged profiles unless an explicit repository o
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-issues.yml",
-    ".github/workflows/codekeeper-bootstrap.yml",
+    ".github/codekeeper/actions/acquire-package/action.yml",
     ".github/workflows/codekeeper-runtime-assistant.yml",
     ".github/workflows/codekeeper-runtime-review.yml",
     ".github/workflows/codekeeper-runtime-issues.yml",
@@ -600,7 +599,7 @@ test("recommended starter plan selects review and maintenance with separate Open
     ".github/workflows/codekeeper-assistant.yml",
     ".github/workflows/codekeeper-review.yml",
     ".github/workflows/codekeeper-maintain.yml",
-    ".github/workflows/codekeeper-bootstrap.yml",
+    ".github/codekeeper/actions/acquire-package/action.yml",
     ".github/workflows/codekeeper-runtime-assistant.yml",
     ".github/workflows/codekeeper-runtime-review.yml",
     ".github/workflows/codekeeper-runtime-maintain.yml",

@@ -64,14 +64,14 @@ export const ASSISTANT_WORKFLOW = Object.freeze({
   asset: "workflows/assistant.yml",
   description: "Routes configured-owner requests to the installed role workflows."
 });
-export const PACKAGE_BOOTSTRAP_WORKFLOW = Object.freeze({
-  id: "bootstrap",
-  label: "Package bootstrap",
-  target: ".github/workflows/codekeeper-bootstrap.yml",
-  asset: "runtime-workflows/bootstrap.yml",
-  sourcePath: ".github/workflows/codekeeper-bootstrap.yml",
-  packagePath: "release/workflows/codekeeper-bootstrap.yml",
-  description: "Downloads and verifies the exact Codekeeper npm release without repository or credential access."
+export const PACKAGE_ACQUIRE_ACTION = Object.freeze({
+  id: "acquire-package",
+  label: "Package acquisition action",
+  target: ".github/codekeeper/actions/acquire-package/action.yml",
+  asset: "runtime-actions/acquire-package/action.yml",
+  sourcePath: ".github/codekeeper/actions/acquire-package/action.yml",
+  packagePath: "release/actions/acquire-package/action.yml",
+  description: "Downloads and verifies the exact Codekeeper npm release inside each isolated runtime job."
 });
 export const RUNTIME_WORKFLOWS = Object.freeze(Object.fromEntries([
   ["assistant", "Repository assistant"],
@@ -86,8 +86,8 @@ export const RUNTIME_WORKFLOWS = Object.freeze(Object.fromEntries([
   description: `Runs the ${label.toLowerCase()} from the verified Codekeeper package.`
 })])));
 export const RUNTIME_WORKFLOW_IDS = Object.freeze(Object.keys(RUNTIME_WORKFLOWS));
-export const RELEASE_WORKFLOW_ASSETS = Object.freeze([
-  PACKAGE_BOOTSTRAP_WORKFLOW,
+export const RELEASE_PACKAGE_ASSETS = Object.freeze([
+  PACKAGE_ACQUIRE_ACTION,
   ...RUNTIME_WORKFLOW_IDS.map((id) => RUNTIME_WORKFLOWS[id])
 ]);
 export const AGENT_PROFILES = Object.freeze({

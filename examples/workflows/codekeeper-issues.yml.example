@@ -14,23 +14,11 @@ permissions:
   pull-requests: read
 
 jobs:
-  bootstrap:
-    name: Codekeeper exact package bootstrap
-    permissions:
-      contents: read
-    uses: ./.github/workflows/codekeeper-bootstrap.yml
-    with:
-      runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
-      package_version: "PACKAGE_VERSION"
-      package_integrity: "PACKAGE_INTEGRITY"
   triage:
-    needs: bootstrap
     uses: ./.github/workflows/codekeeper-runtime-issues.yml
     with:
       package_version: "PACKAGE_VERSION"
       package_integrity: "PACKAGE_INTEGRITY"
-      package_manifest_sha256: ${{ needs.bootstrap.outputs.package_manifest_sha256 }}
-      package_source_commit: ${{ needs.bootstrap.outputs.source_commit }}
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
       auto_triage: true
