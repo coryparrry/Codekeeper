@@ -35,7 +35,7 @@ Node.js 22 or newer, Git, and an authenticated current GitHub CLI are required. 
 
 ## What `init` does
 
-The Settings screen is the command centre for both new and existing installations. Standard mode covers workflows, autonomy, schedules, every role's provider/model/effort, workspace specialists, tracing, and all four packaged profile defaults. Editing a profile opts that role into a repository override; untouched defaults do not create files. Press `A` for Advanced mode, which exposes every editable policy field and shows immutable safety and release boundaries as read-only. Nothing changes until the final review is accepted.
+The Settings screen is the command centre for both new and existing installations. Standard mode covers workflows, autonomy, schedules, every role's provider/model/effort, workspace specialists, tracing, and all four packaged profile defaults. Editing a profile opts that role into a repository override; untouched defaults do not create files. Press `R` on a profile to remove its repository override and resume packaged updates for that role. Press `A` for Advanced mode, which exposes every editable policy field and shows immutable safety and release boundaries as read-only. Nothing changes until the final review is accepted.
 
 | Choice | What it adds |
 |---|---|
@@ -59,7 +59,7 @@ It never merges the pull request, runs a workflow, publishes an npm package, cop
 
 ## Change an existing installation
 
-Run `npx codekeeper init` again from the current default branch to edit configuration. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and any repository profile overrides into the same Settings screen. Missing overrides display the current packaged defaults. You can add or remove role workflows, change every editable policy value, and open any profile in `$EDITOR` without losing prior customizations.
+Run `npx codekeeper init` again from the current default branch to edit configuration. The installer loads the current workflows, callers, schedule, GitHub App settings, policy, model choices, and any repository profile overrides into the same Settings screen. Missing overrides display the current packaged defaults. You can add or remove role workflows, change every editable policy value, open any profile in `$EDITOR` without losing prior customizations, or press `R` to reset an override to the packaged default.
 
 The installer writes only values that changed. It preserves every existing profile override byte-for-byte and does not ask for secrets again. Editing one packaged default creates only that role's override. A configuration change opens a `codekeeper/update-<commit>` pull request. A change to only `CODEKEEPER_ENABLED` updates the repository variable without opening a pull request. If nothing changed, the installer exits without writing.
 

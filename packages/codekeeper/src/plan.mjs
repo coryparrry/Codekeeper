@@ -29,7 +29,7 @@ import {
 import { renderInstallFiles, sha256 } from "./assets.mjs";
 import { InstallerError } from "./errors.mjs";
 import { upgradePolicy } from "./policy.mjs";
-import { createEditableSettings, settingsAnswers, validateEditableSettings } from "./settings.mjs";
+import { createEditableSettings, normalizeProfileSettings, settingsAnswers, validateEditableSettings } from "./settings.mjs";
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const BOT_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,99})\[bot\]$/;
@@ -272,11 +272,13 @@ function editableSettingsForInstallation(snapshot, bundle) {
     id,
     installation.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
+  const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
   const settings = createEditableSettings({
     policy: installation.policy,
     modes: installation.modes,
     enabled: snapshot.existingSettings.enabled,
     profiles,
+    profileDefaults,
     profileOverrides: AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
   });
   return { preset, settings };
@@ -373,14 +375,20 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     ? upgradePolicy(JSON.parse(bundle.contents[`policies/${answers.preset}.json`]))
     : baselinePolicy;
   validationBaselinePolicy.repository.defaultBranch = snapshot.defaultBranch;
-  const profileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
+  const effectiveProfiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
     installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
+  const packagedProfileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
   const inputPolicy = answers.policy ?? createEditableSettings({
     policy: baselinePolicy,
     modes,
     enabled: answers.enabled !== false,
-    profiles: answers.profiles ?? profileDefaults
+    profiles: answers.profiles ?? effectiveProfiles,
+    profileDefaults: packagedProfileDefaults,
+    profileSources: answers.profileSources,
+    profileOverrides: installation
+      ? AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
+      : []
   }).policy;
   const displayName = answers.policy?.repository.displayName ?? answers.displayName;
   if (!validDisplayName(displayName)) throw new InstallerError("Repository display name is invalid.", { code: "PLAN_INVALID" });
@@ -389,15 +397,20 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const capabilities = normalizeCapabilities(modes, answers.capabilities ?? []);
   const models = normalizeModelChoices({ modes, preset: answers.preset, bundle, choices: answers.models, policySource });
   const tracing = answers.policy ? answers.policy.ai.tracing.enabled : answers.tracing !== false;
-  const desiredProfiles = answers.profiles ?? profileDefaults;
+  const desiredProfileSettings = normalizeProfileSettings({
+    profiles: answers.profiles ?? effectiveProfiles,
+    defaults: packagedProfileDefaults,
+    sources: answers.profileSources,
+    existingOverrides: installation
+      ? AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
+      : []
+  });
   const profileSources = {};
   for (const id of AGENT_PROFILE_IDS) {
-    const { asset, target } = AGENT_PROFILES[id];
-    const desired = desiredProfiles[id] ?? profileDefaults[id];
-    const existingOverride = installation
-      ? Object.hasOwn(installation.contents, target)
-      : false;
-    if (existingOverride || desired !== bundle.contents[asset]) profileSources[target] = desired;
+    const { target } = AGENT_PROFILES[id];
+    if (desiredProfileSettings.profileSources[id] === "repository") {
+      profileSources[target] = desiredProfileSettings.profiles[id];
+    }
   }
   const files = renderInstallFiles(bundle, {
     modes,
@@ -419,7 +432,9 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     policy: effectivePolicy,
     modes,
     enabled: answers.enabled !== false,
-    profiles: desiredProfiles
+    profiles: desiredProfileSettings.profiles,
+    profileDefaults: desiredProfileSettings.profileDefaults,
+    profileSources: desiredProfileSettings.profileSources
   }, validationBaselinePolicy);
   const needsAutomationBotLogin = requiresAutomationBotLogin(modes, capabilities, effectivePolicy.automation.ownerRequests);
   const automationBotLogin = needsAutomationBotLogin ? String(answers.automationBotLogin ?? "").trim().toLowerCase() : null;
@@ -430,6 +445,18 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
       .map((file) => ({ ...file, previousSha256: installation.contents[file.path] === undefined ? null : sha256(installation.contents[file.path]) }))
     : files;
   if (installation) {
+    for (const id of AGENT_PROFILE_IDS) {
+      const target = AGENT_PROFILES[id].target;
+      if (desiredProfileSettings.profileSources[id] !== "package" || !Object.hasOwn(installation.contents, target)) continue;
+      changedFiles.push({
+        path: target,
+        contents: null,
+        bytes: 0,
+        sha256: null,
+        previousSha256: sha256(installation.contents[target]),
+        delete: true
+      });
+    }
     for (const mode of installation.modes.filter((mode) => !modes.includes(mode))) {
       const target = MODES[mode].target;
       changedFiles.push({

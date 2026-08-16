@@ -715,6 +715,34 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
   });
 });
 
+test("the Settings command centre resets a repository profile override", async (t) => {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  profiles.fixer += "\nRepository preference.\n";
+  const settings = createEditableSettings({
+    policy,
+    modes: ["review", "maintain"],
+    enabled: true,
+    profiles,
+    profileDefaults: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]])),
+    profileOverrides: ["fixer"]
+  });
+  const tui = await createTuiHarness(t);
+  const edited = tui.prompt.editSettings({ settings, baselinePolicy: policy, repository: "acme/widget" });
+  await tui.waitForText("CODEKEEPER  SETTINGS");
+  await tui.send("G");
+  await tui.send("k");
+  await tui.waitForText("Repository override");
+  await tui.send("r");
+  await tui.waitForText("Using the packaged default");
+  await tui.send("G");
+  await tui.send("\r");
+  const result = await edited;
+  assert.equal(result.profileSources.fixer, "package");
+  assert.equal(result.profiles.fixer, bundle.contents[AGENT_PROFILES.fixer.asset]);
+});
+
 test("settings JSON fields reject PEM pastes without rendering or submitting them", async (t) => {
   const header = "-----BEGIN PRIVATE KEY-----";
   const middle = "c2V0dGluZ3MtcGVtLWNhbmFyeQ==";

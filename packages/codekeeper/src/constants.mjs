@@ -67,25 +67,25 @@ export const AGENT_PROFILES = Object.freeze({
     id: "pr-reviewer",
     target: ".github/codekeeper/agents/pr-reviewer.md",
     asset: "agents/pr-reviewer.md",
-    purpose: "Optional pull-request review judgment override"
+    purpose: "Pull-request review judgment rules"
   }),
   "repository-auditor": Object.freeze({
     id: "repository-auditor",
     target: ".github/codekeeper/agents/repository-auditor.md",
     asset: "agents/repository-auditor.md",
-    purpose: "Optional repository-audit judgment override"
+    purpose: "Repository-audit judgment rules"
   }),
   "issue-triager": Object.freeze({
     id: "issue-triager",
     target: ".github/codekeeper/agents/issue-triager.md",
     asset: "agents/issue-triager.md",
-    purpose: "Optional issue-triage judgment override"
+    purpose: "Issue-triage judgment rules"
   }),
   fixer: Object.freeze({
     id: "fixer",
     target: ".github/codekeeper/agents/fixer.md",
     asset: "agents/fixer.md",
-    purpose: "Optional implementation and repair override"
+    purpose: "Implementation and repair rules"
   })
 });
 export const AGENT_PROFILE_IDS = Object.freeze(Object.keys(AGENT_PROFILES));

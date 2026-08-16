@@ -9,6 +9,7 @@ import { editProfileWithEditor } from "../src/settings-tui.mjs";
 import {
   createEditableSettings,
   parseSettingValue,
+  resetProfileOverride,
   setSetting,
   settingsAnswers,
   settingsRows,
@@ -46,7 +47,7 @@ test("standard and advanced settings expose behavior, arbitrary models, profiles
   assert.equal(row(settings, "policy:ai.agents.review.maxTurns", true).readOnly, true);
   assert.equal(row(settings, "policy:audit.repair.protectedPaths", true).readOnly, true);
   assert.equal(standard.filter((candidate) => candidate.kind === "profile").length, 4);
-  assert.match(row(settings, "profile:pr-reviewer").label, /^Packaged default · Optional .* override$/);
+  assert.equal(row(settings, "profile:pr-reviewer").label, "Packaged default · Pull-request review judgment rules");
   const withOverride = createEditableSettings({
     policy: settings.policy,
     modes: settings.modes,
@@ -54,8 +55,27 @@ test("standard and advanced settings expose behavior, arbitrary models, profiles
     profiles: settings.profiles,
     profileOverrides: ["pr-reviewer"]
   });
-  assert.match(row(withOverride, "profile:pr-reviewer").label, /^Repository override · Optional .* override$/);
+  assert.equal(row(withOverride, "profile:pr-reviewer").label, "Repository override · Pull-request review judgment rules");
   assert.equal(advanced.filter((candidate) => candidate.id.startsWith("release:")).every((candidate) => candidate.readOnly), true);
+});
+
+test("profile source state survives answers and can reset an override to the packaged default", async () => {
+  const { policy, profiles, settings } = await fixture();
+  const profileRow = row(settings, "profile:pr-reviewer");
+  const overridden = setSetting(settings, profileRow, profiles["pr-reviewer"]);
+  assert.equal(overridden.profileSources["pr-reviewer"], "repository");
+  assert.equal(settingsAnswers(overridden).profileSources["pr-reviewer"], "repository");
+  assert.match(row(overridden, "profile:pr-reviewer").label, /^Repository override/);
+
+  const reset = resetProfileOverride(overridden, "pr-reviewer");
+  assert.equal(reset.profileSources["pr-reviewer"], "package");
+  assert.equal(reset.profiles["pr-reviewer"], profiles["pr-reviewer"]);
+  assert.equal(settingsAnswers(reset).profileSources["pr-reviewer"], "package");
+  validateEditableSettings(reset, policy);
+
+  const inconsistent = structuredClone(reset);
+  inconsistent.profiles["pr-reviewer"] += "\nNot the packaged default.\n";
+  assert.throws(() => validateEditableSettings(inconsistent, policy), /must match the release default/);
 });
 
 test("advanced settings preserve dots inside dynamic label keys", async () => {

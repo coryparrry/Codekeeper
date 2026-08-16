@@ -694,6 +694,73 @@ test("a release update refreshes packaged defaults without materializing missing
   assert.ok(update.files.some((file) => file.path === MODES.review.target));
 });
 
+test("resetting an existing profile override deletes it and resumes packaged updates", async () => {
+  const bundle = await loadVerifiedAssets();
+  const initial = buildInstallPlan({
+    bundle,
+    snapshot: snapshot(),
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET })
+  });
+  const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
+  const profileId = "pr-reviewer";
+  const target = AGENT_PROFILES[profileId].target;
+  contents[target] = `${bundle.contents[AGENT_PROFILES[profileId].asset]}\nRepository preference.\n`;
+  const existingSnapshot = {
+    ...snapshot(),
+    installation: {
+      policy: JSON.parse(contents[".github/codekeeper.json"]),
+      policySource: contents[".github/codekeeper.json"],
+      modes: initial.modes,
+      contents
+    },
+    existingSettings: {
+      enabled: true,
+      appClientId: "Iv123456789012345678",
+      automationBotLogin: "codekeeper-acme[bot]"
+    },
+    updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
+  };
+  const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
+  const profileSources = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, "package"]));
+  const reset = buildInstallPlan({
+    bundle,
+    snapshot: existingSnapshot,
+    answers: answers({ modes: RECOMMENDED_MODES, preset: RECOMMENDED_PRESET, profiles, profileSources })
+  });
+  assert.deepEqual(reset.files.map((file) => file.path), [target]);
+  assert.deepEqual(reset.files[0], {
+    path: target,
+    contents: null,
+    bytes: 0,
+    sha256: null,
+    previousSha256: sha256(contents[target]),
+    delete: true
+  });
+
+  const nextBundle = {
+    ...bundle,
+    metadata: {
+      ...bundle.metadata,
+      source: { ...bundle.metadata.source, commit: "c".repeat(40) }
+    },
+    contents: {
+      ...bundle.contents,
+      [AGENT_PROFILES[profileId].asset]: `${bundle.contents[AGENT_PROFILES[profileId].asset]}\nNext packaged default.\n`
+    }
+  };
+  const resetContents = { ...contents };
+  delete resetContents[target];
+  const resetSnapshot = {
+    ...existingSnapshot,
+    installation: { ...existingSnapshot.installation, contents: resetContents }
+  };
+  const updateAnswers = buildUpdateAnswers({ snapshot: resetSnapshot, bundle: nextBundle, output: { write() {} } });
+  assert.equal(updateAnswers.profileSources[profileId], "package");
+  assert.match(updateAnswers.profiles[profileId], /Next packaged default/);
+  const releaseUpdate = buildInstallPlan({ bundle: nextBundle, snapshot: resetSnapshot, answers: updateAnswers });
+  assert.equal(releaseUpdate.files.some((file) => file.path === target), false);
+});
+
 test("normal installation enables selected workflows after the setup pull request merges", async () => {
   const bundle = await loadVerifiedAssets();
   const plan = buildInstallPlan({
