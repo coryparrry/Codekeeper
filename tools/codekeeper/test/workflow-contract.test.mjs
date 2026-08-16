@@ -837,7 +837,7 @@ test("review tracing uses the OpenAI exporter without alternate exporter credent
   );
   assert.deepEqual(packagedRuntime.dependencies, {
     "@openai/agents": "0.15.0",
-    "@openai/codex": "0.146.0",
+    "@openai/codex": "0.147.0",
     zod: "4.4.3",
   });
   assert.match(
