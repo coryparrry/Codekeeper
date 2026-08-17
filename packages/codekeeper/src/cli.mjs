@@ -7,15 +7,17 @@ import { appRegistrationUrl, buildInstallPlan, collectAppAnswers, collectAutomat
 import { installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
 import { MODES, PACKAGE_NAME, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
-import { normalizePackageRelease } from "./package-release.mjs";
+import { normalizePackageRelease, RELEASE_VERSION } from "./package-release.mjs";
 import { formatCommand } from "./shell-command.mjs";
-import { runLatestUpdate } from "./updater.mjs";
+import { runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate } from "./updater.mjs";
 import { verifyCodekeeperReadiness } from "./verify.mjs";
 import { inspectInstalledApp, runMaintenanceDryRun, verifyInstalledPackage } from "./verification-adapters.mjs";
 
 export const USAGE = `Usage:
   codekeeper init
-  codekeeper update
+  codekeeper update [--to X.Y.Z]
+  codekeeper update --check
+  codekeeper rollback --to X.Y.Z
   codekeeper doctor [--json]
   codekeeper verify [--json] [--controlled]
   codekeeper init --current-package --package-integrity SHA512
@@ -24,7 +26,9 @@ export const USAGE = `Usage:
   codekeeper --version
 
 Codekeeper init creates a setup pull request for GitHub.com.
-Codekeeper update runs the latest CLI to refresh runtime dependencies and every release-owned installation file.
+Codekeeper update runs the latest CLI to refresh runtime dependencies and every release-owned installation file only when the target is newer. Use --to with an exact, newer release to select a verified target.
+Codekeeper update --check reads the installed release manifest and resolves registry metadata; it does not mutate repository or GitHub state.
+Codekeeper rollback --to X.Y.Z creates a normal forward update pull request from the verified target release. It never resets, reverts, or force-pushes.
 Codekeeper doctor reports every safe installation prerequisite together.
 Codekeeper verify proves an installed default-branch checkout; --controlled also runs a maintenance dry run.
 Use --current-package with the tarball's SHA-512 integrity only for exact local release testing.
@@ -39,6 +43,13 @@ export function parseCliArgs(argv) {
     return Object.freeze({ command: "init", currentPackage: true });
   }
   if (argv.length === 1 && argv[0] === "update") return Object.freeze({ command: "update" });
+  if (argv.length === 2 && argv[0] === "update" && argv[1] === "--check") return Object.freeze({ command: "update", check: true });
+  if (argv.length === 3 && argv[0] === "update" && argv[1] === "--to" && RELEASE_VERSION.test(argv[2])) {
+    return Object.freeze({ command: "update", targetVersion: argv[2] });
+  }
+  if (argv.length === 3 && argv[0] === "rollback" && argv[1] === "--to" && RELEASE_VERSION.test(argv[2])) {
+    return Object.freeze({ command: "rollback", targetVersion: argv[2] });
+  }
   if (argv.length === 1 && argv[0] === "doctor") return Object.freeze({ command: "doctor", json: false });
   if (argv.length === 2 && argv[0] === "doctor" && argv[1] === "--json") return Object.freeze({ command: "doctor", json: true });
   if (argv[0] === "verify") {
@@ -77,11 +88,7 @@ export function currentResumeCommand(execPath = process.execPath, binPath = proc
 }
 
 async function bestEffortOpen(url, { runner, platform = process.platform }) {
-  const invocation = platform === "darwin"
-    ? ["open", [url]]
-    : platform === "win32"
-      ? ["explorer.exe", [url]]
-      : ["xdg-open", [url]];
+  const invocation = platform === "darwin" ? ["open", [url]] : platform === "win32" ? ["explorer.exe", [url]] : ["xdg-open", [url]];
   try {
     const result = await runner.run(invocation[0], invocation[1], {
       stdio: "ignore",
@@ -105,9 +112,7 @@ function assertSameSnapshot(expected, actual, resumeCommand, { includeSettings =
   if (includeSettings) {
     const expectedSettings = expected.existingSettings ?? null;
     const actualSettings = actual.existingSettings ?? null;
-    const settingsChanged = (expectedSettings === null) !== (actualSettings === null)
-      || (expectedSettings !== null && ["enabled", "appClientId", "automationBotLogin"]
-        .some((field) => expectedSettings[field] !== actualSettings[field]));
+    const settingsChanged = (expectedSettings === null) !== (actualSettings === null) || (expectedSettings !== null && ["enabled", "appClientId", "automationBotLogin"].some((field) => expectedSettings[field] !== actualSettings[field]));
     if (settingsChanged) {
       throw new InstallerError("The repository changed during setup. Run the installer again.", {
         code: "PREFLIGHT_CHANGED",
@@ -118,9 +123,7 @@ function assertSameSnapshot(expected, actual, resumeCommand, { includeSettings =
 }
 
 function operationLabel(plan, { capitalized = false } = {}) {
-  const label = plan.operation === "release-update"
-    ? "release update"
-    : plan.operation === "configuration-update" ? "configuration" : "setup";
+  const label = plan.operation === "release-update" ? "release update" : plan.operation === "configuration-update" ? "configuration" : "setup";
   return capitalized ? `${label[0].toUpperCase()}${label.slice(1)}` : label;
 }
 
@@ -164,9 +167,7 @@ function preview(plan, output) {
 }
 
 function printCompletion(plan, receipt, output) {
-  output.write(receipt.settingsOnly
-    ? "\nUpdated the Codekeeper repository settings. No pull request was needed.\n"
-    : `\nCreated ${operationLabel(plan)} pull request: ${receipt.pullRequestUrl}\n`);
+  output.write(receipt.settingsOnly ? "\nUpdated the Codekeeper repository settings. No pull request was needed.\n" : `\nCreated ${operationLabel(plan)} pull request: ${receipt.pullRequestUrl}\n`);
   output.write(`Pinned source: ${plan.source.repository}@${plan.source.commit}\n`);
   output.write(`CLI release: ${plan.packageVersion}\n`);
   output.write("\nDocument map\n");
@@ -200,7 +201,7 @@ function printVerification(report, output) {
   }
 }
 
-export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd(), input = stdin, output = stdout, errorOutput = stderr, runner = createCommandRunner(), prompt = null, interactive = input.isTTY === true && output.isTTY === true, environment = process.env, platform = process.platform, openUrl = null, loadAssets = loadVerifiedAssets, inspect = inspectRepository, doctor = doctorRepository, showDoctor = true, verifyReadiness = verifyCodekeeperReadiness, resumeCommand = null, launchLatestUpdate = runLatestUpdate } = {}) {
+export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd(), input = stdin, output = stdout, errorOutput = stderr, runner = createCommandRunner(), prompt = null, interactive = input.isTTY === true && output.isTTY === true, environment = process.env, platform = process.platform, openUrl = null, loadAssets = loadVerifiedAssets, inspect = inspectRepository, doctor = doctorRepository, showDoctor = true, verifyReadiness = verifyCodekeeperReadiness, resumeCommand = null, launchLatestUpdate = runLatestUpdate, launchVersionedUpdate = runVersionedUpdate, launchRollback = runRollback, checkUpdate = runUpdateCheck } = {}) {
   let parsed;
   try {
     parsed = parseCliArgs(argv);
@@ -218,7 +219,27 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
   }
   if (parsed.command === "update" && parsed.currentPackage !== true) {
     try {
-      return await launchLatestUpdate({ cwd, output, environment, platform });
+      if (parsed.check) return await checkUpdate({ cwd, output, environment, platform });
+      const launchOptions = { cwd, output, environment, platform };
+      if (parsed.targetVersion) {
+        launchOptions.requestedVersion = parsed.targetVersion;
+        return await launchVersionedUpdate(launchOptions);
+      }
+      return await launchLatestUpdate(launchOptions);
+    } catch (error) {
+      errorOutput.write(`${formatInstallerError(error)}\n`);
+      return 1;
+    }
+  }
+  if (parsed.command === "rollback" && parsed.currentPackage !== true) {
+    try {
+      return await launchRollback({
+        cwd,
+        output,
+        environment,
+        platform,
+        targetVersion: parsed.targetVersion
+      });
     } catch (error) {
       errorOutput.write(`${formatInstallerError(error)}\n`);
       return 1;
@@ -251,18 +272,18 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
   }
   let packageRelease;
   try {
-    if (
-      typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string"
-      && environment.CODEKEEPER_UPDATE_EXPECTED_VERSION !== PACKAGE_VERSION
-    ) {
+    if (typeof environment.CODEKEEPER_UPDATE_EXPECTED_VERSION === "string" && environment.CODEKEEPER_UPDATE_EXPECTED_VERSION !== PACKAGE_VERSION) {
       throw new InstallerError("npm launched a different Codekeeper version than requested.", { code: "UPDATE_VERSION_MISMATCH" });
     }
     const releaseEnvironment = environment;
-    packageRelease = normalizePackageRelease({
-      name: PACKAGE_NAME,
-      version: releaseEnvironment.CODEKEEPER_UPDATE_EXPECTED_VERSION ?? (parsed.currentPackage ? PACKAGE_VERSION : undefined),
-      integrity: parsed.packageIntegrity ?? releaseEnvironment.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY
-    }, { code: "UPDATE_VERSION_MISMATCH" });
+    packageRelease = normalizePackageRelease(
+      {
+        name: PACKAGE_NAME,
+        version: releaseEnvironment.CODEKEEPER_UPDATE_EXPECTED_VERSION ?? (parsed.currentPackage ? PACKAGE_VERSION : undefined),
+        integrity: parsed.packageIntegrity ?? releaseEnvironment.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY
+      },
+      { code: "UPDATE_VERSION_MISMATCH" }
+    );
   } catch (error) {
     errorOutput.write(`${formatInstallerError(error)}\n`);
     return 1;
@@ -278,11 +299,7 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
     const bundle = await loadAssets({ packageRelease });
     const ensureActivePrompt = async () => {
       if (activePrompt) return;
-      const likelyTui = interactive
-        && input?.isTTY === true
-        && output?.isTTY === true
-        && typeof input?.setRawMode === "function"
-        && String(environment?.TERM ?? "").toLowerCase() !== "dumb";
+      const likelyTui = interactive && input?.isTTY === true && output?.isTTY === true && typeof input?.setRawMode === "function" && String(environment?.TERM ?? "").toLowerCase() !== "dumb";
       if (likelyTui) {
         let tui;
         try {
@@ -340,8 +357,7 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
         appClientId: snapshot.existingSettings.appClientId,
         automationBotLogin: snapshot.existingSettings.automationBotLogin
       };
-      const ownerRequests = setupAnswers.policy?.automation.ownerRequests
-        ?? snapshot.installation.policy.automation.ownerRequests;
+      const ownerRequests = setupAnswers.policy?.automation.ownerRequests ?? snapshot.installation.policy.automation.ownerRequests;
       if (requiresAutomationBotLogin(setupAnswers.modes, setupAnswers.capabilities, ownerRequests) && !appAnswers.automationBotLogin) {
         presentationOutput.write("\nGitHub App identifier\n");
         appAnswers.automationBotLogin = await collectAutomationBotLogin({
@@ -477,7 +493,7 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
     if (!receipt.settingsOnly) {
       let pullRequestOpened = false;
       try {
-        pullRequestOpened = await safelyOpenUrl(receipt.pullRequestUrl) !== false;
+        pullRequestOpened = (await safelyOpenUrl(receipt.pullRequestUrl)) !== false;
       } catch {
         // The completion screen always shows the verified pull request URL.
       }

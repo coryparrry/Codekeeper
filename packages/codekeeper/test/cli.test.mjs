@@ -73,6 +73,18 @@ test("CLI accepts only the documented commands", () => {
   assert.deepEqual(parseCliArgs(["--version"]), { command: "version" });
   assert.deepEqual(parseCliArgs(["init"]), { command: "init" });
   assert.deepEqual(parseCliArgs(["update"]), { command: "update" });
+  assert.deepEqual(parseCliArgs(["update", "--check"]), {
+    command: "update",
+    check: true
+  });
+  assert.deepEqual(parseCliArgs(["update", "--to", "1.4.2"]), {
+    command: "update",
+    targetVersion: "1.4.2"
+  });
+  assert.deepEqual(parseCliArgs(["rollback", "--to", "1.2.0"]), {
+    command: "rollback",
+    targetVersion: "1.2.0"
+  });
   assert.deepEqual(parseCliArgs(["doctor"]), {
     command: "doctor",
     json: false
@@ -97,6 +109,14 @@ test("CLI accepts only the documented commands", () => {
   });
   assert.throws(
     () => parseCliArgs(["init", "--force"]),
+    (error) => error.code === "CLI_USAGE"
+  );
+  assert.throws(
+    () => parseCliArgs(["update", "--to", "1.4"]),
+    (error) => error.code === "CLI_USAGE"
+  );
+  assert.throws(
+    () => parseCliArgs(["rollback", "--to", "latest"]),
     (error) => error.code === "CLI_USAGE"
   );
   assert.throws(
@@ -125,14 +145,100 @@ test("update bootstraps the latest CLI before loading assets or inspecting the r
       launchOptions = options;
       return 7;
     },
-    loadAssets: async () => { throw new Error("the old package must not load assets"); },
-    inspect: async () => { throw new Error("the old package must not inspect the repository"); }
+    loadAssets: async () => {
+      throw new Error("the old package must not load assets");
+    },
+    inspect: async () => {
+      throw new Error("the old package must not inspect the repository");
+    }
   });
   assert.equal(status, 7);
   assert.equal(launchOptions.cwd, "/tmp/widget");
   assert.equal(launchOptions.output, output);
   assert.equal(launchOptions.environment.TERM, "xterm-256color");
   assert.equal(launchOptions.platform, "linux");
+  assert.equal(errorOutput.toString(), "");
+});
+
+test("update --to delegates the exact target release before loading assets or inspecting the repository", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  let launchOptions;
+  const status = await runCli({
+    argv: ["update", "--to", "1.4.2"],
+    cwd: "/tmp/widget",
+    output,
+    errorOutput,
+    environment: { TERM: "xterm-256color" },
+    launchVersionedUpdate: async (options) => {
+      launchOptions = options;
+      return 7;
+    },
+    loadAssets: async () => {
+      throw new Error("the old package must not load assets");
+    },
+    inspect: async () => {
+      throw new Error("the old package must not inspect the repository");
+    }
+  });
+  assert.equal(status, 7);
+  assert.equal(launchOptions.requestedVersion, "1.4.2");
+  assert.equal(errorOutput.toString(), "");
+});
+
+test("update --check delegates read-only installed and registry release inspection without entering setup", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  let checkOptions;
+  let loads = 0;
+  let inspections = 0;
+  const status = await runCli({
+    argv: ["update", "--check"],
+    cwd: "/tmp/widget",
+    output,
+    errorOutput,
+    checkUpdate: async (options) => {
+      checkOptions = options;
+      return 0;
+    },
+    loadAssets: async () => {
+      loads += 1;
+      throw new Error("check must not load assets");
+    },
+    inspect: async () => {
+      inspections += 1;
+      throw new Error("check must not inspect the repository");
+    }
+  });
+  assert.equal(status, 0);
+  assert.equal(checkOptions.cwd, "/tmp/widget");
+  assert.equal(loads, 0);
+  assert.equal(inspections, 0);
+  assert.equal(errorOutput.toString(), "");
+});
+
+test("rollback --to delegates the exact target package before repository inspection", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  let launchOptions;
+  const status = await runCli({
+    argv: ["rollback", "--to", "1.2.0"],
+    cwd: "/tmp/widget",
+    output,
+    errorOutput,
+    launchRollback: async (options) => {
+      launchOptions = options;
+      return 0;
+    },
+    loadAssets: async () => {
+      throw new Error("the old package must not load assets");
+    },
+    inspect: async () => {
+      throw new Error("the old package must not inspect the repository");
+    }
+  });
+  assert.equal(status, 0);
+  assert.equal(launchOptions.targetVersion, "1.2.0");
   assert.equal(errorOutput.toString(), "");
 });
 
@@ -143,8 +249,12 @@ test("the npm bootstrap fails closed when it launches the wrong package version"
     output: textSink(),
     errorOutput,
     environment: { CODEKEEPER_UPDATE_EXPECTED_VERSION: "9.9.9" },
-    loadAssets: async () => { throw new Error("mismatched packages must fail before loading assets"); },
-    inspect: async () => { throw new Error("mismatched packages must fail before preflight"); }
+    loadAssets: async () => {
+      throw new Error("mismatched packages must fail before loading assets");
+    },
+    inspect: async () => {
+      throw new Error("mismatched packages must fail before preflight");
+    }
   });
   assert.equal(status, 1);
   assert.match(errorOutput.toString(), /different Codekeeper version than requested/);
@@ -521,8 +631,12 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
     kind: "ink",
     notices,
     progress: {
-      start() { throw new Error("progress must not start before final review approval"); },
-      update() { throw new Error("progress must not update before final review approval"); }
+      start() {
+        throw new Error("progress must not start before final review approval");
+      },
+      update() {
+        throw new Error("progress must not update before final review approval");
+      }
     },
     async confirm(options) {
       calls.push(["confirm", options.message]);
@@ -578,7 +692,9 @@ test("Ink review remains the exact mutation boundary after metadata-only PEM sel
       inspections += 1;
       return repositorySnapshot("/tmp/widget", HEAD_SHA);
     },
-    openUrl: async () => { opens += 1; },
+    openUrl: async () => {
+      opens += 1;
+    },
     resumeCommand: "safe resume"
   });
 
@@ -606,8 +722,12 @@ test("Ink final review returns to the same settings without inventing an OpenRou
     kind: "ink",
     notices,
     progress: {
-      start() { throw new Error("progress must not start after review cancellation"); },
-      update() { throw new Error("progress must not update after review cancellation"); }
+      start() {
+        throw new Error("progress must not start after review cancellation");
+      },
+      update() {
+        throw new Error("progress must not update after review cancellation");
+      }
     },
     async confirm() {
       return true;
@@ -656,7 +776,10 @@ test("Ink final review returns to the same settings without inventing an OpenRou
   assert.equal(reviewedPlans.length, 2);
   for (const plan of reviewedPlans) {
     assert.equal(plan.models.review.provider, "openai");
-    assert.equal(plan.secrets.some((secret) => secret.name === "OPENROUTER_API_KEY"), false);
+    assert.equal(
+      plan.secrets.some((secret) => secret.name === "OPENROUTER_API_KEY"),
+      false
+    );
   }
   assert.deepEqual(runner.calls, []);
 });
@@ -698,14 +821,22 @@ test("an existing installation rerun skips App setup and secret prompts", async 
   const prompt = {
     kind: "ink",
     notices: textSink(),
-    async confirm() { return true; },
+    async confirm() {
+      return true;
+    },
     async select(options) {
       if (options.message.includes("Pull request reviewer")) return "luna-max";
       return options.defaultValue;
     },
-    async multiselect(options) { return options.defaultValues; },
-    async inputText(options) { return options.defaultValue; },
-    async selectPrivateKey() { throw new Error("an update must not request the App key"); },
+    async multiselect(options) {
+      return options.defaultValues;
+    },
+    async inputText(options) {
+      return options.defaultValue;
+    },
+    async selectPrivateKey() {
+      throw new Error("an update must not request the App key");
+    },
     async reviewInstallPlan(plan) {
       reviewedPlan = plan;
       return false;
@@ -717,9 +848,13 @@ test("an existing installation rerun skips App setup and secret prompts", async 
     prompt,
     output: textSink(),
     errorOutput: textSink(),
-    runner: createRecordingRunner(() => { throw new Error("no mutation before review"); }),
+    runner: createRecordingRunner(() => {
+      throw new Error("no mutation before review");
+    }),
     inspect: async () => snapshot,
-    openUrl: async () => { opens += 1; },
+    openUrl: async () => {
+      opens += 1;
+    },
     loadAssets: async () => bundle
   });
   assert.equal(status, 1);
@@ -728,7 +863,10 @@ test("an existing installation rerun skips App setup and secret prompts", async 
   assert.equal(reviewedPlan.operation, "configuration-update");
   assert.deepEqual(reviewedPlan.secrets, []);
   assert.deepEqual(reviewedPlan.variables, []);
-  assert.deepEqual(reviewedPlan.files.map((file) => file.path), [".github/codekeeper.json"]);
+  assert.deepEqual(
+    reviewedPlan.files.map((file) => file.path),
+    [".github/codekeeper.json"]
+  );
   assert.equal(reviewedPlan.models.review.model, "gpt-5.6-luna");
 });
 
@@ -736,7 +874,9 @@ test("update requires an existing installation before prompting or mutation", as
   const output = textSink();
   const errorOutput = textSink();
   const prompt = {
-    async confirm() { throw new Error("update must reject before prompting"); }
+    async confirm() {
+      throw new Error("update must reject before prompting");
+    }
   };
   const runner = createRecordingRunner(() => {
     throw new Error("update must reject before mutation");
@@ -843,7 +983,9 @@ test("update advances release-owned files while preserving adopter configuration
   assert.deepEqual(configurationPlan.policy.merge.blockedPaths, ["adopter-stale-release-boundary"]);
   let reviewedPlan;
   const prompt = {
-    async confirm() { return true; },
+    async confirm() {
+      return true;
+    },
     async reviewInstallPlan(plan) {
       reviewedPlan = plan;
       return false;
@@ -883,9 +1025,18 @@ test("update advances release-owned files while preserving adopter configuration
   assert.deepEqual(reviewedPlan.policy.merge.blockedPaths, JSON.parse(bundle.contents["policies/openai.json"]).merge.blockedPaths);
   assert.ok(reviewedPlan.files.some((file) => file.path === ".github/codekeeper.json"));
   assert.ok(reviewedPlan.files.some((file) => file.path === ".github/codekeeper-release.json" && file.contents.includes(nextCommit)));
-  assert.equal(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-assistant.yml"), false);
-  assert.equal(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-review.yml"), false);
-  assert.equal(reviewedPlan.files.some((file) => file.path === ".github/codekeeper/agents/pr-reviewer.md"), false);
+  assert.equal(
+    reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-assistant.yml"),
+    false
+  );
+  assert.equal(
+    reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-review.yml"),
+    false
+  );
+  assert.equal(
+    reviewedPlan.files.some((file) => file.path === ".github/codekeeper/agents/pr-reviewer.md"),
+    false
+  );
   assert.match(output.toString(), /selected workflows.*existing agent profile overrides stay unchanged/s);
   assert.deepEqual(runner.calls, []);
 });
@@ -932,12 +1083,16 @@ test("update exits successfully when the bundled release is already installed", 
     argv: ["update", "--current-package"],
     input: {
       isTTY: true,
-      setRawMode() { rawModeCalls += 1; }
+      setRawMode() {
+        rawModeCalls += 1;
+      }
     },
     output,
     errorOutput: textSink(),
     environment: { TERM: "xterm-256color" },
-    runner: createRecordingRunner(() => { throw new Error("already-current update must not mutate"); }),
+    runner: createRecordingRunner(() => {
+      throw new Error("already-current update must not mutate");
+    }),
     inspect: async () => snapshot,
     loadAssets: async () => bundle
   });
@@ -972,8 +1127,12 @@ test("a plain-prompt rerun preserves disabled owner requests without asking for 
       if (options.message === "Enable OpenAI traces?") return false;
       return true;
     },
-    async select(options) { return options.defaultValue; },
-    async multiselect(options) { return options.defaultValues; },
+    async select(options) {
+      return options.defaultValue;
+    },
+    async multiselect(options) {
+      return options.defaultValues;
+    },
     async inputText(options) {
       if (options.message.startsWith("GitHub App bot")) throw new Error("owner requests are disabled");
       return options.defaultValue;
@@ -988,24 +1147,23 @@ test("a plain-prompt rerun preserves disabled owner requests without asking for 
     prompt,
     output: textSink(),
     errorOutput: textSink(),
-    runner: createRecordingRunner(() => { throw new Error("no mutation before review"); }),
+    runner: createRecordingRunner(() => {
+      throw new Error("no mutation before review");
+    }),
     inspect: async () => snapshot,
     loadAssets: async () => bundle
   });
   assert.equal(status, 1);
   assert.equal(reviewedPlan.policy.automation.ownerRequests, false);
-  assert.equal(reviewedPlan.variables.some((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"), false);
+  assert.equal(
+    reviewedPlan.variables.some((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"),
+    false
+  );
 });
 
 test("resume command formatting is executable on POSIX and PowerShell", () => {
-  assert.equal(
-    currentResumeCommand("/opt/Node JS/node", "/tmp/Cory's CLI/codekeeper.mjs", "darwin"),
-    "'/opt/Node JS/node' '/tmp/Cory'\"'\"'s CLI/codekeeper.mjs' 'init'"
-  );
-  assert.equal(
-    currentResumeCommand("C:\\Program Files\\node.exe", "C:\\Codekeeper's CLI\\codekeeper.mjs", "win32"),
-    "& 'C:\\Program Files\\node.exe' 'C:\\Codekeeper''s CLI\\codekeeper.mjs' 'init'"
-  );
+  assert.equal(currentResumeCommand("/opt/Node JS/node", "/tmp/Cory's CLI/codekeeper.mjs", "darwin"), "'/opt/Node JS/node' '/tmp/Cory'\"'\"'s CLI/codekeeper.mjs' 'init'");
+  assert.equal(currentResumeCommand("C:\\Program Files\\node.exe", "C:\\Codekeeper's CLI\\codekeeper.mjs", "win32"), "& 'C:\\Program Files\\node.exe' 'C:\\Codekeeper''s CLI\\codekeeper.mjs' 'init'");
   assert.equal(currentResumeCommand("node", "", "linux"), "codekeeper init");
   assert.equal(currentResumeCommand("node", "", "linux", "update"), "codekeeper update");
   assert.equal(formatCommand("gh", ["pr", "view", "a'b"], "linux"), "'gh' 'pr' 'view' 'a'\"'\"'b'");
@@ -1044,12 +1202,12 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
       if (command === "gh") {
         if (typeof options.provideInput === "function") {
           let received = "";
-          await options.provideInput((value) => { received += value; });
+          await options.provideInput((value) => {
+            received += value;
+          });
           assert.equal(received, "test-provider-key");
         }
-        return args[0] === "pr" && args[1] === "create"
-          ? result("https://github.com/acme/widget/pull/42\n")
-          : result();
+        return args[0] === "pr" && args[1] === "create" ? result("https://github.com/acme/widget/pull/42\n") : result();
       }
       if (command === "git" && args[0] === "push") {
         pushedCommit = args[2].split(":")[0];
@@ -1165,22 +1323,11 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
   const providerDone = progressEvents.findIndex((event) => event.id === "secret:provider" && event.status === "done");
   const appActive = progressEvents.findIndex((event) => event.id === "secret:app" && event.status === "active");
   assert.ok(providerDone >= 0 && providerDone < appActive);
-  assert.equal(calls.some((call) => call.args.includes("DEEPSEEK_API_KEY")), false);
-  assert.deepEqual(
-    git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(),
-    [
-      ".github/codekeeper-release.json",
-      ".github/codekeeper.json",
-      ".github/codekeeper/README.md",
-      ".github/codekeeper/actions/acquire-package/action.yml",
-      ".github/workflows/codekeeper-assistant.yml",
-      ".github/workflows/codekeeper-maintain.yml",
-      ".github/workflows/codekeeper-review.yml",
-      ".github/workflows/codekeeper-runtime-assistant.yml",
-      ".github/workflows/codekeeper-runtime-maintain.yml",
-      ".github/workflows/codekeeper-runtime-review.yml"
-    ]
+  assert.equal(
+    calls.some((call) => call.args.includes("DEEPSEEK_API_KEY")),
+    false
   );
+  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [".github/codekeeper-release.json", ".github/codekeeper.json", ".github/codekeeper/README.md", ".github/codekeeper/actions/acquire-package/action.yml", ".github/workflows/codekeeper-assistant.yml", ".github/workflows/codekeeper-maintain.yml", ".github/workflows/codekeeper-review.yml", ".github/workflows/codekeeper-runtime-assistant.yml", ".github/workflows/codekeeper-runtime-maintain.yml", ".github/workflows/codekeeper-runtime-review.yml"]);
   assert.match(output.toString(), /Starting model set: openai/);
   assert.match(output.toString(), /OpenAI traces: disabled/);
   assert.match(output.toString(), /Pull request reviewer \(Pull request review\): openai \/ gpt-5\.6-luna \/ medium effort/);
