@@ -1,17 +1,10 @@
-<!--
-README HEADER IMAGE
-Suggested file: docs/assets/readme/codekeeper-header.png
-Suggested markup:
-<img width="2508" height="627" alt="Codekeeper" src="docs/assets/readme/codekeeper-header.png" />
--->
-
-# Codekeeper
+<h1 align="center">
+  <img width="1600" height="480" alt="Codekeeper — Control your own GitHub maintainer from one guided terminal." src="brand/collateral/github/readme-banner-1600x480.png" />
+</h1>
 
 [![npm](https://img.shields.io/npm/v/codekeeper?style=for-the-badge&label=npm)](https://www.npmjs.com/package/codekeeper)
 ![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)
 [![License](https://img.shields.io/badge/License-Apache--2.0-2563eb?style=for-the-badge)](LICENSE)
-
-> Set up and control your own GitHub maintainer from one guided CLI.
 
 Codekeeper turns a guided command-line setup into an always-available maintainer for your GitHub repository. It reviews pull requests, triages issues, audits repository health, and can prepare small, verified repairs from your own GitHub Actions.
 
