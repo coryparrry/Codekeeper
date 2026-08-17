@@ -297,6 +297,7 @@ jobs:
           release="$RUNNER_TEMP/codekeeper-github-release.json"
           release_error="$RUNNER_TEMP/codekeeper-github-release-error.txt"
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$release" 2> "$release_error"; then
+            # shellcheck disable=SC2016 -- JavaScript template literals are intentionally passed verbatim.
             RELEASE="$release" RELEASE_TAG="$RELEASE_TAG" RELEASE_VERSION="$RELEASE_VERSION" SOURCE_COMMIT="$SOURCE_COMMIT" node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const release = JSON.parse(readFileSync(process.env.RELEASE, "utf8"));
