@@ -1,13 +1,49 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { OWNER_COMMANDS } from "../src/lib/owner-commands.mjs";
 import {
   execFileAsync,
   jobSection,
   modes,
   repositoryFile,
+  repositoryRoot,
   stepRunScript,
   workflow,
 } from "./workflow-test-helpers.mjs";
+
+test("workflow owner-command lists stay synchronized with the canonical definition", async () => {
+  await execFileAsync(
+    process.execPath,
+    ["tools/codekeeper/scripts/sync-owner-command-lists.mjs", "--check"],
+    { cwd: repositoryRoot },
+  );
+  const expected = `contains(fromJSON('${JSON.stringify(
+    OWNER_COMMANDS.map((command) => `/codekeeper ${command}`),
+  )}'), github.event.comment.body))`;
+  const source = await workflow("review");
+  assert.match(
+    source,
+    new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
+});
+
+test("issue comment routing keeps one balanced GitHub expression", async () => {
+  const source = await workflow("issues");
+  const expression = jobSection(source, "workspace", "analyze").match(
+    /if: >-\n([\s\S]*?)\n\s+# CODEKEEPER_OWNER_COMMANDS_END/,
+  )?.[1];
+  assert.ok(expression, "issue workspace expression is present");
+  let depth = 0;
+  for (const character of expression) {
+    if (character === "(") depth += 1;
+    if (character === ")") depth -= 1;
+    assert.ok(
+      depth >= 0,
+      "issue workspace expression never closes before it opens",
+    );
+  }
+  assert.equal(depth, 0, "issue workspace expression has balanced parentheses");
+});
 
 test("every mode isolates untrusted candidate creation, tokenless sealing, and App publication", async () => {
   for (const mode of modes) {
@@ -169,12 +205,24 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.doesNotMatch(publish, /\$GITHUB_API_URL\/user(?:["']|\))/);
     assert.match(publish, /codekeeper-artifact/);
     if (mode === "review") {
-      assert.match(publish, /node codekeeper-runtime\/src\/cli\.mjs publish-review/);
-      assert.doesNotMatch(publish, /node tools\/codekeeper\/src\/cli\.mjs publish-review/);
+      assert.match(
+        publish,
+        /node codekeeper-runtime\/src\/cli\.mjs publish-review/,
+      );
+      assert.doesNotMatch(
+        publish,
+        /node tools\/codekeeper\/src\/cli\.mjs publish-review/,
+      );
     }
     if (mode === "issues") {
-      assert.match(publish, /node codekeeper-runtime\/src\/cli\.mjs publish-issue/);
-      assert.doesNotMatch(publish, /node tools\/codekeeper\/src\/cli\.mjs publish-issue/);
+      assert.match(
+        publish,
+        /node codekeeper-runtime\/src\/cli\.mjs publish-issue/,
+      );
+      assert.doesNotMatch(
+        publish,
+        /node tools\/codekeeper\/src\/cli\.mjs publish-issue/,
+      );
     }
     if (mode === "fix") {
       assert.match(
@@ -224,18 +272,33 @@ test("workflow handoff artifacts survive failed-job reruns and producers replace
     const artifactPrefix = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}`;
     const workspaceArtifactName = `${artifactPrefix}-workspace-\${{ github.run_id }}`;
     const candidateArtifactName = `${artifactPrefix}-candidate-\${{ github.run_id }}`;
+    const validationReceiptArtifactName = `${artifactPrefix}-validation-receipt-\${{ github.run_id }}`;
     const sealedArtifactName = `${artifactPrefix}-artifact-\${{ github.run_id }}`;
-    const candidateHandoffCount = mode === "maintain" || mode === "fix" ? 3 : 2;
+    const repairMode = mode === "maintain" || mode === "fix";
     const candidateArtifactNames = [
-      ...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-candidate-[^\n]+)$/gm),
+      ...source.matchAll(
+        /^ {10}name: (codekeeper-(?![^\n]*-verified-candidate-)[^\n]*-candidate-[^\n]+)$/gm,
+      ),
+    ].map((match) => match[1]);
+    const validationReceiptArtifactNames = [
+      ...source.matchAll(
+        /^ {10}name: (codekeeper-[^\n]*-validation-receipt-[^\n]+)$/gm,
+      ),
     ].map((match) => match[1]);
     const sealedArtifactNames = [
       ...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-artifact-[^\n]+)$/gm),
     ].map((match) => match[1]);
     assert.deepEqual(
       candidateArtifactNames,
-      Array(candidateHandoffCount).fill(candidateArtifactName),
+      Array(repairMode ? 3 : 2).fill(candidateArtifactName),
       `${mode} candidate producer and consumers must use the same run-stable artifact name`,
+    );
+    assert.deepEqual(
+      validationReceiptArtifactNames,
+      repairMode
+        ? [validationReceiptArtifactName, validationReceiptArtifactName]
+        : [],
+      `${mode} validation receipt producer and consumer must use the same run-stable artifact name`,
     );
     assert.deepEqual(
       sealedArtifactNames,
@@ -253,6 +316,7 @@ test("workflow handoff artifacts survive failed-job reruns and producers replace
         `codekeeper-tooling-\${{ github.run_id }}`,
         workspaceArtifactName,
         candidateArtifactName,
+        ...(repairMode ? [validationReceiptArtifactName] : []),
         sealedArtifactName,
       ],
       `${mode} must replace each run-stable handoff when every job is rerun`,
@@ -509,9 +573,14 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
     gate,
     /Owner review commands must be routed by the repository assistant, not the required review gate/,
   );
+  const expectedOwnerCommandCondition = `contains(fromJSON('${JSON.stringify(
+    OWNER_COMMANDS.map((command) => `/codekeeper ${command}`),
+  )}'), github.event.comment.body))`;
   assert.match(
     jobSection(source, "workspace", "analyze"),
-    /contains\(fromJSON\('\["\/codekeeper status"[\s\S]*"\/codekeeper stop"\]'\), github\.event\.comment\.body\)/,
+    new RegExp(
+      expectedOwnerCommandCondition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
   );
   assert.match(
     gate,
@@ -572,14 +641,29 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   );
   assert.match(
     issue,
-    /inputs\.auto_triage &&\s+github\.event_name == 'issues'/,
+    /inputs\.auto_triage &&[\s\S]*github\.event_name == 'issues'/,
   );
   for (const action of ["opened", "reopened", "edited", "closed"])
     assert.match(issue, new RegExp(`github\\.event\\.action == '${action}'`));
-  assert.doesNotMatch(issue, /owner_requests|github\.event\.comment\.body/);
   assert.match(
     issue,
-    /TRIAGE_MODE: \$\{\{ github\.event_name == 'issues' && 'automatic' \|\| 'manual' \}\}/,
+    /github\.event_name == 'issue_comment'[\s\S]*github\.event\.action == 'created'/,
+  );
+  assert.doesNotMatch(issue, /owner_requests/);
+  assert.match(issue, /CODEKEEPER_OWNER_COMMANDS_START/);
+  assert.match(
+    issue,
+    /github\.event\.comment\.user\.login != inputs\.automation_bot_login/,
+  );
+  assert.match(
+    issue,
+    /github\.event\.comment\.user\.login == github\.event\.issue\.user\.login/,
+  );
+  assert.match(issue, /github\.event\.comment\.author_association/);
+  assert.match(issue, /contains\(fromJSON\('\["\/codekeeper help"/);
+  assert.match(
+    issue,
+    /TRIAGE_MODE: \$\{\{ \(github\.event_name == 'issues' \|\| github\.event_name == 'issue_comment'\) && 'automatic' \|\| 'manual' \}\}/,
   );
   assert.match(
     issue,
@@ -589,9 +673,8 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
   assert.match(
     caller,
-    /issues:\n\s+types: \[opened, reopened, edited, closed\]/,
+    /issues:\n\s+types: \[opened, reopened, edited, closed\]\n\s+issue_comment:\n\s+types: \[created\]/,
   );
-  assert.doesNotMatch(caller, /issue_comment:/);
   assert.match(caller, /auto_triage: true/);
   assert.match(
     caller,
@@ -606,7 +689,7 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   assert.match(fix, /Check out frozen repair target/);
   assert.match(fix, /github\.event_name == 'issues'/);
   assert.match(fix, /github\.event\.action == 'labeled'/);
-  assert.match(fix, /github\.event\.label\.name == 'ready'/);
+  assert.match(fix, /github\.event\.label\.name == 'codekeeper:ready'/);
   assert.match(fix, /automation_bot_login:/);
   assert.match(
     fix,
@@ -640,9 +723,9 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   const commands = await repositoryFile(
     "tools/codekeeper/src/lib/commands.mjs",
   );
-  assert.match(commands, /pull\.base\?\.ref !== defaultBranch/);
-  assert.match(commands, /config\.repository\.defaultBranch/);
-  assert.match(commands, /removeLabel\(number, "paused"\)/);
+  assert.match(commands, /!pull\.base\?\.ref/);
+  assert.doesNotMatch(commands, /pull\.base\?\.ref !== defaultBranch/);
+  assert.match(commands, /removeLabel\(number, "codekeeper:paused"\)/);
 });
 
 test("owner-commanded pull request repair can update only the frozen existing head", async () => {
@@ -694,8 +777,14 @@ test("owner-commanded pull request repair can update only the frozen existing he
     jobSection(fix, "verify", "seal"),
     jobSection(fix, "publish"),
   ]) {
-    assert.match(job, /uses: \.\/policy\/\.github\/codekeeper\/actions\/acquire-package/);
-    assert.doesNotMatch(job, /uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/);
+    assert.match(
+      job,
+      /uses: \.\/policy\/\.github\/codekeeper\/actions\/acquire-package/,
+    );
+    assert.doesNotMatch(
+      job,
+      /uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/,
+    );
   }
   assert.match(publisher, /createCommitOnCurrentHead/);
   assert.match(publisher, /pushHeadToBranch\(target\.headRef/);
@@ -745,7 +834,7 @@ test("Fixer repository dispatches retain their target and explicit policy author
   );
   assert.match(
     publisher,
-    /Automatic repair dispatch is pending[\s\S]*?createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*?dispatchSucceeded = true;[\s\S]*?Automatic repair was dispatched[\s\S]*?addLabels\(pull\.number, \["auto repaired"\]\)/,
+    /Automatic repair dispatch is pending[\s\S]*?createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*?dispatchSucceeded = true;[\s\S]*?Automatic repair was dispatched[\s\S]*?addLabels\(pull\.number, \["codekeeper:auto-repaired"\]\)/,
   );
 });
 
@@ -861,10 +950,7 @@ test("review tracing uses the OpenAI exporter without alternate exporter credent
 
   assert.doesNotMatch(source, /trace_exporter/i);
   assert.doesNotMatch(analyze, /trace_exporter/i);
-  assert.match(
-    analyze,
-    /bin\/install-runtime\.mjs/,
-  );
+  assert.match(analyze, /bin\/install-runtime\.mjs/);
   const packagedRuntime = JSON.parse(
     await repositoryFile("packages/codekeeper/runtime-package/package.json"),
   );

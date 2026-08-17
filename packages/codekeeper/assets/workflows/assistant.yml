@@ -16,7 +16,7 @@ permissions:
 jobs:
   intent:
     name: Detect a Codekeeper owner request
-    runs-on: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     outputs:
       route: ${{ steps.intent.outputs.route }}
     steps:
@@ -33,7 +33,9 @@ jobs:
             const association = String(process.env.AUTHOR_ASSOCIATION ?? "");
             const bot = String(process.env.AUTOMATION_BOT_LOGIN ?? "").replace(/\[bot\]$/i, "").toLowerCase();
             const escapedBot = bot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const actions = ["status", "review", "rerun", "triage", "defer", "implement", "fix", "stop"];
+            // CODEKEEPER_OWNER_COMMANDS_START
+            const actions = ["help","status","review","rerun","triage","implement","repair","fix","defer","pause","stop"];
+            // CODEKEEPER_OWNER_COMMANDS_END
             const slash = new RegExp(`^/codekeeper\\s+(${actions.join("|")})$`, "i").test(body);
             const mentioned = bot && new RegExp(`^@${escapedBot}\\s+(${actions.join("|")})$`, "i").test(body);
             const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
@@ -47,7 +49,6 @@ jobs:
       package_version: "PACKAGE_VERSION"
       package_integrity: "PACKAGE_INTEGRITY"
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
-      runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
       owner_requests: true
       installed_modes: review,maintain,issues,fix
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}

@@ -3,9 +3,15 @@ import { readJson } from "./io.mjs";
 import { COMMAND_STATUS_MARKER } from "./markers.mjs";
 import {
   OWNER_COMMANDS,
+  normalizeOwnerCommand,
+  ownerCommandAvailableOnSurface,
+  ownerCommandSurface,
+  parseAnyMentionOwnerCommand,
   parseDirectOwnerCommand,
   parseMentionOwnerCommand,
   parseOwnerCommand,
+  renderOwnerCommandHelp,
+  renderOwnerCommandStatus,
 } from "./owner-commands.mjs";
 import { upsertDeferredReviewFeedback } from "./publish.mjs";
 
@@ -30,17 +36,13 @@ function isOwner(config, actor) {
 }
 
 function parseOwnerRequestIntent(body) {
-  const direct = parseDirectOwnerCommand(body);
-  if (direct) return direct;
-  const mention = String(body ?? "")
-    .trim()
-    .match(new RegExp(`^@\\S+\\s+(${[...COMMANDS].join("|")})$`, "i"));
-  return mention?.[1].toLowerCase() ?? null;
+  return parseDirectOwnerCommand(body) ?? parseAnyMentionOwnerCommand(body);
 }
 
 function authorizeOwnerIntent({ event, config, command }) {
   const targetNumber = event.issue?.number ?? event.pull_request?.number;
-  if (!COMMANDS.has(command)) {
+  const canonicalCommand = normalizeOwnerCommand(command);
+  if (!canonicalCommand || !COMMANDS.has(command)) {
     return {
       number:
         Number.isSafeInteger(targetNumber) && targetNumber > 0
@@ -91,18 +93,17 @@ function requireInstalledMode(command, issue, installedModes) {
   ) {
     throw new Error("Installed Codekeeper workflows are invalid");
   }
+  const canonical = normalizeOwnerCommand(command);
   const required =
-    command === "review" || command === "rerun"
-      ? "review"
-      : command === "triage"
-        ? issue.pull_request
-          ? "review"
-          : "issues"
-        : command === "defer"
-          ? "issues"
-          : command === "implement" || command === "fix"
-            ? "fix"
-            : null;
+    canonical === "review"
+      ? issue.pull_request
+        ? "review"
+        : "issues"
+      : canonical === "defer"
+        ? "issues"
+        : canonical === "implement" || canonical === "repair"
+          ? "fix"
+          : null;
   if (!required || selected.has(required)) return;
   const label =
     required === "review"
@@ -113,27 +114,12 @@ function requireInstalledMode(command, issue, installedModes) {
   throw new Error(`/${command} requires the ${label} workflow`);
 }
 
-function statusBody(issue, command, outcome, config) {
-  const active = labels(issue).filter(
-    (label) => config.labels && Object.hasOwn(config.labels, label),
-  );
-  return `## Codekeeper status
-
-| Item | State |
-|---|---|
-| Command | \`${command}\` |
-| Result | ${outcome} |
-| Codekeeper labels | ${active.length ? active.map((label) => `\`${label}\``).join(", ") : "None"} |
-
-Available commands: \`/codekeeper status\`, \`/codekeeper review\`, \`/codekeeper triage\`, \`/codekeeper defer\`, \`/codekeeper implement\`, \`/codekeeper fix\`, and \`/codekeeper stop\`.`;
-}
-
-function assertEligibleReviewPull(pull, number, repository, defaultBranch) {
+function assertEligibleReviewPull(pull, number, repository) {
   if (
     pull.draft ||
     pull.head?.repo?.full_name !== repository ||
     pull.base?.repo?.full_name !== repository ||
-    pull.base?.ref !== defaultBranch
+    !pull.base?.ref
   ) {
     throw new Error(`PR #${number} is not eligible for Codekeeper review`);
   }
@@ -147,16 +133,16 @@ async function dispatchAfterUnpausing(
   eventType,
   payload,
 ) {
-  const wasPaused = labels(issue).includes("paused");
+  const wasPaused = labels(issue).includes("codekeeper:paused");
   if (wasPaused) {
     try {
-      await github.removeLabel(number, "paused");
+      await github.removeLabel(number, "codekeeper:paused");
     } catch (error) {
       if (isAmbiguousGitHubMutationError(error)) {
         try {
           const currentIssue = await github.getIssue(number);
-          if (!labels(currentIssue).includes("paused")) {
-            await github.addLabels(number, ["paused"]);
+          if (!labels(currentIssue).includes("codekeeper:paused")) {
+            await github.addLabels(number, ["codekeeper:paused"]);
           }
         } catch (rollbackError) {
           throw new Error(
@@ -173,7 +159,7 @@ async function dispatchAfterUnpausing(
   } catch (error) {
     if (wasPaused && !isAmbiguousGitHubMutationError(error)) {
       try {
-        await github.addLabels(number, ["paused"]);
+        await github.addLabels(number, ["codekeeper:paused"]);
       } catch (rollbackError) {
         throw new Error(
           `${error.message}; paused could not be restored: ${rollbackError.message}`,
@@ -200,57 +186,58 @@ export async function runOwnerCommand({
   });
   if (authorization.skipped) return authorization;
   const { actor, command, number } = authorization;
+  const canonicalCommand = normalizeOwnerCommand(command);
   const repository =
     event.repository?.full_name ?? process.env.GITHUB_REPOSITORY;
   const github = new GitHubClient({ token, repository });
   let issue = await github.getIssue(number);
   if (issue.state !== "open") throw new Error(`#${number} is not open`);
+  const surface = ownerCommandSurface({ ...event, issue });
+  if (!ownerCommandAvailableOnSurface(command, surface)) {
+    throw new Error(`/${command} is not available on this ${surface}`);
+  }
   requireInstalledMode(command, issue, installedModes);
   let outcome;
 
-  if (command === "review" || command === "rerun") {
-    if (!issue.pull_request)
-      throw new Error(`/${command} requires a pull request`);
-    const pull = assertEligibleReviewPull(
-      await github.getPull(number),
+  if (canonicalCommand === "help") {
+    await github.upsertMarkerComment(
       number,
-      repository,
-      config.repository.defaultBranch,
+      COMMAND_STATUS_MARKER,
+      renderOwnerCommandHelp(surface),
+      automationIdentity,
     );
-    await github.createRepositoryDispatch("codekeeper_review", {
+    return {
       number,
-      head_sha: pull.head.sha,
-      base_sha: pull.base.sha,
-      draft: pull.draft,
-      head_repository: pull.head.repo.full_name,
-      base_ref: pull.base.ref,
-    });
-    outcome = "A new review was requested for the current pull request commit.";
-  } else if (command === "triage") {
-    if (issue.pull_request) {
+      command,
+      outcome: `Help for this ${surface} was posted.`,
+    };
+  } else if (canonicalCommand === "review") {
+    if (!issue.pull_request) {
+      await github.createRepositoryDispatch("codekeeper_issue", {
+        number,
+        requested_by: actor,
+      });
+      outcome = "The issue was queued for owner-requested triage.";
+    } else {
       const pull = assertEligibleReviewPull(
         await github.getPull(number),
         number,
         repository,
-        config.repository.defaultBranch,
       );
-      await github.createRepositoryDispatch("codekeeper_review", {
+      const payload = {
         number,
         head_sha: pull.head.sha,
         base_sha: pull.base.sha,
         draft: pull.draft,
         head_repository: pull.head.repo.full_name,
         base_ref: pull.base.ref,
-        review_feedback: true,
-      });
+      };
+      if (command === "triage") payload.review_feedback = true;
+      await github.createRepositoryDispatch("codekeeper_review", payload);
       outcome =
-        "The complete current pull request review surface was queued for triage.";
-    } else {
-      await github.createRepositoryDispatch("codekeeper_issue", {
-        number,
-        requested_by: actor,
-      });
-      outcome = "The issue was queued for owner-requested triage.";
+        command === "triage"
+          ? "The complete current pull request review surface was queued for triage."
+          : "A new review was requested for the current pull request commit.";
     }
   } else if (command === "defer") {
     if (!issue.pull_request)
@@ -324,9 +311,11 @@ export async function runOwnerCommand({
       requested_by: actor,
     });
     outcome = "The bounded owner-requested implementation was queued.";
-  } else if (command === "fix") {
+  } else if (canonicalCommand === "repair") {
     if (!issue.pull_request)
-      throw new Error("/codekeeper fix requires a pull request");
+      throw new Error(
+        `/codekeeper ${command === "fix" ? "fix" : "repair"} requires a pull request`,
+      );
     const payload = {
       number,
       authorization_mode: "owner",
@@ -351,10 +340,10 @@ export async function runOwnerCommand({
       payload,
     );
     outcome = "The bounded owner-requested repair was queued.";
-  } else if (command === "stop") {
-    await github.ensureLabels(config.labels, ["paused"]);
-    await github.addLabels(number, ["paused"]);
-    await github.removeLabel(number, "ready");
+  } else if (canonicalCommand === "pause") {
+    await github.ensureLabels(config.labels, ["codekeeper:paused"]);
+    await github.addLabels(number, ["codekeeper:paused"]);
+    await github.removeLabel(number, "codekeeper:ready");
     if (issue.pull_request) {
       const pull = await github.getPull(number);
       if (pull.auto_merge) {
@@ -381,7 +370,13 @@ export async function runOwnerCommand({
   await github.upsertMarkerComment(
     number,
     COMMAND_STATUS_MARKER,
-    statusBody(issue, command, outcome, config),
+    renderOwnerCommandStatus({
+      issue,
+      command,
+      outcome,
+      config,
+      surface,
+    }),
     automationIdentity,
   );
   return { number, command, outcome };

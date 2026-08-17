@@ -123,7 +123,7 @@ test("post-review Max escalation requires a located high-impact blocker", () => 
     mode: "review",
     pullRequest: { changedFiles: ["src/feature.mjs"] }
   };
-  assert.equal(reviewResultEscalation(validReview({ risk: "high", labels: ["security"] }), context), null);
+  assert.equal(reviewResultEscalation(validReview({ risk: "high", labels: ["codekeeper:type-security"] }), context), null);
   assert.equal(reviewResultEscalation(validReview({
     nonBlockingFindings: [{
       title: "Suspicious behavior",
@@ -133,6 +133,8 @@ test("post-review Max escalation requires a located high-impact blocker", () => 
       classification: "current",
       validation: "Inspected manually.",
       preventionTest: "Add a regression test.",
+      rootCauseTags: ["suspicious-behavior"],
+      reproductionTest: null,
       file: "src/feature.mjs",
       line: 10
     }]
@@ -145,6 +147,8 @@ test("post-review Max escalation requires a located high-impact blocker", () => 
     classification: "current",
     validation: "The focused unauthorized request reaches the protected operation.",
     preventionTest: "Assert that the unauthorized request is rejected.",
+    rootCauseTags: ["authorization-bypass"],
+    reproductionTest: "test/authorization.test.mjs",
     file: "src/feature.mjs",
     line: 10
   };
@@ -303,6 +307,8 @@ test("workspace review keeps only normalized left-to-right diagrams without losi
       classification: "current",
       validation: "The focused regression test fails on the current head.",
       preventionTest: "Run the focused total regression test.",
+      rootCauseTags: ["incorrect-total"],
+      reproductionTest: "test/total.test.mjs",
       file: "src/total.mjs",
       line: 12
     }],
@@ -380,6 +386,8 @@ test("a located Medium high-impact blocker triggers one focused Max pass in the 
     classification: "current",
     validation: "The focused unauthorized request reaches the protected operation.",
     preventionTest: "Assert that the unauthorized request is rejected.",
+    rootCauseTags: ["authorization-bypass"],
+    reproductionTest: "test/authorization.test.mjs",
     file: "src/feature.mjs",
     line: 10
   };
@@ -719,9 +727,9 @@ test("trusted profiles reject missing files, symlinks, wrong-mode paths, and abb
 });
 
 test("each coordinator loads its versioned profile into the shared security instructions", async () => {
-  const versions = { review: 7, issue: 4, audit: 4, fix: 2 };
+  const versions = { review: 8, issue: 5, audit: 4, fix: 2 };
   const contracts = {
-    review: [/Pull request reviewer profile/, /Evidence order/, /adequate deterministic tests/i],
+    review: [/Pull request reviewer profile/, /Evidence order/, /adequate deterministic tests/i, /rootCauseTags/, /reproductionTest/],
     issue: [/Issue triager profile/, /Triage procedure/, /Duplicate rule/],
     audit: [/Repository auditor profile/, /stable `problemKey`/i, /Repair gate/],
     fix: [/Fixer profile/, /Preflight/, /smallest complete/i]
@@ -820,7 +828,7 @@ test("security-facing review coordination uses Luna Max from frozen context", as
     mode: "review",
     summary: "Security review complete.",
     risk: "high",
-    labels: ["security"],
+    labels: ["codekeeper:type-security"],
     blockingFindings: [],
     nonBlockingFindings: [],
     reviewFeedback: [],
@@ -1047,7 +1055,7 @@ test("coordinator evidence boundary rejects invented review findings and fix tes
   assert.throws(
     () => enforceCoordinatorEvidenceBoundary(
       "issue",
-      { duplicateOf: 9, actionable: true, implementationRecommendation: "ai-ready", labels: ["ready"] },
+      { duplicateOf: 9, actionable: true, implementationRecommendation: "ai-ready", labels: ["codekeeper:ready"] },
       { duplicateOf: null, actionable: false, implementationRecommendation: "no", labels: [] }
     ),
     /duplicate not present in workspace evidence/
@@ -1127,7 +1135,7 @@ test("coordinator evidence cannot become more permissive than specialist authori
   assert.throws(
     () => enforceCoordinatorEvidenceBoundary(
       "review",
-      reviewEvidence(["security"]),
+      reviewEvidence(["codekeeper:type-security"]),
       reviewEvidence([])
     ),
     /review label/
@@ -1135,8 +1143,8 @@ test("coordinator evidence cannot become more permissive than specialist authori
   assert.doesNotThrow(
     () => enforceCoordinatorEvidenceBoundary(
       "review",
-      reviewEvidence(["security"]),
-      reviewEvidence(["security", "bug"])
+      reviewEvidence(["codekeeper:type-security"]),
+      reviewEvidence(["codekeeper:type-security", "codekeeper:type-bug"])
     )
   );
   assert.throws(
@@ -1327,7 +1335,7 @@ test("coordinator cannot transform specialist fix-now feedback into auto-merge e
     labels: [],
     user: { login: "codekeeper[bot]", type: "Bot" },
     head: { ref: `${config.repository.automationBranchPrefix}repair`, repo: { full_name: "owner/repository" } },
-    base: { repo: { full_name: "owner/repository" } }
+    base: { ref: config.repository.defaultBranch, repo: { full_name: "owner/repository" } }
   };
   const autoMergeDecision = (reviewResult) => evaluateAutoMerge({
     config: { ...config, merge: { ...config.merge, enabled: true } },

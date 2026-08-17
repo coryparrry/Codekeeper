@@ -157,11 +157,15 @@ test("bundled provenance is byte-for-byte metadata from the pinned source releas
   }
 });
 
-test("bundled starter profiles are byte-for-byte canonical current-branch profiles", async () => {
+test("bundled starter profiles remain byte-for-byte pinned until the runtime checkpoint is released", async () => {
   const bundle = await loadVerifiedAssets();
   for (const profile of AGENT_PROFILE_IDS) {
     const definition = AGENT_PROFILES[profile];
-    const canonical = await readFile(path.join(REPOSITORY_ROOT, "tools", "codekeeper", "agents", `${profile}.md`), "utf8");
+    const canonical = execFileSync(
+      "git",
+      ["show", `${PINNED_COMMIT}:tools/codekeeper/agents/${profile}.md`],
+      { cwd: REPOSITORY_ROOT, encoding: "utf8" },
+    );
     assert.equal(bundle.contents[definition.asset], canonical, definition.target);
   }
 });

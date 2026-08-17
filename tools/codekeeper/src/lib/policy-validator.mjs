@@ -1,3 +1,5 @@
+import { isCodekeeperOwnedLabel } from "./label-ownership.mjs";
+
 export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "fix"]);
 const PROVIDER_APIS = new Set(["responses", "chat_completions"]);
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
@@ -221,61 +223,76 @@ function validateAutomationBranchPrefix(value) {
 }
 
 const REQUIRED_RUNTIME_LABELS = [
-  "reviewed",
-  "ready",
-  "blocked",
-  "manual review",
-  "paused",
-  "auto repaired",
-  "auto merge",
-  "duplicate",
-  "deferred",
-  "needs tests",
-  "priority p1",
-  "priority p2",
-  "priority p3",
-  "risk low",
-  "risk medium",
-  "risk high",
-  "bug",
-  "documentation",
-  "enhancement",
-  "maintenance",
-  "question",
-  "security",
-  "testing"
+  "codekeeper:reviewed",
+  "codekeeper:maintenance",
+  "codekeeper:ready",
+  "codekeeper:blocked",
+  "codekeeper:manual-review",
+  "codekeeper:paused",
+  "codekeeper:auto-repaired",
+  "codekeeper:auto-merge",
+  "codekeeper:duplicate-candidate",
+  "codekeeper:deferred",
+  "codekeeper:needs-tests",
+  "codekeeper:priority-p1",
+  "codekeeper:priority-p2",
+  "codekeeper:priority-p3",
+  "codekeeper:risk-low",
+  "codekeeper:risk-medium",
+  "codekeeper:risk-high",
+  "codekeeper:type-bug",
+  "codekeeper:type-documentation",
+  "codekeeper:type-enhancement",
+  "codekeeper:type-maintenance",
+  "codekeeper:type-question",
+  "codekeeper:type-security",
+  "codekeeper:type-testing"
 ];
 
 const REVIEW_MANAGED_LABELS = [
-  "reviewed",
-  "blocked",
-  "manual review",
-  "auto merge",
-  "needs tests",
-  "risk low",
-  "risk medium",
-  "risk high"
+  "codekeeper:reviewed",
+  "codekeeper:blocked",
+  "codekeeper:manual-review",
+  "codekeeper:auto-merge",
+  "codekeeper:needs-tests",
+  "codekeeper:risk-low",
+  "codekeeper:risk-medium",
+  "codekeeper:risk-high"
 ];
 
 const ISSUE_MANAGED_LABELS = [
-  "maintenance",
-  "ready",
-  "manual review",
-  "duplicate",
-  "deferred",
-  "priority p1",
-  "priority p2",
-  "priority p3",
-  "risk low",
-  "risk medium",
-  "risk high",
-  "bug",
-  "documentation",
-  "enhancement",
-  "question",
-  "security",
-  "testing"
+  "codekeeper:maintenance",
+  "codekeeper:ready",
+  "codekeeper:manual-review",
+  "codekeeper:duplicate-candidate",
+  "codekeeper:deferred",
+  "codekeeper:priority-p1",
+  "codekeeper:priority-p2",
+  "codekeeper:priority-p3",
+  "codekeeper:risk-low",
+  "codekeeper:risk-medium",
+  "codekeeper:risk-high",
+  "codekeeper:type-bug",
+  "codekeeper:type-documentation",
+  "codekeeper:type-enhancement",
+  "codekeeper:type-maintenance",
+  "codekeeper:type-question",
+  "codekeeper:type-security",
+  "codekeeper:type-testing"
 ];
+
+function validateWriteAuthorityValidationCommands(config) {
+  const writeAuthority = config.review.autoRepair || config.audit.repair.enabled || config.issues.allowAiImplementation;
+  if (!writeAuthority) return;
+
+  const hasRepositorySpecificCommand = config.audit.repair.validationCommands.some(
+    (command) => command.trim() !== "git diff --check"
+  );
+  assert(
+    hasRepositorySpecificCommand,
+    "write-authority capabilities require at least one repository-specific validation command beyond git diff --check"
+  );
+}
 
 function validateAi(config) {
   fixedObject(config.ai, "ai", ["tracing", "providers", "agents"]);
@@ -383,6 +400,7 @@ export function validatePolicy(config) {
   stringArray(config.review.managedLabels, "review.managedLabels", { maximumLength: 256 });
   for (const label of [...config.review.allowedLabels, ...config.review.managedLabels]) {
     assert(config.labels[label], `review references undefined label ${label}`);
+    assert(isCodekeeperOwnedLabel(label), `review may only emit Codekeeper-owned labels: ${label}`);
   }
   const managedReviewLabels = new Set(config.review.managedLabels);
   for (const label of [...REVIEW_MANAGED_LABELS, ...config.review.allowedLabels]) {
@@ -429,11 +447,13 @@ export function validatePolicy(config) {
   stringArray(config.issues.managedLabels, "issues.managedLabels", { maximumLength: 256 });
   for (const label of config.issues.managedLabels) {
     assert(config.labels[label], `issues references undefined label ${label}`);
+    assert(isCodekeeperOwnedLabel(label), `issues may only manage Codekeeper-owned labels: ${label}`);
   }
   const managedIssueLabels = new Set(config.issues.managedLabels);
   for (const label of [...ISSUE_MANAGED_LABELS, ...config.review.allowedLabels]) {
     assert(managedIssueLabels.has(label), `issues must explicitly manage emitted label ${label}`);
   }
+  validateWriteAuthorityValidationCommands(config);
 
   fixedObject(config.merge, "merge", ["enabled", "method", "allowAutomationPullRequests", "allowUserPullRequests", "allowedUserAuthors", "maximumFiles", "maximumChangedLines", "allowedPaths", "blockedPaths"]);
   boolean(config.merge.enabled, "merge.enabled");

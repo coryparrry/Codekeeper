@@ -10,6 +10,9 @@ const LIMITS = Object.freeze({
   diagram: 4000
 });
 
+const ROOT_CAUSE_TAG_PATTERN = "^[a-z0-9]+(?:[._:/-][a-z0-9]+)*$";
+const REPOSITORY_RELATIVE_PATH_PATTERN = "^(?!/)(?![A-Za-z]:)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$";
+
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -69,6 +72,20 @@ function nullableInteger() {
   return { anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }] };
 }
 
+function nullableRepositoryPath() {
+  return {
+    anyOf: [
+      {
+        type: "string",
+        minLength: 1,
+        maxLength: LIMITS.path,
+        pattern: REPOSITORY_RELATIVE_PATH_PATTERN
+      },
+      { type: "null" }
+    ]
+  };
+}
+
 function object(properties, required = Object.keys(properties)) {
   return { type: "object", additionalProperties: false, properties, required };
 }
@@ -99,6 +116,19 @@ function reviewFindingSchema() {
     classification: { enum: ["current", "stale", "already-fixed", "pre-existing", "preference-only", "not-actionable"] },
     validation: stringSchema({ maxLength: LIMITS.body }),
     preventionTest: stringSchema({ maxLength: LIMITS.summary }),
+    rootCauseTags: {
+      type: "array",
+      items: {
+        type: "string",
+        minLength: 1,
+        maxLength: LIMITS.label,
+        pattern: ROOT_CAUSE_TAG_PATTERN
+      },
+      minItems: 1,
+      maxItems: 8,
+      uniqueItems: true
+    },
+    reproductionTest: nullableRepositoryPath(),
     file: nullableString(LIMITS.path),
     line: nullableInteger()
   });
@@ -296,8 +326,32 @@ function assertEnum(value, allowed, name) {
   assert(allowed.includes(value), `${name} must be one of ${allowed.join(", ")}`);
 }
 
+export function assertRootCauseTags(value, name) {
+  assert(Array.isArray(value), `${name} must be an array`);
+  assert(value.length >= 1 && value.length <= 8, `${name} must contain 1 through 8 tags`);
+  const seen = new Set();
+  for (const tag of value) {
+    assertString(tag, `${name} item`, { maxLength: LIMITS.label });
+    assert(tag === tag.normalize("NFKC") && tag === tag.toLowerCase(), `${name} items must be normalized lowercase tags`);
+    assert(new RegExp(ROOT_CAUSE_TAG_PATTERN).test(tag), `${name} contains an unstable tag ${tag}`);
+    assert(!seen.has(tag), `${name} contains duplicate ${tag}`);
+    seen.add(tag);
+  }
+}
+
+export function assertRepositoryRelativePath(value, name) {
+  assertNullableString(value, name, LIMITS.path);
+  if (value === null) return;
+  assert(value.length > 0, `${name} must be null or a non-empty repository-relative path`);
+  assert(!value.startsWith("/") && !/^[A-Za-z]:/.test(value), `${name} must be repository-relative`);
+  assert(!value.includes(":"), `${name} must not be a URL or drive path`);
+  assert(!value.includes("\\"), `${name} must use repository-relative separators`);
+  assert(!value.split("/").includes(".."), `${name} must not traverse parent directories`);
+  assert(!/[\u0000-\u001f]/.test(value), `${name} contains unsupported control characters`);
+}
+
 function validateReviewFinding(finding, name, { blocking = false } = {}) {
-  assertExactKeys(finding, ["title", "explanation", "severity", "confidence", "classification", "validation", "preventionTest", "file", "line"], name);
+  assertExactKeys(finding, ["title", "explanation", "severity", "confidence", "classification", "validation", "preventionTest", "rootCauseTags", "reproductionTest", "file", "line"], name);
   assertString(finding.title, `${name}.title`, { maxLength: LIMITS.title });
   assertString(finding.explanation, `${name}.explanation`, { maxLength: LIMITS.body });
   assertEnum(finding.severity, ["critical", "high", "medium", "low"], `${name}.severity`);
@@ -305,6 +359,8 @@ function validateReviewFinding(finding, name, { blocking = false } = {}) {
   assertEnum(finding.classification, ["current", "stale", "already-fixed", "pre-existing", "preference-only", "not-actionable"], `${name}.classification`);
   assertString(finding.validation, `${name}.validation`, { maxLength: LIMITS.body });
   assertString(finding.preventionTest, `${name}.preventionTest`, { maxLength: LIMITS.summary });
+  assertRootCauseTags(finding.rootCauseTags, `${name}.rootCauseTags`);
+  assertRepositoryRelativePath(finding.reproductionTest, `${name}.reproductionTest`);
   assertNullableString(finding.file, `${name}.file`, LIMITS.path);
   assert(finding.line === null || (Number.isInteger(finding.line) && finding.line > 0), `${name}.line must be positive integer or null`);
   if (blocking) {

@@ -80,12 +80,13 @@ The tests cover provider selection, trusted default-branch profile loading, fixe
 
 These local checks do not prove an adopter installation. Before enabling writes, confirm the installer metadata pins the final source checkpoint that implements optional profile overrides and same-PR repair; an older embedded pin does not acquire those behaviors from a newer tarball. Then prove the following in a private disposable adopter repository:
 
-1. Install with every `.github/codekeeper/agents/*.md` path absent, merge to the default branch, and run maintenance with `dry_run=true`; confirm the receipt records packaged profile provenance.
-2. With `audit.repair.enabled=true`, run live maintenance and verify that only one allowed, validated patch can reach publication.
-3. Create one agent profile override through a normal pull request. Show that the unmerged branch does not affect a run, then show that a later run records and uses the merged default-branch profile digest while the other roles still use packaged defaults.
-4. Open a controlled same-repository pull request targeting the default branch. Confirm the review caller is evaluated from its default-branch `pull_request_target` definition and never checks out or executes PR code.
-5. Post a comment whose complete body is `/codekeeper fix` as a configured owner. Verify the App advances the existing pull request's head with a non-force commit, does not open another pull request, and refuses a stale or moved head.
-6. Open a separate controlled issue. Verify trusted triage marks it ready and automatically starts at most one bounded, unmerged repair pull request when issue implementation is on.
+1. Install with every `.github/codekeeper/agents/*.md` path absent, merge to the default branch, and run `codekeeper verify` from a clean checkout. Confirm its installed-file, setting-name, App-scope, exact-package, and credential-free runtime checks pass. If App proof is unavailable to the current GitHub token, treat the result as unproven rather than passed.
+2. Run `codekeeper verify --controlled`; confirm the maintenance dry run uses packaged profile provenance. This proves model execution and sealing, but not App token minting or publication.
+3. With `audit.repair.enabled=true`, run live maintenance and verify that only one allowed, validated patch can reach publication.
+4. Create one agent profile override through a normal pull request. Show that the unmerged branch does not affect a run, then show that a later run records and uses the merged default-branch profile digest while the other roles still use packaged defaults.
+5. Open a controlled same-repository pull request targeting the default branch. Confirm the review caller is evaluated from its default-branch `pull_request_target` definition, never checks out or executes PR code, and proves App-authored publication before its gate is made required.
+6. Post a comment whose complete body is `/codekeeper fix` as a configured owner. Verify the App advances the existing pull request's head with a non-force commit, does not open another pull request, and refuses a stale or moved head.
+7. Open a separate controlled issue. Verify trusted triage marks it ready and automatically starts at most one bounded, unmerged repair pull request when issue implementation is on.
 
 Record workflow-run, issue, pull-request, review, and App-owned commit URLs as evidence. Restore `CODEKEEPER_ENABLED=false` after proof. Forks, merge queues, non-default PR targets, and GitHub Enterprise Server are outside the supported surface.
 

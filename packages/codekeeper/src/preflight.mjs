@@ -55,7 +55,10 @@ export function parseReleaseManifest(
   }
   try {
     if (manifest.version === 2) normalizePackageRelease(manifest.package, { expectedVersion: undefined });
-    else normalizePackageIdentity(manifest.package, { expectedVersion: undefined });
+    else
+      normalizePackageIdentity(manifest.package, {
+        expectedVersion: undefined
+      });
   } catch (cause) {
     throw new InstallerError("The existing Codekeeper release manifest is invalid.", { code: "EXISTING_INSTALLATION_INVALID", cause });
   }
@@ -117,17 +120,26 @@ function repositoryFromPathname(pathname) {
 
 export function parseGitHubRemote(remoteUrl) {
   if (typeof remoteUrl !== "string" || !remoteUrl.trim()) {
-    throw new InstallerError("The Git origin URL is missing.", { code: "UNSUPPORTED_ORIGIN" });
+    throw new InstallerError("The Git origin URL is missing.", {
+      code: "UNSUPPORTED_ORIGIN"
+    });
   }
   const value = remoteUrl.trim();
   const scp = /^git@github\.com:([^?#]+)$/.exec(value);
-  if (scp) return Object.freeze({ host: "github.com", repository: repositoryFromPathname(scp[1]), protocol: "ssh" });
+  if (scp)
+    return Object.freeze({
+      host: "github.com",
+      repository: repositoryFromPathname(scp[1]),
+      protocol: "ssh"
+    });
 
   let parsed;
   try {
     parsed = new URL(value);
   } catch {
-    throw new InstallerError("origin must use GitHub.com HTTPS or SSH.", { code: "UNSUPPORTED_ORIGIN" });
+    throw new InstallerError("origin must use GitHub.com HTTPS or SSH.", {
+      code: "UNSUPPORTED_ORIGIN"
+    });
   }
   if (parsed.hostname.toLowerCase() !== "github.com" || !["https:", "ssh:"].includes(parsed.protocol)) {
     throw new InstallerError("GitHub Enterprise Server and non-GitHub origins are not supported.", { code: "UNSUPPORTED_ORIGIN" });
@@ -136,7 +148,9 @@ export function parseGitHubRemote(remoteUrl) {
     throw new InstallerError("origin must not contain credentials, query parameters, or fragments.", { code: "UNSUPPORTED_ORIGIN" });
   }
   if (parsed.protocol === "ssh:" && parsed.username !== "git") {
-    throw new InstallerError("GitHub SSH origins must use the git user.", { code: "UNSUPPORTED_ORIGIN" });
+    throw new InstallerError("GitHub SSH origins must use the git user.", {
+      code: "UNSUPPORTED_ORIGIN"
+    });
   }
   return Object.freeze({
     host: "github.com",
@@ -148,7 +162,9 @@ export function parseGitHubRemote(remoteUrl) {
 export function assertNodeVersion(nodeVersion = process.versions.node) {
   const major = Number(String(nodeVersion).split(".")[0]);
   if (!Number.isInteger(major) || major < 22) {
-    throw new InstallerError("Node.js 22 or newer is required.", { code: "UNSUPPORTED_NODE" });
+    throw new InstallerError("Node.js 22 or newer is required.", {
+      code: "UNSUPPORTED_NODE"
+    });
   }
 }
 
@@ -156,7 +172,10 @@ function parseJson(source, label) {
   try {
     return JSON.parse(source);
   } catch (cause) {
-    throw new InstallerError(`${label} returned invalid JSON.`, { code: "PREFLIGHT_INVALID_RESPONSE", cause });
+    throw new InstallerError(`${label} returned invalid JSON.`, {
+      code: "PREFLIGHT_INVALID_RESPONSE",
+      cause
+    });
   }
 }
 
@@ -281,7 +300,10 @@ export async function assertNoInstallationFiles(
     if (policyEntry.name !== "codekeeper.json" || policyEntry.isSymbolicLink() || !policyEntry.isFile()) {
       throw new InstallerError("A case-colliding or symlinked Codekeeper policy exists.", { code: "PATH_COLLISION" });
     }
-    if (!allowExisting) throw new InstallerError("A Codekeeper policy already exists.", { code: "EXISTING_INSTALLATION" });
+    if (!allowExisting)
+      throw new InstallerError("A Codekeeper policy already exists.", {
+        code: "EXISTING_INSTALLATION"
+      });
   }
 
   const releaseManifestName = path.basename(RELEASE_MANIFEST_TARGET);
@@ -373,7 +395,10 @@ export async function assertNoInstallationFiles(
       if (entry.name !== knownWorkflow.name || entry.isSymbolicLink() || !entry.isFile()) {
         throw new InstallerError("A case-colliding or symlinked Codekeeper workflow exists.", { code: "PATH_COLLISION" });
       }
-      if (!allowExisting) throw new InstallerError("A Codekeeper workflow already exists.", { code: "EXISTING_INSTALLATION" });
+      if (!allowExisting)
+        throw new InstallerError("A Codekeeper workflow already exists.", {
+          code: "EXISTING_INSTALLATION"
+        });
       const source = await fsImpl.readFile(path.join(workflowsRoot, entry.name), "utf8");
       if (!isInstalledCodekeeperWorkflow(source, knownWorkflow.artifact.callerMode)) {
         throw new InstallerError(`Existing workflow ${entry.name} is not an installed Codekeeper caller.`, { code: "PATH_COLLISION" });
@@ -434,7 +459,11 @@ export async function inspectInstallationFiles(root, {
     await assertNoInstallationFiles(root, { fsImpl, artifactCatalog });
     return null;
   }
-  await assertNoInstallationFiles(root, { fsImpl, allowExisting: true, artifactCatalog });
+  await assertNoInstallationFiles(root, {
+    fsImpl,
+    allowExisting: true,
+    artifactCatalog
+  });
   const releaseManifestPath = path.join(root, ...RELEASE_MANIFEST_TARGET.split("/"));
   const releaseManifestStat = await exists(fsImpl, releaseManifestPath);
   const releaseManifestSource = releaseManifestStat ? await fsImpl.readFile(releaseManifestPath, "utf8") : null;
@@ -472,6 +501,7 @@ export async function inspectInstallationFiles(root, {
   }
   const modes = [];
   const callerSources = {};
+  let maintenanceScheduled = false;
   for (const mode of MODE_IDS) {
     const caller = await installedCaller(root, mode, releaseManifest, fsImpl, artifactCatalog);
     if (!caller) continue;
@@ -488,7 +518,9 @@ export async function inspectInstallationFiles(root, {
     policy.automation.issueTriage = callerBoolean(callerSources.issues, "auto_triage") ?? policy.automation.issueTriage;
   }
   if (callerSources.maintain) {
-    policy.automation.maintenanceSchedule = callerSchedule(callerSources.maintain) ?? policy.automation.maintenanceSchedule;
+    const installedSchedule = callerSchedule(callerSources.maintain);
+    policy.automation.maintenanceSchedule = installedSchedule ?? policy.automation.maintenanceSchedule;
+    maintenanceScheduled = installedSchedule !== null;
   }
   const assistantCaller = await installedCaller(root, ASSISTANT_WORKFLOW.id, releaseManifest, fsImpl, artifactCatalog);
   if (assistantCaller) {
@@ -515,6 +547,7 @@ export async function inspectInstallationFiles(root, {
     policy: Object.freeze(policy),
     policySource,
     modes: Object.freeze(modes),
+    maintenanceScheduled,
     contents: Object.freeze(contents),
     releaseManifest,
     legacyFiles: Object.freeze(legacyFiles)
@@ -532,12 +565,17 @@ async function assertNoGitOperation(root, runner, fsImpl) {
   }
 }
 
-function remoteSha(output, defaultBranch) {
-  const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
+export function parseRemoteBranchSha(output, defaultBranch) {
+  const lines = output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   if (lines.length !== 1) throw new InstallerError(`origin does not expose exactly one ${defaultBranch} branch tip.`, { code: "REMOTE_HEAD_INVALID" });
   const [sha, ref, ...extra] = lines[0].split(/\s+/);
   if (!FULL_SHA.test(sha) || ref !== `refs/heads/${defaultBranch}` || extra.length) {
-    throw new InstallerError("origin returned an invalid default-branch tip.", { code: "REMOTE_HEAD_INVALID" });
+    throw new InstallerError("origin returned an invalid default-branch tip.", {
+      code: "REMOTE_HEAD_INVALID"
+    });
   }
   return sha;
 }
@@ -557,7 +595,9 @@ export async function assertNoSetupBranch({ runner, root, repository, branch = S
     `refs/remotes/origin/${branch}`
   ]);
   if (localRefs.split("\n").some((ref) => collidingRefs.has(ref.trim()) || ref.trim().startsWith(`refs/heads/${branch}/`) || ref.trim().startsWith(`refs/remotes/origin/${branch}/`))) {
-    throw new InstallerError(`Local Git refs collide with ${branch}.`, { code: "SETUP_BRANCH_EXISTS" });
+    throw new InstallerError(`Local Git refs collide with ${branch}.`, {
+      code: "SETUP_BRANCH_EXISTS"
+    });
   }
 
   const remoteRefs = await requireSuccess(
@@ -569,14 +609,11 @@ export async function assertNoSetupBranch({ runner, root, repository, branch = S
   );
   if (remoteRefs.trim()) throw new InstallerError(`Remote branch ${branch} or a colliding ref already exists.`, { code: "SETUP_BRANCH_EXISTS" });
 
-  const pulls = parseJson(await requireSuccess(
-    runner,
-    "gh",
-    ["pr", "list", "--repo", repository, "--state", "open", "--head", branch, "--json", "number,url"],
-    { cwd: root },
-    "Could not inspect existing setup pull requests."
-  ), "GitHub pull-request query");
-  if (!Array.isArray(pulls)) throw new InstallerError("GitHub returned an invalid pull-request list.", { code: "PREFLIGHT_INVALID_RESPONSE" });
+  const pulls = parseJson(await requireSuccess(runner, "gh", ["pr", "list", "--repo", repository, "--state", "open", "--head", branch, "--json", "number,url"], { cwd: root }, "Could not inspect existing setup pull requests."), "GitHub pull-request query");
+  if (!Array.isArray(pulls))
+    throw new InstallerError("GitHub returned an invalid pull-request list.", {
+      code: "PREFLIGHT_INVALID_RESPONSE"
+    });
   if (pulls.length) throw new InstallerError(`A setup pull request already exists for ${branch}.`, { code: "SETUP_BRANCH_EXISTS" });
 }
 
@@ -647,7 +684,16 @@ function doctorSkip(checks, id, label, detail) {
 }
 
 function doctorFailure(checks, id, label, detail, remediation) {
-  checks.push(doctorCheck({ id, label, status: "fail", blocking: true, detail, remediation }));
+  checks.push(
+    doctorCheck({
+      id,
+      label,
+      status: "fail",
+      blocking: true,
+      detail,
+      remediation
+    })
+  );
 }
 
 function doctorWarning(checks, id, label, detail, remediation) {
@@ -1016,7 +1062,14 @@ export async function doctorRepository({
         actionsPermissions = null;
       }
       if (actionsPermissions?.enabled === true) {
-        checks.push(doctorCheck({ id: "actions", label: "GitHub Actions", status: "pass", detail: "GitHub Actions are enabled for the repository." }));
+        checks.push(
+          doctorCheck({
+            id: "actions",
+            label: "GitHub Actions",
+            status: "pass",
+            detail: "GitHub Actions are enabled for the repository."
+          })
+        );
       } else {
         doctorFailure(checks, "actions", "GitHub Actions", "GitHub Actions must be enabled for this repository.", "Enable GitHub Actions in repository settings, then run doctor again.");
       }
@@ -1027,7 +1080,14 @@ export async function doctorRepository({
     } else if (currentBranch !== defaultBranch) {
       doctorFailure(checks, "default-branch", "Default branch", "The checkout is not attached to the GitHub default branch.", "git switch <default-branch>");
     } else {
-      checks.push(doctorCheck({ id: "default-branch", label: "Default branch", status: "pass", detail: "The checkout is attached to the GitHub default branch." }));
+      checks.push(
+        doctorCheck({
+          id: "default-branch",
+          label: "Default branch",
+          status: "pass",
+          detail: "The checkout is attached to the GitHub default branch."
+        })
+      );
     }
   }
 
@@ -1044,7 +1104,14 @@ export async function doctorRepository({
     } else if (doctorOutput(statusCommand)) {
       doctorFailure(checks, "clean-state", "Clean state", "The Git checkout has tracked or untracked changes.", "Commit or stash local changes, then run doctor again.");
     } else {
-      checks.push(doctorCheck({ id: "clean-state", label: "Clean state", status: "pass", detail: "The Git checkout is clean, including untracked files." }));
+      checks.push(
+        doctorCheck({
+          id: "clean-state",
+          label: "Clean state",
+          status: "pass",
+          detail: "The Git checkout is clean, including untracked files."
+        })
+      );
     }
 
     if (!repository || typeof defaultBranch !== "string" || !defaultBranch) {
@@ -1058,10 +1125,10 @@ export async function doctorRepository({
         const remoteCommand = await doctorCommand(runner, "git", ["ls-remote", "origin", `refs/heads/${defaultBranch}`], { cwd: root });
         let remoteDefaultSha = null;
         if (remoteCommand.ok) {
-          const lines = doctorOutput(remoteCommand).split("\n").map((line) => line.trim()).filter(Boolean);
-          if (lines.length === 1) {
-            const [sha, ref, ...extra] = lines[0].split(/\s+/);
-            if (FULL_SHA.test(sha) && ref === `refs/heads/${defaultBranch}` && extra.length === 0) remoteDefaultSha = sha;
+          try {
+            remoteDefaultSha = parseRemoteBranchSha(doctorOutput(remoteCommand), defaultBranch);
+          } catch {
+            // The aggregate doctor records the invalid evidence below.
           }
         }
         if (!remoteDefaultSha) {
@@ -1069,7 +1136,14 @@ export async function doctorRepository({
         } else if (headSha !== remoteDefaultSha) {
           doctorFailure(checks, "remote-freshness", "Remote freshness", "HEAD does not exactly match the remote default branch.", "git fetch origin");
         } else {
-          checks.push(doctorCheck({ id: "remote-freshness", label: "Remote freshness", status: "pass", detail: "HEAD exactly matches the remote default branch." }));
+          checks.push(
+            doctorCheck({
+              id: "remote-freshness",
+              label: "Remote freshness",
+              status: "pass",
+              detail: "HEAD exactly matches the remote default branch."
+            })
+          );
         }
       }
     }
@@ -1079,7 +1153,14 @@ export async function doctorRepository({
     if (!authorName.ok || !authorEmail.ok || !doctorOutput(authorName) || !doctorOutput(authorEmail)) {
       doctorFailure(checks, "git-identity", "Git identity", "Configure Git user.name and user.email before setup.", "git config user.name \"Your Name\" && git config user.email \"you@example.com\"");
     } else {
-      checks.push(doctorCheck({ id: "git-identity", label: "Git identity", status: "pass", detail: "Git user.name and user.email are configured." }));
+      checks.push(
+        doctorCheck({
+          id: "git-identity",
+          label: "Git identity",
+          status: "pass",
+          detail: "Git user.name and user.email are configured."
+        })
+      );
     }
 
     try {
@@ -1102,7 +1183,14 @@ export async function doctorRepository({
       const branch = installationState ? `codekeeper/update-${headSha.slice(0, 12)}` : SETUP_BRANCH;
       try {
         await assertNoSetupBranch({ runner, root, repository, branch });
-        checks.push(doctorCheck({ id: "setup-branch", label: "Setup branch", status: "pass", detail: "No local, remote, or open setup branch collision was found." }));
+        checks.push(
+          doctorCheck({
+            id: "setup-branch",
+            label: "Setup branch",
+            status: "pass",
+            detail: "No local, remote, or open setup branch collision was found."
+          })
+        );
       } catch {
         doctorFailure(checks, "setup-branch", "Setup branch", "A setup branch or open setup pull request already exists, or could not be inspected.", "Resolve the existing setup branch or pull request, then run doctor again.");
       }
@@ -1138,10 +1226,19 @@ export async function inspectRepository({
   const rootOutput = await requireSuccess(runner, "git", ["rev-parse", "--show-toplevel"], { cwd }, "Run Codekeeper init inside a Git checkout.");
   const root = await fsImpl.realpath(rootOutput);
   const bare = await requireSuccess(runner, "git", ["rev-parse", "--is-bare-repository"], { cwd: root }, "Could not inspect the Git checkout.");
-  if (bare !== "false") throw new InstallerError("Bare repositories are not supported.", { code: "UNSUPPORTED_CHECKOUT" });
+  if (bare !== "false")
+    throw new InstallerError("Bare repositories are not supported.", {
+      code: "UNSUPPORTED_CHECKOUT"
+    });
   const sparse = await runner.run("git", ["config", "--bool", "core.sparseCheckout"], { cwd: root });
-  if (sparse.status === 0 && sparse.stdout.trim() === "true") throw new InstallerError("Sparse checkouts are not supported.", { code: "UNSUPPORTED_CHECKOUT" });
-  if (![0, 1].includes(sparse.status)) throw new InstallerError("Could not inspect sparse-checkout state.", { code: "PREFLIGHT_COMMAND_FAILED" });
+  if (sparse.status === 0 && sparse.stdout.trim() === "true")
+    throw new InstallerError("Sparse checkouts are not supported.", {
+      code: "UNSUPPORTED_CHECKOUT"
+    });
+  if (![0, 1].includes(sparse.status))
+    throw new InstallerError("Could not inspect sparse-checkout state.", {
+      code: "PREFLIGHT_COMMAND_FAILED"
+    });
   await assertNoGitOperation(root, runner, fsImpl);
 
   const currentBranch = await requireSuccess(runner, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: root }, "Detached HEAD checkouts are not supported.");
@@ -1157,13 +1254,18 @@ export async function inspectRepository({
   ), "GitHub repository query");
   const repository = repositoryData.full_name;
   if (typeof repository !== "string" || repository.toLowerCase() !== origin.repository.toLowerCase()) {
-    throw new InstallerError("The GitHub repository does not match origin.", { code: "REPOSITORY_MISMATCH" });
+    throw new InstallerError("The GitHub repository does not match origin.", {
+      code: "REPOSITORY_MISMATCH"
+    });
   }
   const ownerType = repositoryData.owner?.type;
   if (!["User", "Organization"].includes(ownerType)) {
     throw new InstallerError("GitHub returned an unsupported repository owner type.", { code: "PREFLIGHT_INVALID_RESPONSE" });
   }
-  if (repositoryData.permissions?.admin !== true) throw new InstallerError("Repository admin access is required.", { code: "ADMIN_REQUIRED" });
+  if (repositoryData.permissions?.admin !== true)
+    throw new InstallerError("Repository admin access is required.", {
+      code: "ADMIN_REQUIRED"
+    });
   if (repositoryData.archived || repositoryData.disabled) throw new InstallerError("Archived or disabled repositories are not supported.", { code: "UNSUPPORTED_REPOSITORY" });
   const actionsPermissions = parseJson(await requireSuccess(
     runner,
@@ -1181,19 +1283,18 @@ export async function inspectRepository({
   const status = await requireSuccess(runner, "git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root }, "Could not inspect Git status.");
   if (status) throw new InstallerError("The Git checkout must be clean, including untracked files.", { code: "DIRTY_CHECKOUT" });
   const headSha = await requireSuccess(runner, "git", ["rev-parse", "HEAD"], { cwd: root }, "Could not read HEAD.");
-  if (!FULL_SHA.test(headSha)) throw new InstallerError("Git returned an invalid HEAD commit.", { code: "INVALID_HEAD" });
-  const remoteDefaultSha = remoteSha(await requireSuccess(
-    runner,
-    "git",
-    ["ls-remote", "origin", `refs/heads/${defaultBranch}`],
-    { cwd: root },
-    "Could not read the remote default branch."
-  ), defaultBranch);
+  if (!FULL_SHA.test(headSha))
+    throw new InstallerError("Git returned an invalid HEAD commit.", {
+      code: "INVALID_HEAD"
+    });
+  const remoteDefaultSha = parseRemoteBranchSha(await requireSuccess(runner, "git", ["ls-remote", "origin", `refs/heads/${defaultBranch}`], { cwd: root }, "Could not read the remote default branch."), defaultBranch);
   if (headSha !== remoteDefaultSha) throw new InstallerError("HEAD must exactly match the remote default branch before setup.", { code: "STALE_CHECKOUT" });
 
   const viewerLogin = await requireSuccess(runner, "gh", ["api", "--hostname", "github.com", "user", "--jq", ".login"], { cwd: root }, "Could not identify the authenticated GitHub user.");
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(viewerLogin)) throw new InstallerError("GitHub returned an invalid authenticated login.", { code: "PREFLIGHT_INVALID_RESPONSE" });
-  const authorName = await runner.run("git", ["config", "--get", "user.name"], { cwd: root });
+  const authorName = await runner.run("git", ["config", "--get", "user.name"], {
+    cwd: root
+  });
   const authorEmail = await runner.run("git", ["config", "--get", "user.email"], { cwd: root });
   if (authorName.status !== 0 || !authorName.stdout.trim() || authorEmail.status !== 0 || !authorEmail.stdout.trim()) {
     throw new InstallerError("Configure Git user.name and user.email before setup.", { code: "GIT_IDENTITY_REQUIRED" });

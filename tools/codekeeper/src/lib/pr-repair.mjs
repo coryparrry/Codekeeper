@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   applyPatch,
+  assertCandidateValidationReceipt,
   collectWorkingTreeChanges,
   configureAutomationIdentity,
   createCommitOnCurrentHead,
@@ -102,6 +103,13 @@ async function exactPatch({ artifactDirectory, manifest, context, config }) {
   if (patchBytes.length > config.audit.repair.maximumPatchBytes) {
     throw new Error(`Patch artifact is ${patchBytes.length} bytes; maximum is ${config.audit.repair.maximumPatchBytes}`);
   }
+  assertCandidateValidationReceipt(manifest.validation?.receipt, {
+    candidateSha256: manifest.candidateSha256,
+    configSha256: manifest.configSha256,
+    patchSha256: manifest.patch.sha256,
+    baseSha: context.baseSha,
+    config,
+  });
   applyPatch(patchPath);
   const changes = await collectWorkingTreeChanges();
   const policy = validatePatch({ ...changes, patchBytes: patchBytes.length }, config);

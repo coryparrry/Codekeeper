@@ -9,6 +9,8 @@ The v1 CLI surface is:
 ```bash
 npx --yes codekeeper@0.2.0 init
 npx --yes codekeeper@0.2.0 update
+npx --yes codekeeper@0.2.0 doctor
+npx --yes codekeeper@0.2.0 verify
 npx --yes codekeeper@0.2.0 --help
 npx --yes codekeeper@0.2.0 --version
 ```
@@ -39,7 +41,11 @@ npm exec --package /absolute/path/to/codekeeper-0.2.0.tgz -- codekeeper update -
 
 ## What `init` does
 
-The Settings screen controls new and existing installations. Simple mode groups settings into tabs, with every role's provider, model, and effort on the first tab. Press `Tab` to change section, use Up and Down to move, use Left and Right for choices such as models and effort, and press Space for on/off settings. Press Enter on a model to see the full list or type another supported ID.
+The installer first shows an aggregate repository doctor. It reports every safe prerequisite together instead of stopping at the first one. For organization repositories it also explains whether owner-level membership was observed and when an organization owner may still be needed to create or install the App.
+
+A new installation then offers **Recommended** or **Customize**. Recommended continues without opening the full Settings screen: pull-request review starts on after merge, maintenance is installed for manual runs, OpenAI is used for the selected roles, and the authenticated user is the owner. Scheduled maintenance, tracing, repository repair, issue implementation, duplicate closure, and automatic merge start off. Customize opens the complete Settings screen. Existing installations open Settings directly.
+
+Simple Settings mode groups active role settings into tabs and hides inactive roles. Advanced mode retains inactive roles as read-only context. Press `Tab` to change section, use Up and Down to move, use Left and Right for choices such as models and effort, and press Space for on/off settings. `G` or End jumps to Continue. Press Enter on a model to see the full list or type another supported ID.
 
 Profile instructions stay inside the TUI. Editing a profile creates a repository override for that role. Untouched defaults do not create files. Press `R` on a profile to remove its override and resume packaged updates. Press `A` for Advanced mode. Advanced uses the same section tabs and gives common values, such as response detail, clear choices instead of raw JSON. Protected release and safety boundaries stay fixed. Nothing changes until you accept the final review.
 
@@ -52,14 +58,15 @@ Profile instructions stay inside the TUI. Editing a profile creates a repository
 
 The installer provides curated OpenAI, DeepSeek, and OpenRouter defaults and accepts any model ID for each provider. Coordinator selection is independent from the optional OpenAI Codex workspace specialist. OpenAI traces are optional. When traces are on, the installer requests a separate OpenAI Platform trace-export key. A ChatGPT subscription is not an API key.
 
-After choosing the settings, the TUI shows one short summary of the repository, workflows, models, required credential names, file count, and startup choice. Select **Back to settings** to make another change. The installer then:
+After choosing the settings, the TUI shows one authority-first summary: automatic triggers, code-changing controls, coordinator and workspace models, tracing, App permissions and repository scope, repair boundaries, validation commands, and exact credential, variable, and file mutations. Select **Back to settings** to make another change. The installer then:
 
 1. Generates `.github/codekeeper.json`, `.github/codekeeper-release.json`, the always-installed repository-assistant caller, and the selected role callers. It creates an `.github/codekeeper/agents/*.md` file only for a profile explicitly edited in Settings.
 2. Keeps every generated caller pinned to one exact package version and npm SHA-512 integrity. The first runtime job verifies the registry tarball and shares it as a run-scoped artifact; every later isolated job reverifies the artifact before trusting its closed manifest or runtime.
-3. Opens a prefilled GitHub App registration page. The adopter creates and installs the App. Codekeeper hosts no callback. Paste the saved App settings URL into the TUI. Codekeeper extracts the bot name.
+3. Opens GitHub's App form with private visibility, disabled webhooks, and the required permissions prefilled. GitHub allows those values to be edited, so do not change them. The adopter creates the App and installs it only on the selected repository. Codekeeper hosts no callback. Paste the saved App settings URL into the TUI; Codekeeper extracts the bot name.
 4. Before the final confirmation, shows only usable `.pem` key files from Downloads. The newest keys are first. It hides folders, other files, and links. It does not read the key or display its path.
-5. Sets `CODEKEEPER_ENABLED` from your startup choice. The terminal UI accepts each API key and sends it directly to `gh secret set` through standard input. It sends the App key file to `gh` through a file descriptor.
-6. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add setup`, pushes the branch, and creates a setup pull request. The TUI then opens the pull request in the browser.
+5. Creates `codekeeper/setup`, stages only generated paths, commits `chore(codekeeper): add setup`, and verifies and pushes that exact commit.
+6. Sends each API key directly to `gh secret set` through standard input, sends the App key through a file descriptor, sets non-startup variables, and applies `CODEKEEPER_ENABLED` last.
+7. Creates and verifies the setup pull request, then opens it in the browser. A failure receipt lists completed and pending setting names without values and marks any command whose remote effect is unknown.
 
 It never merges the pull request, runs a workflow, copies the runtime, or creates a hosted service.
 
@@ -96,11 +103,13 @@ When repository repair is on, a live maintenance run may make one bounded repair
 
 ## Preflight and safe failure
 
-`init` refuses to mutate the checkout when any prerequisite is unsafe or ambiguous. Rejections include:
+`doctor` collects the safe checks below in one report, and `init` shows that report before Settings. `init` still refuses mutation when any blocking prerequisite is unsafe or ambiguous. Rejections include:
 
 - a missing or unauthenticated `gh`, GitHub Enterprise Server, or missing repository admin access;
 - a dirty checkout, detached `HEAD`, stale local checkout, or a `HEAD` that is not the remote default branch;
 - an incomplete existing Codekeeper installation, an existing setup or update branch for the same source commit, or a generated-file collision.
+
+For an organization repository, owner membership is useful evidence but not complete proof of installation policy. An App Manager can manage an organization-owned App registration but cannot install it. Repository administrators can install only when the organization permits it; otherwise an owner must act.
 
 The same collision checks reserve all four optional profile paths and every parent directory. Case-colliding paths, symlinked parents, and symlinked profile targets fail before any generated file is written. A genuinely absent profile is valid.
 
@@ -127,7 +136,7 @@ The installer enables the selected workflows after merge by default. You can cho
 - automatic exact-duplicate closure;
 - automatic merge.
 
-Automatic review, feedback triage, issue triage, owner requests, and deferred-issue creation start on when their callers are installed. Automatic code repair, issue implementation, duplicate closure, and merge remain off until enabled separately. The final review gives a short summary of the selected workflows, models, file count, and required secret names before the installer changes repository settings or files.
+On the Recommended path, automatic pull-request review starts on after merge. Manual maintenance remains available, while its schedule and tracing start off. Automatic code repair, issue implementation, duplicate closure, and merge remain off until enabled separately. Customize and later updates expose the complete automation surface.
 
 Review all triggers before you merge the setup pull request. If you chose a disabled installation, keep the `Codekeeper review gate` optional until Codekeeper is enabled.
 
@@ -173,8 +182,10 @@ There is no hosted Codekeeper service, dashboard, webhook receiver, or central c
 
 ## After the setup PR merges
 
-An enabled installation starts its selected workflows after the setup pull request merges. An update keeps running the current default-branch settings until its pull request merges. It then uses the updated settings. No separate dry run or controlled test is required.
+An opened setup pull request is not a readiness result. After it merges, run `npx --yes codekeeper@0.2.0 verify` from a clean, current default-branch checkout. The command verifies the installed catalog, required GitHub setting names, App identity/permissions/single-repository scope where the current token can prove them, exact npm package acquisition and inventory, and the acquired runtime's credential-free policy check. It exits nonzero if any required boundary fails or remains unproven.
+
+`verify --controlled` additionally dispatches the maintenance workflow with `dry_run=true`. This can prove the selected models and credential-free sealing path, but dry runs intentionally do not mint the App token or prove review publication. Before making the review gate required, use a controlled same-repository pull request to prove the App-authored comment, labels, and blocking result.
 
 If you chose a disabled installation, Codekeeper stays off until you set `CODEKEEPER_ENABLED=true`. Keep the review gate optional while Codekeeper is disabled.
 
-Codekeeper v1 has no force, non-interactive, GHES, or separate verify command.
+Codekeeper v1 has no force, non-interactive installation, or GHES support.

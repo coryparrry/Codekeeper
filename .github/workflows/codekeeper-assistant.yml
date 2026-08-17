@@ -15,11 +15,6 @@ on:
         required: false
         default: true
         type: boolean
-      runner:
-        description: Runner label used by every job in this reusable workflow.
-        required: false
-        default: ubuntu-latest
-        type: string
       owner_requests:
         description: Allow configured owners to request bounded Codekeeper actions.
         required: false
@@ -58,7 +53,7 @@ jobs:
       (github.event.comment.author_association == 'OWNER' ||
        github.event.comment.author_association == 'MEMBER' ||
        github.event.comment.author_association == 'COLLABORATOR')
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read

@@ -11,7 +11,8 @@ import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, result, tempo
 function runCli(options = {}) {
   return runProductionCli({
     ...options,
-    environment: testPackageEnvironment(options.environment),
+    showDoctor: options.showDoctor ?? false,
+    environment: testPackageEnvironment(options.environment)
   });
 }
 
@@ -72,9 +73,40 @@ test("CLI accepts only the documented commands", () => {
   assert.deepEqual(parseCliArgs(["--version"]), { command: "version" });
   assert.deepEqual(parseCliArgs(["init"]), { command: "init" });
   assert.deepEqual(parseCliArgs(["update"]), { command: "update" });
-  assert.deepEqual(parseCliArgs(["update", "--current-package"]), { command: "update", currentPackage: true });
-  assert.throws(() => parseCliArgs(["init", "--force"]), (error) => error.code === "CLI_USAGE");
-  assert.throws(() => parseCliArgs(["verify"]), (error) => error.code === "CLI_USAGE");
+  assert.deepEqual(parseCliArgs(["doctor"]), {
+    command: "doctor",
+    json: false
+  });
+  assert.deepEqual(parseCliArgs(["doctor", "--json"]), {
+    command: "doctor",
+    json: true
+  });
+  assert.deepEqual(parseCliArgs(["verify"]), {
+    command: "verify",
+    json: false,
+    controlled: false
+  });
+  assert.deepEqual(parseCliArgs(["verify", "--json", "--controlled"]), {
+    command: "verify",
+    json: true,
+    controlled: true
+  });
+  assert.deepEqual(parseCliArgs(["update", "--current-package"]), {
+    command: "update",
+    currentPackage: true
+  });
+  assert.throws(
+    () => parseCliArgs(["init", "--force"]),
+    (error) => error.code === "CLI_USAGE"
+  );
+  assert.throws(
+    () => parseCliArgs(["verify", "--unknown"]),
+    (error) => error.code === "CLI_USAGE"
+  );
+  assert.throws(
+    () => parseCliArgs(["verify", "--json", "--json"]),
+    (error) => error.code === "CLI_USAGE"
+  );
   assert.throws(() => parseCliArgs("init"), TypeError);
 });
 
@@ -159,6 +191,124 @@ test("help, version, and rejected arguments perform no installer side effects", 
   }
 });
 
+test("doctor supports JSON output and returns a failing exit code when mutation is blocked", async () => {
+  const report = Object.freeze({
+    mutationAllowed: false,
+    counts: Object.freeze({ pass: 1, warning: 0, fail: 1 }),
+    checks: Object.freeze([
+      Object.freeze({
+        id: "git",
+        label: "Git",
+        status: "pass",
+        detail: "Git is available."
+      }),
+      Object.freeze({
+        id: "checkout",
+        label: "Checkout",
+        status: "fail",
+        detail: "Run doctor inside a Git checkout."
+      })
+    ])
+  });
+  const output = textSink();
+  const errorOutput = textSink();
+  let received;
+  const status = await runCli({
+    argv: ["doctor", "--json"],
+    output,
+    errorOutput,
+    runner: createRecordingRunner(() => {
+      throw new Error("doctor must use the injected report");
+    }),
+    doctor: async (options) => {
+      received = options;
+      return report;
+    }
+  });
+  assert.equal(status, 1);
+  assert.equal(received.cwd, process.cwd());
+  assert.deepEqual(JSON.parse(output.toString()), report);
+  assert.equal(errorOutput.toString(), "");
+});
+
+test("init runs the visible doctor explicitly even with a wrapped repository inspector", async () => {
+  const output = textSink();
+  const errorOutput = textSink();
+  let inspections = 0;
+  const status = await runCli({
+    argv: ["init"],
+    output,
+    errorOutput,
+    prompt: guidedPrompt(),
+    interactive: true,
+    showDoctor: true,
+    loadAssets: loadVerifiedAssets,
+    doctor: async () => ({
+      mutationAllowed: false,
+      counts: { pass: 0, warning: 0, fail: 1 },
+      checks: [
+        {
+          id: "organization-app-authority",
+          label: "Organization App authority",
+          status: "fail",
+          detail: "An organization owner must complete App registration.",
+          remediation: "Ask an organization owner before configuring settings."
+        }
+      ]
+    }),
+    inspect: async () => {
+      inspections += 1;
+      return repositorySnapshot("/tmp/widget", HEAD_SHA);
+    }
+  });
+  assert.equal(status, 1);
+  assert.equal(inspections, 0);
+  assert.match(output.toString(), /Organization App authority/);
+  assert.match(errorOutput.toString(), /readiness checks failed/);
+});
+
+test("verify passes controlled mode through, emits JSON, and uses readiness exit semantics", async () => {
+  const report = Object.freeze({
+    ready: true,
+    repository: "acme/widget",
+    checks: Object.freeze([
+      Object.freeze({
+        id: "checkout",
+        status: "pass",
+        detail: "Checkout is current."
+      }),
+      Object.freeze({
+        id: "controlled-check",
+        status: "skipped",
+        detail: "Not requested."
+      })
+    ])
+  });
+  const output = textSink();
+  const errorOutput = textSink();
+  let received;
+  const status = await runCli({
+    argv: ["verify", "--json", "--controlled"],
+    cwd: "/tmp/widget",
+    output,
+    errorOutput,
+    runner: createRecordingRunner(() => {
+      throw new Error("verify must use the injected report");
+    }),
+    verifyReadiness: async (options) => {
+      received = options;
+      return report;
+    }
+  });
+  assert.equal(status, 0);
+  assert.equal(received.cwd, "/tmp/widget");
+  assert.equal(received.controlledCheck, true);
+  assert.equal(typeof received.inspectApp, "function");
+  assert.equal(typeof received.verifyPackage, "function");
+  assert.deepEqual(JSON.parse(output.toString()), report);
+  assert.equal(errorOutput.toString(), "");
+});
+
 test("app-registration abort prints the URL and an exact platform-safe resume command without mutation", async () => {
   const output = textSink();
   const errorOutput = textSink();
@@ -200,9 +350,15 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   assert.match(errorOutput.toString(), /Complete GitHub App creation/);
   assert.match(errorOutput.toString(), new RegExp(resumeCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.deepEqual(
-    prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })),
+    prompt.confirmations.map(({ message, defaultValue }) => ({
+      message,
+      defaultValue
+    })),
     [
-      { message: "Install into acme/widget on default branch main?", defaultValue: true },
+      {
+        message: "Install into acme/widget on default branch main?",
+        defaultValue: true
+      },
       { message: "Use the recommended starter setup?", defaultValue: true },
       {
         message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
@@ -236,7 +392,10 @@ test("declining the repository confirmation performs no mutation or App navigati
   assert.equal(status, 1);
   assert.equal(opens, 0);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: true }
+    {
+      message: "Install into acme/widget on default branch main?",
+      defaultValue: true
+    }
   ]);
   assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
   assert.deepEqual(runner.calls, []);
@@ -248,7 +407,9 @@ test("declining conservative boundaries on the custom path performs no mutation 
   const runner = createRecordingRunner(() => {
     throw new Error("no external mutation is expected before boundary confirmation");
   });
-  const prompt = guidedPrompt([true, false, true, true, false, false], { recommended: false });
+  const prompt = guidedPrompt([true, false, true, true, false, false], {
+    recommended: false
+  });
   let opens = 0;
   const snapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
   const status = await runCli({
@@ -266,10 +427,16 @@ test("declining conservative boundaries on the custom path performs no mutation 
   assert.equal(status, 1);
   assert.equal(opens, 0);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: true },
+    {
+      message: "Install into acme/widget on default branch main?",
+      defaultValue: true
+    },
     { message: "Use the recommended starter setup?", defaultValue: true },
     { message: "Enable OpenAI traces?", defaultValue: false },
-    { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
+    {
+      message: "Start Codekeeper after the setup pull request merges?",
+      defaultValue: true
+    },
     { message: "Run maintenance on a schedule?", defaultValue: false },
     { message: "Continue with these safety settings?", defaultValue: false }
   ]);
@@ -322,9 +489,15 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   assert.equal(inspections, 1);
   assert.match(openedUrl, /^https:\/\/github\.com\/settings\/apps\/new\?/);
   assert.deepEqual(prompt.confirmations, [
-    { message: "Install into acme/widget on default branch main?", defaultValue: true },
+    {
+      message: "Install into acme/widget on default branch main?",
+      defaultValue: true
+    },
     { message: "Use the recommended starter setup?", defaultValue: true },
-    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: true },
+    {
+      message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
+      defaultValue: true
+    },
     { message: "Create this setup?", defaultValue: false }
   ]);
   assert.match(output.toString(), /Setup preview/);
@@ -436,7 +609,9 @@ test("Ink final review returns to the same settings without inventing an OpenRou
       start() { throw new Error("progress must not start after review cancellation"); },
       update() { throw new Error("progress must not update after review cancellation"); }
     },
-    async confirm() { return true; },
+    async confirm() {
+      return true;
+    },
     async select({ message }) {
       if (message === "Choose a starting setup") return "custom";
       throw new Error(`Unexpected select prompt: ${message}`);
@@ -747,7 +922,11 @@ test("update exits successfully when the bundled release is already installed", 
     },
     updateBranch: `codekeeper/update-${HEAD_SHA.slice(0, 12)}`
   };
-  const output = Object.assign(textSink(), { isTTY: true, columns: 80, rows: 24 });
+  const output = Object.assign(textSink(), {
+    isTTY: true,
+    columns: 80,
+    rows: 24
+  });
   let rawModeCalls = 0;
   const status = await runCli({
     argv: ["update", "--current-package"],
@@ -850,7 +1029,12 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
   const head = git(root, ["rev-parse", "HEAD"]).trim();
   const snapshot = repositorySnapshot(root, head);
   const actual = createCommandRunner({
-    environment: { PATH: process.env.PATH, HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), LANG: "C" }
+    environment: {
+      PATH: process.env.PATH,
+      HOME: root,
+      XDG_CONFIG_HOME: path.join(root, ".config"),
+      LANG: "C"
+    }
   });
   const calls = [];
   let pushedCommit = null;
@@ -920,12 +1104,24 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
   assert.equal(status, 0, errorOutput.toString());
   assert.equal(inspections, 2);
   assert.equal(progressStarted, 1);
-  assert.deepEqual(prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })), [
-    { message: "Install into acme/widget on default branch main?", defaultValue: true },
-    { message: "Use the recommended starter setup?", defaultValue: true },
-    { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: true },
-    { message: "Create this setup?", defaultValue: false }
-  ]);
+  assert.deepEqual(
+    prompt.confirmations.map(({ message, defaultValue }) => ({
+      message,
+      defaultValue
+    })),
+    [
+      {
+        message: "Install into acme/widget on default branch main?",
+        defaultValue: true
+      },
+      { message: "Use the recommended starter setup?", defaultValue: true },
+      {
+        message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
+        defaultValue: true
+      },
+      { message: "Create this setup?", defaultValue: false }
+    ]
+  );
   assert.match(opened[0], /^https:\/\/github\.com\/settings\/apps\/new\?/);
   assert.equal(opened.at(-1), "https://github.com/acme/widget/pull/42");
   assert.match(pushedCommit, /^[0-9a-f]{40}$/);
@@ -945,17 +1141,20 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
     calls.filter((call) => call.command === "gh" && call.args[0] === "secret").map((call) => call.args[2]),
     ["OPENAI_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]
   );
-  assert.deepEqual(enteredSecrets.map(({ name }) => name), ["OPENAI_API_KEY"]);
-  assert.deepEqual(enteredSecrets.map(({ purpose }) => purpose), [
-    "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key. Used by: Pull request reviewer, Repository auditor."
-  ]);
-  assert.equal(enteredSecrets.some(({ name }) => name === "CODEKEEPER_APP_PRIVATE_KEY"), false);
-  const providerSecretCalls = calls.filter((call) => call.command === "gh"
-    && call.args[0] === "secret"
-    && call.args[2] !== "CODEKEEPER_APP_PRIVATE_KEY");
-  assert.ok(providerSecretCalls.every((call) => call.options.stdio === "ignore"
-    && typeof call.options.provideInput === "function"
-    && !Object.hasOwn(call.options, "stdinFd")));
+  assert.deepEqual(
+    enteredSecrets.map(({ name }) => name),
+    ["OPENAI_API_KEY"]
+  );
+  assert.deepEqual(
+    enteredSecrets.map(({ purpose }) => purpose),
+    ["OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key. Used by: Pull request reviewer, Repository auditor."]
+  );
+  assert.equal(
+    enteredSecrets.some(({ name }) => name === "CODEKEEPER_APP_PRIVATE_KEY"),
+    false
+  );
+  const providerSecretCalls = calls.filter((call) => call.command === "gh" && call.args[0] === "secret" && call.args[2] !== "CODEKEEPER_APP_PRIVATE_KEY");
+  assert.ok(providerSecretCalls.every((call) => call.options.stdio === "ignore" && typeof call.options.provideInput === "function" && !Object.hasOwn(call.options, "stdinFd")));
   const appSecretCall = calls.find((call) => call.command === "gh" && call.args.includes("CODEKEEPER_APP_PRIVATE_KEY"));
   assert.equal(appSecretCall.options.stdio, "ignore");
   assert.ok(Number.isInteger(appSecretCall.options.stdinFd) && appSecretCall.options.stdinFd >= 3);
@@ -1016,7 +1215,11 @@ test("snapshot drift after confirmation aborts before settings or Git mutation",
     throw new Error("mutation must not run after snapshot drift");
   });
   const initial = repositorySnapshot("/tmp/widget", HEAD_SHA);
-  const changed = Object.freeze({ ...initial, headSha: "b".repeat(40), remoteDefaultSha: "b".repeat(40) });
+  const changed = Object.freeze({
+    ...initial,
+    headSha: "b".repeat(40),
+    remoteDefaultSha: "b".repeat(40)
+  });
   let inspections = 0;
   const status = await runCli({
     argv: ["init"],
@@ -1058,7 +1261,10 @@ test("repository settings drift after confirmation aborts before any mutation", 
       });
       const changed = Object.freeze({
         ...initial,
-        existingSettings: Object.freeze({ ...initial.existingSettings, [field]: value })
+        existingSettings: Object.freeze({
+          ...initial.existingSettings,
+          [field]: value
+        })
       });
       let inspections = 0;
       const status = await runCli({

@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { copyFile, lstat, mkdtemp, open, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -14,6 +15,97 @@ const VALIDATION_ENVIRONMENT_KEYS = Object.freeze([
   "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "CI",
   "SystemRoot", "ComSpec"
 ]);
+export const VALIDATION_RECEIPT_FILE = "validation-receipt.json";
+const SHA256 = /^[a-f0-9]{64}$/i;
+const GIT_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function exactObject(value, name, keys) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${name} must be an object`);
+  }
+  const expected = new Set(keys);
+  const actual = Object.keys(value);
+  if (actual.length !== expected.size || actual.some((key) => !expected.has(key))) {
+    throw new Error(`${name} contains unexpected fields`);
+  }
+  return value;
+}
+
+export function createValidationReceipt({ candidateSha256, configSha256, patchSha256, baseSha, commands, patchUnchanged }) {
+  return {
+    version: 1,
+    candidateSha256,
+    configSha256,
+    patchSha256,
+    baseSha,
+    commands: commands.map(({ command, exitCode, durationMs, stdoutDigest, startedAt }) => ({
+      command,
+      exitCode,
+      durationMs,
+      stdoutDigest,
+      startedAt
+    })),
+    patchUnchanged
+  };
+}
+
+export function assertValidationReceipt(receipt, { candidateSha256, configSha256, patchSha256, baseSha, commands }) {
+  exactObject(
+    receipt,
+    "Validation receipt",
+    ["version", "candidateSha256", "configSha256", "patchSha256", "baseSha", "commands", "patchUnchanged"]
+  );
+  if (receipt.version !== 1) throw new Error("Validation receipt version is unsupported");
+  for (const [name, value] of Object.entries({ candidateSha256, configSha256, patchSha256 })) {
+    if (!SHA256.test(String(value ?? "")) || receipt[name] !== value) {
+      throw new Error(`Validation receipt ${name} is stale or invalid`);
+    }
+  }
+  if (!GIT_SHA.test(String(baseSha ?? "")) || receipt.baseSha !== baseSha) {
+    throw new Error("Validation receipt base SHA is stale or invalid");
+  }
+  if (receipt.patchUnchanged !== true) throw new Error("Validation receipt does not prove an unchanged patch");
+  if (!Array.isArray(commands) || !Array.isArray(receipt.commands) || receipt.commands.length !== commands.length) {
+    throw new Error("Validation receipt does not cover the configured validation commands exactly");
+  }
+  receipt.commands.forEach((item, index) => {
+    exactObject(item, `Validation receipt command ${index}`, ["command", "exitCode", "durationMs", "stdoutDigest", "startedAt"]);
+    if (item.command !== commands[index]) {
+      throw new Error(`Validation receipt command ${index} is not the configured command`);
+    }
+    if (!Number.isSafeInteger(item.exitCode) || item.exitCode < 0 || item.exitCode !== 0) {
+      throw new Error(`Validation receipt command ${index} did not pass`);
+    }
+    if (!Number.isSafeInteger(item.durationMs) || item.durationMs < 0) {
+      throw new Error(`Validation receipt command ${index} has an invalid duration`);
+    }
+    if (!SHA256.test(item.stdoutDigest)) {
+      throw new Error(`Validation receipt command ${index} has an invalid stdout digest`);
+    }
+    const startedAt = typeof item.startedAt === "string" ? Date.parse(item.startedAt) : Number.NaN;
+    if (Number.isNaN(startedAt) || new Date(startedAt).toISOString() !== item.startedAt) {
+      throw new Error(`Validation receipt command ${index} has an invalid start time`);
+    }
+  });
+  return receipt;
+}
+
+export function assertCandidateValidationReceipt(
+  receipt,
+  { candidateSha256, configSha256, patchSha256, baseSha, config },
+) {
+  return assertValidationReceipt(receipt, {
+    candidateSha256,
+    configSha256,
+    patchSha256,
+    baseSha,
+    commands: config?.audit?.repair?.validationCommands,
+  });
+}
 
 function commandError(command, args, result) {
   const stderr = result.stderr?.toString("utf8").trim();
@@ -376,7 +468,7 @@ export async function validationEnvironment(environment = process.env) {
 export async function runValidationCommands(
   commands,
   cwd = process.cwd(),
-  { timeoutMs = DEFAULT_VALIDATION_TIMEOUT_MS } = {}
+  { timeoutMs = DEFAULT_VALIDATION_TIMEOUT_MS, sanitized = false } = {}
 ) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new Error("Validation timeout must be a positive integer");
@@ -388,6 +480,8 @@ export async function runValidationCommands(
     const results = [];
     for (const command of commands) {
       let result;
+      const startedMilliseconds = Date.now();
+      const startedAt = new Date(startedMilliseconds).toISOString();
       try {
         result = await superviseProcess("bash", ["-c", command], { cwd, environment, timeoutMs });
       } catch (error) {
@@ -400,11 +494,30 @@ export async function runValidationCommands(
         failure.validationResults = results;
         throw failure;
       }
-      results.push({
+      const stdout = result.stdout.toString("utf8");
+      const stderr = result.stderr.toString("utf8");
+      const commandResult = {
         command,
         success: result.status === 0,
-        stdout: result.stdout.toString("utf8"),
-        stderr: result.stderr.toString("utf8")
+        exitCode: result.status,
+        durationMs: Math.max(0, Date.now() - startedMilliseconds),
+        stdoutDigest: sha256(result.stdout),
+        startedAt,
+        stdout,
+        stderr
+      };
+      const exposedResult = sanitized
+        ? {
+            command: commandResult.command,
+            success: commandResult.success,
+            exitCode: commandResult.exitCode,
+            durationMs: commandResult.durationMs,
+            stdoutDigest: commandResult.stdoutDigest,
+            startedAt: commandResult.startedAt
+          }
+        : commandResult;
+      results.push({
+        ...exposedResult
       });
       if (result.status !== 0) {
         const error = new Error(`Validation command failed: ${command}`);

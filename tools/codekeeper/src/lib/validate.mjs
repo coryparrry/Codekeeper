@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AGENT_PROFILE_BUNDLE_FILE, loadFrozenAgentProfile } from "./agent-profiles.mjs";
-import { applyPatch, changedFilesBetween, changedLineHunksBetween, collectWorkingTreeChanges, createPatch, currentHead, ensureClean, runValidationCommands } from "./git.mjs";
+import { applyPatch, assertCandidateValidationReceipt, changedFilesBetween, changedLineHunksBetween, collectWorkingTreeChanges, createPatch, createValidationReceipt, currentHead, ensureClean, runValidationCommands, VALIDATION_RECEIPT_FILE } from "./git.mjs";
 import { readRegularFile, readRegularJson, writeJson } from "./io.mjs";
 import { sha256 } from "./markers.mjs";
 import { validatePatch } from "./policy.mjs";
@@ -111,7 +111,7 @@ async function writeCandidate({ artifactDirectory, context, result, patch = null
   };
 }
 
-async function writeArtifact({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, config, configSha256, agentProfileBytes, runtimeMetadataBytes }) {
+async function writeArtifact({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, candidateSha256, config, configSha256, agentProfileBytes, runtimeMetadataBytes }) {
   await createFreshDirectory(artifactDirectory);
   await writeFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE), agentProfileBytes);
   await writeJson(path.join(artifactDirectory, "context.json"), context);
@@ -135,6 +135,7 @@ async function writeArtifact({ artifactDirectory, context, result, patch = null,
     context,
     patch,
     validation,
+    candidateSha256,
     configSha256,
     configFileSha256: sha256(configBytes),
     ...candidateComponents({ contextBytes, resultBytes, patchBytes: sealedPatchBytes, validationBytes, agentProfileBytes, runtimeMetadataBytes })
@@ -417,6 +418,28 @@ async function readCandidate({ mode, candidateDirectory, expectedCandidateSha256
   return { candidate, context, result, validation, patchBytes, agentProfileBytes, runtimeMetadataBytes };
 }
 
+async function readValidationReceipt({ candidateDirectory, candidate, context, expectedCandidateSha256, config, configSha256 }) {
+  const receipt = await readRegularJson(path.join(candidateDirectory, VALIDATION_RECEIPT_FILE));
+  return assertCandidateValidationReceipt(receipt, {
+    candidateSha256: expectedCandidateSha256,
+    configSha256,
+    patchSha256: candidate.patch.sha256,
+    baseSha: context.baseSha,
+    config,
+  });
+}
+
+function validationWithReceipt(validation, receipt) {
+  return {
+    ...validation,
+    receipt,
+    commands: receipt.commands.map((item) => ({
+      ...item,
+      success: item.exitCode === 0
+    }))
+  };
+}
+
 async function verifyPatchCandidate({ mode, candidateDirectory, expectedCandidateSha256, config, configSha256 }) {
   const { candidate, context, patchBytes } = await readCandidate({
     mode,
@@ -443,15 +466,36 @@ async function verifyPatchCandidate({ mode, candidateDirectory, expectedCandidat
   }
   const policy = validatePatch(initial.changes, config);
   if (!policy.valid) throw new Error(`Fresh verification patch failed policy: ${policy.reasons.join("; ")}`);
-  await runValidationCommands(config.audit.repair.validationCommands);
+  const commandResults = await runValidationCommands(
+    config.audit.repair.validationCommands,
+    process.cwd(),
+    { sanitized: true }
+  );
   if (currentHead() !== context.baseSha) {
     throw new Error(`Validation commands changed checkout HEAD from ${context.baseSha} to ${currentHead()}`);
   }
   const afterValidation = await capturePatch(config);
-  if (sha256(initial.bytes) !== sha256(afterValidation.bytes)) {
+  const patchUnchanged = sha256(initial.bytes) === sha256(afterValidation.bytes);
+  if (!patchUnchanged) {
     throw new Error("Validation commands modified the proposed patch");
   }
-  return { verified: true, mode, candidateSha256: expectedCandidateSha256 };
+  const validationReceipt = createValidationReceipt({
+    candidateSha256: expectedCandidateSha256,
+    configSha256,
+    patchSha256: candidate.patch.sha256,
+    baseSha: context.baseSha,
+    commands: commandResults,
+    patchUnchanged
+  });
+  assertCandidateValidationReceipt(validationReceipt, {
+    candidateSha256: expectedCandidateSha256,
+    configSha256,
+    patchSha256: candidate.patch.sha256,
+    baseSha: context.baseSha,
+    config,
+  });
+  await writeJson(path.join(candidateDirectory, VALIDATION_RECEIPT_FILE), validationReceipt);
+  return { verified: true, mode, candidateSha256: expectedCandidateSha256, validationReceipt };
 }
 
 async function seal({ mode, candidateDirectory, artifactDirectory, expectedCandidateSha256, expectedContextSha256, config, configSha256 }) {
@@ -467,13 +511,27 @@ async function seal({ mode, candidateDirectory, artifactDirectory, expectedCandi
   if (sha256(contextBytes) !== expectedContextSha256 || sha256(contextBytes) !== candidate.contextSha256) {
     throw new Error("Candidate context is not the frozen trusted context");
   }
+  const sealedValidation = candidate.patch?.valid
+    ? validationWithReceipt(
+        validation,
+        await readValidationReceipt({
+          candidateDirectory,
+          candidate,
+          context,
+          expectedCandidateSha256,
+          config,
+          configSha256
+        })
+      )
+    : validation;
   return writeArtifact({
     artifactDirectory,
     context,
     result,
     patch: candidate.patch ?? null,
     patchBytes,
-    validation,
+    validation: sealedValidation,
+    candidateSha256: expectedCandidateSha256,
     config,
     configSha256,
     agentProfileBytes,

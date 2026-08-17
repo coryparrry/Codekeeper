@@ -95,6 +95,46 @@ test("conditional pull mutations reject stale heads inside the GitHub adapter", 
   assert.equal(requests.some(({ href, method }) => method === "POST" && href.endsWith("/dispatches")), false);
 });
 
+test("canonical and legacy pause labels fail closed at pull and issue mutation guards", async () => {
+  for (const pauseLabel of ["codekeeper:paused", "paused"]) {
+    const state = { labels: [pauseLabel] };
+    await assert.rejects(
+      conditionalMutationClient(state, []).beginPullMutation({
+        repository: "owner/repository",
+        pullRequest: {
+          number: 7,
+          headSha: "a".repeat(40),
+          baseSha: "b".repeat(40),
+          baseRef: "main",
+          reviewFeedback: [],
+        },
+        policy: reviewPolicy,
+      }),
+      /is paused/,
+    );
+
+    const updatedAt = "2026-08-17T10:00:00Z";
+    const issueClient = client({
+      retries: 0,
+      fetch: async () => new Response(JSON.stringify({
+        number: 30,
+        title: "Paused report",
+        body: "Details",
+        state: "open",
+        updated_at: updatedAt,
+        labels: [{ name: pauseLabel }],
+      })),
+    });
+    await assert.rejects(
+      issueClient.beginIssueMutation({
+        issue: { number: 30, updatedAt },
+        rejectPaused: true,
+      }),
+      /is paused/,
+    );
+  }
+});
+
 test("closing issue references include only merged pull requests", async () => {
   let requestBody;
   const github = client({
@@ -281,7 +321,7 @@ test("secondary issue mutations reject inventory drift and advance after their o
       state: "open",
       state_reason: null,
       updated_at: "2026-08-16T10:00:00Z",
-      labels: [{ name: "deferred" }],
+      labels: [{ name: "codekeeper:deferred" }],
       user: { login: "codekeeper[bot]", id: 123, type: "Bot" }
     },
     comments: []
@@ -332,9 +372,16 @@ test("secondary issue mutations reject inventory drift and advance after their o
   state.issue = structuredClone(inventory);
   await github.beginSecondaryIssueMutation({ issue: structuredClone(state.issue) });
   await github.updateIssue(9, { body: "Codekeeper update" });
-  await github.replaceManagedLabels(9, ["deferred", "testing"], ["deferred", "testing"]);
+  await github.replaceManagedLabels(
+    9,
+    ["codekeeper:deferred", "codekeeper:type-testing"],
+    ["codekeeper:deferred", "codekeeper:type-testing"],
+  );
   assert.deepEqual(writes.map(({ method }) => method), ["PATCH", "POST"]);
-  assert.deepEqual(state.issue.labels.map(({ name }) => name), ["deferred", "testing"]);
+  assert.deepEqual(state.issue.labels.map(({ name }) => name), [
+    "codekeeper:deferred",
+    "codekeeper:type-testing",
+  ]);
   await github.endSecondaryIssueMutation();
 });
 
