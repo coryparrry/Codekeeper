@@ -59,9 +59,10 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.test, /npm run prepare:runtime-test/);
   assert.match(packageJson.scripts.test, /npm run test:unit/);
   assert.match(packageJson.scripts["test:unit"], /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
+  assert.match(packageJson.scripts.coverage, /node --test .*test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
   assert.match(packageJson.scripts.check, /audit\/\*\.mjs/);
   assert.match(packageJson.scripts.check, /npm run prepare:runtime-test/);
-  assert.match(packageJson.scripts.check, /npm run test:unit/);
+  assert.match(packageJson.scripts.check, /npm run coverage/);
 });
 
 test("unpublished installer docs fail closed while local packing preserves the exact receipt", async () => {
