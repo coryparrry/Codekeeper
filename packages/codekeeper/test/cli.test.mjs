@@ -547,7 +547,7 @@ test("declining conservative boundaries on the custom path performs no mutation 
       message: "Start Codekeeper after the setup pull request merges?",
       defaultValue: true
     },
-    { message: "Run maintenance on a schedule?", defaultValue: false },
+    { message: "Run report-only maintenance on a schedule?", defaultValue: false },
     { message: "Continue with these safety settings?", defaultValue: false }
   ]);
   assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
@@ -852,6 +852,7 @@ test("an existing installation rerun skips App setup and secret prompts", async 
       throw new Error("no mutation before review");
     }),
     inspect: async () => snapshot,
+    inspectAppRegistration: async () => ({ status: "pass" }),
     openUrl: async () => {
       opens += 1;
     },
@@ -1004,6 +1005,7 @@ test("update advances release-owned files while preserving adopter configuration
     prompt,
     runner,
     inspect: async () => snapshot,
+    inspectAppRegistration: async () => ({ status: "pass" }),
     loadAssets: async () => nextBundle
   });
 
@@ -1041,7 +1043,7 @@ test("update advances release-owned files while preserving adopter configuration
   assert.deepEqual(runner.calls, []);
 });
 
-test("update exits successfully when the bundled release is already installed", async () => {
+test("an already-current update reconciles App permissions before success", async () => {
   const bundle = await loadVerifiedAssets();
   const baseSnapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
   const initial = buildInstallPlan({
@@ -1079,6 +1081,8 @@ test("update exits successfully when the bundled release is already installed", 
     rows: 24
   });
   let rawModeCalls = 0;
+  let inspections = 0;
+  let openedUrl = null;
   const status = await runCli({
     argv: ["update", "--current-package"],
     input: {
@@ -1094,10 +1098,41 @@ test("update exits successfully when the bundled release is already installed", 
       throw new Error("already-current update must not mutate");
     }),
     inspect: async () => snapshot,
+    inspectAppRegistration: async () => {
+      inspections += 1;
+      if (inspections === 1) {
+        return {
+          status: "mismatch",
+          settingsUrl: "https://github.com/settings/apps/codekeeper-widget/permissions",
+          permissionDelta: [
+            {
+              permission: "issues",
+              registered: "write",
+              installed: "read",
+              required: "write"
+            }
+          ]
+        };
+      }
+      return { status: "pass" };
+    },
+    prompt: {
+      async confirm(options) {
+        assert.match(options.message, /updated the App permissions/i);
+        return true;
+      },
+      async dispose() {}
+    },
+    openUrl: async (url) => {
+      openedUrl = url;
+    },
     loadAssets: async () => bundle
   });
   assert.equal(status, 0);
   assert.equal(rawModeCalls, 0);
+  assert.equal(inspections, 2);
+  assert.equal(openedUrl, "https://github.com/settings/apps/codekeeper-widget/permissions");
+  assert.match(output.toString(), /issues: registered write; installed read; required write/);
   assert.match(output.toString(), new RegExp(`already up to date at ${bundle.metadata.source.repository}@${bundle.metadata.source.commit}`));
   assert.match(output.toString(), /Required secret availability was not validated; secret values were not inspected or exposed/);
 });
@@ -1151,6 +1186,7 @@ test("a plain-prompt rerun preserves disabled owner requests without asking for 
       throw new Error("no mutation before review");
     }),
     inspect: async () => snapshot,
+    inspectAppRegistration: async () => ({ status: "pass" }),
     loadAssets: async () => bundle
   });
   assert.equal(status, 1);

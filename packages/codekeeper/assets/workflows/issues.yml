@@ -16,12 +16,52 @@ permissions:
   pull-requests: read
 
 jobs:
+  continuation:
+    name: Route a Codekeeper issue continuation
+    if: >-
+      github.event_name == 'issue_comment' &&
+      contains(github.event.issue.labels.*.name, 'codekeeper:needs-information')
+    runs-on: ubuntu-latest
+    outputs:
+      route: ${{ steps.route.outputs.route }}
+    steps:
+      - name: Skip commands, bots, and untrusted discussion
+        id: route
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          REPORTER: ${{ github.event.issue.user.login }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          AUTOMATION_BOT_LOGIN: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
+        run: |
+          node --input-type=module -e '
+            import { appendFileSync } from "node:fs";
+            const body = String(process.env.COMMENT_BODY ?? "").trim().toLowerCase();
+            const author = String(process.env.COMMENT_AUTHOR ?? "").toLowerCase();
+            const reporter = String(process.env.REPORTER ?? "").toLowerCase();
+            const association = String(process.env.AUTHOR_ASSOCIATION ?? "");
+            const botLogin = String(process.env.AUTOMATION_BOT_LOGIN ?? "").toLowerCase();
+            const bot = botLogin.replace(/\[bot\]$/i, "");
+            const escapedBot = bot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            // CODEKEEPER_OWNER_COMMANDS_START
+            const actions = ["help","status","review","rerun","triage","implement","repair","fix","defer","pause","stop"];
+            // CODEKEEPER_OWNER_COMMANDS_END
+            const slash = new RegExp(`^/codekeeper\\s+(${actions.join("|")})$`, "i").test(body);
+            const mentioned = bot && new RegExp(`^@${escapedBot}\\s+(${actions.join("|")})$`, "i").test(body);
+            const trusted = author === reporter || ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
+            appendFileSync(process.env.GITHUB_OUTPUT, `route=${trusted && author !== botLogin && !slash && !mentioned}\n`);
+          '
   triage:
+    needs: continuation
+    if: >-
+      always() &&
+      vars.CODEKEEPER_ENABLED == 'true' &&
+      (github.event_name != 'issue_comment' || needs.continuation.outputs.route == 'true')
     uses: ./.github/workflows/codekeeper-runtime-issues.yml
     with:
       package_version: "PACKAGE_VERSION"
       package_integrity: "PACKAGE_INTEGRITY"
-      enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
+      enabled: true
       auto_triage: true
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}

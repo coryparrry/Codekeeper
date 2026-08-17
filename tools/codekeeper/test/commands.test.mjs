@@ -423,7 +423,11 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
     removed.push({ number, label });
   };
   GitHubClient.prototype.getPull = async () => ({
-    head: { sha: "a".repeat(40) },
+    base: { ref: "main", repo: { full_name: "owner/repository" } },
+    head: {
+      sha: "a".repeat(40),
+      repo: { full_name: "owner/repository" },
+    },
   });
   GitHubClient.prototype.createRepositoryDispatch = async (
     eventType,
@@ -435,7 +439,12 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
   try {
     const result = await runOwnerCommand({
       eventPath,
-      config: { repository: { ownerLogins: ["repository-owner"] } },
+      config: {
+        repository: {
+          ownerLogins: ["repository-owner"],
+          defaultBranch: "main",
+        },
+      },
       token: "app-token",
       automationIdentity: { login: "codekeeper[bot]", id: "123" },
     });
@@ -452,6 +461,126 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
         },
       },
     ]);
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("owner help hides repair using the live stacked pull base", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-stacked-help-command-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "/codekeeper help",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    getPull: GitHubClient.prototype.getPull,
+    upsertMarkerComment: GitHubClient.prototype.upsertMarkerComment,
+  };
+  let help = "";
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    pull_request: {},
+    labels: [],
+  });
+  GitHubClient.prototype.getPull = async () => ({
+    base: { ref: "stack-base", repo: { full_name: "owner/repository" } },
+  });
+  GitHubClient.prototype.upsertMarkerComment = async (
+    _number,
+    _marker,
+    body,
+  ) => {
+    help = body;
+  };
+  try {
+    await runOwnerCommand({
+      eventPath,
+      config: {
+        repository: {
+          ownerLogins: ["repository-owner"],
+          defaultBranch: "main",
+        },
+      },
+      token: "app-token",
+      automationIdentity: { login: "codekeeper[bot]", id: "123" },
+    });
+    assert.doesNotMatch(help, /`\/codekeeper repair`/);
+    assert.doesNotMatch(help, /`\/codekeeper fix`/);
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("an owner repair rejects a stacked pull request before unpausing it", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-stacked-repair-command-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "/codekeeper repair",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    getPull: GitHubClient.prototype.getPull,
+    removeLabel: GitHubClient.prototype.removeLabel,
+    createRepositoryDispatch: GitHubClient.prototype.createRepositoryDispatch,
+  };
+  const removed = [];
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    pull_request: {},
+    labels: [{ name: "codekeeper:paused" }],
+  });
+  GitHubClient.prototype.getPull = async () => ({
+    draft: false,
+    head: { sha: "a".repeat(40), repo: { full_name: "owner/repository" } },
+    base: { ref: "stack-base", repo: { full_name: "owner/repository" } },
+  });
+  GitHubClient.prototype.removeLabel = async (...args) => removed.push(args);
+  GitHubClient.prototype.createRepositoryDispatch = async () => {
+    throw new Error("stacked pull repair must not dispatch");
+  };
+  try {
+    await assert.rejects(
+      runOwnerCommand({
+        eventPath,
+        config: {
+          repository: {
+            ownerLogins: ["repository-owner"],
+            defaultBranch: "main",
+          },
+        },
+        token: "app-token",
+        automationIdentity: { login: "codekeeper[bot]", id: "123" },
+      }),
+      /Stacked pull requests support review only; repair is unavailable\./,
+    );
+    assert.deepEqual(removed, []);
   } finally {
     Object.assign(GitHubClient.prototype, originals);
     await rm(directory, { recursive: true, force: true });

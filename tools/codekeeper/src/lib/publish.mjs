@@ -918,6 +918,9 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   if (!closingResolved && result.duplicateOf && result.duplicateConfidence === "high") {
     desired.add("codekeeper:duplicate-candidate");
   }
+  if (!closingResolved && !closingDuplicate && result.missingInformation.length > 0) {
+    desired.add("codekeeper:needs-information");
+  }
   if (closingResolved) {
     desired.delete("codekeeper:ready");
     desired.delete("codekeeper:duplicate-candidate");

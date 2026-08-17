@@ -144,12 +144,14 @@ function canonicalDisplayCommand(command) {
   return `/codekeeper ${normalizeOwnerCommand(command) ?? command}`;
 }
 
-export function commandsForSurface(surface) {
+export function commandsForSurface(surface, { repairAvailable = true } = {}) {
   const normalizedSurface = COMMAND_SURFACES.includes(surface)
     ? surface
     : "issue";
-  return OWNER_COMMAND_DEFINITIONS.filter((definition) =>
-    definition.surfaces.includes(normalizedSurface),
+  return OWNER_COMMAND_DEFINITIONS.filter(
+    (definition) =>
+      definition.surfaces.includes(normalizedSurface) &&
+      (repairAvailable || definition.command !== "repair"),
   );
 }
 
@@ -165,11 +167,11 @@ function compatibilityText(definitions = OWNER_COMMAND_DEFINITIONS, surface = nu
   return aliases.length ? `Compatibility aliases: ${aliases.join(", ")}.` : "";
 }
 
-export function renderOwnerCommandHelp(surface = "issue") {
+export function renderOwnerCommandHelp(surface = "issue", options = {}) {
   const normalizedSurface = COMMAND_SURFACES.includes(surface)
     ? surface
     : "issue";
-  const commands = commandsForSurface(normalizedSurface);
+  const commands = commandsForSurface(normalizedSurface, options);
   const rows = commands.map(
     (definition) =>
       `- \`/codekeeper ${definition.command}\` — ${definition.description}`,

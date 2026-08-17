@@ -693,6 +693,8 @@ test("issue triage can start enabled issue implementation while owner PR repair 
     issue,
     /github\.event_name == 'issue_comment'[\s\S]*github\.event\.action == 'created'/,
   );
+  assert.match(issue, /codekeeper:needs-information/);
+  assert.doesNotMatch(issue, /replace\(/);
   assert.doesNotMatch(issue, /owner_requests/);
   assert.match(issue, /CODEKEEPER_OWNER_COMMANDS_START/);
   assert.match(
@@ -720,6 +722,11 @@ test("issue triage can start enabled issue implementation while owner PR repair 
     /issues:\n\s+types: \[opened, reopened, edited, closed\]\n\s+issue_comment:\n\s+types: \[created\]/,
   );
   assert.match(caller, /auto_triage: true/);
+  assert.match(caller, /codekeeper:needs-information/);
+  assert.match(caller, /Route a Codekeeper issue continuation/);
+  assert.match(caller, /const mentioned = bot && new RegExp/);
+  assert.match(caller, /needs\.continuation\.outputs\.route == 'true'/);
+  assert.match(caller, /enabled: true/);
   assert.match(
     caller,
     /run-name: "Codekeeper issue triage #\$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}"/,

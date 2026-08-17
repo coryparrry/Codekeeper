@@ -43,7 +43,7 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
       if (options.message === "Use the recommended starter setup?") return recommended;
       if (options.message === "Enable OpenAI traces?") return true;
       if (options.message.startsWith("Start Codekeeper")) return true;
-      if (options.message === "Run maintenance on a schedule?") return false;
+      if (options.message === "Run report-only maintenance on a schedule?") return false;
       if (options.message.startsWith("Record ") && options.message.includes(" as the required validation command")) return true;
       if (options.message.startsWith("Continue with")) return boundaries;
       throw new Error(`Unexpected confirmation: ${options.message}`);
