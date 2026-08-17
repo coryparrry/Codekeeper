@@ -32,6 +32,21 @@ on:
         description: GitHub App client ID.
         required: true
         type: string
+      app_contents_permission:
+        description: GitHub App Contents permission requested by this workflow.
+        required: false
+        default: write
+        type: string
+      app_issues_permission:
+        description: GitHub App Issues permission requested by this workflow.
+        required: false
+        default: write
+        type: string
+      app_pull_requests_permission:
+        description: GitHub App Pull requests permission requested by this workflow.
+        required: false
+        default: write
+        type: string
     secrets:
       app_private_key:
         required: true
@@ -98,6 +113,19 @@ jobs:
             appendFileSync(process.env.GITHUB_OUTPUT, "authorized=" + String(!result.skipped) + "\n");
           '
 
+      - name: Validate GitHub App permission inputs
+        if: steps.authorization.outputs.authorized == 'true'
+        env:
+          APP_CONTENTS_PERMISSION: ${{ inputs.app_contents_permission }}
+          APP_ISSUES_PERMISSION: ${{ inputs.app_issues_permission }}
+          APP_PULL_REQUESTS_PERMISSION: ${{ inputs.app_pull_requests_permission }}
+        run: |
+          for permission in "$APP_CONTENTS_PERMISSION" "$APP_ISSUES_PERMISSION" "$APP_PULL_REQUESTS_PERMISSION"; do
+            case "$permission" in
+              read|write) ;;
+              *) echo "Invalid GitHub App permission: $permission"; exit 1 ;;
+            esac
+          done
       - name: Create short-lived GitHub App token
         if: steps.authorization.outputs.authorized == 'true'
         id: app-token
@@ -105,9 +133,9 @@ jobs:
         with:
           client-id: ${{ inputs.app_client_id }}
           private-key: ${{ secrets.app_private_key }}
-          permission-contents: write
-          permission-issues: write
-          permission-pull-requests: write
+          permission-contents: ${{ inputs.app_contents_permission }}
+          permission-issues: ${{ inputs.app_issues_permission }}
+          permission-pull-requests: ${{ inputs.app_pull_requests_permission }}
 
       - name: Resolve automation bot identity
         if: steps.authorization.outputs.authorized == 'true'

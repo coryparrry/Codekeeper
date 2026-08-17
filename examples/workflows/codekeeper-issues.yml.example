@@ -25,6 +25,9 @@ jobs:
       auto_triage: true
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
+      app_contents_permission: "APP_CONTENTS_PERMISSION"
+      app_issues_permission: "APP_ISSUES_PERMISSION"
+      app_pull_requests_permission: "APP_PULL_REQUESTS_PERMISSION"
     secrets:
       # Match this secret to ai.agents.issue.provider in .github/codekeeper.json.
       model_api_key: ${{ secrets.DEEPSEEK_API_KEY }}

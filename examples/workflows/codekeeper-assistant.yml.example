@@ -53,5 +53,8 @@ jobs:
       installed_modes: review,maintain,issues,fix
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
+      app_contents_permission: "APP_CONTENTS_PERMISSION"
+      app_issues_permission: "APP_ISSUES_PERMISSION"
+      app_pull_requests_permission: "APP_PULL_REQUESTS_PERMISSION"
     secrets:
       app_private_key: ${{ secrets.CODEKEEPER_APP_PRIVATE_KEY }}
