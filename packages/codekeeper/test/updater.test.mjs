@@ -4,16 +4,46 @@ import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { createRecordingRunner, result, temporaryDirectory, textSink } from "./helpers.mjs";
-import { resolveNpmCliPath, resolveNpmRelease, runLatestInit, runLatestUpdate, verifyDownloadedTarball } from "../src/updater.mjs";
+import { SOURCE_REPOSITORY } from "../src/constants.mjs";
+import { installedReleaseVersion, resolveNpmCliPath, resolveNpmRelease, runLatestCommand, runLatestInit, runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate, verifyDownloadedTarball } from "../src/updater.mjs";
 
 const RELEASE_INTEGRITY = `sha512-${Buffer.alloc(64, 0xab).toString("base64")}`;
 
-test("the latest-release bootstrap resolves an exact receipt then runs that exact package", async () => {
+test("installed release inspection reads the validated repository manifest", async (t) => {
+  const root = await temporaryDirectory(t);
+  const nested = path.join(root, "nested");
+  await mkdir(path.join(root, ".git"));
+  await mkdir(path.join(root, ".github"));
+  await mkdir(nested);
+  await writeFile(
+    path.join(root, ".github", "codekeeper-release.json"),
+    `${JSON.stringify({
+      version: 2,
+      package: {
+        name: "codekeeper",
+        version: "1.4.2",
+        integrity: RELEASE_INTEGRITY
+      },
+      source: { repository: SOURCE_REPOSITORY, commit: "a".repeat(40) },
+      managedFiles: {
+        ".github/workflows/codekeeper-assistant.yml": "b".repeat(64)
+      }
+    })}\n`
+  );
+  assert.equal(await installedReleaseVersion({ cwd: nested }), "1.4.2");
+});
+
+test("a newer latest release resolves an exact receipt then runs that exact package", async () => {
   const calls = [];
   const runner = createRecordingRunner((call) => {
     calls.push(call);
     return calls.length === 1
-      ? result(JSON.stringify({ version: "1.4.2", dist: { integrity: RELEASE_INTEGRITY } }))
+      ? result(
+          JSON.stringify({
+            version: "1.4.2",
+            dist: { integrity: RELEASE_INTEGRITY }
+          })
+        )
       : result();
   });
   const output = textSink();
@@ -27,30 +57,21 @@ test("the latest-release bootstrap resolves an exact receipt then runs that exac
       OPENAI_API_KEY: "must-not-reach-the-new-cli"
     },
     platform: "linux",
+    readInstalledVersion: async () => "1.3.0",
     resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
     stagePackage: async ({ receipt }) => {
       assert.equal(receipt.integrity, RELEASE_INTEGRITY);
-      return { executable: "/verified/codekeeper/bin/codekeeper.mjs", root: "/verified/codekeeper" };
+      return {
+        executable: "/verified/codekeeper/bin/codekeeper.mjs",
+        root: "/verified/codekeeper"
+      };
     },
     fsImpl: { async rm() {} },
     runner
   });
   assert.equal(status, 0);
-  assert.deepEqual(calls[0].args, [
-    "/trusted/lib/node_modules/npm/bin/npm-cli.js",
-    "view",
-    "codekeeper@latest",
-    "version",
-    "dist.integrity",
-    "--json"
-  ]);
-  assert.deepEqual(calls[1].args, [
-    "/verified/codekeeper/bin/codekeeper.mjs",
-    "update",
-    "--current-package",
-    "--package-integrity",
-    RELEASE_INTEGRITY,
-  ]);
+  assert.deepEqual(calls[0].args, ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "codekeeper@latest", "version", "dist.integrity", "--json"]);
+  assert.deepEqual(calls[1].args, ["/verified/codekeeper/bin/codekeeper.mjs", "update", "--current-package", "--package-integrity", RELEASE_INTEGRITY]);
   assert.equal(calls[1].options.stdio, "inherit");
   assert.equal(calls[1].options.timeoutMs, null);
   assert.equal(calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_VERSION, "1.4.2");
@@ -60,20 +81,272 @@ test("the latest-release bootstrap resolves an exact receipt then runs that exac
   assert.match(output.toString(), /Resolving the latest.*Launching Codekeeper 1\.4\.2/s);
 });
 
-test("init also re-enters through the exact latest package receipt", async () => {
-  const runner = createRecordingRunner((_call, index) => index === 0
-    ? result(JSON.stringify({ version: "1.4.2", dist: { integrity: RELEASE_INTEGRITY } }))
-    : result());
-  assert.equal(await runLatestInit({
+test("latest updates reject equal or older releases before package staging or execution", async () => {
+  for (const version of ["1.4.2", "1.3.0"]) {
+    const runner = createRecordingRunner(() =>
+      result(
+        JSON.stringify({
+          version,
+          dist: { integrity: RELEASE_INTEGRITY }
+        })
+      )
+    );
+    let staged = 0;
+    await assert.rejects(
+      runLatestUpdate({
+        cwd: "/tmp/widget",
+        output: textSink(),
+        environment: { PATH: "/trusted/bin" },
+        platform: "linux",
+        readInstalledVersion: async () => "1.4.2",
+        resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+        stagePackage: async () => {
+          staged += 1;
+          throw new Error("package must not stage");
+        },
+        runner
+      }),
+      (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /must be newer/.test(error.message)
+    );
+    assert.equal(runner.calls.length, 1);
+    assert.equal(staged, 0);
+  }
+});
+
+test("an exact update target resolves and launches only that verified release", async () => {
+  const calls = [];
+  const runner = createRecordingRunner((call) => {
+    calls.push(call);
+    return calls.length === 1
+      ? result(
+          JSON.stringify({
+            version: "1.4.2",
+            dist: { integrity: RELEASE_INTEGRITY }
+          })
+        )
+      : result();
+  });
+  const status = await runVersionedUpdate({
     cwd: "/tmp/widget",
     output: textSink(),
     environment: { PATH: "/trusted/bin" },
     platform: "linux",
+    requestedVersion: "1.4.2",
+    readInstalledVersion: async () => "1.3.0",
     resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
-    stagePackage: async () => ({ executable: "/verified/codekeeper/bin/codekeeper.mjs", root: "/verified/codekeeper" }),
+    stagePackage: async ({ receipt }) => {
+      assert.deepEqual(receipt, {
+        npmCli: "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+        version: "1.4.2",
+        integrity: RELEASE_INTEGRITY
+      });
+      return {
+        executable: "/verified/codekeeper/bin/codekeeper.mjs",
+        root: "/verified/codekeeper"
+      };
+    },
     fsImpl: { async rm() {} },
     runner
-  }), 0);
+  });
+  assert.equal(status, 0);
+  assert.deepEqual(calls[0].args.slice(0, 3), ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "codekeeper@1.4.2"]);
+  assert.deepEqual(calls[1].args, ["/verified/codekeeper/bin/codekeeper.mjs", "update", "--current-package", "--package-integrity", RELEASE_INTEGRITY]);
+  assert.equal(calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_VERSION, "1.4.2");
+});
+
+test("exact updates reject equal or older targets before registry or package work", async () => {
+  for (const targetVersion of ["1.4.2", "1.3.0"]) {
+    let calls = 0;
+    await assert.rejects(
+      runVersionedUpdate({
+        cwd: "/tmp/widget",
+        output: textSink(),
+        requestedVersion: targetVersion,
+        readInstalledVersion: async () => "1.4.2",
+        resolveNpm: async () => {
+          calls += 1;
+          throw new Error("registry must not be queried");
+        }
+      }),
+      (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /must be newer/.test(error.message)
+    );
+    assert.equal(calls, 0);
+  }
+});
+
+test("update check resolves metadata without staging or launching a package", async () => {
+  const runner = createRecordingRunner(() =>
+    result(
+      JSON.stringify({
+        version: "1.4.2",
+        dist: { integrity: RELEASE_INTEGRITY }
+      })
+    )
+  );
+  const output = textSink();
+  const status = await runUpdateCheck({
+    cwd: "/tmp/widget",
+    output,
+    environment: { PATH: "/trusted/bin" },
+    platform: "linux",
+    readInstalledVersion: async () => "1.3.0",
+    resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+    runner
+  });
+  assert.equal(status, 0);
+  assert.equal(runner.calls.length, 1);
+  assert.deepEqual(runner.calls[0].args.slice(0, 3), ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "codekeeper@latest"]);
+  assert.match(output.toString(), /Installed Codekeeper release: 1\.3\.0/);
+  assert.match(output.toString(), /Latest published Codekeeper release: 1\.4\.2/);
+  assert.match(output.toString(), /codekeeper update --to 1\.4\.2/);
+  assert.match(output.toString(), /No files, settings, or pull requests were changed/);
+});
+
+test("update check never recommends downgrading an installation newer than the registry", async () => {
+  const output = textSink();
+  const status = await runUpdateCheck({
+    cwd: "/tmp/widget",
+    output,
+    environment: { PATH: "/trusted/bin" },
+    platform: "linux",
+    readInstalledVersion: async () => "2.0.0",
+    resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+    runner: createRecordingRunner(() =>
+      result(
+        JSON.stringify({
+          version: "1.4.2",
+          dist: { integrity: RELEASE_INTEGRITY }
+        })
+      )
+    )
+  });
+  assert.equal(status, 0);
+  assert.match(output.toString(), /installed Codekeeper release is newer/);
+  assert.doesNotMatch(output.toString(), /codekeeper update --to/);
+});
+
+test("rollback stages the exact target and invokes its forward update protocol", async () => {
+  const calls = [];
+  const runner = createRecordingRunner((call) => {
+    calls.push(call);
+    return calls.length === 1
+      ? result(
+          JSON.stringify({
+            version: "1.2.0",
+            dist: { integrity: RELEASE_INTEGRITY }
+          })
+        )
+      : result();
+  });
+  const output = textSink();
+  const status = await runRollback({
+    cwd: "/tmp/widget",
+    output,
+    environment: { PATH: "/trusted/bin" },
+    platform: "linux",
+    targetVersion: "1.2.0",
+    readInstalledVersion: async () => "1.4.2",
+    resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+    stagePackage: async ({ receipt }) => {
+      assert.equal(receipt.version, "1.2.0");
+      return {
+        executable: "/verified/codekeeper/bin/codekeeper.mjs",
+        root: "/verified/codekeeper"
+      };
+    },
+    fsImpl: { async rm() {} },
+    runner
+  });
+  assert.equal(status, 0);
+  assert.deepEqual(calls[1].args, ["/verified/codekeeper/bin/codekeeper.mjs", "update", "--current-package", "--package-integrity", RELEASE_INTEGRITY]);
+  assert.match(output.toString(), /forward rollback plan/);
+});
+
+test("rollback fails closed when the verified target CLI cannot complete its forward update", async () => {
+  const runner = createRecordingRunner((call, index) =>
+    index === 0
+      ? result(
+          JSON.stringify({
+            version: "1.2.0",
+            dist: { integrity: RELEASE_INTEGRITY }
+          })
+        )
+      : result("", { status: 2 })
+  );
+  await assert.rejects(
+    runRollback({
+      cwd: "/tmp/widget",
+      output: textSink(),
+      environment: { PATH: "/trusted/bin" },
+      platform: "linux",
+      targetVersion: "1.2.0",
+      readInstalledVersion: async () => "1.4.2",
+      resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+      stagePackage: async () => ({
+        executable: "/verified/codekeeper/bin/codekeeper.mjs",
+        root: "/verified/codekeeper"
+      }),
+      fsImpl: { async rm() {} },
+      runner
+    }),
+    (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /could not perform a forward rollback/.test(error.message)
+  );
+});
+
+test("rollback rejects current or newer targets before registry or package work", async () => {
+  for (const targetVersion of ["1.4.2", "1.5.0"]) {
+    let calls = 0;
+    await assert.rejects(
+      runRollback({
+        cwd: "/tmp/widget",
+        output: textSink(),
+        targetVersion,
+        readInstalledVersion: async () => "1.4.2",
+        resolveNpm: async () => {
+          calls += 1;
+          throw new Error("registry must not be queried");
+        }
+      }),
+      (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /must be older/.test(error.message)
+    );
+    assert.equal(calls, 0);
+  }
+});
+
+test("latest command helper cannot bypass rollback's exact older-version guard", async () => {
+  await assert.rejects(
+    async () => runLatestCommand("rollback"),
+    (error) => error instanceof TypeError && /init or update/.test(error.message)
+  );
+});
+
+test("init also re-enters through the exact latest package receipt", async () => {
+  const runner = createRecordingRunner((_call, index) =>
+    index === 0
+      ? result(
+          JSON.stringify({
+            version: "1.4.2",
+            dist: { integrity: RELEASE_INTEGRITY }
+          })
+        )
+      : result()
+  );
+  assert.equal(
+    await runLatestInit({
+      cwd: "/tmp/widget",
+      output: textSink(),
+      environment: { PATH: "/trusted/bin" },
+      platform: "linux",
+      resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+      stagePackage: async () => ({
+        executable: "/verified/codekeeper/bin/codekeeper.mjs",
+        root: "/verified/codekeeper"
+      }),
+      fsImpl: { async rm() {} },
+      runner
+    }),
+    0
+  );
   assert.deepEqual(runner.calls[1].args.slice(-4), ["init", "--current-package", "--package-integrity", RELEASE_INTEGRITY]);
   assert.equal(runner.calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_INTEGRITY, RELEASE_INTEGRITY);
 });
@@ -87,22 +360,24 @@ test("the trusted launcher rejects changed tarball bytes for the same package ve
   await assert.rejects(
     verifyDownloadedTarball({
       downloadRoot,
-      reportSource: JSON.stringify([{
-        name: "codekeeper",
-        version: "1.4.2",
-        integrity: expectedIntegrity,
-        filename,
-      }]),
-      receipt: { version: "1.4.2", integrity: expectedIntegrity },
+      reportSource: JSON.stringify([
+        {
+          name: "codekeeper",
+          version: "1.4.2",
+          integrity: expectedIntegrity,
+          filename
+        }
+      ]),
+      receipt: { version: "1.4.2", integrity: expectedIntegrity }
     }),
-    (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /does not match.*SHA-512/.test(error.message),
+    (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /does not match.*SHA-512/.test(error.message)
   );
 });
 
 for (const [description, wrapReport] of [
   ["a single-array report", (entry) => [entry]],
   ["a direct report object", (entry) => entry],
-  ["a single-key report object", (entry) => ({ codekeeper: entry })],
+  ["a single-key report object", (entry) => ({ codekeeper: entry })]
 ]) {
   test(`the trusted launcher accepts ${description} from npm pack`, async (t) => {
     const downloadRoot = await temporaryDirectory(t, "codekeeper-updater-download-");
@@ -111,35 +386,42 @@ for (const [description, wrapReport] of [
     const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
     await writeFile(path.join(downloadRoot, filename), bytes);
     const entry = { name: "codekeeper", version: "1.4.2", integrity, filename };
-    assert.equal(await verifyDownloadedTarball({
-      downloadRoot,
-      reportSource: JSON.stringify(wrapReport(entry)),
-      receipt: { version: "1.4.2", integrity },
-    }), await realpath(path.join(downloadRoot, filename)));
+    assert.equal(
+      await verifyDownloadedTarball({
+        downloadRoot,
+        reportSource: JSON.stringify(wrapReport(entry)),
+        receipt: { version: "1.4.2", integrity }
+      }),
+      await realpath(path.join(downloadRoot, filename))
+    );
   });
 }
 
 for (const [description, report] of [
   ["an array with multiple reports", [{ name: "codekeeper" }, { name: "codekeeper" }]],
-  ["an object with multiple reports", { codekeeper: { name: "codekeeper" }, other: { name: "other" } }],
+  ["an object with multiple reports", { codekeeper: { name: "codekeeper" }, other: { name: "other" } }]
 ]) {
   test(`the trusted launcher rejects ${description}`, async (t) => {
     await assert.rejects(
       verifyDownloadedTarball({
         downloadRoot: await temporaryDirectory(t, "codekeeper-updater-download-"),
         reportSource: JSON.stringify(report),
-        receipt: { version: "1.4.2", integrity: RELEASE_INTEGRITY },
+        receipt: { version: "1.4.2", integrity: RELEASE_INTEGRITY }
       }),
-      (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /invalid report/.test(error.message),
+      (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /invalid report/.test(error.message)
     );
   });
 }
 
 test("the latest-release bootstrap rejects invalid registry versions before execution", async () => {
-  const runner = createRecordingRunner(() => result(JSON.stringify({
-    version: "latest",
-    dist: { integrity: RELEASE_INTEGRITY }
-  })));
+  const runner = createRecordingRunner(() =>
+    result(
+      JSON.stringify({
+        version: "latest",
+        dist: { integrity: RELEASE_INTEGRITY }
+      })
+    )
+  );
   await assert.rejects(
     runLatestUpdate({
       cwd: "/tmp/widget",
@@ -155,10 +437,14 @@ test("the latest-release bootstrap rejects invalid registry versions before exec
 });
 
 test("the release resolver queries an explicit version and requires an exact matching receipt", async () => {
-  const runner = createRecordingRunner(() => result(JSON.stringify({
-    version: "1.4.2",
-    "dist.integrity": RELEASE_INTEGRITY
-  })));
+  const runner = createRecordingRunner(() =>
+    result(
+      JSON.stringify({
+        version: "1.4.2",
+        "dist.integrity": RELEASE_INTEGRITY
+      })
+    )
+  );
   const receipt = await resolveNpmRelease({
     cwd: "/tmp/widget",
     environment: { PATH: "/trusted/bin" },
@@ -172,14 +458,7 @@ test("the release resolver queries an explicit version and requires an exact mat
     version: "1.4.2",
     integrity: RELEASE_INTEGRITY
   });
-  assert.deepEqual(runner.calls[0].args, [
-    "/trusted/lib/node_modules/npm/bin/npm-cli.js",
-    "view",
-    "codekeeper@1.4.2",
-    "version",
-    "dist.integrity",
-    "--json"
-  ]);
+  assert.deepEqual(runner.calls[0].args, ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "codekeeper@1.4.2", "version", "dist.integrity", "--json"]);
 });
 
 test("the release resolver rejects ranges before invoking npm", async () => {
@@ -204,10 +483,14 @@ test("the release resolver rejects ranges before invoking npm", async () => {
 });
 
 test("the release resolver rejects an exact-version mismatch before execution", async () => {
-  const runner = createRecordingRunner(() => result(JSON.stringify({
-    version: "1.4.3",
-    dist: { integrity: RELEASE_INTEGRITY }
-  })));
+  const runner = createRecordingRunner(() =>
+    result(
+      JSON.stringify({
+        version: "1.4.3",
+        dist: { integrity: RELEASE_INTEGRITY }
+      })
+    )
+  );
   await assert.rejects(
     resolveNpmRelease({
       cwd: "/tmp/widget",
@@ -254,11 +537,14 @@ test("npm resolution accepts the package-manager CLI outside the checkout and re
   await mkdir(path.dirname(shadowNpm), { recursive: true });
   await writeFile(trustedNpm, "// trusted test npm\n");
   await writeFile(shadowNpm, "// repository shadow\n");
-  assert.equal(await resolveNpmCliPath({
-    cwd: repository,
-    environment: { npm_execpath: trustedNpm },
-    platform: "linux"
-  }), await realpath(trustedNpm));
+  assert.equal(
+    await resolveNpmCliPath({
+      cwd: repository,
+      environment: { npm_execpath: trustedNpm },
+      platform: "linux"
+    }),
+    await realpath(trustedNpm)
+  );
   await assert.rejects(
     resolveNpmCliPath({
       cwd: repository,

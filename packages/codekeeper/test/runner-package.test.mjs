@@ -32,33 +32,18 @@ async function pathExists(filePath) {
 test("normalizes object- and single-element array-shaped npm pack reports", () => {
   const report = {
     filename: "codekeeper-0.2.0.tgz",
-    files: [{ path: "package.json" }],
+    files: [{ path: "package.json" }]
   };
   assert.deepEqual(normalizeNpmPackReport(JSON.stringify(report)), report);
-  assert.deepEqual(
-    normalizeNpmPackReport(JSON.stringify({ codekeeper: report })),
-    report,
-  );
+  assert.deepEqual(normalizeNpmPackReport(JSON.stringify({ codekeeper: report })), report);
   assert.deepEqual(normalizeNpmPackReport(JSON.stringify([report])), report);
 });
 
 test("rejects invalid and multiple npm pack reports", () => {
   assert.throws(() => normalizeNpmPackReport("null"), /invalid report/);
-  assert.throws(
-    () => normalizeNpmPackReport(JSON.stringify([])),
-    /invalid number of reports/,
-  );
-  assert.throws(
-    () =>
-      normalizeNpmPackReport(
-        JSON.stringify({ first: { files: [] }, second: { files: [] } }),
-      ),
-    /invalid number of reports/,
-  );
-  assert.throws(
-    () => normalizeNpmPackReport(JSON.stringify([null])),
-    /invalid report/,
-  );
+  assert.throws(() => normalizeNpmPackReport(JSON.stringify([])), /invalid number of reports/);
+  assert.throws(() => normalizeNpmPackReport(JSON.stringify({ first: { files: [] }, second: { files: [] } })), /invalid number of reports/);
+  assert.throws(() => normalizeNpmPackReport(JSON.stringify([null])), /invalid report/);
 });
 
 test("pack destination rejects an ancestor symlink into the source repository", async (t) => {
@@ -68,19 +53,12 @@ test("pack destination rejects an ancestor symlink into the source repository", 
   }
   const fixture = await temporaryDirectory(t, "codekeeper-pack-symlink-");
   const repositoryRoot = path.join(fixture, "repository");
-  await mkdir(path.join(repositoryRoot, "packages", "codekeeper", "assets"), { recursive: true });
-  await writeFile(
-    path.join(repositoryRoot, "package.json"),
-    JSON.stringify({ packageManager: "npm@12.0.2" }),
-  );
-  await writeFile(
-    path.join(repositoryRoot, "packages", "codekeeper", "package.json"),
-    JSON.stringify({ version: "0.2.0" }),
-  );
-  await writeFile(
-    path.join(repositoryRoot, "packages", "codekeeper", "assets", "metadata.json"),
-    JSON.stringify({ source: { commit: "0".repeat(40) } }),
-  );
+  await mkdir(path.join(repositoryRoot, "packages", "codekeeper", "assets"), {
+    recursive: true
+  });
+  await writeFile(path.join(repositoryRoot, "package.json"), JSON.stringify({ packageManager: "npm@12.0.2" }));
+  await writeFile(path.join(repositoryRoot, "packages", "codekeeper", "package.json"), JSON.stringify({ version: "0.2.0" }));
+  await writeFile(path.join(repositoryRoot, "packages", "codekeeper", "assets", "metadata.json"), JSON.stringify({ source: { commit: "0".repeat(40) } }));
   const redirectedParent = path.join(fixture, "redirected-parent");
   await symlink(repositoryRoot, redirectedParent);
 
@@ -89,9 +67,9 @@ test("pack destination rejects an ancestor symlink into the source repository", 
       repositoryRoot,
       destination: path.join(redirectedParent, "release"),
       sourceCommit: "0".repeat(40),
-      requireClean: false,
+      requireClean: false
     }),
-    /pack destination must be outside the source repository/,
+    /pack destination must be outside the source repository/
   );
   assert.equal(await pathExists(path.join(repositoryRoot, "release")), false);
 });
@@ -101,7 +79,9 @@ test("release authority accepts a merged snapshot and rejects an unmerged branch
   git(repositoryRoot, ["init", "--initial-branch=main"]);
   git(repositoryRoot, ["config", "user.name", "Codekeeper Test"]);
   git(repositoryRoot, ["config", "user.email", "codekeeper-test@example.invalid"]);
-  await mkdir(path.join(repositoryRoot, "tools", "codekeeper"), { recursive: true });
+  await mkdir(path.join(repositoryRoot, "tools", "codekeeper"), {
+    recursive: true
+  });
   await writeFile(path.join(repositoryRoot, "tools", "codekeeper", "runtime.mjs"), "export {};\n");
   git(repositoryRoot, ["add", "."]);
   git(repositoryRoot, ["commit", "-m", "production checkpoint"]);
@@ -116,13 +96,13 @@ test("release authority accepts a merged snapshot and rejects an unmerged branch
   assert.deepEqual(
     verifyReleaseAuthority(repositoryRoot, {
       releaseCommit,
-      pinnedSourceCommit: productionCommit,
+      pinnedSourceCommit: productionCommit
     }),
     {
       defaultBranchRef: "refs/remotes/origin/main",
       latestProductionCheckpoint: productionCommit,
-      releaseCommit,
-    },
+      releaseCommit
+    }
   );
 
   git(repositoryRoot, ["checkout", "-b", "feature"]);
@@ -134,9 +114,9 @@ test("release authority accepts a merged snapshot and rejects an unmerged branch
     () =>
       verifyReleaseAuthority(repositoryRoot, {
         releaseCommit: featureCommit,
-        pinnedSourceCommit: productionCommit,
+        pinnedSourceCommit: productionCommit
       }),
-    /must be reachable from the fetched default branch/,
+    /must be reachable from the fetched default branch/
   );
 });
 
@@ -201,11 +181,7 @@ test("the real command runner maps an App PEM descriptor only to child stdin", a
       return child;
     }
   });
-  const result = await runner.run(
-    "gh",
-    ["secret", "set", "CODEKEEPER_APP_PRIVATE_KEY", "--app", "actions", "--repo", "acme/widget"],
-    { cwd: "/tmp/widget", stdio: "ignore", stdinFd: 45, timeoutMs: null }
-  );
+  const result = await runner.run("gh", ["secret", "set", "CODEKEEPER_APP_PRIVATE_KEY", "--app", "actions", "--repo", "acme/widget"], { cwd: "/tmp/widget", stdio: "ignore", stdinFd: 45, timeoutMs: null });
 
   assert.equal(result.status, 0);
   assert.deepEqual(spawnCall.options.stdio, [45, "ignore", "ignore"]);
@@ -222,10 +198,7 @@ test("the real command runner sends a provider key only through child stdin", as
   const runner = createCommandRunner({
     environment: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C" }
   });
-  const child = await runner.run(process.execPath, [
-    "-e",
-    "let size=0;process.stdin.on('data',chunk=>size+=chunk.length);process.stdin.on('end',()=>process.stdout.write(size>0?'received':'empty'))"
-  ], {
+  const child = await runner.run(process.execPath, ["-e", "let size=0;process.stdin.on('data',chunk=>size+=chunk.length);process.stdin.on('end',()=>process.stdout.write(size>0?'received':'empty'))"], {
     provideInput(write) {
       write(secret);
     }
@@ -242,16 +215,21 @@ test("command runner bounds captured output and requireSuccess rejects failure, 
   assert.equal(large.status, 0);
   assert.equal(large.truncated, true);
   assert.equal(Buffer.byteLength(large.stdout), 128 * 1024);
+  await assert.rejects(requireSuccess({ run: async () => large }, "node", [], {}, "bounded command failed"), (error) => error.code === "COMMAND_FAILED" && error.message === "bounded command failed");
+  await assert.rejects(requireSuccess({ run: async () => ({ ...large, status: 1, truncated: false }) }, "node", []), (error) => error.code === "COMMAND_FAILED");
   await assert.rejects(
-    requireSuccess({ run: async () => large }, "node", [], {}, "bounded command failed"),
-    (error) => error.code === "COMMAND_FAILED" && error.message === "bounded command failed"
-  );
-  await assert.rejects(
-    requireSuccess({ run: async () => ({ ...large, status: 1, truncated: false }) }, "node", []),
-    (error) => error.code === "COMMAND_FAILED"
-  );
-  await assert.rejects(
-    requireSuccess({ run: async () => ({ ...large, status: 1, timedOut: true, truncated: false }) }, "node", []),
+    requireSuccess(
+      {
+        run: async () => ({
+          ...large,
+          status: 1,
+          timedOut: true,
+          truncated: false
+        })
+      },
+      "node",
+      []
+    ),
     (error) => error.code === "COMMAND_TIMEOUT"
   );
 });
@@ -284,7 +262,10 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     npm_config_fund: "false"
   };
   const npmOptions = { encoding: "utf8", env: npmEnvironment, timeout: 60_000 };
-  const files = packed.files.map((file) => file.path).filter((file) => !file.startsWith("node_modules/")).sort();
+  const files = packed.files
+    .map((file) => file.path)
+    .filter((file) => !file.startsWith("node_modules/"))
+    .sort();
   const expected = [...releaseManifest.files.map((file) => file.path), "release/manifest.json"].sort();
   assert.equal(packed.name, "codekeeper");
   assert.equal(packed.version, "0.2.0");
@@ -314,9 +295,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     dependencies: { codekeeper: `file:${tarball}` }
   };
   await writeFile(path.join(npmInstallRoot, "package.json"), JSON.stringify(installerManifest));
-  execFileSync("npm", [
-    "install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--allow-file=root", "--prefix", npmInstallRoot
-  ], { cwd: npmInstallRoot, ...npmOptions });
+  execFileSync("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--allow-file=root", "--prefix", npmInstallRoot], { cwd: npmInstallRoot, ...npmOptions });
   const npmInstalledRoot = path.join(npmInstallRoot, "node_modules", "codekeeper");
   const npmInstalledPackage = JSON.parse(await readFile(path.join(npmInstalledRoot, "package.json"), "utf8"));
   const expectedBins = {
@@ -325,7 +304,10 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   };
   assert.deepEqual(npmInstalledPackage.bin, expectedBins);
   assert.deepEqual(npmInstalledPackage.dependencies, packageManifest.dependencies);
-  assert.deepEqual(npmInstalledPackage.dependencies, { ink: "7.1.1", react: "19.2.8" });
+  assert.deepEqual(npmInstalledPackage.dependencies, {
+    ink: "7.1.1",
+    react: "19.2.8"
+  });
   assert.equal(await pathExists(path.join(npmInstallRoot, "node_modules", "@openai", "agents")), false);
   assert.equal(await pathExists(path.join(npmInstallRoot, "node_modules", "@openai", "codex")), false);
   const npmShim = path.join(npmInstallRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper.cmd" : "codekeeper");
@@ -338,36 +320,37 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   assert.deepEqual(installedPackage.bin, expectedBins);
   assert.deepEqual(installedPackage.dependencies, packageManifest.dependencies);
   assert.deepEqual([...new Set(installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? [])], [PINNED_COMMIT]);
-  const shimEnvironment = Object.fromEntries(Object.entries({
-    PATH: process.env.PATH,
-    SystemRoot: process.env.SystemRoot
-  }).filter(([, value]) => typeof value === "string"));
-  const invoke = (command, args) => process.platform === "win32"
-    ? execFileSync("cmd.exe", ["/d", "/s", "/c", command, ...args], { encoding: "utf8", env: shimEnvironment, timeout: 10_000 })
-    : execFileSync(command, args, { encoding: "utf8", env: shimEnvironment, timeout: 10_000 });
+  const shimEnvironment = Object.fromEntries(
+    Object.entries({
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot
+    }).filter(([, value]) => typeof value === "string")
+  );
+  const invoke = (command, args) =>
+    process.platform === "win32"
+      ? execFileSync("cmd.exe", ["/d", "/s", "/c", command, ...args], {
+          encoding: "utf8",
+          env: shimEnvironment,
+          timeout: 10_000
+        })
+      : execFileSync(command, args, {
+          encoding: "utf8",
+          env: shimEnvironment,
+          timeout: 10_000
+        });
   const help = invoke(shim, ["--help"]);
   const version = invoke(shim, ["--version"]);
   const npmInstallHelp = invoke(npmShim, ["--help"]);
   const npmInstallVersion = invoke(npmShim, ["--version"]);
-  const npmExecHelp = execFileSync("npm", [
-    "exec", "--prefix", npmInstallRoot, "--", "codekeeper", "--help"
-  ], { cwd: npmInstallRoot, ...npmOptions });
-  const npxHelp = execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", [
-    "--offline", "--prefix", npmInstallRoot, "--", "codekeeper", "--help"
-  ], { cwd: npmInstallRoot, ...npmOptions });
-  const installedTui = await import(pathToFileURL(path.join(
-    installedRoot,
-    "src",
-    "tui.mjs"
-  )).href);
-  assert.match(help, /^Usage:\n  codekeeper init/m);
-  assert.match(help, /^  codekeeper update$/m);
-  assert.match(npmInstallHelp, /^Usage:\n  codekeeper init/m);
-  assert.match(npmInstallHelp, /^  codekeeper update$/m);
-  assert.match(npmExecHelp, /^Usage:\n  codekeeper init/m);
-  assert.match(npmExecHelp, /^  codekeeper update$/m);
-  assert.match(npxHelp, /^Usage:\n  codekeeper init/m);
-  assert.match(npxHelp, /^  codekeeper update$/m);
+  const npmExecHelp = execFileSync("npm", ["exec", "--prefix", npmInstallRoot, "--", "codekeeper", "--help"], { cwd: npmInstallRoot, ...npmOptions });
+  const npxHelp = execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", ["--offline", "--prefix", npmInstallRoot, "--", "codekeeper", "--help"], { cwd: npmInstallRoot, ...npmOptions });
+  const installedTui = await import(pathToFileURL(path.join(installedRoot, "src", "tui.mjs")).href);
+  for (const output of [help, npmInstallHelp, npmExecHelp, npxHelp]) {
+    assert.match(output, /^Usage:\n  codekeeper init/m);
+    assert.match(output, /^  codekeeper update \[--to X\.Y\.Z\]$/m);
+    assert.match(output, /^  codekeeper update --check$/m);
+    assert.match(output, /^  codekeeper rollback --to X\.Y\.Z$/m);
+  }
   assert.equal(version, "0.2.0\n");
   assert.equal(npmInstallVersion, "0.2.0\n");
   assert.throws(
@@ -376,42 +359,38 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
       const output = `${error.stdout ?? ""}${error.stderr ?? ""}`;
       return !/release receipt is missing or invalid|Resolving the latest Codekeeper/.test(output);
     },
-    "an explicit local tarball receipt enters the current package without registry bootstrapping",
+    "an explicit local tarball receipt enters the current package without registry bootstrapping"
   );
   assert.equal(typeof installedTui.createInkPrompter, "function");
-  assert.equal(installedTui.shouldUseInkTui({
-    interactive: true,
-    input: { isTTY: true, setRawMode() {} },
-    output: { isTTY: true },
-    environment: { TERM: "xterm-256color" }
-  }), true);
+  assert.equal(
+    installedTui.shouldUseInkTui({
+      interactive: true,
+      input: { isTTY: true, setRawMode() {} },
+      output: { isTTY: true },
+      environment: { TERM: "xterm-256color" }
+    }),
+    true
+  );
 
   const installedReleaseManifestBytes = await readFile(path.join(installedRoot, "release", "manifest.json"));
   const expectedManifestSha256 = createHash("sha256").update(installedReleaseManifestBytes).digest("hex");
-  await writeFile(path.join(installedRoot, "release", "package-integrity.json"), `${JSON.stringify({
-    version: 1,
-    algorithm: "sha512",
-    integrity: expectedIntegrity
-  })}\n`);
-  const verifier = path.join(
-    npmInstallRoot,
-    "node_modules",
-    ".bin",
-    process.platform === "win32" ? "codekeeper-verify-package.cmd" : "codekeeper-verify-package"
+  await writeFile(
+    path.join(installedRoot, "release", "package-integrity.json"),
+    `${JSON.stringify({
+      version: 1,
+      algorithm: "sha512",
+      integrity: expectedIntegrity
+    })}\n`
   );
-  const verifierOutput = invoke(verifier, [
-    "--root", installedRoot,
-    "--expected-name", "codekeeper",
-    "--expected-version", packageManifest.version,
-    "--expected-integrity", expectedIntegrity,
-    "--expected-manifest-sha256", expectedManifestSha256,
-    "--expected-source-commit", releaseManifest.source.commit
-  ]);
+  const verifier = path.join(npmInstallRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper-verify-package.cmd" : "codekeeper-verify-package");
+  const verifierOutput = invoke(verifier, ["--root", installedRoot, "--expected-name", "codekeeper", "--expected-version", packageManifest.version, "--expected-integrity", expectedIntegrity, "--expected-manifest-sha256", expectedManifestSha256, "--expected-source-commit", releaseManifest.source.commit]);
   assert.match(verifierOutput, /^CODEKEEPER_PACKAGE_VERIFIED name=codekeeper version=0\.2\.0 source=[0-9a-f]{40}$/m);
 
   const runtimeInstallParent = await temporaryDirectory(t, "codekeeper-runtime-install-");
   const runtimeRoot = path.join(runtimeInstallParent, "runtime");
-  await cp(path.join(installedRoot, "runtime"), runtimeRoot, { recursive: true });
+  await cp(path.join(installedRoot, "runtime"), runtimeRoot, {
+    recursive: true
+  });
   const runtimeLock = JSON.parse(await readFile(path.join(runtimeRoot, "package-lock.json"), "utf8"));
   for (const [index, [packagePath, metadata]] of Object.entries(runtimeLock.packages).entries()) {
     if (!packagePath.startsWith("node_modules/")) continue;
@@ -424,9 +403,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     }
     const installedManifestPath = path.join(installedDependencyPath, "package.json");
     const installedManifest = JSON.parse(await readFile(installedManifestPath, "utf8"));
-    const hasLifecycleScript = ["preinstall", "install", "postinstall", "prepare"].some(
-      (name) => typeof installedManifest.scripts?.[name] === "string"
-    );
+    const hasLifecycleScript = ["preinstall", "install", "postinstall", "prepare"].some((name) => typeof installedManifest.scripts?.[name] === "string");
     let resolvedPath = installedDependencyPath;
     if (hasLifecycleScript) {
       resolvedPath = path.join(dependencyStaging, `runtime-${index}`);
@@ -438,15 +415,10 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     metadata.resolved = `file:${resolvedPath}`;
   }
   await writeFile(path.join(runtimeRoot, "package-lock.json"), JSON.stringify(runtimeLock));
-  execFileSync("npm", [
-    "ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"
-  ], { cwd: runtimeRoot, ...npmOptions });
+  execFileSync("npm", ["ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: runtimeRoot, ...npmOptions });
   const installedRuntimePaths = await import(pathToFileURL(path.join(runtimeRoot, "src", "lib", "runtime-paths.mjs")).href);
   const installedAgentProfiles = await import(pathToFileURL(path.join(runtimeRoot, "src", "lib", "agent-profiles.mjs")).href);
-  assert.equal(
-    await realpath(installedRuntimePaths.CODEX_BIN),
-    await realpath(path.join(runtimeRoot, "node_modules", "@openai", "codex", "bin", "codex.js"))
-  );
+  assert.equal(await realpath(installedRuntimePaths.CODEX_BIN), await realpath(path.join(runtimeRoot, "node_modules", "@openai", "codex", "bin", "codex.js")));
   assert.ok(await pathExists(path.join(runtimeRoot, "node_modules", "@openai", "agents")));
   const packagedProfile = await installedAgentProfiles.loadTrustedAgentProfile({
     mode: "review",
@@ -455,8 +427,5 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   });
   assert.equal(packagedProfile.metadata.source, "package");
   assert.equal(packagedProfile.metadata.path, "runtime/agents/pr-reviewer.md");
-  assert.equal(
-    packagedProfile.text,
-    await readFile(path.join(runtimeRoot, "agents", "pr-reviewer.md"), "utf8")
-  );
+  assert.equal(packagedProfile.text, await readFile(path.join(runtimeRoot, "agents", "pr-reviewer.md"), "utf8"));
 });
