@@ -816,7 +816,7 @@ test("resume command formatting is executable on POSIX and PowerShell", () => {
   assert.equal(formatCommand("gh", ["pr", "view", "a'b"], "linux"), "'gh' 'pr' 'view' 'a'\"'\"'b'");
 });
 
-test("successful init revalidates three snapshots and orders settings, exact commit publication, and completion", async (t) => {
+test("successful init revalidates the confirmed snapshot and orders commit, publication, settings, and completion", async (t) => {
   const root = await temporaryDirectory(t, "codekeeper-cli-");
   git(root, ["init", "--template=", "--initial-branch=main"]);
   git(root, ["config", "user.name", "Codekeeper Test"]);
@@ -902,7 +902,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
     platform: "linux"
   });
   assert.equal(status, 0, errorOutput.toString());
-  assert.equal(inspections, 3);
+  assert.equal(inspections, 2);
   assert.equal(progressStarted, 1);
   assert.deepEqual(prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })), [
     { message: "Install into acme/widget on default branch main?", defaultValue: true },
@@ -922,8 +922,9 @@ test("successful init revalidates three snapshots and orders settings, exact com
   const commitIndex = indexOf((call) => call.command === "git" && call.args[0] === "commit");
   const pushIndex = indexOf((call) => call.command === "git" && call.args[0] === "push");
   const prIndex = indexOf((call) => call.command === "gh" && call.args[0] === "pr");
-  assert.ok([disableIndex, secretIndex, branchIndex, commitIndex, pushIndex, prIndex].every((index) => index >= 0));
-  assert.ok(disableIndex < secretIndex && secretIndex < branchIndex && branchIndex < commitIndex && commitIndex < pushIndex && pushIndex < prIndex);
+  const variableIndex = indexOf((call) => call.command === "gh" && call.args[0] === "variable" && !call.args.includes("CODEKEEPER_ENABLED"));
+  assert.ok([disableIndex, secretIndex, branchIndex, commitIndex, pushIndex, prIndex, variableIndex].every((index) => index >= 0));
+  assert.ok(branchIndex < commitIndex && commitIndex < pushIndex && pushIndex < secretIndex && secretIndex < variableIndex && variableIndex < disableIndex && disableIndex < prIndex);
   assert.deepEqual(
     calls.filter((call) => call.command === "gh" && call.args[0] === "secret").map((call) => call.args[2]),
     ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]
@@ -945,16 +946,7 @@ test("successful init revalidates three snapshots and orders settings, exact com
   assert.ok(Number.isInteger(appSecretCall.options.stdinFd) && appSecretCall.options.stdinFd >= 3);
   assert.deepEqual(
     progressEvents.filter((event) => event.status === "done").map((event) => event.id),
-    [
-      "repository:verify",
-      "settings:disable",
-      "secret:provider",
-      "secret:app",
-      "variables:configure",
-      "git:commit",
-      "git:push",
-      "github:pull-request"
-    ]
+    ["repository:verify", "git:commit", "git:push", "secret:provider", "secret:app", "variables:configure", "settings:disable", "github:pull-request"]
   );
   const providerDone = progressEvents.findIndex((event) => event.id === "secret:provider" && event.status === "done");
   const appActive = progressEvents.findIndex((event) => event.id === "secret:app" && event.status === "active");
