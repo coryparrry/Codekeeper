@@ -33,15 +33,34 @@ The local package exposes:
 ```text
 codekeeper init
 codekeeper update
+codekeeper update --to X.Y.Z
+codekeeper update --check
+codekeeper rollback --to X.Y.Z
 codekeeper doctor [--json]
 codekeeper verify [--json] [--controlled]
 ```
 
-`init` and `update` use `--current-package --package-integrity` only for an
-exact local tarball. `doctor` is read-only. `verify` is post-merge evidence; it
-does not turn an opened setup pull request into a working installation. While
-the registry package is unavailable, it cannot prove the generated runtime's
-package-acquisition path.
+`update` resolves the latest published release and runs it only when it is
+strictly newer than the installed release. `--to X.Y.Z` selects one exact,
+strictly newer semantic-version release after npm returns and verifies its
+SHA-512 receipt.
+`update --check` reads the installed release manifest, resolves registry
+metadata, and reports the installed and latest published versions without
+changing repository files, GitHub settings, or pull requests.
+
+`rollback --to X.Y.Z` uses the same verified package path, then asks the target
+CLI's existing forward-update protocol to create a normal release-update pull
+request for that older release. The target must be older than the installed
+release. It never resets, reverts, or force-pushes. If the verified target
+cannot complete that protocol, the launcher fails closed without claiming that
+rollback succeeded.
+
+`init`, exact updates, and rollback's target-side forward update use
+`--current-package --package-integrity` only for an exact local tarball or
+verified staged package. `doctor` is read-only. `verify` is post-merge evidence;
+it does not turn an opened setup pull request into a working installation.
+While the registry package is unavailable, it cannot prove the generated
+runtime's package-acquisition path.
 
 ## Safety and operating model
 
