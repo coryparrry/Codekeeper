@@ -8,6 +8,7 @@ import { sha256 } from "./markers.mjs";
 import { validatePatch } from "./policy.mjs";
 import { frozenPullRepairTarget } from "./pr-repair.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
+import { assertNoPublicSecurityFindings } from "./security-containment.mjs";
 
 function assertTrustedContext(context, expectedMode) {
   if (!context || typeof context !== "object" || Array.isArray(context)) {
@@ -84,6 +85,7 @@ async function readRuntimeMetadata(directory, mode) {
 }
 
 async function writeCandidate({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, agentProfileBytes, runtimeMetadataBytes }) {
+  if (context.mode === "audit") assertNoPublicSecurityFindings(result);
   await createFreshDirectory(artifactDirectory);
   await writeFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE), agentProfileBytes);
   await writeJson(path.join(artifactDirectory, "context.json"), context);
@@ -112,6 +114,7 @@ async function writeCandidate({ artifactDirectory, context, result, patch = null
 }
 
 async function writeArtifact({ artifactDirectory, context, result, patch = null, patchBytes = null, validation = null, candidateSha256, config, configSha256, agentProfileBytes, runtimeMetadataBytes }) {
+  if (context.mode === "audit") assertNoPublicSecurityFindings(result);
   await createFreshDirectory(artifactDirectory);
   await writeFile(path.join(artifactDirectory, AGENT_PROFILE_BUNDLE_FILE), agentProfileBytes);
   await writeJson(path.join(artifactDirectory, "context.json"), context);
@@ -286,7 +289,9 @@ export async function validateAudit({ directory, contextPath = path.join(directo
   assertTrustedContext(context, "audit");
   assertFrozenPolicy(context, configSha256);
   assertFrozenHead(context);
-  const result = validateAuditResult(await readRegularJson(resultPath), config);
+  const result = assertNoPublicSecurityFindings(
+    validateAuditResult(await readRegularJson(resultPath), config)
+  );
   if (typeof context.repairAuthorized !== "boolean") {
     throw new Error("Trusted audit context is missing explicit repair authorization");
   }
@@ -357,7 +362,9 @@ export async function validateFix({ directory, contextPath = path.join(directory
 
 function validateResultForMode(mode, result, context, config) {
   if (mode === "review") return validateReviewResult(result, config);
-  if (mode === "audit") return validateAuditResult(result, config);
+  if (mode === "audit") {
+    return assertNoPublicSecurityFindings(validateAuditResult(result, config));
+  }
   if (mode === "issue") return validateIssueResult(result, config);
   if (mode === "fix") return validateFixResult(result, context.target);
   throw new Error(`Unsupported candidate mode: ${mode}`);
@@ -511,6 +518,7 @@ async function seal({ mode, candidateDirectory, artifactDirectory, expectedCandi
   if (sha256(contextBytes) !== expectedContextSha256 || sha256(contextBytes) !== candidate.contextSha256) {
     throw new Error("Candidate context is not the frozen trusted context");
   }
+  if (mode === "audit") assertNoPublicSecurityFindings(result);
   const sealedValidation = candidate.patch?.valid
     ? validationWithReceipt(
         validation,

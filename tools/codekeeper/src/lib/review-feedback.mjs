@@ -14,6 +14,70 @@ function configuredOwnerLogins(policy) {
   return new Set(policy.repository.ownerLogins.map((login) => String(login).trim().toLowerCase()));
 }
 
+function normalizedReviewer(review) {
+  const login = String(review?.user?.login ?? "").trim().toLowerCase();
+  return login || null;
+}
+
+function submittedReviewOrdering(review) {
+  const submittedAt = Date.parse(String(review?.submitted_at ?? ""));
+  const id = Number(review?.id);
+  if (!Number.isFinite(submittedAt) || !Number.isSafeInteger(id) || id <= 0) return null;
+  return { submittedAt, id };
+}
+
+function reviewState(review) {
+  return String(review?.state ?? "").trim().toUpperCase();
+}
+
+function hasReviewBody(review) {
+  return Boolean(String(review?.body ?? "").trim());
+}
+
+function activeReviewBodies(reviews) {
+  const submittedByReviewer = new Map();
+  const fallbackReviews = [];
+  for (const review of reviews) {
+    const reviewer = normalizedReviewer(review);
+    const ordering = submittedReviewOrdering(review);
+    if (reviewer && ordering) {
+      const submitted = submittedByReviewer.get(reviewer) ?? [];
+      submitted.push({ review, ordering });
+      submittedByReviewer.set(reviewer, submitted);
+    } else {
+      fallbackReviews.push({ review, reviewer });
+    }
+  }
+
+  const active = [];
+  for (const submitted of submittedByReviewer.values()) {
+    submitted.sort((left, right) =>
+      left.ordering.submittedAt - right.ordering.submittedAt || left.ordering.id - right.ordering.id
+    );
+    const latest = submitted.at(-1).review;
+    if (["APPROVED", "DISMISSED"].includes(reviewState(latest))) continue;
+    const latestBody = submitted.map(({ review }) => review).reverse().find((review) =>
+      hasReviewBody(review) && !["APPROVED", "DISMISSED"].includes(reviewState(review))
+    );
+    if (latestBody) active.push({ review: latestBody, state: reviewState(latest) });
+  }
+
+  // REST review records normally contain both submitted_at and an ID. Preserve
+  // the historical body-only behavior only when no submitted record for that
+  // reviewer is available; malformed records can never override authoritative
+  // review state.
+  for (const { review, reviewer } of fallbackReviews) {
+    if (reviewer && submittedByReviewer.has(reviewer)) continue;
+    if (
+      hasReviewBody(review) &&
+      !["APPROVED", "DISMISSED"].includes(reviewState(review))
+    ) {
+      active.push({ review, state: reviewState(review) });
+    }
+  }
+  return active;
+}
+
 export async function completeReviewFeedback(github, pullNumber, policy) {
   const owners = configuredOwnerLogins(policy);
   const [reviews, threads] = await Promise.all([
@@ -32,8 +96,7 @@ export async function completeReviewFeedback(github, pullNumber, policy) {
     owners.has(String(author ?? "").trim().toLowerCase())
     && parseOwnerCommand(body, automationLogin) !== null;
   const feedback = [];
-  for (const review of reviews) {
-    if (!String(review.body ?? "").trim()) continue;
+  for (const { review, state } of activeReviewBodies(reviews)) {
     if (isAutomationFeedback(review.user?.login)) continue;
     const body = String(review.body ?? "");
     if (isPersistedOwnerCommand(review.user?.login, body)) continue;
@@ -44,7 +107,7 @@ export async function completeReviewFeedback(github, pullNumber, policy) {
       body: boundedText(body, 6000),
       bodySha256: sha256(body),
       url: boundedText(review.html_url, 2048, "…"),
-      state: boundedText(review.state, 64, "…"),
+      state: boundedText(state, 64, "…"),
       threadId: null,
       resolved: false,
       outdated: false,

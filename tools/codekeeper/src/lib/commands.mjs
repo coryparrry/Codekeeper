@@ -1,6 +1,6 @@
 import { GitHubClient, isAmbiguousGitHubMutationError } from "./github.mjs";
 import { readJson } from "./io.mjs";
-import { COMMAND_STATUS_MARKER } from "./markers.mjs";
+import { COMMAND_STATUS_MARKER, sha256 } from "./markers.mjs";
 import {
   OWNER_COMMANDS,
   normalizeOwnerCommand,
@@ -181,6 +181,106 @@ async function dispatchAfterUnpausing(
   }
 }
 
+export function issueDispatchReceipt({
+  repository,
+  number,
+  command,
+  actor,
+  commentId: rawCommentId,
+}) {
+  const commentId = Number(rawCommentId);
+  if (!Number.isSafeInteger(commentId) || commentId <= 0) {
+    throw new Error("Issue dispatch requires a valid owner-command comment ID");
+  }
+  const normalizedCommand = String(command).trim().toLowerCase();
+  if (!["review", "triage", "implement"].includes(normalizedCommand)) {
+    throw new Error("Issue dispatch command is invalid");
+  }
+  const requestId = sha256(
+    JSON.stringify({
+      version: 1,
+      repository: String(repository).toLowerCase(),
+      number,
+      command: normalizedCommand,
+      actor: String(actor).toLowerCase(),
+      commentId,
+    }),
+  );
+  const marker = `<!-- codekeeper:command-dispatch=${requestId} -->`;
+  const body = [
+    "## Codekeeper dispatch requested",
+    "",
+    `- Command: \`/codekeeper ${normalizedCommand}\``,
+    `- Requested by: \`@${actor}\``,
+    `- Command comment: \`${commentId}\``,
+    `- Request ID: \`${requestId}\``,
+    "",
+    "This immutable receipt records the request before dispatch. It does not confirm that GitHub accepted or started a worker.",
+  ].join("\n");
+  const content = `${body}\n${marker}`;
+  return {
+    command: normalizedCommand,
+    commentId,
+    requestId,
+    marker,
+    body,
+    content,
+    sha256: sha256(content),
+  };
+}
+
+async function dispatchIssueOwnerCommand({
+  github,
+  issue,
+  event,
+  repository,
+  number,
+  command,
+  actor,
+  automationIdentity,
+  eventType,
+  payload,
+  unpause = false,
+}) {
+  const identity = issueDispatchReceipt({
+    repository,
+    number,
+    command,
+    actor,
+    commentId: event.comment?.id,
+  });
+  const receipt = await github.upsertMarkerComment(
+    number,
+    identity.marker,
+    identity.body,
+    automationIdentity,
+  );
+  const receiptCommentId = Number(receipt?.id);
+  if (!Number.isSafeInteger(receiptCommentId) || receiptCommentId <= 0) {
+    throw new Error("Issue dispatch receipt has no valid comment ID");
+  }
+  const dispatchPayload = {
+    ...payload,
+    command_request_id: identity.requestId,
+    command_name: identity.command,
+    command_comment_id: identity.commentId,
+    command_receipt_comment_id: receiptCommentId,
+    command_receipt_sha256: identity.sha256,
+  };
+  if (unpause) {
+    await dispatchAfterUnpausing(
+      github,
+      issue,
+      number,
+      eventType,
+      dispatchPayload,
+    );
+  } else {
+    await github.createRepositoryDispatch(eventType, dispatchPayload);
+  }
+  return identity;
+}
+
 export async function runOwnerCommand({
   eventPath,
   config,
@@ -227,11 +327,20 @@ export async function runOwnerCommand({
     };
   } else if (canonicalCommand === "review") {
     if (!issue.pull_request) {
-      await github.createRepositoryDispatch("codekeeper_issue", {
+      await dispatchIssueOwnerCommand({
+        github,
+        issue,
+        event,
+        repository,
         number,
-        requested_by: actor,
+        command,
+        actor,
+        automationIdentity,
+        eventType: "codekeeper_issue",
+        payload: { number, requested_by: actor },
       });
       outcome = "The issue was queued for owner-requested triage.";
+      return { number, command, outcome };
     } else {
       const pull = assertEligibleReviewPull(
         await github.getPull(number),
@@ -319,12 +428,25 @@ export async function runOwnerCommand({
   } else if (command === "implement") {
     if (issue.pull_request)
       throw new Error("/codekeeper implement requires an issue");
-    await dispatchAfterUnpausing(github, issue, number, "codekeeper_fix", {
+    await dispatchIssueOwnerCommand({
+      github,
+      issue,
+      event,
+      repository,
       number,
-      authorization_mode: "owner",
-      requested_by: actor,
+      command,
+      actor,
+      automationIdentity,
+      eventType: "codekeeper_fix",
+      payload: {
+        number,
+        authorization_mode: "owner",
+        requested_by: actor,
+      },
+      unpause: true,
     });
     outcome = "The bounded owner-requested implementation was queued.";
+    return { number, command, outcome };
   } else if (canonicalCommand === "repair") {
     if (!issue.pull_request)
       throw new Error(

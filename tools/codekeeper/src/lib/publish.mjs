@@ -8,8 +8,9 @@ import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, issueTriageStateMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
 import { evaluateAutoMerge, evaluateReviewEligibility, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
 import { publishPullRequestRepair } from "./pr-repair.mjs";
-import { normalizeReleaseOwnedPinReview, renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
+import { normalizeReleaseOwnedPinReview, renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown, sanitizePublicTitle } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
+import { assertNoPublicSecurityFindings } from "./security-containment.mjs";
 
 const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
 const AUTOMATIC_REPAIR_LEASE_MAX_AGE_MS = 15 * 60 * 1000;
@@ -73,14 +74,6 @@ async function releaseAutomaticRepairLease(github, lease, state) {
   );
 }
 
-function singleLine(value, maximum = 256) {
-  return String(value ?? "")
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim()
-    .slice(0, maximum);
-}
-
 function parseArtifactJson(bytes, name) {
   try {
     return JSON.parse(bytes.toString("utf8"));
@@ -91,7 +84,9 @@ function parseArtifactJson(bytes, name) {
 
 function validateArtifactResult(mode, result, context, config) {
   if (mode === "review") return validateReviewResult(result, config);
-  if (mode === "audit") return validateAuditResult(result, config);
+  if (mode === "audit") {
+    return assertNoPublicSecurityFindings(validateAuditResult(result, config));
+  }
   if (mode === "issue") return validateIssueResult(result, config);
   if (mode === "fix") return validateFixResult(result, context.target);
   throw new Error(`Unsupported artifact mode: ${mode}`);
@@ -809,7 +804,10 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
     }));
     const sources = [sourcesByKey.get(sourceKey)].filter(Boolean);
     const labels = ["codekeeper:deferred", issueTypeLabel(feedback.type)];
-    const title = singleLine(`[Deferred from PR #${context.pullRequest.number}] ${feedback.explanation}`, 256);
+    const title = sanitizePublicTitle(
+      `[Deferred from PR #${context.pullRequest.number}] ${feedback.explanation}`,
+      256
+    );
     const body = renderDeferredIssue({
       feedback: scopedFeedback,
       pullRequest: context.pullRequest,
@@ -1021,7 +1019,7 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
       }
     }
     const labels = [...new Set([...findingLabels(finding), `codekeeper:priority-${finding.priority}`])];
-    const title = singleLine(`[AI maintenance] ${finding.title}`) || "[AI maintenance] Repository finding";
+    const title = sanitizePublicTitle(`[AI maintenance] ${finding.title}`) || "[AI maintenance] Repository finding";
     const body = renderMaintenanceIssue(finding, fingerprint, runUrl);
 
     if (match?.state === "closed") {
@@ -1224,13 +1222,19 @@ async function publishPatchPullRequest({
   }
 
   const branch = repairBranch(config, context.mode, fingerprint);
-  const normalizedTitle = singleLine(title, 200) || "chore: apply bounded maintenance repair";
+  const normalizedTitle = sanitizePublicTitle(title, 200) || "chore: apply bounded maintenance repair";
   const draft = !readyForReview || risk !== "low";
+  const validationReceipt = manifest.validation?.receipt;
+  const validationCommands = validationReceipt?.commands ?? [];
   const validationSummary = [
-    ...(manifest.validation?.receipt?.commands ?? []).map(
-      (item) =>
-        `- \`${item.command}\`: ${item.exitCode === 0 ? "passed" : "failed"} in ${item.durationMs} ms; stdout SHA-256 \`${item.stdoutDigest}\``,
-    ),
+    ...(validationCommands.length > 0
+      ? validationCommands.map(
+          (item) =>
+            `- \`${item.command}\`: ${item.exitCode === 0 ? "passed" : "failed"} in ${item.durationMs} ms; stdout SHA-256 \`${item.stdoutDigest}\``,
+        )
+      : ["- No repository-specific validation commands were configured."]),
+    `- Candidate SHA-256: \`${manifest.candidateSha256}\``,
+    `- Base commit: \`${validationReceipt?.baseSha ?? context.baseSha}\``,
   ].join("\n");
   const prBody = renderRepairPullRequest({
     titleSummary: summary,
@@ -1321,6 +1325,7 @@ async function publishPatchPullRequest({
 
 export async function publishAudit({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource = agentProfilePath ? "repository" : "package", agentProfileSourceSha, token, dryRun = false }) {
   const { manifest, context, result } = await loadArtifact(artifactDirectory, "audit", config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource, agentProfileSourceSha);
+  assertNoPublicSecurityFindings(result);
   if (typeof context.repairAuthorized !== "boolean") {
     throw new Error("Trusted audit artifact is missing explicit repair authorization");
   }

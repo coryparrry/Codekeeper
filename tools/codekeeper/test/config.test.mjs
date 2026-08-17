@@ -129,6 +129,57 @@ test("review reasoning escalates only security, high-risk, and exceptional diffs
   assert.equal(escalatedCustom.provider, "openai");
   assert.equal(escalatedCustom.model, "gpt-5.6-luna");
   assert.equal(escalatedCustom.effort, "max");
+  assert.equal(escalatedCustom.workspaceModel, "gpt-5.6-luna");
+  assert.equal(escalatedCustom.workspaceEffort, "max");
+
+  const independentlyRouted = structuredClone(customCoordinator);
+  independentlyRouted.review.reasoningEscalation.provider = "openrouter";
+  independentlyRouted.review.reasoningEscalation.model = "anthropic/claude-opus";
+  independentlyRouted.review.reasoningEscalation.effort = "none";
+  independentlyRouted.review.reasoningEscalation.modelSettings = { providerData: { custom: true } };
+  independentlyRouted.review.reasoningEscalation.workspace = {
+    model: "gpt-5.6-sol",
+    effort: "max"
+  };
+  const independentSettings = getAgentRuntimeSettings(independentlyRouted, "review", {
+    context: context({ labels: ["security"] })
+  });
+  assert.equal(independentSettings.provider, "openrouter");
+  assert.equal(independentSettings.model, "anthropic/claude-opus");
+  assert.equal(independentSettings.effort, "none");
+  assert.equal(independentSettings.workspaceModel, "gpt-5.6-sol");
+  assert.equal(independentSettings.workspaceEffort, "max");
+});
+
+test("review escalation owns provider settings and workspace routing independently", async () => {
+  const invalid = structuredClone(source);
+  invalid.review.reasoningEscalation.modelSettings.reasoning = { effort: "low" };
+  await assert.rejects(
+    loadConfig(await writeConfig(invalid)),
+    /review\.reasoningEscalation\.modelSettings\.reasoning\.effort must not be set/
+  );
+
+  const unsupportedWorkspace = structuredClone(source);
+  unsupportedWorkspace.review.reasoningEscalation.workspace.effort = "turbo";
+  await assert.rejects(
+    loadConfig(await writeConfig(unsupportedWorkspace)),
+    /review\.reasoningEscalation\.workspace\.effort is unsupported/
+  );
+
+  const nonCodexEscalationWorkspace = structuredClone(source);
+  nonCodexEscalationWorkspace.review.reasoningEscalation.workspace.model =
+    "anthropic/claude-opus";
+  await assert.rejects(
+    loadConfig(await writeConfig(nonCodexEscalationWorkspace)),
+    /review\.reasoningEscalation\.workspace\.model must be a Codex-compatible OpenAI model/,
+  );
+
+  const nonCodexAgentWorkspace = structuredClone(source);
+  nonCodexAgentWorkspace.ai.agents.review.workspace.model = "claude-opus";
+  await assert.rejects(
+    loadConfig(await writeConfig(nonCodexAgentWorkspace)),
+    /ai\.agents\.review\.workspace\.model must be a Codex-compatible OpenAI model/,
+  );
 });
 
 test("configuration rejects unsupported user auto-merge, unknown keys, and unsafe ref prefixes", async () => {
