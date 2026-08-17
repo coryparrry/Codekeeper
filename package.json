@@ -7,6 +7,7 @@
     "package:pack": "node scripts/pack-codekeeper-package.mjs",
     "package:stage": "node scripts/build-codekeeper-package.mjs",
     "package:stage:check": "node --test packages/codekeeper/test/package-stage.test.mjs",
+    "coverage": "npm --prefix tools/codekeeper run coverage && npm --prefix packages/codekeeper run coverage && npm --prefix acceptance run coverage",
     "lint": "eslint .",
     "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
