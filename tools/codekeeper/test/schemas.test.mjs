@@ -22,6 +22,48 @@ test("review validator keeps Mermaid optional for ordinary changes", () => {
   assert.equal(result.diagram, null);
 });
 
+test("review finding evidence requires stable root-cause tags and a safe reproduction path", () => {
+  const finding = {
+    title: "Authorization bypass",
+    explanation: "The changed branch skips the authorization guard.",
+    severity: "high",
+    confidence: "high",
+    classification: "current",
+    validation: "The focused unauthorized request reaches the protected operation.",
+    preventionTest: "Keep the unauthorized request regression test.",
+    rootCauseTags: ["missing-authorization-check", "guard-order"],
+    reproductionTest: "test/authorization.test.mjs",
+    file: "src/auth.mjs",
+    line: 12
+  };
+  const base = {
+    mode: "review",
+    summary: "A current defect exists.",
+    risk: "high",
+    labels: [],
+    blockingFindings: [finding],
+    nonBlockingFindings: [],
+    reviewFeedback: [],
+    tests: { adequate: false, notes: "The exact regression is available.", missingTest: null },
+    diagram: null,
+    mergeRecommendation: "block",
+    noActionReason: null
+  };
+  assert.deepEqual(validateReviewResult(structuredClone(base), config).blockingFindings[0].rootCauseTags, finding.rootCauseTags);
+  for (const rootCauseTags of [["Missing-authorization-check"], ["duplicate", "duplicate"], Array.from({ length: 9 }, (_item, index) => `tag-${index}`)]) {
+    assert.throws(() => validateReviewResult({ ...structuredClone(base), blockingFindings: [{ ...finding, rootCauseTags }] }, config), /rootCauseTags/);
+  }
+  for (const reproductionTest of ["/tmp/test.mjs", "../test.mjs", "src/../test.mjs", "src\\test.mjs", "https://example.test/repro.mjs"]) {
+    assert.throws(() => validateReviewResult({ ...structuredClone(base), blockingFindings: [{ ...finding, reproductionTest }] }, config), /reproductionTest/);
+  }
+  assert.doesNotThrow(() => validateReviewResult({ ...structuredClone(base), blockingFindings: [{ ...finding, reproductionTest: null }] }, config));
+  const findingSchema = reviewSchema(config).properties.blockingFindings.items.properties;
+  assert.equal(findingSchema.rootCauseTags.minItems, 1);
+  assert.equal(findingSchema.rootCauseTags.maxItems, 8);
+  assert.equal(findingSchema.rootCauseTags.uniqueItems, true);
+  assert.equal(findingSchema.reproductionTest.anyOf[1].type, "null");
+});
+
 test("review validator canonicalizes graph LR and rejects vertical Mermaid diagrams", () => {
   const review = {
     mode: "review",
@@ -99,6 +141,8 @@ test("review validator rejects auto recommendation with blockers", () => {
               classification: "current",
               validation: "The current head still contains the failing unwrap.",
               preventionTest: "Exercise the nil input path.",
+              rootCauseTags: ["nil-input", "unchecked-unwrap"],
+              reproductionTest: null,
               file: "src/App.swift",
               line: 42
             }
@@ -128,6 +172,8 @@ test("review validator cannot promote a stale finding to the fixer", () => {
       classification: "stale",
       validation: "The current head no longer reproduces the failure.",
       preventionTest: "Keep the current regression test.",
+      rootCauseTags: ["stale-evidence"],
+      reproductionTest: null,
       file: "src/example.mjs",
       line: 1
     }],
@@ -153,6 +199,8 @@ test("review validator allows a low-severity introduced contract failure to bloc
       classification: "current",
       validation: "The current-head boundary test fails while the base comparison succeeds.",
       preventionTest: "Keep an equality-boundary test that expects the cached value.",
+      rootCauseTags: ["boundary-comparison"],
+      reproductionTest: "test/cache-boundary.test.mjs",
       file: "src/cache.mjs",
       line: 1
     }],
@@ -314,6 +362,8 @@ test("review validator rejects a critical finding hidden as non-blocking", () =>
           classification: "current",
           validation: "The current head still contains the data-loss path.",
           preventionTest: "Exercise the data-preservation path.",
+          rootCauseTags: ["data-loss"],
+          reproductionTest: null,
           file: "docs/README.md",
           line: 1
         }],

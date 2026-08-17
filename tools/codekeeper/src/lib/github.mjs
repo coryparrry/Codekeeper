@@ -267,11 +267,14 @@ export class GitHubClient {
     }
   }
 
-  async beginPullMutation({ repository, pullRequest, policy }) {
+  async beginPullMutation({ repository, pullRequest, policy, reviewPublication = false }) {
     this.assertNoMutationGuard();
     if (repository !== this.repository) throw new Error("Conditional pull mutation repository does not match the GitHub client");
     if (!pullRequest || !Number.isSafeInteger(pullRequest.number) || pullRequest.number <= 0) {
       throw new Error("Conditional pull mutation requires a pull request number");
+    }
+    if (typeof reviewPublication !== "boolean") {
+      throw new Error("Conditional pull mutation review publication flag must be boolean");
     }
     if (!policy?.repository || !Array.isArray(policy.repository.ownerLogins)) {
       throw new Error("Conditional pull mutation requires repository policy");
@@ -296,6 +299,7 @@ export class GitHubClient {
       feedbackSha256: sha256(JSON.stringify(feedback)),
       labels: null,
       addedLabels: new Set(),
+      reviewPublication,
       policy: mutationPolicy
     };
     try {
@@ -747,7 +751,7 @@ export class GitHubClient {
     if (pull.base?.sha !== expected.baseSha) {
       throw new Error(`PR #${pull.number} base SHA changed from ${expected.baseSha} to ${pull.base?.sha}; stale publication will not mutate GitHub`);
     }
-    if (pull.base?.ref !== expected.baseRef || pull.base?.ref !== expected.policy.repository.defaultBranch) {
+    if (pull.base?.ref !== expected.baseRef || (!expected.reviewPublication && pull.base?.ref !== expected.policy.repository.defaultBranch)) {
       throw new Error(`PR #${pull.number} base branch changed; stale publication will not mutate GitHub`);
     }
     if (pull.head?.repo?.full_name !== expected.repository || pull.base?.repo?.full_name !== expected.repository) {

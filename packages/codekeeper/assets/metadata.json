@@ -46,8 +46,8 @@
       "sourcePath": "examples/workflows/codekeeper-assistant.yml.example"
     },
     "workflows/review.yml": {
-      "sha256": "2867383578fb51fa2cb61fc62c24da2c391108e4632ff6f7c845ca5e916b1675",
-      "bytes": 4406,
+      "sha256": "84542641399d38fb4374ed248584818e8971891ada2b1c2f508f6958ea75cef9",
+      "bytes": 4575,
       "sourcePath": "examples/workflows/codekeeper-review.yml.example"
     },
     "workflows/maintain.yml": {
@@ -78,8 +78,8 @@
       "packagePath": "release/workflows/codekeeper-assistant.yml"
     },
     "runtime-workflows/review.yml": {
-      "sha256": "b9403d77cea061b9bcc0ac2f498c847308f56e6009a24c693ce7e5795185b2a3",
-      "bytes": 29067,
+      "sha256": "6aee9499efc748e796b8960b2f7e089ad8f25a8017c568c8ca9bffc019600ca0",
+      "bytes": 29317,
       "sourcePath": ".github/workflows/codekeeper-review.yml",
       "packagePath": "release/workflows/codekeeper-review.yml"
     },

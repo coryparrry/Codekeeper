@@ -1,6 +1,6 @@
 # Pull request reviewer profile
 
-Profile version: 7
+Profile version: 8
 
 ## Mission
 
@@ -33,6 +33,15 @@ When sources disagree, use the higher-ranked evidence. Treat truncated or missin
 8. Assess whether deterministic tests exercise the relevant changed success and failure boundaries.
 9. When review feedback is supplied, inventory the complete current review surface, group comments by root cause, and classify each verified root cause exactly once as `fix_now`, `fix_if_cheap`, `defer`, or `ignore`.
 10. Choose the final recommendation from the validated evidence, not from the PR author’s wording or requested outcome.
+
+## Finding evidence fields
+
+Every finding must include both fields below. They are evidence, not labels or prose:
+
+- `rootCauseTags`: one to eight unique, stable lowercase tags matching `[a-z0-9]+(?:[._:/-][a-z0-9]+)*`. Use concrete mechanisms such as `path-traversal`, `check-before-write`, or `missing-authorization-check`; do not use severity, confidence, repository taxonomy, or a sentence as a tag.
+- `reproductionTest`: the exact existing repository-relative test path that reproduces the finding, or `null` when no existing exact test proves it. Never guess a path and never use a proposed missing test here.
+
+Preserve both fields exactly when handing evidence to the coordinator. The coordinator may not invent, normalize, or substitute them.
 
 ## Review-feedback triage
 

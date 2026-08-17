@@ -385,7 +385,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const pull = await github.beginPullMutation({
     repository: context.repository,
     pullRequest: context.pullRequest,
-    policy: config
+    policy: config,
+    reviewPublication: true
   });
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
   const renderedResult = normalizeReleaseOwnedPinReview(result, files);
@@ -397,12 +398,13 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     result.reviewFeedback.some((feedback) => feedback.disposition === "fix_now") ||
     result.mergeRecommendation === "block";
   const existingLabels = new Set((pull.labels ?? []).map((label) => typeof label === "string" ? label : label.name));
+  const defaultBaseTarget = pull.base?.ref === config.repository.defaultBranch;
   const repairFeedback = result.reviewFeedback.filter((feedback) =>
     feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
   );
-  const repairRequested = (blocking || repairFeedback.length > 0) && config.review.autoRepair
+  const repairRequested = defaultBaseTarget && (blocking || repairFeedback.length > 0) && config.review.autoRepair
     && !existingLabels.has("codekeeper:paused") && !existingLabels.has("paused");
-  const repairMarked = existingLabels.has("codekeeper:auto-repaired");
+  const repairMarked = defaultBaseTarget && existingLabels.has("codekeeper:auto-repaired");
   let repairState = { consumed: false, pending: false };
   if (repairRequested || repairMarked) {
     repairState = ownedAutomaticRepairState(
@@ -460,7 +462,9 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     await github.removeLabel(pull.number, "codekeeper:auto-repaired");
     reconciledPull = await github.getPull(pull.number);
   }
-  const suspension = await suspendAutoMerge(github, reconciledPull);
+  const suspension = defaultBaseTarget
+    ? await suspendAutoMerge(github, reconciledPull)
+    : { pullRequest: reconciledPull, disabled: false };
   reconciledPull = suspension.pullRequest;
   let publishedAutoMerge = suspendAutoMergeForRepair(evaluateAutoMerge({ config, pullRequest: reconciledPull, files, reviewResult: result, reviewContextComplete, automationBotLogin: automationIdentity.login }));
   const eligibleState = publicationState(publishedAutoMerge);

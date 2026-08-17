@@ -124,6 +124,10 @@ export function evaluateAutoMerge({
   if (pullRequest.draft) reasons.push("Pull request is a draft");
   if (pullRequest.state !== "open") reasons.push(`Pull request state is ${pullRequest.state}`);
   if (pullRequest.head?.repo?.full_name !== pullRequest.base?.repo?.full_name) reasons.push("Pull request comes from a fork");
+  if (pullRequest.base?.ref !== config.repository.defaultBranch) {
+    reasons.push("Pull request does not target the configured default branch");
+  }
+
   const automationBranch = String(pullRequest.head?.ref ?? "").startsWith(config.repository.automationBranchPrefix);
   const pullAuthor = pullRequest.user?.login ?? "";
   const automationAuthor = pullRequest.user?.type === "Bot" && pullAuthor.toLowerCase().endsWith("[bot]");

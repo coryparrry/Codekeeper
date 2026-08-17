@@ -16,6 +16,9 @@ permissions:
   contents: read
   pull-requests: read
 
+# Same-repository, non-draft stacked PRs receive review publication. Forks,
+# drafts, and merge queues remain manual; stacked targets never auto-repair or
+# auto-merge.
 jobs:
   intent:
     name: Detect Codekeeper review feedback

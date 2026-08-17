@@ -133,6 +133,8 @@ test("post-review Max escalation requires a located high-impact blocker", () => 
       classification: "current",
       validation: "Inspected manually.",
       preventionTest: "Add a regression test.",
+      rootCauseTags: ["suspicious-behavior"],
+      reproductionTest: null,
       file: "src/feature.mjs",
       line: 10
     }]
@@ -145,6 +147,8 @@ test("post-review Max escalation requires a located high-impact blocker", () => 
     classification: "current",
     validation: "The focused unauthorized request reaches the protected operation.",
     preventionTest: "Assert that the unauthorized request is rejected.",
+    rootCauseTags: ["authorization-bypass"],
+    reproductionTest: "test/authorization.test.mjs",
     file: "src/feature.mjs",
     line: 10
   };
@@ -303,6 +307,8 @@ test("workspace review keeps only normalized left-to-right diagrams without losi
       classification: "current",
       validation: "The focused regression test fails on the current head.",
       preventionTest: "Run the focused total regression test.",
+      rootCauseTags: ["incorrect-total"],
+      reproductionTest: "test/total.test.mjs",
       file: "src/total.mjs",
       line: 12
     }],
@@ -380,6 +386,8 @@ test("a located Medium high-impact blocker triggers one focused Max pass in the 
     classification: "current",
     validation: "The focused unauthorized request reaches the protected operation.",
     preventionTest: "Assert that the unauthorized request is rejected.",
+    rootCauseTags: ["authorization-bypass"],
+    reproductionTest: "test/authorization.test.mjs",
     file: "src/feature.mjs",
     line: 10
   };
@@ -719,9 +727,9 @@ test("trusted profiles reject missing files, symlinks, wrong-mode paths, and abb
 });
 
 test("each coordinator loads its versioned profile into the shared security instructions", async () => {
-  const versions = { review: 7, issue: 5, audit: 4, fix: 2 };
+  const versions = { review: 8, issue: 5, audit: 4, fix: 2 };
   const contracts = {
-    review: [/Pull request reviewer profile/, /Evidence order/, /adequate deterministic tests/i],
+    review: [/Pull request reviewer profile/, /Evidence order/, /adequate deterministic tests/i, /rootCauseTags/, /reproductionTest/],
     issue: [/Issue triager profile/, /Triage procedure/, /Duplicate rule/],
     audit: [/Repository auditor profile/, /stable `problemKey`/i, /Repair gate/],
     fix: [/Fixer profile/, /Preflight/, /smallest complete/i]

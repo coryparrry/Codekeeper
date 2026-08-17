@@ -1482,6 +1482,8 @@ test("review findings outside a changed hunk fall back to file-level evidence", 
       classification: "current",
       validation: "The current documentation still contains the unclear changed line.",
       preventionTest: "Check the rendered documentation wording.",
+      rootCauseTags: ["documentation-clarity"],
+      reproductionTest: null,
       file: "README.md",
       line: 2
     }],
