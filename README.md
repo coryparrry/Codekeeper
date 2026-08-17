@@ -11,11 +11,11 @@ Suggested markup:
 ![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)
 [![License](https://img.shields.io/badge/License-Apache--2.0-2563eb?style=for-the-badge)](LICENSE)
 
-> A policy-bounded AI maintainer that reviews pull requests, triages issues, audits repositories, and prepares small, verified repairs from your own GitHub Actions.
+> Set up and control your own GitHub maintainer from one guided CLI.
 
-Codekeeper gives a GitHub repository an always-available maintenance workflow without handing control to a hosted service. You choose the models, policy, validation commands, GitHub App permissions, and capabilities. Codekeeper works inside those boundaries and fails closed when it cannot prove that an action is allowed.
+Codekeeper turns a guided command-line setup into an always-available maintainer for your GitHub repository. It reviews pull requests, triages issues, audits repository health, and can prepare small, verified repairs from your own GitHub Actions.
 
-It can start as a read-oriented reviewer and grow with your repository. Automatic repair, issue implementation, scheduled maintenance, duplicate closure, and automatic merge remain explicit choices.
+You do not need to write workflows or configure installation files by hand. The CLI helps you choose the models, capabilities, validation commands, and GitHub App permissions, then creates the complete setup as a pull request for you to review. Codekeeper works inside those boundaries and fails closed when it cannot prove that an action is allowed.
 
 ## 🚀 Install
 
@@ -149,21 +149,27 @@ Codekeeper is deliberately repository-owned:
 
 Before enabling a provider or code-changing capability, read [Authority, data, and cost](docs/authority-data-cost.md).
 
-## 🧭 Configure your workflows
+## 🧭 Manage Codekeeper from the CLI
 
-The setup pull request adds the policy, editable role guidance, selected caller workflows, local runtime entrypoints, package acquisition action, and a release catalog to your repository.
+The CLI is Codekeeper's control surface. It generates and maintains the required policy, workflows, role guidance, package verification, secrets, and repository settings. You choose the behavior; Codekeeper handles the installation files.
 
-| Installed surface | Purpose |
-|---|---|
-| `.github/codekeeper.json` | Models, providers, triggers, capabilities, labels, protected paths, validation, and startup controls. |
-| `.github/codekeeper/agents/` | Repository-specific judgment guidance for the reviewer, auditor, issue triager, and fixer. |
-| `.github/workflows/codekeeper-*.yml` | Event callers and local runtime entrypoints for the workflows you selected. |
-| `.github/codekeeper/actions/acquire-package/action.yml` | Downloads and verifies the exact Codekeeper release in each isolated runtime job. |
-| `.github/codekeeper-release.json` | Records the managed installation files, version, integrity, and source identity. |
+Run the setup command again whenever you want to change the current configuration:
 
-The role guidance can shape decisions but cannot grant permissions. Authority comes from the validated policy, installed workflows, GitHub App permissions, and current GitHub state.
+```bash
+npx codekeeper init
+```
 
-Use [Configuration](docs/CONFIGURATION.md) for provider settings, models, triggers, labels, path rules, validation commands, tracing, repair limits, and automatic merge controls.
+Codekeeper detects the existing installation and opens the guided settings screen. You can add or remove workflows, change models, adjust automatic triggers, enable or disable capabilities, update validation commands, and review the resulting authority before anything changes. A settings-only change is applied directly when safe; a repository configuration change is prepared as a pull request.
+
+To move an installation to the latest Codekeeper release, run:
+
+```bash
+npx codekeeper update
+```
+
+The updater preserves your choices, verifies the new package, shows what changed, and opens an update pull request when managed repository files need to change.
+
+The generated files remain available for review and version history, but normal setup and configuration happen through the CLI. Use [Configuration](docs/CONFIGURATION.md) when you need the complete policy reference.
 
 ## 💬 Owner commands
 
@@ -182,7 +188,7 @@ The same commands can mention the installed App, for example `@your-app-slug rev
 
 | Command | Purpose |
 |---|---|
-| `npx codekeeper init` | Check prerequisites, configure Codekeeper, and open a setup pull request. |
+| `npx codekeeper init` | Install Codekeeper or reopen the guided settings for an existing installation. |
 | `npx codekeeper doctor` | Report installation prerequisites without changing the repository. |
 | `npx codekeeper doctor --json` | Return the readiness report as structured JSON. |
 | `npx codekeeper update` | Review the latest release and open an update pull request when managed files change. |
