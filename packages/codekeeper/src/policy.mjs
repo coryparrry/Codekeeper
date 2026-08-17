@@ -7,7 +7,6 @@ export const RELEASE_OWNED_POLICY_PATHS = Object.freeze([
   "ai.providers",
   "ai.tracing.includeSensitiveData",
   "audit.repair.protectedPaths",
-  "audit.repair.validationCommands",
   "merge.allowUserPullRequests",
   "merge.blockedPaths",
   ...POLICY_AGENT_IDS.flatMap((agentId) => [
@@ -98,57 +97,67 @@ export const REVIEW_REASONING_ESCALATION_DEFAULTS = Object.freeze({
 });
 
 const LEGACY_LABEL_NAMES = Object.freeze({
-  "codekeeper:reviewed": "reviewed",
-  "codekeeper:maintenance": "maintenance",
-  "codekeeper:ready": "ready",
-  "codekeeper:blocked": "blocked",
-  "codekeeper:manual-review": "manual review",
-  "codekeeper:paused": "paused",
-  "codekeeper:auto-repaired": "auto repaired",
-  "codekeeper:auto-merge": "auto merge",
-  "codekeeper:duplicate-candidate": "duplicate",
-  "codekeeper:deferred": "deferred",
-  "codekeeper:needs-tests": "needs tests",
-  "codekeeper:priority-p1": "priority p1",
-  "codekeeper:priority-p2": "priority p2",
-  "codekeeper:priority-p3": "priority p3",
-  "codekeeper:risk-low": "risk low",
-  "codekeeper:risk-medium": "risk medium",
-  "codekeeper:risk-high": "risk high",
-  "codekeeper:type-bug": "bug",
-  "codekeeper:type-enhancement": "enhancement",
-  "codekeeper:type-documentation": "documentation",
-  "codekeeper:type-question": "question",
-  "codekeeper:type-maintenance": "maintenance",
-  "codekeeper:type-security": "security",
-  "codekeeper:type-testing": "testing"
+  reviewed: "codekeeper:reviewed",
+  ready: "codekeeper:ready",
+  blocked: "codekeeper:blocked",
+  "manual review": "codekeeper:manual-review",
+  paused: "codekeeper:paused",
+  "auto repaired": "codekeeper:auto-repaired",
+  "auto merge": "codekeeper:auto-merge",
+  duplicate: "codekeeper:duplicate-candidate",
+  deferred: "codekeeper:deferred",
+  "needs tests": "codekeeper:needs-tests",
+  "priority p1": "codekeeper:priority-p1",
+  "priority p2": "codekeeper:priority-p2",
+  "priority p3": "codekeeper:priority-p3",
+  "risk low": "codekeeper:risk-low",
+  "risk medium": "codekeeper:risk-medium",
+  "risk high": "codekeeper:risk-high",
+  bug: "codekeeper:type-bug",
+  enhancement: "codekeeper:type-enhancement",
+  documentation: "codekeeper:type-documentation",
+  question: "codekeeper:type-question",
+  maintenance: "codekeeper:type-maintenance",
+  security: "codekeeper:type-security",
+  testing: "codekeeper:type-testing"
 });
 
-const CLEAN_LABEL_DESCRIPTIONS = Object.freeze({
-  reviewed: "Automated review complete",
-  maintenance: "Repository maintenance",
-  paused: "Automatic work is paused",
-  "auto repaired": "Automatically repaired"
+const OWNED_LABEL_DESCRIPTIONS = Object.freeze({
+  "codekeeper:reviewed": "Reviewed by Codekeeper",
+  "codekeeper:maintenance": "Created or managed by Codekeeper",
+  "codekeeper:paused": "Automatic work is paused",
+  "codekeeper:auto-repaired": "Automatically repaired by Codekeeper",
+  "codekeeper:type-maintenance": "Repository maintenance"
 });
 
-function cleanLabelName(name) {
+function ownedLabelName(name) {
   return LEGACY_LABEL_NAMES[name] ?? name;
 }
 
-function cleanLabelList(labels) {
-  return [...new Set(labels.map(cleanLabelName))];
+function ownedLabelList(labels) {
+  return [...new Set(labels.map(ownedLabelName))];
 }
 
 function migrateLegacyLabels(policy) {
-  policy.labels = Object.fromEntries(
-    Object.entries(policy.labels ?? {}).map(([name, definition]) => [cleanLabelName(name), definition])
-  );
-  for (const [name, description] of Object.entries(CLEAN_LABEL_DESCRIPTIONS)) {
+  policy.labels ??= {};
+  for (const [legacyName, ownedName] of Object.entries(LEGACY_LABEL_NAMES)) {
+    if (policy.labels[legacyName] && !policy.labels[ownedName]) {
+      policy.labels[ownedName] = structuredClone(policy.labels[legacyName]);
+    }
+  }
+  if (policy.labels.maintenance && !policy.labels["codekeeper:maintenance"]) {
+    policy.labels["codekeeper:maintenance"] = structuredClone(policy.labels.maintenance);
+  }
+  for (const [name, description] of Object.entries(OWNED_LABEL_DESCRIPTIONS)) {
     if (policy.labels[name]) policy.labels[name].description = description;
   }
-  policy.review.allowedLabels = cleanLabelList(policy.review.allowedLabels);
-  policy.review.managedLabels = cleanLabelList(policy.review.managedLabels);
-  policy.issues.managedLabels = cleanLabelList(policy.issues.managedLabels);
+  const legacyIssueMaintenance = policy.issues.managedLabels.includes("maintenance");
+  policy.review.allowedLabels = ownedLabelList(policy.review.allowedLabels);
+  policy.review.managedLabels = ownedLabelList(policy.review.managedLabels);
+  policy.issues.managedLabels = ownedLabelList(policy.issues.managedLabels);
+  if (legacyIssueMaintenance && !policy.issues.managedLabels.includes("codekeeper:maintenance")) {
+    policy.issues.managedLabels.unshift("codekeeper:maintenance");
+  }
 }
 
 export function upgradePolicy(input) {

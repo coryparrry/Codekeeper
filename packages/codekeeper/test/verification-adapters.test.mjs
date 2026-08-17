@@ -84,6 +84,43 @@ test("App proof requires the exact identity, permission set, and one selected re
   );
 });
 
+test("App proof derives least privilege from the installed capabilities", async () => {
+  const installation = {
+    modes: ["review"],
+    policy: {
+      review: { autoRepair: false },
+      audit: { repair: { enabled: false } },
+      issues: { allowAiImplementation: false },
+      merge: { enabled: false }
+    }
+  };
+  assert.equal(
+    await inspectInstalledApp({
+      runner: appRunner({
+        permissions: {
+          contents: "read",
+          issues: "write",
+          metadata: "read",
+          pull_requests: "write"
+        }
+      }),
+      root: ROOT,
+      repository: REPOSITORY,
+      installation
+    }),
+    true
+  );
+  assert.equal(
+    await inspectInstalledApp({
+      runner: appRunner(),
+      root: ROOT,
+      repository: REPOSITORY,
+      installation
+    }),
+    false
+  );
+});
+
 test("App proof reuses a safe variable snapshot without extra GitHub setting reads", async () => {
   const runner = appRunner();
   const variables = new Map([
@@ -131,14 +168,19 @@ test("App proof rejects extra permissions, subscribed events, and a mismatched c
   }
 });
 
-function dryRunRunner({ afterIds = [100, 101], jobs = [] } = {}) {
-  let listCalls = 0;
+const VERIFICATION_ID = "123e4567-e89b-12d3-a456-426614174000";
+
+function dryRunRunner({ matchingIds = [101], jobs = [] } = {}) {
   return createRecordingRunner(({ command, args, options }) => {
     const key = `${command} ${args.join(" ")}`;
     if (key.includes("gh run list")) {
-      listCalls += 1;
-      const ids = listCalls === 1 ? [100] : afterIds;
-      return result(JSON.stringify(ids.map((databaseId) => ({ databaseId }))));
+      return result(JSON.stringify([
+        { databaseId: 100, displayTitle: "Codekeeper maintenance verification another-run" },
+        ...matchingIds.map((databaseId) => ({
+          databaseId,
+          displayTitle: `Codekeeper maintenance verification ${VERIFICATION_ID}`,
+        })),
+      ]));
     }
     if (key.startsWith("gh workflow run codekeeper-maintain.yml"))
       return result();
@@ -171,7 +213,7 @@ test("controlled maintenance correlates one new dispatch and proves required job
         policy: { repository: { defaultBranch: "main" } },
       },
     },
-    { wait: async () => {} },
+    { wait: async () => {}, verificationId: VERIFICATION_ID },
   );
   assert.equal(passed, true);
 });
@@ -185,14 +227,14 @@ test("controlled maintenance rejects ambiguous dispatches and skipped model jobs
     await runMaintenanceDryRun(
       {
         runner: dryRunRunner({
-          afterIds: [100, 101, 102],
+          matchingIds: [101, 102],
           jobs: successfulJobs,
         }),
         root: ROOT,
         repository: REPOSITORY,
         installation,
       },
-      { wait: async () => {} },
+      { wait: async () => {}, verificationId: VERIFICATION_ID },
     ),
     false,
   );
@@ -204,7 +246,7 @@ test("controlled maintenance rejects ambiguous dispatches and skipped model jobs
         repository: REPOSITORY,
         installation,
       },
-      { wait: async () => {} },
+      { wait: async () => {}, verificationId: VERIFICATION_ID },
     ),
     false,
   );

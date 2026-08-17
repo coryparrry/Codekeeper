@@ -6,7 +6,7 @@ The adopter-owned `.github/codekeeper.json` is the runtime policy file. Each coo
 
 Version 3 treats every named policy object as closed: unknown keys fail validation. Its `automation` section controls automatic PR review, review-feedback triage, issue triage, owner requests, and the maintenance schedule. The intentional extension points are the provider names in `ai.providers`, label names in `labels`, and provider-specific JSON in `modelSettings`; these dynamic maps remain supported but have bounded entry counts, nesting, strings, arrays, and numeric values. `modelSettings` numbers may be negative or fractional when a provider supports them, but their absolute magnitude may not exceed 1,000,000. Lists, strings, provider and label counts, and validation-command count are also bounded before a coordinator can consume them.
 
-Run `npx --yes codekeeper@0.2.0 init` again to use the tabbed Settings screen. Simple mode puts each role's provider, model, and effort first, then separates workflows, automation, pull requests, maintenance, issues, merge, and instructions. Advanced mode uses the same sections and exposes every editable policy field. The final summary can return to Settings and remains the only mutation boundary.
+Until a public package release is available, build the verified local tarball described in [INSTALL.md](../INSTALL.md), install that exact tarball, and run `codekeeper init`. A fresh setup first offers the conservative Recommended path or Customize. Customize opens the tabbed Settings screen; simple mode hides inactive agents, while advanced mode keeps inactive settings visible and read-only. The final authority summary can return to Settings and remains the only mutation boundary.
 
 Every operation limit has a global ceiling. Review context is limited to 20 findings of each kind, 5 MiB of diff, and 1,000 files. Audit publication is limited to 20 issues and issue triage to 200 open-issue summaries. A repair can be at most 100 files, 10,000 changed lines, 5 MiB total, and 1 MiB per file. Auto-merge is limited to 50 files and 5,000 changed lines. These ceilings are intentionally above the starter policy while preventing a trusted-policy mistake from turning into unbounded work.
 
@@ -98,14 +98,14 @@ Reusable workflow callers expose explicit controls alongside `enabled`:
 
 - `auto_review` defaults to `true` and permits eligible pull-request events to run the review workflow. Setting it to `false` skips automatic review; the supplied required review gate then fails closed.
 - `feedback_triage` defaults to `true` and permits review and review-comment events to inventory and triage the complete current review surface.
-- `auto_triage` defaults to `true` and permits only `issues` events with actions `opened`, `reopened`, or `edited`. Setting it to `false` skips those automatic events, while exact `/codekeeper triage` comments from configured owners remain available.
+- `auto_triage` defaults to `true` and permits issue lifecycle events plus a bounded `issue_comment.created` follow-up. A comment follow-up runs only after an App-owned missing-information result and only for a newer reporter or trusted-maintainer reply; Codekeeper comments, owner commands, stale replies, and unrelated issues fail closed. Setting `auto_triage=false` skips those automatic events, while exact owner commands remain available.
 - `dry_run=true` makes maintenance report-only. A live run can repair only when `audit.repair.enabled=true` and every patch limit passes.
 
 `review.autoRepair=true` permits one automatic repair pass after a blocking review. A second blocking review stops for a maintainer.
 
-Configured owners can use `/codekeeper status`, `/codekeeper review`, `/codekeeper rerun`, `/codekeeper triage`, `/codekeeper defer`, `/codekeeper implement`, `/codekeeper fix`, and `/codekeeper stop`. Slash commands must be the complete comment. The always-installed assistant caller also accepts the exact mention form `@<app-slug> <action>` for one supported action. It ignores extra prose and ambiguous actions; non-owner content cannot authorize writes.
+Configured owners can use `/codekeeper help`, `/codekeeper status`, `/codekeeper review`, `/codekeeper implement`, `/codekeeper repair`, `/codekeeper defer`, and `/codekeeper pause`. The compatibility aliases `rerun`, `triage`, `fix`, and `stop` remain accepted. Slash commands must be the complete comment. The always-installed assistant caller also accepts the exact mention form `@<app-slug> <action>` for one supported action. It ignores extra prose and ambiguous actions; non-owner content cannot authorize writes.
 
-Automated feedback-triage `defer` results create or update one issue using a hidden root-cause fingerprint, add `deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue through that automated path. A direct owner `/codekeeper defer` reply is an unconditional owner-authorized deferral and does not ask the reviewer or model to verify the claim. Deferred and ignored threads are not automatically resolved.
+Automated feedback-triage `defer` results create or update one issue using a hidden root-cause fingerprint, add `codekeeper:deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue through that automated path. A direct owner `/codekeeper defer` reply is an unconditional owner-authorized deferral and does not ask the reviewer or model to verify the claim. Deferred and ignored threads are not automatically resolved.
 
 Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. With the starter policy's `issues.closeResolvedIssues=true`, it closes an issue as completed only when GitHub's closing-reference metadata identifies a merged pull request, and revalidates that exact reference immediately before publication. `issues.closeExactDuplicates` is independent and remains `false` in the starter policy.
 
@@ -114,11 +114,13 @@ Automatic issue triage may label, publish a sticky comment, and mark a high-conf
 Capabilities decide which automatic actions can run.
 
 - **Maintenance:** a live scheduled or manual run may create one repair when `audit.repair.enabled=true`. A dry run remains report-only.
-- **Issue:** when `issues.allowAiImplementation=true`, trusted triage may add `ready` to a clear, bounded issue. That label starts a fix run which may create one bounded repair pull request. A configured owner may also provide an issue through manual dispatch.
+- **Issue:** when `issues.allowAiImplementation=true`, trusted triage may add `codekeeper:ready` to a clear, bounded issue. Only that Codekeeper-owned label can start a policy-authorized fix run; a generic human-owned `ready` label never grants authority. A configured owner may also provide an issue through manual dispatch.
 - **Same-repository pull request:** the same exact owner command may target an eligible open, non-draft pull request to the default branch. A valid repair is committed and pushed to that pull request's existing head branch. The publisher never calls the create-pull-request path for this target and has no fallback that opens a second pull request. Forks, default/protected head branches, stale heads, branch movement, or target drift fail closed.
 - **Automatic review repair:** when `review.autoRepair=true`, a blocking review can request one repair for the exact PR head. The next blocking review requires a maintainer.
 
 Profiles can decide that an enabled repair is too risky and return no change. They cannot turn on a disabled capability or bypass its fixed limits.
+
+Any enabled review repair, maintenance repair, or issue implementation also requires a maintainer-confirmed repository validation command beyond `git diff --check`. The fresh credential-free verifier runs the exact allowed commands and publication accepts only its bound machine receipt.
 
 ## Workspace specialists
 

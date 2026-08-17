@@ -537,7 +537,13 @@ function reviewData(plan) {
     documentCount: plan.files.length,
     secrets: plan.secrets.map((secret) => secret.name),
     variables: plan.variables.map((variable) => variable.name),
-    app: ["Contents: read/write", "Issues: read/write", "Pull requests: read/write", "Metadata: read-only", `Requested access: ${plan.repository} only`],
+    app: [
+      `Contents: ${plan.appPermissions.contents}`,
+      `Issues: ${plan.appPermissions.issues}`,
+      `Pull requests: ${plan.appPermissions.pullRequests}`,
+      "Metadata: read-only",
+      `Requested access: ${plan.repository} only`
+    ],
     repair: `${(plan.policy.audit.repair.allowedPaths ?? []).length} allowed path rules · ${(plan.policy.audit.repair.protectedPaths ?? []).length} protected path rules`,
     validation: plan.policy.audit.repair.validationCommands ?? [],
     startup: plan.update && plan.enabled

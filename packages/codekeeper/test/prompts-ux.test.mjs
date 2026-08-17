@@ -44,6 +44,7 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
       if (options.message === "Enable OpenAI traces?") return true;
       if (options.message.startsWith("Start Codekeeper")) return true;
       if (options.message === "Run maintenance on a schedule?") return false;
+      if (options.message.startsWith("Record ") && options.message.includes(" as the required validation command")) return true;
       if (options.message.startsWith("Continue with")) return boundaries;
       throw new Error(`Unexpected confirmation: ${options.message}`);
     },
@@ -203,7 +204,8 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     ownerLogins: ["cory"],
     enabled: true,
     maintenanceScheduled: false,
-    capabilities: []
+    capabilities: [],
+    validationCommand: null
   });
   const modeCall = prompt.calls.find((call) => call.method === "multiselect");
   assert.equal(modeCall.options.message, "Choose workflows to generate:");
@@ -242,6 +244,7 @@ test("an existing installation reuses its workflows, identity, and settings", as
     output,
     snapshot: {
       ...snapshot(),
+      validationCommandCandidate: "npm test",
       installation: {
         policy,
         policySource: `${JSON.stringify(policy, null, 2)}\n`,
@@ -265,7 +268,8 @@ test("an existing installation reuses its workflows, identity, and settings", as
     ownerLogins: ["alice", "cory"],
     enabled: true,
     maintenanceScheduled: false,
-    capabilities: ["repair", "autoMerge"]
+    capabilities: ["repair", "autoMerge"],
+    validationCommand: "npm test"
   });
   assert.equal(prompt.calls.some((call) => call.options.message === "Use the recommended starter setup?"), false);
   assert.equal(prompt.calls.some((call) => call.options.message === "Choose workflows to generate:"), false);

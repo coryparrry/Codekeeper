@@ -25,6 +25,12 @@ const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const GITHUB_WORKFLOW_REFERENCE = /(?:\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-|codekeeper@[0-9]|\.\/\.github\/workflows\/codekeeper-)/i;
+const PACKAGE_MANAGER_LOCKFILES = Object.freeze([
+  Object.freeze({ manager: "npm", names: Object.freeze(["package-lock.json", "npm-shrinkwrap.json"]) }),
+  Object.freeze({ manager: "pnpm", names: Object.freeze(["pnpm-lock.yaml"]) }),
+  Object.freeze({ manager: "yarn", names: Object.freeze(["yarn.lock"]) }),
+  Object.freeze({ manager: "bun", names: Object.freeze(["bun.lock", "bun.lockb"]) }),
+]);
 
 function sha256(source) {
   return createHash("sha256").update(source).digest("hex");
@@ -186,6 +192,133 @@ async function exists(fsImpl, target) {
     if (error?.code === "ENOENT") return null;
     throw error;
   }
+}
+
+function packageManagerName(value) {
+  const match = typeof value === "string" ? /^([a-z]+)@/.exec(value.trim()) : null;
+  return match?.[1] ?? null;
+}
+
+async function isRegularFile(fsImpl, target) {
+  const stat = await exists(fsImpl, target);
+  return Boolean(stat?.isFile?.() && !stat.isSymbolicLink?.());
+}
+
+async function readRootRegularFile(root, name, fsImpl) {
+  const target = path.join(root, name);
+  if (!await isRegularFile(fsImpl, target)) return null;
+  try {
+    return await fsImpl.readFile(target, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function isExecutableRegularFile(fsImpl, target) {
+  const stat = await exists(fsImpl, target);
+  return Boolean(stat?.isFile?.() && !stat.isSymbolicLink?.() && (stat.mode & 0o111));
+}
+
+async function discoverPackageValidationCommand(root, fsImpl) {
+  const packageSource = await readRootRegularFile(root, "package.json", fsImpl);
+  if (packageSource === null) return null;
+
+  let packageJson;
+  try {
+    packageJson = JSON.parse(packageSource);
+  } catch {
+    return null;
+  }
+  if (!packageJson || typeof packageJson !== "object" || Array.isArray(packageJson)) return null;
+
+  const lockfileManagers = [];
+  for (const definition of PACKAGE_MANAGER_LOCKFILES) {
+    const found = [];
+    for (const name of definition.names) {
+      if (await isRegularFile(fsImpl, path.join(root, name))) found.push(name);
+    }
+    if (found.length) lockfileManagers.push({ ...definition, found });
+  }
+  if (lockfileManagers.length !== 1) return null;
+  const lockfile = lockfileManagers[0];
+  const declaredManager = packageManagerName(packageJson.packageManager);
+  if (declaredManager && declaredManager !== lockfile.manager) return null;
+
+  const scripts = packageJson.scripts;
+  const script = ["check", "test"].find((name) => typeof scripts?.[name] === "string" && scripts[name].trim());
+  if (!script) return null;
+  return Object.freeze({
+    command: `${lockfile.manager} run ${script}`,
+    packageManager: lockfile.manager,
+    lockfile: lockfile.found[0],
+    script,
+  });
+}
+
+function makeTarget(source) {
+  return ["check", "test"].find((target) => new RegExp(`^\\s*${target}\\s*:(?:\\s|$)`, "m").test(source));
+}
+
+async function discoverNonNodeValidationCandidates(root, fsImpl) {
+  const candidates = [];
+  const makefile = await readRootRegularFile(root, "Makefile", fsImpl);
+  const makeTargetName = makefile === null ? null : makeTarget(makefile);
+  if (makeTargetName) candidates.push(Object.freeze({ command: `make ${makeTargetName}`, ecosystem: "make", buildFile: "Makefile" }));
+
+  const pyproject = await readRootRegularFile(root, "pyproject.toml", fsImpl);
+  if (pyproject !== null && /(?:^|[^A-Za-z0-9_-])pytest(?:[^A-Za-z0-9_-]|$)/.test(pyproject)) {
+    const pythonLocks = [];
+    for (const definition of [
+      { lockfile: "uv.lock", command: "uv run pytest" },
+      { lockfile: "poetry.lock", command: "poetry run pytest" },
+      { lockfile: "Pipfile.lock", command: "pipenv run pytest" },
+    ]) {
+      if (await isRegularFile(fsImpl, path.join(root, definition.lockfile))) pythonLocks.push(definition);
+    }
+    if (pythonLocks.length === 1) {
+      candidates.push(Object.freeze({
+        command: pythonLocks[0].command,
+        ecosystem: "python",
+        buildFile: "pyproject.toml",
+        lockfile: pythonLocks[0].lockfile,
+      }));
+    }
+  }
+
+  if (await isRegularFile(fsImpl, path.join(root, "Cargo.toml")) && await isRegularFile(fsImpl, path.join(root, "Cargo.lock"))) {
+    candidates.push(Object.freeze({ command: "cargo test --locked", ecosystem: "cargo", buildFile: "Cargo.toml", lockfile: "Cargo.lock" }));
+  }
+  if (await isRegularFile(fsImpl, path.join(root, "Package.swift"))) {
+    candidates.push(Object.freeze({ command: "swift test", ecosystem: "swift", buildFile: "Package.swift" }));
+  }
+  const gradleBuildFile = await isRegularFile(fsImpl, path.join(root, "build.gradle"))
+    ? "build.gradle"
+    : await isRegularFile(fsImpl, path.join(root, "build.gradle.kts"))
+      ? "build.gradle.kts"
+      : null;
+  if (gradleBuildFile && await isExecutableRegularFile(fsImpl, path.join(root, "gradlew"))) {
+    candidates.push(Object.freeze({ command: "./gradlew test", ecosystem: "gradle", buildFile: gradleBuildFile }));
+  }
+  if (await isRegularFile(fsImpl, path.join(root, "pom.xml")) && await isExecutableRegularFile(fsImpl, path.join(root, "mvnw"))) {
+    candidates.push(Object.freeze({ command: "./mvnw test", ecosystem: "maven", buildFile: "pom.xml" }));
+  }
+  return candidates;
+}
+
+/**
+ * Discover one deterministic repository validation command without executing
+ * project code or searching beyond the checked-out repository root. A locked
+ * package-manager script is the only documented priority; all other mixed
+ * ecosystems fail closed rather than guessing which test command is intended.
+ */
+export async function discoverRepositoryValidationCommand(
+  root,
+  { fsImpl = { lstat, readFile } } = {},
+) {
+  const packageCandidate = await discoverPackageValidationCommand(root, fsImpl);
+  if (packageCandidate) return packageCandidate;
+  const candidates = await discoverNonNodeValidationCandidates(root, fsImpl);
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 async function safeDirectoryEntries(fsImpl, target) {
@@ -1301,6 +1434,7 @@ export async function inspectRepository({
   }
 
   const installation = await inspectInstallationFiles(root, { fsImpl });
+  const validationCandidate = await discoverRepositoryValidationCommand(root, { fsImpl });
   const updateBranch = installation ? `codekeeper/update-${headSha.slice(0, 12)}` : SETUP_BRANCH;
   await assertNoSetupBranch({ runner, root, repository, branch: updateBranch });
   let existingSettings = null;
@@ -1322,6 +1456,7 @@ export async function inspectRepository({
     remoteDefaultSha,
     viewerLogin,
     displayName: repository.split("/")[1],
+    validationCommandCandidate: validationCandidate?.command ?? null,
     ...(installation ? { installation, existingSettings, updateBranch } : {})
   });
 }

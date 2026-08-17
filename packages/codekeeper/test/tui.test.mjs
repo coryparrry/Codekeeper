@@ -1096,7 +1096,10 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
   const bundle = await loadVerifiedAssets();
   const initial = buildInstallPlan({
     bundle,
-    snapshot: repositorySnapshot(),
+    snapshot: {
+      ...repositorySnapshot(),
+      validationCommandCandidate: "npm test",
+    },
     answers: {
       modes: ["review", "maintain"],
       preset: "openai",
@@ -1105,12 +1108,14 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
       appClientId: "Iv123456789012345678",
       automationBotLogin: "codekeeper-widget[bot]",
       enabled: true,
-      capabilities: ["repair", "autoMerge"]
+      capabilities: ["repair", "autoMerge"],
+      validationCommand: "npm test",
     }
   });
   const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
   const snapshot = {
     ...repositorySnapshot(),
+    validationCommandCandidate: "npm test",
     installation: {
       policy: JSON.parse(contents[".github/codekeeper.json"]),
       policySource: contents[".github/codekeeper.json"],
@@ -1137,6 +1142,7 @@ test("settings-only updates can be reviewed without a changed policy file", asyn
         automationBotLogin: "codekeeper-widget[bot]",
         enabled: false,
         capabilities: ["repair", "autoMerge"],
+        validationCommand: "npm test",
         releaseUpdate
       }
     });

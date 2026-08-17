@@ -144,7 +144,7 @@ function preview(plan, output) {
   }
   output.write(`  OpenAI traces: ${plan.tracing ? "enabled" : "disabled"}\n`);
   output.write(`  Scheduled maintenance: ${plan.maintenanceScheduled ? "enabled" : "disabled; manual runs remain available"}\n`);
-  output.write("  GitHub App: contents/issues/pull requests read-write; metadata read-only; selected repository only\n");
+  output.write(`  GitHub App: contents ${plan.appPermissions.contents}; issues ${plan.appPermissions.issues}; pull requests ${plan.appPermissions.pullRequests}; metadata read-only; selected repository only\n`);
   output.write(`  Code-changing capabilities: ${["reviewRepair", "repair", "issueImplementation"].some((id) => plan.capabilities[id]) ? "enabled" : "off"}; automatic merge: ${plan.capabilities.autoMerge ? "enabled" : "off"}\n`);
   output.write("  Files:\n");
   for (const file of plan.files) output.write(`    - ${file.path}\n`);
@@ -353,7 +353,9 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
       const registrationUrl = appRegistrationUrl({
         repository: snapshot.repository,
         displayName: setupAnswers.displayName,
-        ownerType: snapshot.ownerType
+        ownerType: snapshot.ownerType,
+        modes: setupAnswers.modes,
+        capabilities: setupAnswers.capabilities
       });
       presentationOutput.write(`\nUse a GitHub App that you own. Install it only on ${snapshot.repository}.\nGitHub pre-fills Codekeeper's required permissions. Do not change them; Codekeeper will verify the App after the setup pull request merges. GitHub does not create the App until you submit the form.\n${registrationUrl}\n`);
       try {

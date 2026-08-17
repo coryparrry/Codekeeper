@@ -29,6 +29,7 @@ import {
 } from "../src/constants.mjs";
 import { ASSET_KEYS } from "../src/repository-artifacts.mjs";
 import {
+  appPermissions,
   appRegistrationUrl,
   buildInstallPlan,
   buildUpdateAnswers,
@@ -72,7 +73,8 @@ function snapshot() {
     repository: "acme/widget",
     defaultBranch: "main",
     headSha: HEAD_SHA,
-    viewerLogin: "coryparrry"
+    viewerLogin: "coryparrry",
+    validationCommandCandidate: "npm test"
   });
 }
 
@@ -85,6 +87,7 @@ function answers(overrides = {}) {
     appClientId: "Iv123456789012345678",
     automationBotLogin: "Codekeeper-Acme[bot]",
     enabled: true,
+    validationCommand: "npm test",
     ...overrides
   };
   if (!Object.hasOwn(overrides, "capabilities")) {
@@ -226,8 +229,11 @@ test("rendered policies personalize only repository identity while retaining con
     assert.equal(rendered.issues.closeExactDuplicates, false);
     assert.equal(rendered.issues.closeResolvedIssues, true);
     assert.equal(rendered.merge.enabled, false);
-    assert.ok(Object.keys(rendered.labels).every((name) => /^[a-z0-9 ]+$/.test(name)));
-    assert.ok(Object.values(rendered.labels).every((definition) => !/codekeeper/i.test(definition.description)));
+    assert.ok(Object.keys(rendered.labels).every((name) => /^[a-z0-9 :-]+$/.test(name)));
+    assert.ok(Object.keys(rendered.labels).some((name) => name.startsWith("codekeeper:")));
+    assert.ok(Object.entries(rendered.labels)
+      .filter(([name]) => !name.startsWith("codekeeper:"))
+      .every(([, definition]) => !/codekeeper/i.test(definition.description)));
     assert.ok(rendered.audit.repair.protectedPaths.length > 0);
     assert.ok(rendered.audit.repair.validationCommands.includes("git diff --check"));
     assert.deepEqual(rendered.ai, upgradePolicy(original).ai);
@@ -313,9 +319,10 @@ test("policy reruns add newly required labels without replacing adopter customiz
   const bundle = await loadVerifiedAssets();
   const bundledPolicy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
   const previous = structuredClone(bundledPolicy);
-  delete previous.labels["paused"];
-  delete previous.labels["auto repaired"];
-  previous.labels["ready"].description = "Repository-specific ready label";
+  delete previous.labels["codekeeper:paused"];
+  delete previous.labels["codekeeper:auto-repaired"];
+  previous.labels["codekeeper:ready"].description =
+    "Repository-specific ready label";
   const rendered = JSON.parse(renderPolicy(JSON.stringify(previous), {
     displayName: "Widget",
     defaultBranch: "main",
@@ -323,9 +330,18 @@ test("policy reruns add newly required labels without replacing adopter customiz
     enforceBundledDefaults: false,
     requiredPolicySource: bundle.contents["policies/openai.json"]
   }));
-  assert.equal(rendered.labels["ready"].description, "Repository-specific ready label");
-  assert.deepEqual(rendered.labels["paused"], bundledPolicy.labels["paused"]);
-  assert.deepEqual(rendered.labels["auto repaired"], bundledPolicy.labels["auto repaired"]);
+  assert.equal(
+    rendered.labels["codekeeper:ready"].description,
+    "Repository-specific ready label",
+  );
+  assert.deepEqual(
+    rendered.labels["codekeeper:paused"],
+    bundledPolicy.labels["codekeeper:paused"],
+  );
+  assert.deepEqual(
+    rendered.labels["codekeeper:auto-repaired"],
+    bundledPolicy.labels["codekeeper:auto-repaired"],
+  );
 });
 
 test("openai preset changes only issue-triage model policy from the mixed preset", async () => {
@@ -532,9 +548,23 @@ test("legacy policies keep deferred issue publication off until the publisher is
   delete legacy.automation;
   delete legacy.review.createDeferredIssues;
   delete legacy.ai.providers.openrouter;
+  delete legacy.labels.deferred;
   delete legacy.labels["codekeeper:deferred"];
-  legacy.issues.managedLabels = legacy.issues.managedLabels.filter((label) => label !== "codekeeper:deferred");
+  legacy.issues.managedLabels = legacy.issues.managedLabels.filter((label) => !["deferred", "codekeeper:deferred"].includes(label));
   assert.equal(upgradePolicy(legacy).review.createDeferredIssues, false);
+});
+
+test("policy upgrades namespace Codekeeper-owned labels without erasing repository taxonomy", async () => {
+  const bundle = await loadVerifiedAssets();
+  const legacy = JSON.parse(bundle.contents["policies/openai.json"]);
+  const upgraded = upgradePolicy(legacy);
+
+  assert.ok(upgraded.review.managedLabels.every((label) => label.startsWith("codekeeper:")));
+  assert.ok(upgraded.issues.managedLabels.every((label) => label.startsWith("codekeeper:")));
+  assert.ok(upgraded.issues.managedLabels.includes("codekeeper:maintenance"));
+  assert.ok(upgraded.issues.managedLabels.includes("codekeeper:type-maintenance"));
+  assert.deepEqual(upgraded.labels.security, legacy.labels.security);
+  assert.deepEqual(upgradePolicy(upgraded), upgraded);
 });
 
 test("existing policies gain the default high-risk review escalation", async () => {
@@ -1393,6 +1423,24 @@ test("GitHub App registration URL is private, webhook-free, repository-owned, an
     () => appRegistrationUrl({ repository: "Acme/Widget", displayName: "Widget App", ownerType: "Bot" }),
     assertInstallerCode(assert, "PLAN_INVALID")
   );
+
+  assert.deepEqual(appPermissions({ modes: ["review"], capabilities: [] }), {
+    contents: "read",
+    issues: "write",
+    pullRequests: "write",
+    metadata: "read"
+  });
+  const reviewUrl = new URL(appRegistrationUrl({
+    repository: "Acme/Widget",
+    displayName: "Widget App",
+    ownerType: "User",
+    modes: ["review"],
+    capabilities: []
+  }).split("#")[0]);
+  assert.equal(reviewUrl.searchParams.get("contents"), "read");
+  assert.equal(reviewUrl.searchParams.get("pull_requests"), "write");
+  assert.equal(appPermissions({ modes: ["issues"], capabilities: [] }).pullRequests, "read");
+  assert.equal(appPermissions({ modes: ["maintain"], capabilities: ["repair"] }).contents, "write");
 });
 
 test("GitHub App client IDs accept the documented dotted form and reject whitespace or controls", async () => {

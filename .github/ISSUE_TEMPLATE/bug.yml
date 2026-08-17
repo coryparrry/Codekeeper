@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible Codekeeper behavior problem.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private keys, tokens, or unredacted private repository content. Use private reporting for security concerns.
+  - type: input
+    id: version
+    attributes:
+      label: Codekeeper version or source commit
+      placeholder: "0.x.y or full commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: workflow
+    attributes:
+      label: Workflow and event
+      placeholder: "codekeeper-review.yml / pull_request_target"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Observed behavior and sanitised logs
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction steps
+    validations:
+      required: true
