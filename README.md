@@ -17,6 +17,18 @@ Codekeeper turns a guided command-line setup into an always-available maintainer
 
 You do not need to write workflows or configure installation files by hand. The CLI helps you choose the models, capabilities, validation commands, and GitHub App permissions, then creates the complete setup as a pull request for you to review. Codekeeper works inside those boundaries and fails closed when it cannot prove that an action is allowed.
 
+## ✨ What Codekeeper does
+
+| Workflow | What it does | Starting authority |
+|---|---|---|
+| **Pull-request review** | Inspects a bounded comparison, publishes a living review summary, applies configured labels, and reports a review gate. | Automatic on supported pull requests with the Recommended setup. Repair and merge stay off. |
+| **Issue triage** | Classifies an issue, checks for exact duplicates, records readiness, and publishes one App-owned triage result. | Triage can be enabled independently. Duplicate closure and implementation require explicit opt-in. |
+| **Repository maintenance** | Audits repository health and can publish bounded maintenance issues. | Manual runs are available with the Recommended setup. Scheduling and repair stay off. |
+| **Repair and implementation** | Prepares a small patch, validates it, then updates an eligible pull request or opens a bounded repair or implementation pull request. | Disabled until you enable a code-changing capability and supply a trusted validation command. |
+| **Owner assistant** | Routes exact commands from configured owners to the installed workflows. | Only configured owners and exact supported commands grant authority. |
+
+Codekeeper complements your existing tests, approvals, security checks, and deployment gates. It does not replace them.
+
 ## 🚀 Install
 
 ### Before you start
@@ -102,18 +114,6 @@ flowchart LR
     H --> I["Prove the first live review"]
 ```
 
-## ✨ What Codekeeper does
-
-| Workflow | What it does | Starting authority |
-|---|---|---|
-| **Pull-request review** | Inspects a bounded comparison, publishes a living review summary, applies configured labels, and reports a review gate. | Automatic on supported pull requests with the Recommended setup. Repair and merge stay off. |
-| **Issue triage** | Classifies an issue, checks for exact duplicates, records readiness, and publishes one App-owned triage result. | Triage can be enabled independently. Duplicate closure and implementation require explicit opt-in. |
-| **Repository maintenance** | Audits repository health and can publish bounded maintenance issues. | Manual runs are available with the Recommended setup. Scheduling and repair stay off. |
-| **Repair and implementation** | Prepares a small patch, validates it, and publishes an eligible repair or implementation pull request. | Disabled until you enable a code-changing capability and supply a trusted validation command. |
-| **Owner assistant** | Routes exact commands from configured owners to the installed workflows. | Only configured owners and exact supported commands grant authority. |
-
-Codekeeper complements your existing tests, approvals, security checks, and deployment gates. It does not replace them.
-
 ## ⚙️ How it works
 
 Every run begins with the policy from the repository's default branch and an exact, verified Codekeeper package. Work is split across isolated GitHub-hosted runners so repository inspection, model coordination, deterministic validation, sealing, and publication do not share one credential-bearing process.
@@ -124,12 +124,14 @@ flowchart LR
     B --> C["Inspect the bounded workspace"]
     C --> D["Coordinate model reasoning"]
     D --> E["Validate the structured result"]
-    E --> F["Verify repairs on a fresh runner"]
-    F --> G["Seal immutable evidence"]
-    G --> H["Publish with the adopter GitHub App"]
+    E --> F{"Repair candidate?"}
+    F -->|Yes| G["Verify repair on a fresh runner"]
+    F -->|No| H["Seal immutable evidence"]
+    G --> H
+    H --> I["Recheck current state and publish with the GitHub App"]
 ```
 
-The workspace specialist receives bounded repository context and, when configured, a workspace credential. It does not receive the GitHub App or model-provider credential. The coordinator reconstructs the frozen context on a fresh runner and treats specialist output as untrusted evidence. Publication receives a short-lived App token only after the result and current GitHub state pass deterministic checks.
+The workspace specialist receives bounded repository context and, when configured, a workspace credential. It does not receive the GitHub App or model-provider credential. The coordinator reconstructs the frozen context on a fresh runner and treats specialist output as untrusted evidence. Publication mints a short-lived App token only after the candidate is sealed, then uses it to recheck current GitHub state and publish the result.
 
 For pull-request review, the default-branch caller does not check out or execute pull-request code. Repairs are applied only after model execution and are checked again on a fresh, credential-free runner before publication.
 
@@ -182,7 +184,7 @@ Configured owners can use exact complete-body commands in supported issues and p
 /codekeeper pause
 ```
 
-The same commands can mention the installed App, for example `@your-app-slug review`. Ordinary prose, extra text, and commands from unconfigured users do not grant authority. Run `/codekeeper help` in the current issue or pull request to see the commands available there.
+The same commands can mention the installed App, for example `@<app-slug> review`. Free-form requests such as `@<app-slug> please review this` are ignored. Commands from unconfigured users do not grant authority. Run `/codekeeper help` in the current issue or pull request to see the commands available there.
 
 ## 🧰 CLI reference
 
