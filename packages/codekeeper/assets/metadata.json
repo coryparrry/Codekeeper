@@ -90,8 +90,8 @@
       "packagePath": "release/workflows/codekeeper-maintain.yml"
     },
     "runtime-workflows/issues.yml": {
-      "sha256": "bea29ca026e688a677b964f5c6ba279b8d165d5887c2a5d616a2fa2af3442060",
-      "bytes": 24732,
+      "sha256": "f3c20b3d38fb7615347ab907a797ef039a9d77e546a7ba6b53d81d717010e688",
+      "bytes": 24828,
       "sourcePath": ".github/workflows/codekeeper-issues.yml",
       "packagePath": "release/workflows/codekeeper-issues.yml"
     },

@@ -27,6 +27,24 @@ test("workflow owner-command lists stay synchronized with the canonical definiti
   );
 });
 
+test("issue comment routing keeps one balanced GitHub expression", async () => {
+  const source = await workflow("issues");
+  const expression = jobSection(source, "workspace", "analyze").match(
+    /if: >-\n([\s\S]*?)\n\s+# CODEKEEPER_OWNER_COMMANDS_END/,
+  )?.[1];
+  assert.ok(expression, "issue workspace expression is present");
+  let depth = 0;
+  for (const character of expression) {
+    if (character === "(") depth += 1;
+    if (character === ")") depth -= 1;
+    assert.ok(
+      depth >= 0,
+      "issue workspace expression never closes before it opens",
+    );
+  }
+  assert.equal(depth, 0, "issue workspace expression has balanced parentheses");
+});
+
 test("every mode isolates untrusted candidate creation, tokenless sealing, and App publication", async () => {
   for (const mode of modes) {
     const source = await workflow(mode);
@@ -258,10 +276,14 @@ test("workflow handoff artifacts survive failed-job reruns and producers replace
     const sealedArtifactName = `${artifactPrefix}-artifact-\${{ github.run_id }}`;
     const repairMode = mode === "maintain" || mode === "fix";
     const candidateArtifactNames = [
-      ...source.matchAll(/^ {10}name: (codekeeper-(?![^\n]*-verified-candidate-)[^\n]*-candidate-[^\n]+)$/gm),
+      ...source.matchAll(
+        /^ {10}name: (codekeeper-(?![^\n]*-verified-candidate-)[^\n]*-candidate-[^\n]+)$/gm,
+      ),
     ].map((match) => match[1]);
     const validationReceiptArtifactNames = [
-      ...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-validation-receipt-[^\n]+)$/gm),
+      ...source.matchAll(
+        /^ {10}name: (codekeeper-[^\n]*-validation-receipt-[^\n]+)$/gm,
+      ),
     ].map((match) => match[1]);
     const sealedArtifactNames = [
       ...source.matchAll(/^ {10}name: (codekeeper-[^\n]*-artifact-[^\n]+)$/gm),
@@ -273,7 +295,9 @@ test("workflow handoff artifacts survive failed-job reruns and producers replace
     );
     assert.deepEqual(
       validationReceiptArtifactNames,
-      repairMode ? [validationReceiptArtifactName, validationReceiptArtifactName] : [],
+      repairMode
+        ? [validationReceiptArtifactName, validationReceiptArtifactName]
+        : [],
       `${mode} validation receipt producer and consumer must use the same run-stable artifact name`,
     );
     assert.deepEqual(
@@ -627,8 +651,14 @@ test("issue triage can start enabled issue implementation while owner PR repair 
   );
   assert.doesNotMatch(issue, /owner_requests/);
   assert.match(issue, /CODEKEEPER_OWNER_COMMANDS_START/);
-  assert.match(issue, /github\.event\.comment\.user\.login != inputs\.automation_bot_login/);
-  assert.match(issue, /github\.event\.comment\.user\.login == github\.event\.issue\.user\.login/);
+  assert.match(
+    issue,
+    /github\.event\.comment\.user\.login != inputs\.automation_bot_login/,
+  );
+  assert.match(
+    issue,
+    /github\.event\.comment\.user\.login == github\.event\.issue\.user\.login/,
+  );
   assert.match(issue, /github\.event\.comment\.author_association/);
   assert.match(issue, /contains\(fromJSON\('\["\/codekeeper help"/);
   assert.match(
