@@ -16,7 +16,7 @@ import {
   modelAssignments,
   requiresAutomationBotLogin,
 } from "./plan.mjs";
-import { configureRepositorySettings, installPlan } from "./install.mjs";
+import { installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
 import { MODES, PACKAGE_NAME, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
 import { normalizePackageRelease } from "./package-release.mjs";
@@ -374,37 +374,20 @@ export async function runCli({
     const beforeMutation = await inspect({ runner, cwd: snapshot.root, interactive });
     assertSameSnapshot(snapshot, beforeMutation, resumeCommand);
     activePrompt.progress?.update({ id: "repository:verify", status: "done" });
-    const hasSettingsMutation = plan.variables.length > 0 || plan.secrets.length > 0;
-    if (hasSettingsMutation) {
-      await configureRepositorySettings(plan, {
-        runner,
-        output: presentationOutput,
-        appPrivateKeyPath,
-        onProgress: activePrompt.progress?.update,
-        withSecretInput: typeof activePrompt.inputSecret === "function"
-          ? (spec) => activePrompt.inputSecret(spec)
-          : null,
-        withInteractiveTerminal: typeof activePrompt.suspendTerminal === "function"
-          ? (callback, notice) => activePrompt.suspendTerminal(callback, notice)
-          : (callback) => callback(),
-        resumeCommand
-      });
-    }
-    let receipt;
-    if (plan.settingsOnly) {
-      receipt = Object.freeze({ settingsOnly: true, pullRequestUrl: "No pull request was needed." });
-    } else {
-      if (hasSettingsMutation) {
-        const beforeGit = await inspect({ runner, cwd: snapshot.root, interactive });
-        assertSameSnapshot(snapshot, beforeGit, resumeCommand, { includeSettings: false });
-      }
-      receipt = await installPlan(plan, {
-        runner,
-        onProgress: activePrompt.progress?.update,
-        resumeCommand,
-        platform
-      });
-    }
+    let receipt = await installPlan(plan, {
+      runner,
+      output: presentationOutput,
+      appPrivateKeyPath,
+      onProgress: activePrompt.progress?.update,
+      withSecretInput: typeof activePrompt.inputSecret === "function"
+        ? (spec) => activePrompt.inputSecret(spec)
+        : null,
+      withInteractiveTerminal: typeof activePrompt.suspendTerminal === "function"
+        ? (callback, notice) => activePrompt.suspendTerminal(callback, notice)
+        : (callback) => callback(),
+      resumeCommand,
+      platform
+    });
     if (!receipt.settingsOnly) {
       let pullRequestOpened = false;
       try {

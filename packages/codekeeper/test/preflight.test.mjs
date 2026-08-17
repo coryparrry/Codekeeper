@@ -9,6 +9,7 @@ import {
   assertNodeVersion,
   assertNoInstallationFiles,
   assertNoSetupBranch,
+  doctorRepository,
   inspectInstallationFiles,
   inspectRepository,
   parseGitHubRemote
@@ -55,6 +56,7 @@ function preflightRunner(root, options = {}) {
     localRefs: "",
     remoteRefs: "",
     pulls: [],
+    membership: { state: "active", role: "admin" },
     bare: "false",
     sparseStatus: 1,
     sparseValue: "",
@@ -89,6 +91,9 @@ function preflightRunner(root, options = {}) {
     }
     if (command === "gh" && args[0] === "api" && args.at(-1) === "repos/acme/widget/actions/permissions") {
       return result(JSON.stringify(settings.actions));
+    }
+    if (command === "gh" && args[0] === "api" && args.at(-1) === "user/memberships/orgs/acme") {
+      return result(JSON.stringify(settings.membership));
     }
     if (command === "git" && args.join(" ") === "status --porcelain=v1 --untracked-files=all") return result(settings.status);
     if (command === "git" && args.join(" ") === "rev-parse HEAD") return result(`${settings.headSha}\n`);
@@ -700,4 +705,129 @@ test("repository preflight accepts personal and organization owners and fails cl
     }),
     assertInstallerCode(assert, "PREFLIGHT_INVALID_RESPONSE")
   );
+});
+
+test("repository doctor aggregates independent failures and keeps mutation disabled", async (t) => {
+  const root = await temporaryDirectory(t);
+  const report = await doctorRepository({
+    runner: preflightRunner(root, {
+      bare: "true",
+      status: " M notes.txt\n",
+      remoteSha: OTHER_SHA,
+      userName: "",
+      repositoryData: {
+        full_name: "acme/widget",
+        default_branch: "main",
+        owner: { type: "Organization" },
+        permissions: { admin: false },
+        archived: false,
+        disabled: false,
+      },
+      actions: { enabled: false },
+      membership: { state: "active", role: "member" },
+      localRefs: "refs/heads/codekeeper/setup\n",
+    }),
+    cwd: root,
+    nodeVersion: "22.0.0",
+  });
+
+  const byId = new Map(report.checks.map((check) => [check.id, check]));
+  for (const id of ["checkout", "repository-admin", "actions", "clean-state", "remote-freshness", "git-identity", "setup-branch"]) {
+    assert.equal(byId.get(id)?.status, "fail", id);
+    assert.equal(byId.get(id)?.blocking, true, id);
+  }
+  assert.equal(byId.get("app-authority")?.status, "warning");
+  assert.match(byId.get("app-authority")?.detail, /App Manager cannot install/);
+  assert.ok(report.counts.fail >= 7);
+  assert.ok(report.counts.warning >= 1);
+  assert.equal(report.mutationAllowed, false);
+  assert.ok(report.checks.length >= 14);
+});
+
+test("repository doctor reports an archived repository with the other readiness checks", async (t) => {
+  const root = await temporaryDirectory(t);
+  const report = await doctorRepository({
+    runner: preflightRunner(root, {
+      repositoryData: {
+        full_name: "acme/widget",
+        default_branch: "main",
+        owner: { type: "Organization" },
+        permissions: { admin: true },
+        archived: true,
+        disabled: false,
+      },
+    }),
+    cwd: root,
+    nodeVersion: "22.0.0",
+  });
+  const repositoryState = report.checks.find((check) => check.id === "repository-state");
+  assert.equal(repositoryState?.status, "fail");
+  assert.equal(repositoryState?.blocking, true);
+  assert.equal(report.mutationAllowed, false);
+});
+
+test("repository doctor skips dependent checks when GitHub CLI and Git are unavailable", async (t) => {
+  const root = await temporaryDirectory(t);
+  const report = await doctorRepository({
+    runner: preflightRunner(root, {
+      failures: new Map([
+        [commandKey("git", ["--version"]), 127],
+        [commandKey("gh", ["--version"]), 127],
+      ]),
+    }),
+    cwd: root,
+    nodeVersion: "22.0.0",
+  });
+  const byId = new Map(report.checks.map((check) => [check.id, check]));
+  assert.equal(byId.get("git")?.status, "fail");
+  assert.equal(byId.get("gh")?.status, "fail");
+  for (const id of ["checkout", "repository-identity", "auth", "clean-state", "remote-freshness", "git-identity", "installation", "setup-branch"]) {
+    assert.equal(byId.get(id)?.status, "skipped", id);
+  }
+  assert.equal(report.mutationAllowed, false);
+});
+
+test("repository doctor reports organization membership authority without exposing response data", async (t) => {
+  const root = await temporaryDirectory(t);
+  for (const [name, membership, expectedStatus] of [
+    ["owner", { state: "active", role: "admin" }, "pass"],
+    ["member", { state: "active", role: "member" }, "warning"],
+    ["unknown role", { state: "active", role: "triage" }, "warning"],
+    ["malformed", { state: "active", role: "unexpected", token: "super-secret-membership-value" }, "warning"],
+  ]) {
+    await t.test(name, async () => {
+      const report = await doctorRepository({
+        runner: preflightRunner(root, { membership }),
+        cwd: root,
+        nodeVersion: "22.0.0",
+      });
+      const check = report.checks.find((candidate) => candidate.id === "app-authority");
+      assert.equal(check?.status, expectedStatus);
+      assert.doesNotMatch(check?.detail ?? "", /super-secret-membership-value/);
+      assert.doesNotMatch(JSON.stringify(report), /stderr|token|pem|secret/i);
+    });
+  }
+});
+
+test("repository doctor accepts personal repository owners and returns a deeply frozen report", async (t) => {
+  const root = await temporaryDirectory(t);
+  const runner = preflightRunner(root, {
+    repositoryData: {
+      full_name: "acme/widget",
+      default_branch: "main",
+      owner: { type: "User" },
+      permissions: { admin: true },
+    },
+  });
+  const report = await doctorRepository({ runner, cwd: root, nodeVersion: "22.0.0" });
+  const appAuthority = report.checks.find((check) => check.id === "app-authority");
+  assert.equal(appAuthority?.status, "pass");
+  assert.equal(runner.calls.some((call) => call.args.at(-1)?.startsWith("user/memberships/orgs/")), false);
+  assert.ok(Object.isFrozen(report));
+  assert.ok(Object.isFrozen(report.checks));
+  assert.ok(report.checks.every((check) => Object.isFrozen(check)));
+  assert.ok(Object.isFrozen(report.counts));
+  assert.equal(report.mutationAllowed, true);
+  assert.ok(report.checks.every((check) => !/(stderr|token|pem|secret)/i.test(JSON.stringify(check))));
+  assert.ok(runner.calls.every((call) => !["push", "commit", "secret", "variable"].some((token) => call.args.includes(token))));
 });

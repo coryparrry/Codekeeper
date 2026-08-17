@@ -754,7 +754,7 @@ test("the Settings command centre returns defaults and arbitrary model edits", a
     await tui.send("j");
     await tui.send(" ");
     await tui.send("g");
-    for (let index = 0; index < 12; index += 1) await tui.send("j");
+    for (let index = 0; index < 13; index += 1) await tui.send("j");
     await tui.send("\u001b[C");
     await tui.send("\u001b[C");
     await tui.send("j");
@@ -787,7 +787,7 @@ test("the Settings command centre resets a repository profile override", async (
   profiles.fixer += "\nRepository preference.\n";
   const settings = createEditableSettings({
     policy,
-    modes: ["review", "maintain"],
+    modes: ["review", "maintain", "fix"],
     enabled: true,
     profiles,
     profileDefaults: Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]])),
@@ -796,9 +796,8 @@ test("the Settings command centre resets a repository profile override", async (
   const tui = await createTuiHarness(t);
   const edited = tui.prompt.editSettings({ settings, baselinePolicy: policy, repository: "acme/widget" });
   await tui.waitForText("Choose how Codekeeper works");
-  await tui.send("[");
-  await tui.send("[");
-  for (let index = 0; index < 3; index += 1) await tui.send("j");
+  for (let index = 0; index < 7; index += 1) await tui.send("]");
+  for (let index = 0; index < 2; index += 1) await tui.send("j");
   await tui.waitForText("custom");
   await tui.send("r");
   await tui.waitForText("Using the packaged default");
@@ -893,12 +892,11 @@ test("profile instructions stay inside the TUI and accept multi-line text", asyn
   const bundle = await loadVerifiedAssets();
   const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
   const profiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
-  const settings = createEditableSettings({ policy, modes: ["review", "maintain"], enabled: true, profiles });
+  const settings = createEditableSettings({ policy, modes: ["review", "maintain", "fix"], enabled: true, profiles });
   const tui = await createTuiHarness(t);
   const edited = tui.prompt.editSettings({ settings, baselinePolicy: policy, repository: "acme/widget" });
   await tui.waitForText("Choose how Codekeeper works");
-  await tui.send("[");
-  await tui.send("[");
+  for (let index = 0; index < 7; index += 1) await tui.send("]");
   const profileIndex = settingsRows(settings).filter((row) => row.section === "profiles").findIndex((row) => row.id === "profile:fixer");
   assert.ok(profileIndex >= 0);
   for (let index = 0; index < profileIndex; index += 1) await tui.send("j");

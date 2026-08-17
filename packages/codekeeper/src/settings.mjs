@@ -6,6 +6,15 @@ import { validatePolicy } from "./policy-validator.mjs";
 const AGENT_IDS = Object.freeze(["review", "audit", "issue", "fix"]);
 const EFFORTS = Object.freeze(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const AGENT_WORKFLOWS = Object.freeze(Object.fromEntries(
+  Object.entries(MODES).map(([mode, definition]) => [definition.policyAgent, mode])
+));
+const PROFILE_WORKFLOWS = Object.freeze({
+  "pr-reviewer": "review",
+  "repository-auditor": "maintain",
+  "issue-triager": "issues",
+  fixer: "fix"
+});
 
 export const SETTINGS_SECTIONS = Object.freeze([
   Object.freeze({ id: "ai", label: "Models", icon: "🤖" }),
@@ -208,6 +217,7 @@ export function createEditableSettings({
   policy,
   modes,
   enabled,
+  maintenanceScheduled = true,
   profiles = {},
   profileDefaults = profiles,
   profileSources = null,
@@ -228,13 +238,33 @@ export function createEditableSettings({
     policy: editablePolicy,
     modes: [...modes],
     enabled: enabled !== false,
+    maintenanceScheduled,
     ...normalizedProfiles
   };
+}
+
+function inactiveRow(row, workflow) {
+  return {
+    ...row,
+    description: `Not used — enable the ${MODES[workflow].label} workflow to edit this setting. ${row.description}`,
+    inactive: true,
+    disabled: true,
+    readOnly: true,
+    kind: "readonly"
+  };
+}
+
+function agentWorkflow(path) {
+  const agent = path.match(/^ai\.agents\.([^.]+)/)?.[1];
+  return agent ? AGENT_WORKFLOWS[agent] : null;
 }
 
 export function settingsRows(settings, { advanced = false } = {}) {
   const rows = [];
   for (const agent of AGENT_IDS) {
+    const workflow = AGENT_WORKFLOWS[agent];
+    const active = settings.modes.includes(workflow);
+    if (!advanced && !active) continue;
     for (const [suffix, name] of [
       ["provider", "Provider"],
       ["model", "Model"],
@@ -242,8 +272,12 @@ export function settingsRows(settings, { advanced = false } = {}) {
       ["workspace.enabled", "Workspace specialist"],
       ["workspace.model", "Workspace model"],
       ["workspace.effort", "Workspace effort"]
-    ]) rows.push(policyRow(settings.policy, `ai.agents.${agent}.${suffix}`, name));
+    ]) {
+      const row = policyRow(settings.policy, `ai.agents.${agent}.${suffix}`, name);
+      rows.push(advanced && !active ? inactiveRow(row, workflow) : row);
+    }
   }
+  const standardPaths = STANDARD_PATHS.filter(([path]) => path !== "automation.maintenanceSchedule" || settings.modes.includes("maintain"));
   rows.push(
     ...MODE_IDS.map((mode) => ({
       id: `workflow:${mode}`,
@@ -261,10 +295,21 @@ export function settingsRows(settings, { advanced = false } = {}) {
       kind: "boolean",
       value: settings.enabled
     },
-    ...STANDARD_PATHS.map(([path, label]) => policyRow(settings.policy, path, label))
+    ...(settings.modes.includes("maintain") ? [{
+      id: "maintenance-scheduled",
+      section: "automation",
+      label: "Scheduled maintenance",
+      description: "Run repository maintenance on its cron schedule. Turn this off to keep manual maintenance available through workflow_dispatch.",
+      kind: "boolean",
+      value: settings.maintenanceScheduled !== false
+    }] : []),
+    ...standardPaths.map(([path, label]) => policyRow(settings.policy, path, label))
   );
   for (const profile of AGENT_PROFILE_IDS) {
-    rows.push({
+    const workflow = PROFILE_WORKFLOWS[profile];
+    const active = settings.modes.includes(workflow);
+    if (!advanced && !active) continue;
+    const profileRow = {
       id: `profile:${profile}`,
       section: "profiles",
       label: `${AGENT_PROFILES[profile].purpose}`,
@@ -275,18 +320,21 @@ export function settingsRows(settings, { advanced = false } = {}) {
       value: settings.profiles[profile],
       profile,
       source: settings.profileSources?.[profile] ?? "package"
-    });
+    };
+    rows.push(advanced && !active ? inactiveRow(profileRow, workflow) : profileRow);
   }
   if (!advanced) return rows;
   const seen = new Set(rows.map((row) => row.id));
   for (const row of flattenPolicy(settings.policy)) {
     if (!seen.has(row.id) && !row.readOnly) {
-      rows.push({
+      const rendered = {
         ...row,
         label: /^ai\.agents\.[^.]+\.modelSettings\.text\.verbosity$/.test(row.path)
           ? "Response detail"
           : `${sentence(row.path.split(".").at(-1))} · ${sentence(row.path.split(".").slice(0, -1).join(" "))}`
-      });
+      };
+      const workflow = agentWorkflow(row.path);
+      rows.push(workflow && !settings.modes.includes(workflow) ? inactiveRow(rendered, workflow) : rendered);
     }
   }
   return rows;
@@ -296,6 +344,7 @@ export function setSetting(settings, row, value) {
   if (row.readOnly || row.kind === "readonly") throw new InstallerError("That Codekeeper setting is read-only.", { code: "SETTING_READ_ONLY" });
   const next = clone(settings);
   if (row.id === "enabled") next.enabled = value;
+  else if (row.id === "maintenance-scheduled") next.maintenanceScheduled = value;
   else if (row.id.startsWith("workflow:")) {
     const mode = row.id.slice("workflow:".length);
     next.modes = value
@@ -360,6 +409,8 @@ function equal(left, right) {
 
 export function validateEditableSettings(settings, baselinePolicy) {
   if (!settings || typeof settings !== "object" || typeof settings.enabled !== "boolean") throw new InstallerError("Codekeeper settings are invalid.", { code: "SETTING_INVALID" });
+  if (!Object.hasOwn(settings, "maintenanceScheduled")) settings.maintenanceScheduled = true;
+  if (typeof settings.maintenanceScheduled !== "boolean") throw new InstallerError("Scheduled maintenance setting is invalid.", { code: "SETTING_INVALID" });
   if (!Array.isArray(settings.modes) || !settings.modes.length || new Set(settings.modes).size !== settings.modes.length || settings.modes.some((mode) => !MODE_IDS.includes(mode))) {
     throw new InstallerError("Select at least one installed workflow.", { code: "SETTING_INVALID" });
   }
@@ -417,9 +468,27 @@ export function validateEditableSettings(settings, baselinePolicy) {
 
 export function settingsAnswers(settings) {
   const policy = settings.policy;
+  const modelSummary = Object.fromEntries(settings.modes.map((mode) => {
+    const agent = policy.ai.agents[MODES[mode].policyAgent];
+    const workspace = agent.workspace ?? {};
+    return [mode, {
+      coordinator: {
+        provider: agent.provider,
+        model: agent.model,
+        effort: agent.effort
+      },
+      workspace: {
+        provider: MODES[mode].workspaceProvider,
+        enabled: workspace.enabled === true,
+        model: workspace.model ?? "",
+        effort: workspace.effort ?? "none"
+      }
+    }];
+  }));
   return {
     modes: [...settings.modes],
     enabled: settings.enabled,
+    maintenanceScheduled: settings.maintenanceScheduled === undefined ? true : settings.maintenanceScheduled,
     policy: clone(policy),
     profiles: clone(settings.profiles),
     profileSources: clone(settings.profileSources),
@@ -436,6 +505,7 @@ export function settingsAnswers(settings) {
     models: Object.fromEntries(settings.modes.map((mode) => {
       const agent = policy.ai.agents[MODES[mode].policyAgent];
       return [mode, { provider: agent.provider, model: agent.model, effort: agent.effort }];
-    }))
+    })),
+    modelSummary
   };
 }

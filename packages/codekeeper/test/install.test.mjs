@@ -104,7 +104,7 @@ function isolatedCommandRunner(root) {
   });
 }
 
-test("repository settings set startup first and pass provider secrets through private stdin", async () => {
+test("repository settings set secrets and non-startup variables before startup through private stdin", async () => {
   const basePlan = await completePlan();
   const plan = {
     ...basePlan,
@@ -142,12 +142,9 @@ test("repository settings set startup first and pass provider secrets through pr
     resumeCommand: "'node' 'codekeeper.mjs' 'init'"
   });
 
-  assert.deepEqual(runner.calls[0], {
-    command: "gh",
-    args: ["variable", "set", "CODEKEEPER_ENABLED", "--body", "true", "--repo", "acme/widget"],
-    options: { cwd: "/tmp/widget" }
-  });
   const secretCalls = runner.calls.filter((call) => call.args[0] === "secret");
+  assert.equal(runner.calls[0].command, "gh");
+  assert.equal(runner.calls[0].args[0], "secret");
   assert.deepEqual(secretCalls.map((call) => call.args[2]), [
     "OPENAI_API_KEY",
     "DEEPSEEK_API_KEY",
@@ -181,8 +178,6 @@ test("repository settings set startup first and pass provider secrets through pr
   assert.deepEqual(
     progressEvents.filter((event) => ["settings:disable", "secret:app", "variables:configure"].includes(event.id)),
     [
-      { id: "settings:disable", status: "active" },
-      { id: "settings:disable", status: "done" },
       {
         id: "secret:app",
         status: "active",
@@ -190,20 +185,23 @@ test("repository settings set startup first and pass provider secrets through pr
       },
       { id: "secret:app", status: "done" },
       { id: "variables:configure", status: "active" },
-      { id: "variables:configure", status: "done" }
+      { id: "variables:configure", status: "done" },
+      { id: "settings:disable", status: "active" },
+      { id: "settings:disable", status: "done" }
     ]
   );
-  assert.deepEqual(runner.calls.slice(1 + secretCalls.length).map((call) => call.args.slice(0, 4)), [
+  assert.deepEqual(runner.calls.slice(secretCalls.length).map((call) => call.args.slice(0, 4)), [
     ["variable", "set", "CODEKEEPER_APP_CLIENT_ID", "--body"],
-    ["variable", "set", "CODEKEEPER_AUTOMATION_BOT_LOGIN", "--body"]
+    ["variable", "set", "CODEKEEPER_AUTOMATION_BOT_LOGIN", "--body"],
+    ["variable", "set", "CODEKEEPER_ENABLED", "--body"]
   ]);
   const transcript = JSON.stringify(runner.calls) + output.toString();
   assert.doesNotMatch(transcript, new RegExp(SECRET_CANARY));
   assert.doesNotMatch(transcript, /codekeeper-secret-path-canary/);
-  assert.equal(runner.calls.filter((call) => call.args.includes("true")).length, 1);
+  assert.equal(runner.calls.at(-1).args.includes("true"), true);
 });
 
-test("invalid plans and startup-setting failure stop before all secret and file mutations", async () => {
+test("invalid plans stop before mutation and startup failure occurs after settings", async () => {
   const valid = await completePlan();
   const invalid = { ...valid, variables: [{ name: "CODEKEEPER_ENABLED", value: "sometimes" }, ...valid.variables.slice(1)] };
   const invalidRunner = createRecordingRunner(() => result());
@@ -232,8 +230,8 @@ test("invalid plans and startup-setting failure stop before all secret and file 
     }),
     (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume === "safe resume"
   );
-  assert.equal(runner.calls.length, 1);
-  assert.ok(runner.calls[0].args.includes("CODEKEEPER_ENABLED"));
+  assert.equal(runner.calls.length, 7);
+  assert.ok(runner.calls.at(-1).args.includes("CODEKEEPER_ENABLED"));
   assert.equal(closed, 1);
 });
 
@@ -252,10 +250,9 @@ test("secret or variable failure stops later settings", async () => {
       }),
       (error) => error.code === "EXTERNAL_MUTATION_FAILED" && error.resume === "resume exactly"
     );
-    assert.ok(runner.calls[0].args.includes("CODEKEEPER_ENABLED"));
     const failedIndex = runner.calls.findIndex((call) => call.args.includes(failedName));
     assert.equal(failedIndex, runner.calls.length - 1);
-    assert.equal(runner.calls.filter((call) => call.args.includes("true")).length, 1);
+    assert.equal(runner.calls.some((call) => call.args.includes("CODEKEEPER_ENABLED")), false);
     assert.equal(closed, 1);
   }
 });

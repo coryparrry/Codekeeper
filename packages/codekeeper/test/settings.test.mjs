@@ -56,11 +56,11 @@ test("standard and advanced settings expose only editable choices with clear con
   assert.equal(responseDetail.kind, "enum");
   assert.deepEqual(responseDetail.choices, ["low", "medium", "high"]);
   assert.equal(advanced.some((candidate) => candidate.id === "policy:ai.providers"), false);
-  assert.equal(advanced.some((candidate) => candidate.readOnly), false);
+  assert.ok(advanced.filter((candidate) => candidate.inactive).every((candidate) => candidate.readOnly));
   assert.equal(advanced.some((candidate) => candidate.id === "policy:ai.agents.review.maxTurns"), false);
   assert.equal(advanced.some((candidate) => candidate.id === "policy:audit.repair.protectedPaths"), false);
   assert.ok(advanced.every((candidate) => typeof candidate.description === "string" && candidate.description.length > 10));
-  assert.equal(standard.filter((candidate) => candidate.kind === "profile").length, 4);
+  assert.equal(standard.filter((candidate) => candidate.kind === "profile").length, 2);
   assert.equal(row(settings, "profile:pr-reviewer").label, "Pull-request review judgment rules");
   assert.match(row(settings, "profile:pr-reviewer").description, /Codekeeper's default instructions/);
   const withOverride = createEditableSettings({
@@ -72,6 +72,92 @@ test("standard and advanced settings expose only editable choices with clear con
   });
   assert.match(row(withOverride, "profile:pr-reviewer").description, /custom repository instructions/);
   assert.equal(advanced.some((candidate) => candidate.id.startsWith("release:")), false);
+});
+
+test("scheduled maintenance is an explicit editable setting with a conservative default", async () => {
+  const { policy, settings } = await fixture(["review", "maintain"]);
+  assert.equal(settings.maintenanceScheduled, true);
+  const switchRow = row(settings, "maintenance-scheduled");
+  assert.equal(switchRow.label, "Scheduled maintenance");
+  assert.match(switchRow.description, /manual maintenance.*workflow_dispatch/i);
+
+  const disabled = setSetting(settings, switchRow, false);
+  assert.equal(disabled.maintenanceScheduled, false);
+  validateEditableSettings(disabled, policy);
+  assert.equal(settingsAnswers(disabled).maintenanceScheduled, false);
+
+  const omitted = structuredClone(disabled);
+  delete omitted.maintenanceScheduled;
+  validateEditableSettings(omitted, policy);
+  assert.equal(omitted.maintenanceScheduled, true);
+
+  const removed = setSetting(disabled, row(disabled, "workflow:maintain"), false);
+  assert.equal(removed.maintenanceScheduled, false);
+  assert.equal(removed.modes.includes("maintain"), false);
+  const restored = setSetting(removed, row(removed, "workflow:maintain"), true);
+  assert.equal(restored.maintenanceScheduled, false);
+});
+
+test("simple settings hide inactive agents while advanced settings preserve them as read-only", async () => {
+  const { policy, profiles, settings } = await fixture(["review"]);
+  const issueModel = settings.policy.ai.agents.issue.model;
+  const issueProfile = `${profiles["issue-triager"]}\nRepository-specific issue rules.\n`;
+  settings.profiles["issue-triager"] = issueProfile;
+  settings.profileSources["issue-triager"] = "repository";
+
+  const standard = settingsRows(settings);
+  assert.equal(standard.some((candidate) => candidate.id.startsWith("policy:ai.agents.issue.")), false);
+  assert.equal(standard.some((candidate) => candidate.id === "profile:issue-triager"), false);
+
+  const advanced = settingsRows(settings, { advanced: true });
+  const inactiveModel = row(settings, "policy:ai.agents.issue.model", true);
+  const inactiveProfile = row(settings, "profile:issue-triager", true);
+  for (const candidate of [inactiveModel, inactiveProfile]) {
+    assert.equal(candidate.inactive, true);
+    assert.equal(candidate.disabled, true);
+    assert.equal(candidate.readOnly, true);
+    assert.equal(candidate.kind, "readonly");
+    assert.match(candidate.description, /Not used — enable the Issue triage workflow/);
+  }
+  assert.throws(() => setSetting(settings, inactiveModel, "gpt-5.6-sol"), /read-only/);
+  assert.ok(advanced.some((candidate) => candidate.id === "profile:issue-triager"));
+
+  const enabled = setSetting(settings, row(settings, "workflow:issues"), true);
+  assert.equal(row(enabled, "policy:ai.agents.issue.model").kind, "model");
+  assert.equal(row(enabled, "profile:issue-triager").kind, "profile");
+  assert.equal(enabled.policy.ai.agents.issue.model, issueModel);
+  assert.equal(enabled.profiles["issue-triager"], issueProfile);
+  const disabled = setSetting(enabled, row(enabled, "workflow:issues"), false);
+  assert.equal(disabled.policy.ai.agents.issue.model, issueModel);
+  assert.equal(disabled.profiles["issue-triager"], issueProfile);
+});
+
+test("settings answers retain coordinator compatibility and full selected workspace model details", async () => {
+  const { settings } = await fixture(["review", "issues"]);
+  const answers = settingsAnswers(settings);
+  assert.deepEqual(answers.models.review, {
+    provider: settings.policy.ai.agents.review.provider,
+    model: settings.policy.ai.agents.review.model,
+    effort: settings.policy.ai.agents.review.effort
+  });
+  assert.deepEqual(answers.modelSummary.review, {
+    coordinator: answers.models.review,
+    workspace: {
+      provider: "openai",
+      enabled: settings.policy.ai.agents.review.workspace.enabled,
+      model: settings.policy.ai.agents.review.workspace.model,
+      effort: settings.policy.ai.agents.review.workspace.effort
+    }
+  });
+  assert.deepEqual(answers.modelSummary.issues, {
+    coordinator: answers.models.issues,
+    workspace: {
+      provider: null,
+      enabled: settings.policy.ai.agents.issue.workspace.enabled,
+      model: settings.policy.ai.agents.issue.workspace.model,
+      effort: settings.policy.ai.agents.issue.workspace.effort
+    }
+  });
 });
 
 test("profile source state survives answers and can reset an override to the packaged default", async () => {
