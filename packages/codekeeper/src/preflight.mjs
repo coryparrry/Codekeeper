@@ -87,6 +87,16 @@ function isInstalledCodekeeperWorkflow(source, mode) {
   const localBootstrap = "uses: ./.github/workflows/codekeeper-bootstrap.yml";
   const localWorkflow = `uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`;
   if (activeUses.length === 1 && activeUses[0] === localWorkflow) return true;
+  const appCredentialProbe =
+    "uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3";
+  if (
+    mode === "assistant" &&
+    activeUses.length === 2 &&
+    activeUses.includes(appCredentialProbe) &&
+    activeUses.includes(localWorkflow)
+  ) {
+    return true;
+  }
   if (activeUses.length !== 2) return false;
   if (activeUses.includes(localBootstrap) && activeUses.includes(localWorkflow)) return true;
   const action = activeUses.find((line) => line.startsWith(actionPrefix));

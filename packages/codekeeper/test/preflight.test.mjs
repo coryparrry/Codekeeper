@@ -418,6 +418,31 @@ test("edited caller workflows retain semantic validation across catalog renames 
   }
 });
 
+test("assistant callers retain semantic validation with the pinned App credential probe", async (t) => {
+  const root = await temporaryDirectory(t);
+  const bundle = await loadVerifiedAssets();
+  const source = installedWorkflow(bundle.contents["workflows/assistant.yml"]);
+  await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
+  await writeFile(
+    path.join(root, ".github", "workflows", "codekeeper-assistant.yml"),
+    source,
+  );
+
+  await assertNoInstallationFiles(root, { allowExisting: true });
+
+  await writeFile(
+    path.join(root, ".github", "workflows", "codekeeper-assistant.yml"),
+    source.replace(
+      "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3",
+      "actions/create-github-app-token@main",
+    ),
+  );
+  await assert.rejects(
+    assertNoInstallationFiles(root, { allowExisting: true }),
+    assertInstallerCode(assert, "PATH_COLLISION"),
+  );
+});
+
 test("installation inspection and planning migrate an edited caller from a catalog previous target", async (t) => {
   const root = await temporaryDirectory(t);
   const bundle = await loadVerifiedAssets();
@@ -589,8 +614,8 @@ test("existing generated files with every optional profile missing are recognize
   await writeFile(
     path.join(issuesRoot, ".github", "workflows", "codekeeper-issues.yml"),
     installedWorkflow(bundle.contents["workflows/issues.yml"]).replace(
-      "enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}",
-      "enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}\n      owner_requests: false"
+      "      enabled: true",
+      "      enabled: true\n      owner_requests: false"
     )
   );
   const legacyIssuesOnly = await inspectRepository({ runner: preflightRunner(issuesRoot), cwd: issuesRoot });

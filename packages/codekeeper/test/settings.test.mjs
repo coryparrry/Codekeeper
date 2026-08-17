@@ -84,12 +84,13 @@ test("standard and advanced settings expose only editable choices with clear con
   assert.equal(advanced.some((candidate) => candidate.id.startsWith("release:")), false);
 });
 
-test("scheduled maintenance is an explicit editable setting with a conservative default", async () => {
+test("scheduled report-only maintenance is an explicit editable setting with a conservative default", async () => {
   const { policy, settings } = await fixture(["review", "maintain"]);
   assert.equal(settings.maintenanceScheduled, true);
   const switchRow = row(settings, "maintenance-scheduled");
-  assert.equal(switchRow.label, "Scheduled maintenance");
-  assert.match(switchRow.description, /manual maintenance.*workflow_dispatch/i);
+  assert.equal(switchRow.label, "Scheduled report-only maintenance");
+  assert.match(switchRow.description, /report-only/i);
+  assert.match(switchRow.description, /manual maintenance.*dry or live/i);
 
   const disabled = setSetting(settings, switchRow, false);
   assert.equal(disabled.maintenanceScheduled, false);
@@ -590,6 +591,7 @@ test("one validated settings object renders matching caller controls and schedul
   assert.match(contents[MODES.review.target], /feedback_triage: false/);
   assert.match(contents[MODES.issues.target], /auto_triage: false/);
   assert.match(contents[MODES.maintain.target], /cron: "23 4 \* \* 2"/);
+  assert.match(contents[MODES.maintain.target], /dry_run: \$\{\{ github\.event_name == 'schedule' \|\| inputs\.dry_run \}\}/);
   assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /owner_requests: false/);
 });
 
