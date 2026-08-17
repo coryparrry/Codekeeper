@@ -6,7 +6,7 @@ dependency graphs.
 
 Source repository: [coryparrry/Codekeeper](https://github.com/coryparrry/Codekeeper).
 
-Bundled source checkpoint: `1fb76533618eeeca4eaff30dbaae42926d68fdea`.
+Bundled source checkpoint: `8df1039fd4f9682464bb61f8fbf130e26dcadd9b`.
 
 ## Availability
 

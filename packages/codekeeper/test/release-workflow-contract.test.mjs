@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { repositoryFile } from "./workflow-test-helpers.mjs";
+
+const repositoryRoot = new URL("../../../", import.meta.url);
+const repositoryFile = (relativePath) => readFile(new URL(relativePath, repositoryRoot), "utf8");
 
 test("release publication is tag-gated, provenance-enabled, and bound to a protected npm environment", async () => {
   const source = await repositoryFile(".github/workflows/codekeeper-release.yml");
@@ -26,7 +29,6 @@ test("release publication is tag-gated, provenance-enabled, and bound to a prote
   assert.match(source, /working-directory: tools\/codekeeper/);
   assert.match(source, /working-directory: packages\/codekeeper/);
 });
-
 test("release workflow only publishes a locally reverified tarball and rechecks the public registry receipt", async () => {
   const source = await repositoryFile(".github/workflows/codekeeper-release.yml");
   assert.match(source, /node scripts\/pack-codekeeper-package\.mjs --destination/);
