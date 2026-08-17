@@ -43,6 +43,7 @@ function setupPrompt({ recommended, modes = ["issues", "fix"], preset = "mixed",
       if (options.message === "Use the recommended starter setup?") return recommended;
       if (options.message === "Enable OpenAI traces?") return true;
       if (options.message.startsWith("Start Codekeeper")) return true;
+      if (options.message === "Run maintenance on a schedule?") return false;
       if (options.message.startsWith("Continue with")) return boundaries;
       throw new Error(`Unexpected confirmation: ${options.message}`);
     },
@@ -155,45 +156,33 @@ test("recommended setup explains consequences and returns review plus maintenanc
   const output = textSink();
   const answers = await collectSetupAnswers({ prompt, snapshot: snapshot(), bundle, output });
 
-  assert.deepEqual(answers, {
-    modes: ["review", "maintain"],
-    preset: "openai",
-    models: {
-      review: "luna-medium",
-      maintain: "sol-high"
-    },
-    tracing: true,
-    displayName: "widget",
-    ownerLogins: ["cory"],
-    enabled: true,
-    capabilities: []
+  assert.deepEqual(answers.modes, ["review", "maintain"]);
+  assert.equal(answers.preset, "openai");
+  assert.deepEqual(answers.models, {
+    review: { provider: "openai", model: "gpt-5.6-luna", effort: "medium" },
+    maintain: { provider: "openai", model: "gpt-5.6-sol", effort: "high" }
   });
+  assert.equal(answers.tracing, false);
+  assert.equal(answers.maintenanceScheduled, false);
+  assert.equal(answers.displayName, "widget");
+  assert.deepEqual(answers.ownerLogins, ["cory"]);
+  assert.equal(answers.enabled, true);
+  assert.deepEqual(answers.capabilities, []);
+  assert.equal(answers.policy.version, 3);
+  assert.equal(Object.keys(answers.profiles).length, 4);
   assert.ok(Object.isFrozen(answers));
   assert.deepEqual(
     prompt.calls.filter((call) => call.method === "confirm").map((call) => call.options),
     [
       { message: "Install into acme/widget on default branch main?", defaultValue: true },
-      { message: "Use the recommended starter setup?", defaultValue: true },
-      { message: "Enable OpenAI traces?", defaultValue: true },
-      { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
-      { message: "Continue with these safety settings?", defaultValue: false }
+      { message: "Use the recommended starter setup?", defaultValue: true }
     ]
   );
-  const capabilityCall = prompt.calls.find((call) => call.method === "multiselect");
-  assert.equal(capabilityCall.options.message, "Choose capabilities to turn on:");
-  assert.deepEqual(capabilityCall.options.defaultValues, []);
   const transcript = output.toString();
-  assert.match(transcript, /Pull request review:.*comments, labels, and a blocking result/);
-  assert.match(transcript, /Repository maintenance:.*manual or scheduled audits.*live runs can repair/);
-  assert.match(transcript, /OpenAI starting models: you can assign any supported provider and model to each role/);
-  assert.match(transcript, /Issue triage and issue fix are not included/);
-  assert.match(transcript, /Repository repair: off/);
-  assert.match(transcript, /Automatic merge: off/);
-  assert.match(transcript, /installer opens a setup pull request/);
-  assert.match(transcript, /OPENAI_API_KEY:/);
-  assert.match(transcript, /OPENAI_TRACE_API_KEY:/);
-  assert.match(transcript, /CODEKEEPER_APP_PRIVATE_KEY:/);
-  assert.doesNotMatch(transcript, /DEEPSEEK_API_KEY:/);
+  assert.match(transcript, /Recommended starter setup/);
+  assert.match(transcript, /manual maintenance available/);
+  assert.match(transcript, /schedule starts off/);
+  assert.match(transcript, /run codekeeper verify before treating it as ready/);
 });
 
 test("custom setup exposes consequence labels and keeps OpenAI as the first default preset", async () => {
@@ -213,6 +202,7 @@ test("custom setup exposes consequence labels and keeps OpenAI as the first defa
     displayName: "widget",
     ownerLogins: ["cory"],
     enabled: true,
+    maintenanceScheduled: false,
     capabilities: []
   });
   const modeCall = prompt.calls.find((call) => call.method === "multiselect");
@@ -274,6 +264,7 @@ test("an existing installation reuses its workflows, identity, and settings", as
     displayName: "Existing Widget",
     ownerLogins: ["alice", "cory"],
     enabled: true,
+    maintenanceScheduled: false,
     capabilities: ["repair", "autoMerge"]
   });
   assert.equal(prompt.calls.some((call) => call.options.message === "Use the recommended starter setup?"), false);

@@ -15,33 +15,37 @@ function runCli(options = {}) {
   });
 }
 
-function guidedPrompt(confirmations = [true, true, true, true, true, true], { privateKeyPath = "/private/tmp/codekeeper-test-private-key.pem" } = {}) {
+function guidedPrompt(confirmations = [true, true, true, true, true, true], { privateKeyPath = "/private/tmp/codekeeper-test-private-key.pem", recommended = true } = {}) {
   const answers = [...confirmations];
   const prompt = {
     confirmations: [],
     async confirm(options) {
       prompt.confirmations.push(options);
-      if (options.message === "Enable OpenAI traces?") return true;
+      if (options.message === "Use the recommended starter setup?") return answers.shift() ?? recommended;
       return answers.shift();
     },
     async multiselect({ message, defaultValues }) {
-      if (message.startsWith("Choose capabilities")) return defaultValues;
-      throw new Error("recommended setup must not ask for custom workflows");
+      if (message.startsWith("Choose capabilities") || message.startsWith("Choose workflows")) return defaultValues;
+      throw new Error(`Unexpected multiselect prompt: ${message}`);
     },
     async select({ message, defaultValue }) {
-      if (message === "Choose a starting setup") return "recommended";
+      if (message === "Choose a starting setup") return recommended ? "recommended" : "custom";
+      if (message.startsWith("Choose the starting model set")) return defaultValue;
       if (message.startsWith("Assign a model to")) return defaultValue;
+      if (message.startsWith("Choose the provider for")) return defaultValue;
+      if (message.startsWith("Choose the reasoning effort for")) return defaultValue;
       if (message === "Enable OpenAI traces?") return "enabled";
       if (message.startsWith("Start Codekeeper")) return "enabled";
-      throw new Error("recommended setup must not ask for a custom preset");
+      throw new Error(`Unexpected select prompt: ${message}`);
     },
-    async inputText({ message }) {
+    async inputText({ message, defaultValue }) {
       if (message.startsWith("Name to show")) return "Widget";
       if (message.startsWith("GitHub users")) return "cory";
       if (message.startsWith("GitHub App Client")) return "Iv123456789012345678";
       if (message.startsWith("Paste the GitHub App")) return "https://github.com/settings/apps/codekeeper-widget";
       if (message.startsWith("GitHub App bot")) return "codekeeper-widget[bot]";
       if (message.startsWith("Full absolute path")) return privateKeyPath;
+      if (message.startsWith("Enter the model ID for")) return defaultValue;
       throw new Error(`Unexpected prompt: ${message}`);
     }
   };
@@ -161,7 +165,7 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   const runner = createRecordingRunner(() => {
     throw new Error("no external command is expected before the App confirmation");
   });
-  const prompt = guidedPrompt([true, true, true, true, false]);
+  const prompt = guidedPrompt([true, true, false]);
   const snapshot = Object.freeze({
     root: "/tmp/acme widget",
     originUrl: "https://github.com/acme/widget.git",
@@ -195,7 +199,17 @@ test("app-registration abort prints the URL and an exact platform-safe resume co
   assert.match(output.toString(), new RegExp(openedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(errorOutput.toString(), /Complete GitHub App creation/);
   assert.match(errorOutput.toString(), new RegExp(resumeCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.equal(prompt.confirmations.length, 6);
+  assert.deepEqual(
+    prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })),
+    [
+      { message: "Install into acme/widget on default branch main?", defaultValue: true },
+      { message: "Use the recommended starter setup?", defaultValue: true },
+      {
+        message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?",
+        defaultValue: true
+      }
+    ]
+  );
   assert.deepEqual(runner.calls, []);
 });
 
@@ -228,13 +242,13 @@ test("declining the repository confirmation performs no mutation or App navigati
   assert.deepEqual(runner.calls, []);
 });
 
-test("declining conservative boundaries on the recommended path performs no mutation or App navigation", async () => {
+test("declining conservative boundaries on the custom path performs no mutation or App navigation", async () => {
   const output = textSink();
   const errorOutput = textSink();
   const runner = createRecordingRunner(() => {
     throw new Error("no external mutation is expected before boundary confirmation");
   });
-  const prompt = guidedPrompt([true, true, true, false]);
+  const prompt = guidedPrompt([true, false, true, true, false, false], { recommended: false });
   let opens = 0;
   const snapshot = repositorySnapshot("/tmp/widget", HEAD_SHA);
   const status = await runCli({
@@ -254,8 +268,9 @@ test("declining conservative boundaries on the recommended path performs no muta
   assert.deepEqual(prompt.confirmations, [
     { message: "Install into acme/widget on default branch main?", defaultValue: true },
     { message: "Use the recommended starter setup?", defaultValue: true },
-    { message: "Enable OpenAI traces?", defaultValue: true },
+    { message: "Enable OpenAI traces?", defaultValue: false },
     { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
+    { message: "Run maintenance on a schedule?", defaultValue: false },
     { message: "Continue with these safety settings?", defaultValue: false }
   ]);
   assert.match(errorOutput.toString(), /Setup was cancelled before any mutation/);
@@ -283,7 +298,7 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   const runner = createRecordingRunner(() => {
     throw new Error("no repository setting, GitHub, or Git command is expected before final confirmation");
   });
-  const prompt = guidedPrompt([true, true, true, true, true, false]);
+  const prompt = guidedPrompt([true, true, true, false]);
   let inspections = 0;
   let openedUrl = null;
   const status = await runCli({
@@ -309,9 +324,6 @@ test("declining final setup confirmation leaves settings, Git, and files untouch
   assert.deepEqual(prompt.confirmations, [
     { message: "Install into acme/widget on default branch main?", defaultValue: true },
     { message: "Use the recommended starter setup?", defaultValue: true },
-    { message: "Enable OpenAI traces?", defaultValue: true },
-    { message: "Start Codekeeper after the setup pull request merges?", defaultValue: true },
-    { message: "Continue with these safety settings?", defaultValue: false },
     { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: true },
     { message: "Create this setup?", defaultValue: false }
   ]);
@@ -425,6 +437,10 @@ test("Ink final review returns to the same settings without inventing an OpenRou
       update() { throw new Error("progress must not update after review cancellation"); }
     },
     async confirm() { return true; },
+    async select({ message }) {
+      if (message === "Choose a starting setup") return "custom";
+      throw new Error(`Unexpected select prompt: ${message}`);
+    },
     async editSettings({ settings }) {
       settingsVisits += 1;
       return settings;
@@ -906,7 +922,7 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
   assert.equal(progressStarted, 1);
   assert.deepEqual(prompt.confirmations.map(({ message, defaultValue }) => ({ message, defaultValue })), [
     { message: "Install into acme/widget on default branch main?", defaultValue: true },
-    { message: "Continue with these safety settings?", defaultValue: false },
+    { message: "Use the recommended starter setup?", defaultValue: true },
     { message: "Have you chosen or created the App, installed it on this repository, and downloaded its private key?", defaultValue: true },
     { message: "Create this setup?", defaultValue: false }
   ]);
@@ -927,12 +943,11 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
   assert.ok(branchIndex < commitIndex && commitIndex < pushIndex && pushIndex < secretIndex && secretIndex < variableIndex && variableIndex < disableIndex && disableIndex < prIndex);
   assert.deepEqual(
     calls.filter((call) => call.command === "gh" && call.args[0] === "secret").map((call) => call.args[2]),
-    ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]
+    ["OPENAI_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]
   );
-  assert.deepEqual(enteredSecrets.map(({ name }) => name), ["OPENAI_API_KEY", "OPENAI_TRACE_API_KEY"]);
+  assert.deepEqual(enteredSecrets.map(({ name }) => name), ["OPENAI_API_KEY"]);
   assert.deepEqual(enteredSecrets.map(({ purpose }) => purpose), [
-    "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key. Used by: Pull request reviewer, Repository auditor.",
-    "Separate OpenAI Platform API key for trace export. Do not reuse the model API key."
+    "OpenAI Platform API key for model calls. A ChatGPT subscription does not include this key. Used by: Pull request reviewer, Repository auditor."
   ]);
   assert.equal(enteredSecrets.some(({ name }) => name === "CODEKEEPER_APP_PRIVATE_KEY"), false);
   const providerSecretCalls = calls.filter((call) => call.command === "gh"
@@ -968,11 +983,11 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
     ]
   );
   assert.match(output.toString(), /Starting model set: openai/);
-  assert.match(output.toString(), /OpenAI traces: enabled/);
+  assert.match(output.toString(), /OpenAI traces: disabled/);
   assert.match(output.toString(), /Pull request reviewer \(Pull request review\): openai \/ gpt-5\.6-luna \/ medium effort/);
   assert.match(output.toString(), /Repository auditor \(Repository maintenance\): openai \/ gpt-5\.6-sol \/ high effort/);
   assert.match(output.toString(), /OPENAI_API_KEY: OpenAI Platform API key for model calls/);
-  assert.match(output.toString(), /OPENAI_TRACE_API_KEY: Separate OpenAI Platform API key for trace export/);
+  assert.doesNotMatch(output.toString(), /OPENAI_TRACE_API_KEY:/);
   assert.match(output.toString(), /CODEKEEPER_APP_PRIVATE_KEY: downloaded GitHub App PEM private key used to mint App installation tokens/);
   assert.doesNotMatch(output.toString(), /DEEPSEEK_API_KEY:/);
   assert.match(output.toString(), /\.github\/workflows\/codekeeper-review\.yml/);
@@ -981,11 +996,10 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
   assert.match(output.toString(), /Packaged agent profiles are the default/);
   assert.match(output.toString(), /Capability switches control repair, issue implementation, issue closure, and merge actions/);
   assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
-  assert.match(output.toString(), /starts the selected workflows when the setup pull request merges/);
-  assert.match(output.toString(), /no separate dry run or controlled test is required/);
-  assert.doesNotMatch(output.toString(), /controlled review|dry_run=true|test each/i);
+  assert.match(output.toString(), /Startup: enabled after merge/);
+  assert.match(output.toString(), /run codekeeper verify before treating it as ready/i);
   assert.match(output.toString(), /Created setup pull request: https:\/\/github\.com\/acme\/widget\/pull\/42/);
-  assert.match(output.toString(), /did not run a workflow or merge the pull request/);
+  assert.match(output.toString(), /not proven ready until the pull request merges/i);
   const guidance = completionGuidance(["review", "maintain"]);
   assert.match(output.toString(), new RegExp(guidance.profileGuidance.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(guidance.reviewGateWarning, null);
