@@ -78,8 +78,8 @@
       "packagePath": "release/workflows/codekeeper-assistant.yml"
     },
     "runtime-workflows/review.yml": {
-      "sha256": "6f18662ea61d909387e133b67e7eeff4e94b4bcfe077fbf97e9bb1e486aa3888",
-      "bytes": 30596,
+      "sha256": "d05e2c4a7d076b034880cb239c0f2416605e0a51cd95affc5d8b0792019032aa",
+      "bytes": 31952,
       "sourcePath": ".github/workflows/codekeeper-review.yml",
       "packagePath": "release/workflows/codekeeper-review.yml"
     },

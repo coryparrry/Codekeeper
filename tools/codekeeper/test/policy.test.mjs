@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { validatePatch, evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
+import { validatePatch, evaluateAutoMerge, evaluateReviewEligibility, reviewLabels } from "../src/lib/policy.mjs";
 
 const source = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
@@ -27,6 +27,41 @@ function patch(files, overrides = {}) {
     ...overrides
   };
 }
+
+test("review, report publication, and automation mutation use separate eligibility tiers", () => {
+  const pullRequest = {
+    number: 7,
+    state: "open",
+    draft: false,
+    head: { sha: "a".repeat(40), repo: { full_name: "fork/repository" } },
+    base: { sha: "b".repeat(40), ref: config.repository.defaultBranch, repo: { full_name: "owner/repository" } }
+  };
+  const fork = evaluateReviewEligibility({ config, pullRequest, repository: "owner/repository" });
+  assert.equal(fork.readOnlyReview.eligible, false);
+  assert.equal(fork.reportPublication.eligible, false);
+  assert.equal(fork.automationMutation.eligible, false);
+  assert.ok(fork.readOnlyReview.reasons.includes("Fork pull requests are unsupported"));
+
+  const sameRepository = { ...pullRequest, head: { ...pullRequest.head, repo: { full_name: "owner/repository" } } };
+  const draft = evaluateReviewEligibility({
+    config,
+    pullRequest: { ...sameRepository, draft: true },
+    repository: "owner/repository"
+  });
+  assert.equal(draft.readOnlyReview.eligible, true);
+  assert.equal(draft.reportPublication.eligible, false);
+  assert.equal(draft.automationMutation.eligible, false);
+
+  const oversized = evaluateReviewEligibility({
+    config,
+    pullRequest: sameRepository,
+    repository: "owner/repository",
+    reviewReasons: ["Review changed-file context exceeds configured maximum of 200 files"]
+  });
+  assert.equal(oversized.readOnlyReview.eligible, false);
+  assert.equal(oversized.reportPublication.eligible, true);
+  assert.equal(oversized.automationMutation.eligible, false);
+});
 
 test("review labels distinguish missing coverage from unknown evidence", () => {
   const result = {

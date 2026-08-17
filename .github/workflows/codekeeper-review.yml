@@ -1,10 +1,10 @@
 name: Codekeeper review
 
-# Forks, drafts, merge queues, and disabled runs fail closed. Same-repository,
-# non-draft stacked PRs may receive review publication; repair and auto-merge
-# remain restricted to the configured default branch. Do not make this gate
-# required for merge queues unless merge_group support is intentionally added
-# and verified.
+# Forks and merge queues remain unsupported. Drafts may produce a sealed manual
+# result, and same-repository stacked PRs may receive a report. Labels, repair,
+# deferred issues, and auto-merge remain limited to non-draft same-repository PRs
+# targeting the configured default branch. merge_group does not provide the
+# single-PR head/base contract required by the sealed publication guard.
 on:
   workflow_call:
     inputs:
@@ -110,8 +110,8 @@ jobs:
              github.event.comment.author_association == 'COLLABORATOR') &&
             contains(fromJSON('["/codekeeper help","/codekeeper status","/codekeeper review","/codekeeper rerun","/codekeeper triage","/codekeeper implement","/codekeeper repair","/codekeeper fix","/codekeeper defer","/codekeeper pause","/codekeeper stop"]'), github.event.comment.body)) &&
           (github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment'))) &&
-        !github.event.pull_request.draft &&
-        github.event.pull_request.head.repo.full_name == github.repository))
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.base.repo.full_name == github.repository))
     # CODEKEEPER_OWNER_COMMANDS_END
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -625,8 +625,10 @@ jobs:
           IS_REVIEW_FEEDBACK: ${{ github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment' || (github.event_name == 'repository_dispatch' && github.event.client_payload.review_feedback) }}
           IS_COMMAND_REVIEW: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review' }}
           IS_OWNER_COMMAND_REVIEW: ${{ inputs.owner_command }}
-          IS_DRAFT: ${{ github.event.pull_request.draft || github.event.client_payload.draft }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.event.client_payload.head_repository }}
+          BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.client_payload.base_sha }}
           REPOSITORY: ${{ github.repository }}
           BASE_REF: ${{ github.event.pull_request.base.ref || github.event.client_payload.base_ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -634,7 +636,8 @@ jobs:
           AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
           ANALYZE_RESULT: ${{ needs.analyze.result }}
           SEAL_RESULT: ${{ needs.seal.result }}
-          PUBLISH_RESULT: ${{ steps.publish.outcome }}
+          PUBLISH_DISPOSITION: ${{ steps.publish.outputs.result != '' && fromJSON(steps.publish.outputs.result).disposition || '' }}
+          PUBLISH_BLOCKING: ${{ steps.publish.outputs.result != '' && fromJSON(steps.publish.outputs.result).blocking || false }}
         run: |
           [[ "$IS_AUTOMATION_REPLY" == "true" || ("$IS_REVIEW_FEEDBACK" == "true" && -n "$AUTOMATION_BOT_LOGIN" && "$ACTOR" == "$AUTOMATION_BOT_LOGIN") ]] && {
             echo "Codekeeper-authored review feedback is intentionally ignored."
@@ -646,13 +649,37 @@ jobs:
           }
           [[ "$ENABLED" == "true" ]] || { echo "Codekeeper is disabled; this required gate fails closed."; exit 1; }
           [[ "$IS_COMMAND_REVIEW" == "true" || ("$IS_REVIEW_FEEDBACK" == "true" && "$AUTO_REVIEW_FEEDBACK" == "true") || ("$IS_REVIEW_FEEDBACK" != "true" && "$AUTO_REVIEW" == "true") ]] || { echo "The matching automatic review policy is disabled; this required gate fails closed."; exit 1; }
-          [[ "$IS_DRAFT" != "true" ]] || { echo "Draft pull requests require manual review."; exit 1; }
-          [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]] || { echo "Fork pull requests require manual review."; exit 1; }
-          [[ -n "$BASE_REF" ]] || { echo "Pull request base branch is unavailable; manual review is required."; exit 1; }
-          if [[ "$BASE_REF" != "$DEFAULT_BRANCH" ]]; then
-            echo "Stacked pull request target $BASE_REF is review-publication-only; automatic repair and auto-merge remain restricted to $DEFAULT_BRANCH."
-          fi
-          [[ "$ANALYZE_RESULT" == "success" && "$SEAL_RESULT" == "success" && "$PUBLISH_RESULT" == "success" ]] || {
-            echo "Codekeeper did not publish a passing current review."
+          manual_review() {
+            echo "::notice title=Codekeeper manual review::$1"
+            printf '## Codekeeper manual review\n\n%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          [[ "$BASE_REPOSITORY" == "$REPOSITORY" && "$HEAD_REPOSITORY" == "$REPOSITORY" ]] || {
+            echo "Fork pull requests are unsupported; manual review is required."
             exit 1
           }
+          [[ "$ANALYZE_RESULT" == "success" && "$SEAL_RESULT" == "success" ]] || {
+            echo "Codekeeper did not seal a current review."
+            exit 1
+          }
+          case "$PUBLISH_DISPOSITION" in
+            published)
+              [[ "$PUBLISH_BLOCKING" != "true" ]] || {
+                echo "Codekeeper published blocking findings for the current pull request head."
+                exit 1
+              }
+              if [[ "$BASE_REF" != "$DEFAULT_BRANCH" ]]; then
+                echo "Stacked pull request target $BASE_REF is review-publication-only; automatic repair and auto-merge remain restricted to $DEFAULT_BRANCH."
+              fi
+              ;;
+            manual)
+              manual_review "The sealed publication step rechecked the live pull request and returned a manual-review disposition without mutation."
+              ;;
+            unsupported)
+              manual_review "The sealed publication step rechecked the live pull request and returned an unsupported disposition without mutation."
+              ;;
+            *)
+              echo "Codekeeper did not produce a sealed live review disposition."
+              exit 1
+              ;;
+          esac

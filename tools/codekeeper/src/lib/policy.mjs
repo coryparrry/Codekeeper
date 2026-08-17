@@ -66,6 +66,61 @@ function hasCriticalFinding(result) {
     .some((finding) => finding?.severity === "critical");
 }
 
+function uniqueReasons(reasons) {
+  return [...new Set(reasons.filter(Boolean).map(String))];
+}
+
+export function evaluateReviewEligibility({ config, pullRequest, repository, reviewReasons = [] }) {
+  const targetRepository = String(repository ?? "").trim();
+  const headRepository = String(pullRequest?.head?.repo?.full_name ?? pullRequest?.headRepository ?? "").trim();
+  const baseRepository = String(pullRequest?.base?.repo?.full_name ?? pullRequest?.baseRepository ?? "").trim();
+  const baseRef = String(pullRequest?.base?.ref ?? pullRequest?.baseRef ?? "").trim();
+  const readOnlyReasons = [...reviewReasons];
+
+  if (!pullRequest || !Number.isSafeInteger(pullRequest.number) || pullRequest.number <= 0) {
+    readOnlyReasons.push("Pull request number is unavailable");
+  }
+  if (pullRequest?.state && pullRequest.state !== "open") readOnlyReasons.push(`Pull request state is ${pullRequest.state}`);
+  if (!targetRepository || !baseRepository || baseRepository !== targetRepository) {
+    readOnlyReasons.push("Pull request base repository is unsupported");
+  }
+  if (!headRepository) readOnlyReasons.push("Pull request head repository is unavailable");
+  if (headRepository && headRepository !== targetRepository) readOnlyReasons.push("Fork pull requests are unsupported");
+  if (!baseRef) readOnlyReasons.push("Pull request base branch is unavailable");
+  if (!(pullRequest?.base?.sha ?? pullRequest?.baseSha)) readOnlyReasons.push("Pull request base SHA is unavailable");
+  if (!(pullRequest?.head?.sha ?? pullRequest?.headSha)) readOnlyReasons.push("Pull request head SHA is unavailable");
+
+  const publicationReasons = [];
+  if (pullRequest?.draft) publicationReasons.push("Draft pull requests are report-only and will not mutate GitHub");
+  if (pullRequest?.state && pullRequest.state !== "open") publicationReasons.push(`Pull request state is ${pullRequest.state}`);
+  if (!targetRepository || !baseRepository || baseRepository !== targetRepository) {
+    publicationReasons.push("Pull request base repository cannot receive a Codekeeper report");
+  }
+  if (!headRepository) publicationReasons.push("Pull request head repository is unavailable for report publication");
+  if (headRepository && headRepository !== targetRepository) {
+    publicationReasons.push("Fork pull requests cannot receive a Codekeeper report");
+  }
+  if (!baseRef) publicationReasons.push("Pull request base branch is unavailable for report publication");
+  if (!(pullRequest?.base?.sha ?? pullRequest?.baseSha)) publicationReasons.push("Pull request base SHA is unavailable for report publication");
+  if (!(pullRequest?.head?.sha ?? pullRequest?.headSha)) publicationReasons.push("Pull request head SHA is unavailable for report publication");
+  if (!Number.isSafeInteger(pullRequest?.number) || pullRequest.number <= 0) {
+    publicationReasons.push("Pull request number is unavailable for report publication");
+  }
+
+  const automationReasons = [...readOnlyReasons, ...publicationReasons];
+  if (baseRef && baseRef !== config.repository.defaultBranch) {
+    automationReasons.push("Pull request does not target the configured default branch");
+  }
+  const readOnly = uniqueReasons(readOnlyReasons);
+  const publication = uniqueReasons(publicationReasons);
+  const automation = uniqueReasons(automationReasons);
+  return {
+    readOnlyReview: { eligible: readOnly.length === 0, reasons: readOnly },
+    reportPublication: { eligible: publication.length === 0, reasons: publication },
+    automationMutation: { eligible: automation.length === 0, reasons: automation }
+  };
+}
+
 function hasFixNowFeedback(result) {
   return (result?.reviewFeedback ?? []).some((feedback) => feedback?.disposition === "fix_now");
 }

@@ -6,7 +6,7 @@ import { applyPatch, assertCandidateValidationReceipt, collectWorkingTreeChanges
 import { GitHubClient, isAmbiguousGitHubMutationError, isOwnedMarkerComment } from "./github.mjs";
 import { readRegularFile, log, warn } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, findingFingerprint, findingMarker, fixRunMarker, issueTriageStateMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "./markers.mjs";
-import { evaluateAutoMerge, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
+import { evaluateAutoMerge, evaluateReviewEligibility, findingLabels, issueTypeLabel, reviewLabels, validatePatch } from "./policy.mjs";
 import { publishPullRequestRepair } from "./pr-repair.mjs";
 import { normalizeReleaseOwnedPinReview, renderDeferredIssue, renderIssueTriage, renderMaintenanceIssue, renderRepairPullRequest, renderReviewComment, sanitizeMarkdown } from "./render.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
@@ -379,14 +379,63 @@ async function verifyAutoMergePostcondition({
   return verifiedDecision;
 }
 
+export function reviewPublicationDisposition(context, pull) {
+  const expected = context.pullRequest;
+  const repositoryReasons = [];
+  if (pull?.head?.repo?.full_name !== context.repository) repositoryReasons.push("Fork pull requests are unsupported");
+  if (pull?.base?.repo?.full_name !== context.repository) repositoryReasons.push("Pull request base repository is unsupported");
+  if (repositoryReasons.length > 0) return { disposition: "unsupported", reasons: repositoryReasons };
+  const staleReasons = [];
+  if (pull?.number !== expected.number) staleReasons.push("Pull request number changed");
+  if (pull?.state !== "open") staleReasons.push(`Pull request state is ${pull?.state ?? "unavailable"}`);
+  if (pull?.head?.sha !== expected.headSha) staleReasons.push("Pull request head SHA changed");
+  if (pull?.base?.sha !== expected.baseSha) staleReasons.push("Pull request base SHA changed");
+  if (pull?.base?.ref !== expected.baseRef) staleReasons.push("Pull request base branch changed");
+  if (staleReasons.length > 0) return { disposition: "stale", reasons: staleReasons };
+  if (pull.draft) {
+    return { disposition: "manual", reasons: ["The live pull request is a draft; Codekeeper did not mutate GitHub"] };
+  }
+  return { disposition: "eligible", reasons: [] };
+}
+
+function sealedReviewLimitReasons(context) {
+  return (context.pullRequest?.eligibility?.readOnlyReview?.reasons ?? []).filter((reason) =>
+    String(reason).startsWith("Review changed-file context exceeds configured maximum of ") ||
+    String(reason).startsWith("Review diff is ")
+  );
+}
+
 export async function publishReview({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource = agentProfilePath ? "repository" : "package", agentProfileSourceSha, token, dryRun = false }) {
   const { context, result } = await loadArtifact(artifactDirectory, "review", config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource, agentProfileSourceSha);
   const github = new GitHubClient({ token, repository: context.repository });
-  const pull = await github.beginPullMutation({
+  let pull;
+  try {
+    pull = await github.beginPullMutation({
+      repository: context.repository,
+      pullRequest: context.pullRequest,
+      policy: config,
+      reviewPublication: true
+    });
+  } catch (error) {
+    if (!/ is a draft; stale publication will not mutate GitHub$/.test(String(error?.message ?? ""))) throw error;
+    const racedDisposition = reviewPublicationDisposition(context, await github.getPull(context.pullRequest.number));
+    if (racedDisposition.disposition !== "manual") throw error;
+    log(`REVIEW MANUAL PR #${context.pullRequest.number}`, { reasons: racedDisposition.reasons });
+    return {
+      pullRequest: context.pullRequest.number,
+      disposition: "manual",
+      published: false,
+      reportOnly: true,
+      reasons: racedDisposition.reasons,
+      blocking: false,
+      dryRun
+    };
+  }
+  const eligibility = evaluateReviewEligibility({
+    config,
+    pullRequest: pull,
     repository: context.repository,
-    pullRequest: context.pullRequest,
-    policy: config,
-    reviewPublication: true
+    reviewReasons: sealedReviewLimitReasons(context)
   });
   const files = await github.listPullFiles(pull.number, config.merge.maximumFiles + 1);
   const renderedResult = normalizeReleaseOwnedPinReview(result, files);
@@ -399,12 +448,18 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     result.mergeRecommendation === "block";
   const existingLabels = new Set((pull.labels ?? []).map((label) => typeof label === "string" ? label : label.name));
   const defaultBaseTarget = pull.base?.ref === config.repository.defaultBranch;
+  const automationMutationEligible = eligibility.automationMutation.eligible === true;
+  const reportOnly = !automationMutationEligible;
+  const manualEligibilityReasons = [
+    ...eligibility.readOnlyReview.reasons,
+    ...eligibility.automationMutation.reasons
+  ];
   const repairFeedback = result.reviewFeedback.filter((feedback) =>
     feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
   );
-  const repairRequested = defaultBaseTarget && (blocking || repairFeedback.length > 0) && config.review.autoRepair
+  const repairRequested = automationMutationEligible && defaultBaseTarget && (blocking || repairFeedback.length > 0) && config.review.autoRepair
     && !existingLabels.has("codekeeper:paused") && !existingLabels.has("paused");
-  const repairMarked = defaultBaseTarget && existingLabels.has("codekeeper:auto-repaired");
+  const repairMarked = automationMutationEligible && defaultBaseTarget && existingLabels.has("codekeeper:auto-repaired");
   let repairState = { consumed: false, pending: false };
   if (repairRequested || repairMarked) {
     repairState = ownedAutomaticRepairState(
@@ -448,15 +503,33 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     };
   };
 
-  const autoMerge = suspendAutoMergeForRepair(evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin }));
+  let autoMerge = suspendAutoMergeForRepair(evaluateAutoMerge({ config, pullRequest: pull, files, reviewResult: result, reviewContextComplete, automationBotLogin }));
+  if (reportOnly) {
+    autoMerge = { ...autoMerge, eligible: false, reasons: [...new Set([...autoMerge.reasons, ...manualEligibilityReasons])] };
+  }
   const initialState = publicationState(autoMerge);
 
   if (dryRun) {
+    await github.assertMutationCurrent();
     log(`DRY RUN review PR #${pull.number}`, { ...initialState, autoMerge, blocking });
-    return { pullRequest: pull.number, ...initialState, autoMerge, automaticRepair, blocking, dryRun: true };
+    return { pullRequest: pull.number, disposition: "published", ...initialState, autoMerge, automaticRepair, blocking, dryRun: true };
   }
 
   const automationIdentity = expectedAutomationIdentity();
+  if (reportOnly) {
+    await github.upsertMarkerComment(pull.number, REVIEW_MARKER, initialState.comment, automationIdentity);
+    await github.assertMutationCurrent();
+    return {
+      pullRequest: pull.number,
+      disposition: "published",
+      published: true,
+      reportOnly: true,
+      desiredLabels: [],
+      autoMerge,
+      automaticRepair,
+      blocking
+    };
+  }
   let reconciledPull = pull;
   if (automaticRepair.staleMarker) {
     await github.removeLabel(pull.number, "codekeeper:auto-repaired");
@@ -621,7 +694,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     }
   }
 
-  return { pullRequest: pull.number, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, deferredIssues, feedbackReplies, blocking };
+  await github.assertMutationCurrent();
+  return { pullRequest: pull.number, disposition: "published", published: true, desiredLabels, autoMerge: publishedAutoMerge, autoMergeResult, automaticRepair, deferredIssues, feedbackReplies, blocking };
 }
 
 function rootReviewCommentIds(sources) {

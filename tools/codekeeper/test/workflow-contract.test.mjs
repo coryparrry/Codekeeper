@@ -459,8 +459,10 @@ test("merged review gate executes the same fail-closed publication contract", as
     IS_REVIEW_FEEDBACK: "false",
     IS_COMMAND_REVIEW: "false",
     IS_OWNER_COMMAND_REVIEW: "false",
-    IS_DRAFT: "false",
     HEAD_REPOSITORY: "octo/example",
+    BASE_REPOSITORY: "octo/example",
+    HEAD_SHA: "a".repeat(40),
+    BASE_SHA: "b".repeat(40),
     REPOSITORY: "octo/example",
     BASE_REF: "main",
     DEFAULT_BRANCH: "main",
@@ -468,7 +470,9 @@ test("merged review gate executes the same fail-closed publication contract", as
     AUTOMATION_BOT_LOGIN: "codekeeper[bot]",
     ANALYZE_RESULT: "success",
     SEAL_RESULT: "success",
-    PUBLISH_RESULT: "success",
+    PUBLISH_DISPOSITION: "published",
+    PUBLISH_BLOCKING: "false",
+    GITHUB_STEP_SUMMARY: "/dev/null",
   };
   const runGate = (overrides = {}) =>
     execFileAsync("bash", ["-c", script], {
@@ -480,8 +484,6 @@ test("merged review gate executes the same fail-closed publication contract", as
   assert.equal(passed.stdout, "");
 
   for (const overrides of [
-    { PUBLISH_RESULT: "skipped" },
-    { PUBLISH_RESULT: "failure" },
     { ANALYZE_RESULT: "skipped" },
     { SEAL_RESULT: "failure" },
   ]) {
@@ -489,17 +491,53 @@ test("merged review gate executes the same fail-closed publication contract", as
       () => runGate(overrides),
       (error) =>
         error.code === 1 &&
-        /Codekeeper did not publish a passing current review\./.test(
+        /Codekeeper did not seal a current review\./.test(
           error.stdout,
         ),
     );
   }
+  for (const disposition of ["", "unexpected"]) {
+    await assert.rejects(
+      () => runGate({ PUBLISH_DISPOSITION: disposition }),
+      (error) =>
+        error.code === 1 &&
+        /Codekeeper did not produce a sealed live review disposition\./.test(
+          error.stdout,
+        ),
+    );
+  }
+  await assert.rejects(
+    () => runGate({ PUBLISH_BLOCKING: "true" }),
+    (error) =>
+      error.code === 1 && /published blocking findings/.test(error.stdout),
+  );
+
+  const manual = await runGate({ PUBLISH_DISPOSITION: "manual" });
+  assert.match(
+    manual.stdout,
+    /returned a manual-review disposition without mutation/,
+  );
+  const unsupported = await runGate({ PUBLISH_DISPOSITION: "unsupported" });
+  assert.match(
+    unsupported.stdout,
+    /returned an unsupported disposition without mutation/,
+  );
+
+  const liveDispositionWins = await runGate({ IS_DRAFT: "true" });
+  assert.equal(liveDispositionWins.stdout, "");
+
+  await assert.rejects(
+    () => runGate({ HEAD_REPOSITORY: "fork/example" }),
+    (error) =>
+      error.code === 1 &&
+      /Fork pull requests are unsupported/.test(error.stdout),
+  );
 
   const intentionalNoOp = await runGate({
     IS_AUTOMATION_REPLY: "true",
     ANALYZE_RESULT: "skipped",
     SEAL_RESULT: "skipped",
-    PUBLISH_RESULT: "skipped",
+    PUBLISH_DISPOSITION: "",
   });
   assert.match(intentionalNoOp.stdout, /intentionally ignored/);
 
@@ -531,7 +569,12 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   assert.match(gate, /timeout-minutes: 15/);
   assert.match(gate, /fails closed/);
   assert.match(gate, /exit 1/);
-  assert.match(gate, /PUBLISH_RESULT: \$\{\{ steps\.publish\.outcome \}\}/);
+  assert.match(
+    gate,
+    /PUBLISH_DISPOSITION: \$\{\{ steps\.publish\.outputs\.result != '' && fromJSON\(steps\.publish\.outputs\.result\)\.disposition \|\| '' \}\}/,
+  );
+  assert.match(gate, /PUBLISH_BLOCKING:/);
+  assert.doesNotMatch(gate, /steps\.publish\.outcome|IS_DRAFT:/);
   assert.doesNotMatch(source, /^  publish:\n/m);
   assert.match(
     source,
