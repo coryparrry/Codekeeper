@@ -3,6 +3,11 @@ import { readFile, lstat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  APP_PERMISSION_VALUES,
+  assistantAppPermissions,
+  workflowAppPermissions
+} from "./app-permissions.mjs";
+import {
   MODE_IDS,
   MODEL_PROVIDER_SECRETS,
   MODES,
@@ -25,6 +30,7 @@ const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const RELEASE_PACKAGE_ASSET_MAP = new Map(RELEASE_PACKAGE_ASSETS.map((asset) => [asset.asset, asset]));
+const APP_PERMISSION_VALUE_SET = new Set(APP_PERMISSION_VALUES);
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -246,6 +252,30 @@ function renderPackageReceipt(template, packageRelease, label) {
   return rendered;
 }
 
+function replaceAppPermissionInputs(source, permissions, label) {
+  const replacements = {
+    app_contents_permission: permissions.contents,
+    app_issues_permission: permissions.issues,
+    app_pull_requests_permission: permissions.pullRequests
+  };
+  let rendered = source;
+  for (const [name, value] of Object.entries(replacements)) {
+    const placeholder = `APP_${name.slice(4, -11).toUpperCase()}_PERMISSION`;
+    if (!APP_PERMISSION_VALUE_SET.has(value)) {
+      throw new InstallerError(`Rendered ${label} workflow has an invalid ${name}.`, { code: "WORKFLOW_RENDER_INVALID" });
+    }
+    const pattern = new RegExp(`(\\b${name}:\\s*)["']?${placeholder}["']?`);
+    if (count(rendered, placeholder) !== 1 || !pattern.test(rendered)) {
+      throw new InstallerError(`Bundled ${label} workflow has an unexpected ${name} placeholder.`, { code: "WORKFLOW_RENDER_INVALID" });
+    }
+    rendered = rendered.replace(pattern, `$1"${value}"`);
+  }
+  if (/APP_(?:CONTENTS|ISSUES|PULL_REQUESTS)_PERMISSION/.test(rendered)) {
+    throw new InstallerError(`Rendered ${label} workflow contains unresolved App permission placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  return rendered;
+}
+
 export function renderWorkflow(template, {
   packageRelease,
   mode,
@@ -257,6 +287,7 @@ export function renderWorkflow(template, {
   if (!MODE_IDS.includes(mode)) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   let rendered = renderPackageReceipt(template, packageRelease, mode)
     .replaceAll("codekeeper:ready", "ready");
+  rendered = replaceAppPermissionInputs(rendered, workflowAppPermissions(mode, policy), mode);
 
   const resolvedProvider = provider ?? (mode === "issues" && preset === "mixed" ? "deepseek" : "openai");
   const desiredSecret = MODEL_PROVIDER_SECRETS[resolvedProvider];
@@ -309,8 +340,11 @@ export function renderAssistantWorkflow(template, { packageRelease, ownerRequest
   const rendered = renderPackageReceipt(template, packageRelease, "assistant")
     .replace(/owner_requests: (?:true|false)/, `owner_requests: ${ownerRequests}`)
     .replace(/installed_modes: [a-z,]+/, `installed_modes: ${modes.join(",")}`);
-  assertLocalPackageWorkflow(rendered, "assistant");
-  return rendered;
+  const permissioned = replaceAppPermissionInputs(rendered, assistantAppPermissions(modes, {
+    automation: { ownerRequests }
+  }), "assistant");
+  assertLocalPackageWorkflow(permissioned, "assistant");
+  return permissioned;
 }
 
 export function renderInstallFiles(bundle, {

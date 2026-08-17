@@ -88,6 +88,7 @@ test("App proof derives least privilege from the installed capabilities", async 
   const installation = {
     modes: ["review"],
     policy: {
+      automation: { ownerRequests: false },
       review: { autoRepair: false },
       audit: { repair: { enabled: false } },
       issues: { allowAiImplementation: false },

@@ -355,7 +355,8 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
         displayName: setupAnswers.displayName,
         ownerType: snapshot.ownerType,
         modes: setupAnswers.modes,
-        capabilities: setupAnswers.capabilities
+        capabilities: setupAnswers.capabilities,
+        ownerRequests: setupAnswers.policy?.automation?.ownerRequests ?? true
       });
       presentationOutput.write(`\nUse a GitHub App that you own. Install it only on ${snapshot.repository}.\nGitHub pre-fills Codekeeper's required permissions. Do not change them; Codekeeper will verify the App after the setup pull request merges. GitHub does not create the App until you submit the form.\n${registrationUrl}\n`);
       try {

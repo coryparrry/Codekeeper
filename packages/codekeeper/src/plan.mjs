@@ -1,4 +1,5 @@
 import path from "node:path";
+import { registrationAppPermissions } from "./app-permissions.mjs";
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
@@ -211,33 +212,21 @@ export function normalizeModelChoices({ modes, preset, bundle, choices = {}, pol
   return Object.freeze(normalized);
 }
 
-export function appPermissions({ modes = MODE_IDS, capabilities = ["reviewRepair", "repair", "issueImplementation", "autoMerge"] } = {}) {
-  const selectedModes = new Set(normalizeModes(modes));
-  const enabledCapabilities = new Set(
-    Array.isArray(capabilities)
-      ? capabilities
-      : Object.entries(capabilities ?? {}).filter(([, enabled]) => enabled === true).map(([id]) => id)
-  );
-  const canWriteContents = ["reviewRepair", "repair", "issueImplementation"].some((id) => enabledCapabilities.has(id));
-  const canWritePullRequests = selectedModes.has("review")
-    || selectedModes.has("fix")
-    || canWriteContents
-    || enabledCapabilities.has("autoMerge");
-  return Object.freeze({
-    contents: canWriteContents ? "write" : "read",
-    issues: "write",
-    pullRequests: canWritePullRequests ? "write" : "read",
-    metadata: "read"
+export function appPermissions({ modes = MODE_IDS, capabilities = ["reviewRepair", "repair", "issueImplementation", "autoMerge"], ownerRequests = true } = {}) {
+  return registrationAppPermissions({
+    modes: normalizeModes(modes),
+    capabilities,
+    ownerRequests
   });
 }
 
-export function appRegistrationUrl({ repository, displayName, ownerType = "User", modes, capabilities }) {
+export function appRegistrationUrl({ repository, displayName, ownerType = "User", modes, capabilities, ownerRequests = true }) {
   const [owner] = repository.split("/");
   if (ownerType !== "User" && ownerType !== "Organization") {
     throw new InstallerError("GitHub App registration requires a personal or organization repository owner.", { code: "PLAN_INVALID" });
   }
   const name = `Codekeeper ${displayName}`.slice(0, 34);
-  const permissions = appPermissions({ modes, capabilities });
+  const permissions = appPermissions({ modes, capabilities, ownerRequests });
   const parameters = new URLSearchParams({
     name,
     description: `Codekeeper automation for ${repository}`,
@@ -642,7 +631,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     ownerLogins,
     enabled,
     capabilities,
-    appPermissions: appPermissions({ modes, capabilities }),
+    appPermissions: appPermissions({ modes, capabilities, ownerRequests: effectivePolicy.automation.ownerRequests }),
     models,
     modelSummary: Object.freeze(
       Object.fromEntries(

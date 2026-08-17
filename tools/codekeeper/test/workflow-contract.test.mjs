@@ -195,8 +195,9 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.doesNotMatch(seal, /openai\/codex-action@|create-github-app-token/);
 
     assert.match(publish, /create-github-app-token/);
-    if (mode === "issues")
-      assert.match(publish, /permission-pull-requests: read/);
+    assert.match(publish, /permission-contents: \$\{\{ inputs\.app_contents_permission \}\}/);
+    assert.match(publish, /permission-issues: \$\{\{ inputs\.app_issues_permission \}\}/);
+    assert.match(publish, /permission-pull-requests: \$\{\{ inputs\.app_pull_requests_permission \}\}/);
     assert.match(publish, /CODEKEEPER_AUTOMATION_BOT_LOGIN/);
     assert.match(publish, /CODEKEEPER_AUTOMATION_BOT_ID/);
     assert.match(publish, /steps\.app-token\.outputs\.app-slug/);

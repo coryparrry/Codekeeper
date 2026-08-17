@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  renderAssistantWorkflow,
   renderInstallFiles,
   renderPolicy,
   renderWorkflow,
@@ -13,6 +14,7 @@ import { applyPolicyPreset } from "../../../tools/codekeeper/presets/catalogue.m
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
+  ASSISTANT_WORKFLOW,
   APP_SECRET,
   DEEPSEEK_SECRET,
   MODE_IDS,
@@ -402,6 +404,114 @@ test("each rendered workflow contains exactly one local runtime workflow and pac
   assert.doesNotMatch(mixedIssue, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY/);
   assert.match(openaiIssue, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY/);
   assert.doesNotMatch(openaiIssue, /secrets\.DEEPSEEK_API_KEY/);
+});
+
+test("generated callers request only the App permissions required by their selected capabilities", async () => {
+  const bundle = await loadVerifiedAssets();
+  const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
+  policy.review.autoRepair = false;
+  policy.audit.repair.enabled = false;
+  policy.issues.allowAiImplementation = false;
+  policy.merge.enabled = false;
+  const files = renderInstallFiles(bundle, {
+    modes: ["review", "maintain", "issues", "fix"],
+    preset: "openai",
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    policySource: JSON.stringify(policy),
+    enforceBundledDefaults: false
+  });
+  const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
+  assert.match(contents[MODES.review.target], /app_contents_permission: "read"/);
+  assert.match(contents[MODES.review.target], /app_issues_permission: "write"/);
+  assert.match(contents[MODES.review.target], /app_pull_requests_permission: "write"/);
+  assert.match(contents[MODES.maintain.target], /app_contents_permission: "read"/);
+  assert.match(contents[MODES.maintain.target], /app_issues_permission: "write"/);
+  assert.match(contents[MODES.maintain.target], /app_pull_requests_permission: "read"/);
+  assert.match(contents[MODES.issues.target], /app_contents_permission: "read"/);
+  assert.match(contents[MODES.issues.target], /app_issues_permission: "write"/);
+  assert.match(contents[MODES.issues.target], /app_pull_requests_permission: "read"/);
+  assert.match(contents[MODES.fix.target], /app_contents_permission: "write"/);
+  assert.match(contents[MODES.fix.target], /app_issues_permission: "write"/);
+  assert.match(contents[MODES.fix.target], /app_pull_requests_permission: "write"/);
+  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /app_contents_permission: "write"/);
+  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /app_issues_permission: "write"/);
+  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /app_pull_requests_permission: "write"/);
+  const callerContents = [
+    contents[".github/workflows/codekeeper-assistant.yml"],
+    ...Object.values(MODES).map((mode) => contents[mode.target])
+  ];
+  assert.doesNotMatch(callerContents.join("\n"), /APP_(?:CONTENTS|ISSUES|PULL_REQUESTS)_PERMISSION/);
+
+  const automaticRepairFiles = renderInstallFiles(bundle, {
+    modes: ["review", "fix"],
+    preset: "openai",
+    displayName: "Widget",
+    defaultBranch: "main",
+    ownerLogins: ["coryparrry"],
+    capabilities: { reviewRepair: true },
+    policySource: JSON.stringify(policy),
+    enforceBundledDefaults: false
+  });
+  assert.match(
+    automaticRepairFiles.find((file) => file.path === MODES.review.target).contents,
+    /app_contents_permission: "write"/
+  );
+
+  for (const [modes, contentsPermission] of [["issues"], ["maintain"]].map((selected) => [selected, selected[0] === "issues" ? "write" : "read"])) {
+    const subset = renderInstallFiles(bundle, {
+      modes,
+      preset: "openai",
+      displayName: "Widget",
+      defaultBranch: "main",
+      ownerLogins: ["coryparrry"],
+      policySource: JSON.stringify(policy),
+      enforceBundledDefaults: false
+    });
+    const assistant = subset.find((file) => file.path === ".github/workflows/codekeeper-assistant.yml").contents;
+    assert.match(assistant, new RegExp(`app_contents_permission: "${contentsPermission}"`));
+    assert.match(assistant, /app_issues_permission: "write"/);
+    assert.match(assistant, /app_pull_requests_permission: "write"/);
+  }
+});
+
+test("owner-request dispatch authority is reflected in App registration permissions", () => {
+  assert.equal(appPermissions({ modes: ["review"], capabilities: [], ownerRequests: true }).contents, "write");
+  assert.equal(appPermissions({ modes: ["review"], capabilities: [], ownerRequests: false }).contents, "read");
+  assert.equal(appPermissions({ modes: ["maintain"], capabilities: [], ownerRequests: true }).contents, "read");
+  assert.equal(appPermissions({ modes: ["issues"], capabilities: [], ownerRequests: true }).pullRequests, "write");
+  assert.equal(appPermissions({ modes: ["maintain"], capabilities: [], ownerRequests: true }).pullRequests, "write");
+  assert.equal(appPermissions({ modes: ["issues"], capabilities: [], ownerRequests: false }).pullRequests, "read");
+});
+
+test("workflow rendering rejects unresolved App permission placeholders", async () => {
+  const bundle = await loadVerifiedAssets();
+  const template = bundle.contents[MODES.review.asset].replace(
+    'app_contents_permission: "APP_CONTENTS_PERMISSION"',
+    'app_contents_permission: "UNRESOLVED"'
+  );
+  assert.throws(
+    () => renderWorkflow(template, {
+      packageRelease: TEST_PACKAGE_RELEASE,
+      mode: "review",
+      preset: "openai"
+    }),
+    assertInstallerCode(assert, "WORKFLOW_RENDER_INVALID")
+  );
+});
+
+test("assistant rendering honors an explicit disabled owner-request setting", async () => {
+  const bundle = await loadVerifiedAssets();
+  const rendered = renderAssistantWorkflow(bundle.contents[ASSISTANT_WORKFLOW.asset], {
+    packageRelease: TEST_PACKAGE_RELEASE,
+    ownerRequests: false,
+    modes: ["review"]
+  });
+  assert.match(rendered, /owner_requests: false/);
+  assert.match(rendered, /app_contents_permission: "read"/);
+  assert.match(rendered, /app_issues_permission: "read"/);
+  assert.match(rendered, /app_pull_requests_permission: "read"/);
 });
 
 test("generated callers honor the rendered policy automation controls", async () => {
@@ -1425,7 +1535,7 @@ test("GitHub App registration URL is private, webhook-free, repository-owned, an
   );
 
   assert.deepEqual(appPermissions({ modes: ["review"], capabilities: [] }), {
-    contents: "read",
+    contents: "write",
     issues: "write",
     pullRequests: "write",
     metadata: "read"
@@ -1435,11 +1545,23 @@ test("GitHub App registration URL is private, webhook-free, repository-owned, an
     displayName: "Widget App",
     ownerType: "User",
     modes: ["review"],
-    capabilities: []
+    capabilities: [],
+    ownerRequests: true
   }).split("#")[0]);
-  assert.equal(reviewUrl.searchParams.get("contents"), "read");
+  assert.equal(reviewUrl.searchParams.get("contents"), "write");
   assert.equal(reviewUrl.searchParams.get("pull_requests"), "write");
-  assert.equal(appPermissions({ modes: ["issues"], capabilities: [] }).pullRequests, "read");
+  const reviewWithoutOwnerRequests = new URL(appRegistrationUrl({
+    repository: "Acme/Widget",
+    displayName: "Widget App",
+    ownerType: "User",
+    modes: ["review"],
+    capabilities: [],
+    ownerRequests: false
+  }).split("#")[0]);
+  assert.equal(reviewWithoutOwnerRequests.searchParams.get("contents"), "read");
+  assert.equal(appPermissions({ modes: ["issues"], capabilities: [], ownerRequests: false }).pullRequests, "read");
+  assert.equal(appPermissions({ modes: ["fix"], capabilities: [] }).contents, "write");
+  assert.equal(appPermissions({ modes: ["fix"], capabilities: [] }).pullRequests, "write");
   assert.equal(appPermissions({ modes: ["maintain"], capabilities: ["repair"] }).contents, "write");
 });
 

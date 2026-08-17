@@ -87,7 +87,8 @@ export async function inspectInstalledApp({
     : ["reviewRepair", "repair", "issueImplementation", "autoMerge"];
   const required = appPermissions({
     modes: installation?.modes,
-    capabilities
+    capabilities,
+    ownerRequests: installation?.policy?.automation?.ownerRequests ?? true
   });
   const expectedPermissions = {
     contents: required.contents,
