@@ -209,9 +209,9 @@ jobs:
             printf 'should_publish=false\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          ERROR_REPORT="$error_report" node --input-type=module -e '
+          RECEIPT="$receipt" node --input-type=module -e '
           import { readFileSync } from "node:fs";
-          const error = JSON.parse(readFileSync(process.env.ERROR_REPORT, "utf8"));
+          const error = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
           if (error?.error?.code !== "E404") throw new Error("npm lookup failed without a confirmed E404");
           '
           printf 'should_publish=true\n' >> "$GITHUB_OUTPUT"

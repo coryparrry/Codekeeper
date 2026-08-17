@@ -526,6 +526,66 @@ test("owner help hides repair using the live stacked pull base", async () => {
   }
 });
 
+test("owner status hides repair using the live stacked pull base", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-stacked-status-command-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        body: "/codekeeper status",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    getPull: GitHubClient.prototype.getPull,
+    upsertMarkerComment: GitHubClient.prototype.upsertMarkerComment,
+  };
+  let status = "";
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    pull_request: {},
+    labels: [],
+  });
+  GitHubClient.prototype.getPull = async () => ({
+    base: { ref: "stack-base", repo: { full_name: "owner/repository" } },
+  });
+  GitHubClient.prototype.upsertMarkerComment = async (
+    _number,
+    _marker,
+    body,
+  ) => {
+    status = body;
+  };
+  try {
+    await runOwnerCommand({
+      eventPath,
+      config: {
+        repository: {
+          ownerLogins: ["repository-owner"],
+          defaultBranch: "main",
+        },
+        labels: {},
+      },
+      token: "app-token",
+      automationIdentity: { login: "codekeeper[bot]", id: "123" },
+    });
+    assert.doesNotMatch(status, /Available commands:.*repair/);
+    assert.doesNotMatch(status, /`\/codekeeper fix`/);
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("an owner repair rejects a stacked pull request before unpausing it", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "codekeeper-owner-stacked-repair-command-"),
@@ -844,9 +904,12 @@ test("owner stop confirms ambiguous auto-merge disablement without accepting det
   GitHubClient.prototype.removeLabel = async () => {};
   GitHubClient.prototype.getPull = async () => {
     pullReads += 1;
-    return pullReads === 1
-      ? { number: 42, node_id: "PR_42", auto_merge: { enabled_at: "now" } }
-      : { number: 42, node_id: "PR_42", auto_merge: null };
+    return {
+      number: 42,
+      node_id: "PR_42",
+      auto_merge: pullReads === 1 ? { enabled_at: "now" } : null,
+      base: { ref: "main" },
+    };
   };
   GitHubClient.prototype.disableAutoMerge = async () => {
     const error = new Error(ambiguous ? "response lost" : "not permitted");
@@ -859,7 +922,10 @@ test("owner stop confirms ambiguous auto-merge disablement without accepting det
       eventPath,
       config: {
         automation: { ownerRequests: true },
-        repository: { ownerLogins: ["repository-owner"] },
+        repository: {
+          ownerLogins: ["repository-owner"],
+          defaultBranch: "main",
+        },
         labels: {},
       },
       token: "app-token",
@@ -867,7 +933,7 @@ test("owner stop confirms ambiguous auto-merge disablement without accepting det
     };
     const result = await runOwnerCommand(options);
     assert.equal(result.command, "stop");
-    assert.equal(pullReads, 2);
+    assert.equal(pullReads, 3);
 
     ambiguous = false;
     pullReads = 0;

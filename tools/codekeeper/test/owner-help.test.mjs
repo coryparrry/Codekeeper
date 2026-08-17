@@ -94,10 +94,12 @@ test("status uses the same canonical commands and reports the active surface", (
     outcome: "Automatic work is paused.",
     config: { labels: { "codekeeper:paused": {} } },
     surface: "pull-request",
+    repairAvailable: false,
   });
   assert.match(status, /\| Surface \| pull request \|/);
   assert.match(status, /\| Command \| `\/codekeeper pause` \|/);
   assert.match(status, /`codekeeper:paused`/);
   assert.match(status, /`\/codekeeper stop` → `\/codekeeper pause`/);
   assert.doesNotMatch(status, /Available commands:.*triage/);
+  assert.doesNotMatch(status, /Available commands:.*repair/);
 });

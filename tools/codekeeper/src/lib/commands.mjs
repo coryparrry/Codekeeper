@@ -386,6 +386,10 @@ export async function runOwnerCommand({
   }
 
   issue = await github.getIssue(number);
+  const repairAvailable =
+    !issue.pull_request ||
+    (await github.getPull(number)).base?.ref ===
+      config.repository.defaultBranch;
   await github.upsertMarkerComment(
     number,
     COMMAND_STATUS_MARKER,
@@ -395,6 +399,7 @@ export async function runOwnerCommand({
       outcome,
       config,
       surface,
+      repairAvailable,
     }),
     automationIdentity,
   );

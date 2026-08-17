@@ -78,6 +78,11 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
     /receipt\?\.dist\?\.integrity !== process\.env\.EXPECTED_INTEGRITY/,
   );
   assert.match(source, /error\?\.error\?\.code !== "E404"/);
+  assert.match(
+    source,
+    /RECEIPT="\$receipt" node --input-type=module -e '[\s\S]*const error = JSON\.parse\(readFileSync\(process\.env\.RECEIPT/,
+  );
+  assert.doesNotMatch(source, /JSON\.parse\(readFileSync\(process\.env\.ERROR_REPORT/);
   assert.match(source, /should_publish=false/);
   assert.match(source, /should_publish=true/);
   assert.match(
