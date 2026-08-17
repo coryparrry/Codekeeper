@@ -7,7 +7,7 @@ import { PACKAGE_SOURCE_REPOSITORY, PACKAGE_SOURCE_REPOSITORY_URL } from "../src
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
-const REVIEWED_SOURCE_CHECKPOINT = "993bcec2e749b1188d53d9e2968cc3df2b54c565";
+const REVIEWED_SOURCE_CHECKPOINT = "d7554d9d6482664499f4c2ea788b20542f743a2e";
 const PRODUCTION_SOURCE_PATHS = [
   "tools/codekeeper",
   ".github/workflows/codekeeper-assistant.yml",
@@ -59,9 +59,10 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.test, /npm run prepare:runtime-test/);
   assert.match(packageJson.scripts.test, /npm run test:unit/);
   assert.match(packageJson.scripts["test:unit"], /node --test test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
+  assert.match(packageJson.scripts.coverage, /node --test .*test\/\*\.test\.mjs audit\/\*\.test\.mjs/);
   assert.match(packageJson.scripts.check, /audit\/\*\.mjs/);
   assert.match(packageJson.scripts.check, /npm run prepare:runtime-test/);
-  assert.match(packageJson.scripts.check, /npm run test:unit/);
+  assert.match(packageJson.scripts.check, /npm run coverage/);
 });
 
 test("unpublished installer docs fail closed while local packing preserves the exact receipt", async () => {
