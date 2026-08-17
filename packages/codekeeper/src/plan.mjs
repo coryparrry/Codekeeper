@@ -267,9 +267,7 @@ export function workflowMap(modes, { maintenanceScheduled = true } = {}) {
       label: MODES[mode].label,
       description: MODES[mode].description,
       workflow: MODES[mode].target,
-      trigger: mode === "maintain"
-        ? maintenanceScheduled ? "scheduled report-only run and manual run" : "manual run"
-        : MODES[mode].trigger,
+      trigger: mode === "maintain" && !maintenanceScheduled ? "manual run" : MODES[mode].trigger,
       policyAgent: MODES[mode].policyAgent
     })
   );
@@ -367,7 +365,7 @@ Codekeeper CLI release **${plan.packageVersion}** uses the **${plan.preset}** st
 
 OpenAI traces are **${plan.tracing ? "enabled" : "disabled"}**.
 
-Scheduled report-only maintenance is **${plan.maintenanceScheduled ? "enabled; scheduled runs cannot modify GitHub" : "disabled; manual maintenance remains available"}**. Manual dispatch always lets an operator explicitly choose dry or live maintenance.
+Scheduled maintenance is **${plan.maintenanceScheduled ? "enabled" : "disabled; manual maintenance remains available"}**.
 
 Source: [${plan.source.repository}@${plan.source.commit}](https://github.com/${plan.source.repository}/tree/${plan.source.commit})
 
@@ -390,7 +388,7 @@ ${requiredSettings ? `\n${requiredSettings}\n` : ""}
 
 ${plan.enabled ? (plan.update ? "Codekeeper keeps running the current default-branch configuration. After this pull request merges, run `codekeeper verify` from a clean, current default-branch checkout." : "Codekeeper can start the selected workflows when this pull request merges. After merge, run `codekeeper verify` from a clean, current default-branch checkout before treating the installation as ready.") : "Codekeeper stays off. After merge, run `codekeeper verify`, then set `CODEKEEPER_ENABLED=true` when you want it to start."}
 
-Packaged agent profiles are used by default. Edit a profile in Settings to create an optional \`.github/codekeeper/agents/*.md\` repository override for priorities, work selection, implementation approach, review standards, or reporting. The capability switches above control which GitHub actions Codekeeper can take. Scheduled maintenance is always report-only; only a manually dispatched live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
+Packaged agent profiles are used by default. Edit a profile in Settings to create an optional \`.github/codekeeper/agents/*.md\` repository override for priorities, work selection, implementation approach, review standards, or reporting. The capability switches above control which GitHub actions Codekeeper can take. A live maintenance run can repair when repository repair is on. An issue marked ready can start implementation when issue implementation is on.
 
 The installer did not merge this pull request or prove a workflow. A successful setup pull request is not a readiness result.
 `;
@@ -754,7 +752,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
       (await prompt.select({
         step: "setup",
         message: "Choose a starting setup",
-        description: ["Recommended starts with automatic pull-request review and manual maintenance.", "When enabled, scheduled maintenance is report-only; manual dispatch can explicitly choose dry or live mode. Tracing, schedules, repository repair, issue implementation, and automatic merge start off."],
+        description: ["Recommended starts with automatic pull-request review and manual maintenance.", "Tracing, schedules, repository repair, issue implementation, and automatic merge start off."],
         defaultValue: "recommended",
         choices: [
           {
@@ -765,7 +763,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
         ]
       })) === "custom";
     if (!chooseCustom) {
-      output.write("Using the recommended setup: review on, manual maintenance available, scheduled runs off, tracing and code-changing automation off.\n");
+      output.write("Using the recommended setup: review on, manual maintenance available, tracing and code-changing automation off.\n");
       return recommendedAnswers(snapshot, bundle);
     }
   }
@@ -818,7 +816,7 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
         defaultValue: true
       });
   if (useRecommended) {
-    output.write("Using the recommended setup: review on, manual maintenance available, scheduled runs off, tracing and code-changing automation off.\n");
+    output.write("Using the recommended setup: review on, manual maintenance available, tracing and code-changing automation off.\n");
     return recommendedAnswers(snapshot, bundle);
   }
 
@@ -1060,12 +1058,12 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
         tuiOptions(
           prompt,
           {
-            message: "Run report-only maintenance on a schedule?",
+            message: "Run maintenance on a schedule?",
             defaultValue: installation?.maintenanceScheduled ?? false
           },
           {
             step: "automation",
-            description: ["Scheduled runs are always report-only and cannot modify GitHub.", "Manual maintenance remains available when the schedule is off and lets you explicitly choose dry or live mode."]
+            description: ["Manual maintenance remains available when the schedule is off."]
           }
         )
       )

@@ -519,7 +519,7 @@ function reviewData(plan) {
     authority: [
       `${state(plan.enabled && plan.modes.includes("review") && plan.policy.automation.automaticPrReview)}  Review eligible pull requests automatically`,
       `${state(plan.enabled && plan.modes.includes("review"))}  Post comments, labels, and a blocking result`,
-      `${state(plan.enabled && plan.modes.includes("maintain") && plan.maintenanceScheduled)}  Scheduled maintenance — report-only (manual dispatch chooses dry or live)`,
+      `${state(plan.enabled && plan.modes.includes("maintain") && plan.maintenanceScheduled)}  Scheduled maintenance`,
       `${state(canModifyFiles)}  Modify repository files`,
       `${state(plan.capabilities.issueImplementation)}  Implement issues`,
       `${state(plan.capabilities.autoMerge)}  Merge pull requests`,

@@ -35,6 +35,15 @@ function patchGitHub(methods) {
   return () => Object.assign(GitHubClient.prototype, originals);
 }
 
+function eligibleRepairPull() {
+  return {
+    state: "open",
+    draft: false,
+    head: { sha: "a".repeat(40), repo: { full_name: "owner/repository" } },
+    base: { sha: "b".repeat(40), ref: "main", repo: { full_name: "owner/repository" } }
+  };
+}
+
 test("failed owner repair dispatch does not leave a target unpaused", async (t) => {
   const eventPath = await eventFile(t, "/codekeeper fix");
   const labels = new Set(["codekeeper:paused"]);
@@ -42,7 +51,7 @@ test("failed owner repair dispatch does not leave a target unpaused", async (t) 
     async getIssue() { return { number: 42, state: "open", labels: [...labels], pull_request: {} }; },
     async removeLabel(_number, label) { labels.delete(label); },
     async addLabels(_number, labelsToAdd) { labelsToAdd.forEach((label) => labels.add(label)); },
-    async getPull() { return { head: { sha: "a".repeat(40) } }; },
+    async getPull() { return eligibleRepairPull(); },
     async createRepositoryDispatch() { throw new Error("dispatch unavailable"); }
   });
   t.after(restore);
@@ -60,7 +69,7 @@ test("ambiguous owner repair dispatch keeps a target unpaused", async (t) => {
     async getIssue() { return { number: 42, state: "open", labels: [...labels], pull_request: {} }; },
     async removeLabel(_number, label) { labels.delete(label); },
     async addLabels(_number, labelsToAdd) { labelsToAdd.forEach((label) => labels.add(label)); },
-    async getPull() { return { head: { sha: "a".repeat(40) } }; },
+    async getPull() { return eligibleRepairPull(); },
     async createRepositoryDispatch() {
       const error = new Error("dispatch response lost");
       error.githubMutationOutcome = "ambiguous";
@@ -89,7 +98,7 @@ test("ambiguous pause removal is reconciled before owner repair dispatch", async
       throw error;
     },
     async addLabels(_number, labelsToAdd) { labelsToAdd.forEach((label) => labels.add(label)); },
-    async getPull() { return { head: { sha: "a".repeat(40) } }; },
+    async getPull() { return eligibleRepairPull(); },
     async createRepositoryDispatch() { dispatches += 1; }
   });
   t.after(restore);

@@ -91,7 +91,6 @@ function baseOptions(options = {}) {
       return inspected;
     },
     validateInstalledPolicy: () => {},
-    verifyAppCredentials: async () => true,
     ...options,
   };
 }
@@ -236,42 +235,6 @@ test("GitHub App proof is explicitly not-provable when only token-visible instal
   assert.equal(app.status, "not-provable");
   assert.match(app.remediation, /After merge/);
   assert.equal(report.ready, false);
-});
-
-test("readiness distinguishes configured state from stored private-key proof", async () => {
-  const notProven = await verifyCodekeeperReadiness(
-    baseOptions({
-      inspectApp: async () => true,
-      verifyPackage: async () => true,
-      verifyAppCredentials: null
-    })
-  );
-  assert.equal(notProven.configurationReady, true);
-  assert.equal(notProven.operationallyVerified, false);
-  assert.equal(notProven.ready, false);
-  assert.equal(check(notProven, "app-credentials").status, "not-provable");
-
-  const rejected = await verifyCodekeeperReadiness(
-    baseOptions({
-      inspectApp: async () => true,
-      verifyPackage: async () => true,
-      verifyAppCredentials: async () => false
-    })
-  );
-  assert.equal(rejected.configurationReady, true);
-  assert.equal(rejected.ready, false);
-  assert.equal(check(rejected, "app-credentials").status, "fail");
-
-  const verified = await verifyCodekeeperReadiness(
-    baseOptions({
-      inspectApp: async () => true,
-      verifyPackage: async () => true,
-      verifyAppCredentials: async () => true
-    })
-  );
-  assert.equal(verified.configurationReady, true);
-  assert.equal(verified.operationallyVerified, true);
-  assert.equal(check(verified, "app-credentials").status, "pass");
 });
 
 test("controlled checks stay skipped unless explicitly requested and supplied", async () => {

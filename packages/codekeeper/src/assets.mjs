@@ -227,12 +227,12 @@ export function renderPolicy(policySource, {
   return `${JSON.stringify(policy, null, 2)}\n`;
 }
 
-function assertLocalPackageWorkflow(source, mode, { allowedUses = [] } = {}) {
+function assertLocalPackageWorkflow(source, mode) {
   const activeUses = source.split("\n")
     .map((line) => line.trim())
     .filter((line) => /^(?:-\s+)?uses:/.test(line))
     .map((line) => line.replace(/^-\s+/, ""));
-  const expected = [`uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`, ...allowedUses];
+  const expected = [`uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`];
   if (activeUses.length !== expected.length || expected.some((line) => !activeUses.includes(line))) {
     throw new InstallerError("Rendered workflow does not use the installed package runtime workflow.", { code: "WORKFLOW_RENDER_INVALID" });
   }
@@ -272,22 +272,6 @@ function replaceAppPermissionInputs(source, permissions, label) {
   }
   if (/APP_(?:CONTENTS|ISSUES|PULL_REQUESTS)_PERMISSION/.test(rendered)) {
     throw new InstallerError(`Rendered ${label} workflow contains unresolved App permission placeholders.`, { code: "WORKFLOW_RENDER_INVALID" });
-  }
-  return rendered;
-}
-
-function replaceAppCredentialProbePermissions(source, permissions) {
-  const replacements = {
-    VERIFY_APP_CONTENTS_PERMISSION: permissions.contents,
-    VERIFY_APP_ISSUES_PERMISSION: permissions.issues,
-    VERIFY_APP_PULL_REQUESTS_PERMISSION: permissions.pullRequests
-  };
-  let rendered = source;
-  for (const [placeholder, value] of Object.entries(replacements)) {
-    if (!APP_PERMISSION_VALUE_SET.has(value) || count(rendered, placeholder) !== 1) {
-      throw new InstallerError("Bundled assistant workflow has invalid App credential probe permissions.", { code: "WORKFLOW_RENDER_INVALID" });
-    }
-    rendered = rendered.replace(placeholder, value);
   }
   return rendered;
 }
@@ -356,18 +340,11 @@ export function renderAssistantWorkflow(template, { packageRelease, ownerRequest
   const rendered = renderPackageReceipt(template, packageRelease, "assistant")
     .replace(/owner_requests: (?:true|false)/, `owner_requests: ${ownerRequests}`)
     .replace(/installed_modes: [a-z,]+/, `installed_modes: ${modes.join(",")}`);
-  const permissions = assistantAppPermissions(modes, {
+  const permissioned = replaceAppPermissionInputs(rendered, assistantAppPermissions(modes, {
     automation: { ownerRequests }
-  });
-  const permissioned = replaceAppCredentialProbePermissions(
-    rendered,
-    permissions
-  );
-  const fullyPermissioned = replaceAppPermissionInputs(permissioned, permissions, "assistant");
-  assertLocalPackageWorkflow(fullyPermissioned, "assistant", {
-    allowedUses: ["uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3"]
-  });
-  return fullyPermissioned;
+  }), "assistant");
+  assertLocalPackageWorkflow(permissioned, "assistant");
+  return permissioned;
 }
 
 export function renderInstallFiles(bundle, {

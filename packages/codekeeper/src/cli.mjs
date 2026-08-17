@@ -11,7 +11,7 @@ import { normalizePackageRelease, RELEASE_VERSION } from "./package-release.mjs"
 import { formatCommand } from "./shell-command.mjs";
 import { runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate } from "./updater.mjs";
 import { verifyCodekeeperReadiness } from "./verify.mjs";
-import { inspectInstalledApp, inspectInstalledAppRegistration, runAppCredentialProbe, runMaintenanceDryRun, verifyInstalledPackage } from "./verification-adapters.mjs";
+import { inspectInstalledApp, runMaintenanceDryRun, verifyInstalledPackage } from "./verification-adapters.mjs";
 
 export const USAGE = `Usage:
   codekeeper init
@@ -30,7 +30,7 @@ Codekeeper update runs the latest CLI to refresh runtime dependencies and every 
 Codekeeper update --check reads the installed release manifest and resolves registry metadata; it does not mutate repository or GitHub state.
 Codekeeper rollback --to X.Y.Z creates a normal forward update pull request from the verified target release. It never resets, reverts, or force-pushes.
 Codekeeper doctor reports every safe installation prerequisite together.
-Codekeeper verify proves an installed default-branch checkout and runs a no-mutation GitHub App credential probe; --controlled also runs a maintenance dry run.
+Codekeeper verify proves an installed default-branch checkout; --controlled also runs a maintenance dry run.
 Use --current-package with the tarball's SHA-512 integrity only for exact local release testing.
 `;
 
@@ -146,7 +146,7 @@ function preview(plan, output) {
     output.write(`      workspace: ${summary.workspace.enabled ? `${summary.workspace.model} / ${summary.workspace.effort} / ${summary.workspace.allowWrites ? "write-enabled" : "read-only"}` : "off"}\n`);
   }
   output.write(`  OpenAI traces: ${plan.tracing ? "enabled" : "disabled"}\n`);
-  output.write(`  Scheduled maintenance: ${plan.maintenanceScheduled ? "enabled; report-only (cannot modify GitHub)" : "disabled; manual runs remain available"}\n`);
+  output.write(`  Scheduled maintenance: ${plan.maintenanceScheduled ? "enabled" : "disabled; manual runs remain available"}\n`);
   output.write(`  GitHub App: contents ${plan.appPermissions.contents}; issues ${plan.appPermissions.issues}; pull requests ${plan.appPermissions.pullRequests}; metadata read-only; selected repository only\n`);
   output.write(`  Code-changing capabilities: ${["reviewRepair", "repair", "issueImplementation"].some((id) => plan.capabilities[id]) ? "enabled" : "off"}; automatic merge: ${plan.capabilities.autoMerge ? "enabled" : "off"}\n`);
   output.write("  Files:\n");
@@ -193,12 +193,7 @@ function printDoctor(report, output) {
 }
 
 function printVerification(report, output) {
-  const heading = report.ready
-    ? "Codekeeper is ready"
-    : report.configurationReady
-      ? "Codekeeper configuration is ready, but operational verification is incomplete"
-      : "Codekeeper is not ready";
-  output.write(`\n${heading}\n`);
+  output.write(`\n${report.ready ? "Codekeeper is ready" : "Codekeeper is not ready"}\n`);
   for (const check of report.checks) {
     const symbol = check.status === "pass" ? "✓" : check.status === "skipped" ? "·" : "✕";
     output.write(`${symbol} ${check.label}: ${check.detail}\n`);
@@ -206,61 +201,7 @@ function printVerification(report, output) {
   }
 }
 
-function installedAppVariables(snapshot) {
-  return {
-    CODEKEEPER_APP_CLIENT_ID: snapshot.existingSettings.appClientId,
-    CODEKEEPER_AUTOMATION_BOT_LOGIN: snapshot.existingSettings.automationBotLogin
-  };
-}
-
-async function reconcileExistingApp({ inspectAppRegistration, runner, snapshot, desiredInstallation, prompt, output, openUrl, resumeCommand }) {
-  const inspect = () => inspectAppRegistration({
-    runner,
-    root: snapshot.root,
-    repository: snapshot.repository,
-    installation: desiredInstallation,
-    variables: installedAppVariables(snapshot)
-  });
-  let proof = await inspect();
-  if (proof?.status === "pass") return;
-
-  output.write("\nGitHub App permission update required\n");
-  if (Array.isArray(proof?.permissionDelta) && proof.permissionDelta.length > 0) {
-    for (const item of proof.permissionDelta) {
-      output.write(`  ${item.permission}: registered ${item.registered}; installed ${item.installed}; required ${item.required}\n`);
-    }
-  } else {
-    output.write("  The configured App identity, installation, repository scope, or permission state could not be proven.\n");
-  }
-  if (proof?.settingsUrl) {
-    output.write(`  Update the App registration, then approve the installation permission change:\n  ${proof.settingsUrl}\n`);
-    try {
-      await openUrl(proof.settingsUrl);
-    } catch {
-      // The printed URL remains the authoritative recovery path.
-    }
-  }
-  const ready = await prompt.confirm({
-    message: "Have you updated the App permissions and approved them for this repository?",
-    defaultValue: false
-  });
-  if (!ready) {
-    throw new InstallerError("Update and approve the GitHub App permissions before continuing this Codekeeper update.", {
-      code: "APP_PERMISSIONS_MISMATCH",
-      resume: resumeCommand
-    });
-  }
-  proof = await inspect();
-  if (proof?.status !== "pass") {
-    throw new InstallerError("The GitHub App registration and installed permissions still do not exactly match this update.", {
-      code: "APP_PERMISSIONS_MISMATCH",
-      resume: resumeCommand
-    });
-  }
-  output.write("  GitHub App registration and installed permissions now match this update.\n");
-}
-
-export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd(), input = stdin, output = stdout, errorOutput = stderr, runner = createCommandRunner(), prompt = null, interactive = input.isTTY === true && output.isTTY === true, environment = process.env, platform = process.platform, openUrl = null, loadAssets = loadVerifiedAssets, inspect = inspectRepository, inspectAppRegistration = inspectInstalledAppRegistration, doctor = doctorRepository, showDoctor = true, verifyReadiness = verifyCodekeeperReadiness, verifyAppCredentials = runAppCredentialProbe, resumeCommand = null, launchLatestUpdate = runLatestUpdate, launchVersionedUpdate = runVersionedUpdate, launchRollback = runRollback, checkUpdate = runUpdateCheck } = {}) {
+export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd(), input = stdin, output = stdout, errorOutput = stderr, runner = createCommandRunner(), prompt = null, interactive = input.isTTY === true && output.isTTY === true, environment = process.env, platform = process.platform, openUrl = null, loadAssets = loadVerifiedAssets, inspect = inspectRepository, doctor = doctorRepository, showDoctor = true, verifyReadiness = verifyCodekeeperReadiness, resumeCommand = null, launchLatestUpdate = runLatestUpdate, launchVersionedUpdate = runVersionedUpdate, launchRollback = runRollback, checkUpdate = runUpdateCheck } = {}) {
   let parsed;
   try {
     parsed = parseCliArgs(argv);
@@ -317,7 +258,6 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
         runner,
         cwd,
         inspectApp: inspectInstalledApp,
-        verifyAppCredentials,
         verifyPackage: (input) => verifyInstalledPackage(input, { runner, environment, platform }),
         controlledCheck: parsed.controlled,
         runControlledCheck: parsed.controlled ? runMaintenanceDryRun : null
@@ -475,21 +415,6 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
       });
     } catch (error) {
       if (parsed.command !== "update" || error?.code !== "NO_CHANGES") throw error;
-      await ensureActivePrompt();
-      presentationOutput = activePrompt.kind === "ink" ? activePrompt.notices : output;
-      await reconcileExistingApp({
-        inspectAppRegistration,
-        runner,
-        snapshot,
-        desiredInstallation: {
-          modes: setupAnswers.modes,
-          policy: setupAnswers.policy ?? snapshot.installation.policy
-        },
-        prompt: activePrompt,
-        output: presentationOutput,
-        openUrl: safelyOpenUrl,
-        resumeCommand
-      });
       presentationOutput.write(`\nCodekeeper is already up to date at ${bundle.metadata.source.repository}@${bundle.metadata.source.commit}. No files or settings were changed. Required secret availability was not validated; secret values were not inspected or exposed.\n`);
       await activePrompt?.dispose?.();
       return 0;
@@ -504,18 +429,6 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
       : null;
     let confirmed;
     while (true) {
-      if (snapshot.installation) {
-        await reconcileExistingApp({
-          inspectAppRegistration,
-          runner,
-          snapshot,
-          desiredInstallation: { modes: plan.modes, policy: plan.policy },
-          prompt: activePrompt,
-          output: presentationOutput,
-          openUrl: safelyOpenUrl,
-          resumeCommand
-        });
-      }
       if (typeof activePrompt.reviewInstallPlan === "function") {
         confirmed = await activePrompt.reviewInstallPlan(plan);
       } else {

@@ -99,16 +99,11 @@ function safeCode(error) {
 }
 
 function freezeReport({ repository = null, checks }) {
-  const configurationReady = checks.every(
-    (check) => !check.required || check.id === "app-credentials" || check.status === "pass"
-  );
   const ready = checks.every(
     (check) => !check.required || check.status === "pass",
   );
   return Object.freeze({
     ready,
-    configurationReady,
-    operationallyVerified: ready,
     ...(repository ? { repository } : {}),
     checks: Object.freeze(checks),
   });
@@ -129,7 +124,6 @@ export async function verifyCodekeeperReadiness({
   validateInstalledPolicy = validatePolicy,
   verifyPackage = null,
   inspectApp = null,
-  verifyAppCredentials = null,
   controlledCheck = false,
   runControlledCheck = null,
 } = {}) {
@@ -529,61 +523,6 @@ export async function verifyCodekeeperReadiness({
           detail: "The installed credential-free policy is invalid.",
           remediation: "Repair the policy through the Codekeeper update flow.",
         }),
-      );
-    }
-  }
-
-  const prerequisiteFailure = checks.some((check) => check.required && check.status !== "pass");
-  if (!installation || prerequisiteFailure) {
-    checks.push(
-      frozenCheck({
-        id: "app-credentials",
-        label: "GitHub App credentials",
-        status: "skipped",
-        boundary: "github-workflow",
-        detail: "The no-mutation App credential probe was not dispatched because required configuration checks failed.",
-        remediation: "Resolve the required configuration failures, then verify again."
-      })
-    );
-  } else if (!verifyAppCredentials) {
-    checks.push(
-      frozenCheck({
-        id: "app-credentials",
-        label: "GitHub App credentials",
-        status: "not-provable",
-        boundary: "github-workflow",
-        detail: "No no-mutation App credential probe was supplied.",
-        remediation: "Run verification with the installed App credential probe."
-      })
-    );
-  } else {
-    try {
-      const result = await verifyAppCredentials({ runner, root, repository, installation });
-      const passed = result === true || result?.status === "pass";
-      checks.push(
-        frozenCheck({
-          id: "app-credentials",
-          label: "GitHub App credentials",
-          status: passed ? "pass" : "fail",
-          boundary: "github-workflow",
-          detail: passed
-            ? "The stored private key minted a repository-scoped App token with the required identity and permissions."
-            : "The stored private key did not complete the no-mutation App credential probe.",
-          remediation: passed
-            ? "None."
-            : "Replace CODEKEEPER_APP_PRIVATE_KEY with a key for the configured App, approve required permissions, then verify again."
-        })
-      );
-    } catch {
-      checks.push(
-        frozenCheck({
-          id: "app-credentials",
-          label: "GitHub App credentials",
-          status: "fail",
-          boundary: "github-workflow",
-          detail: "The no-mutation App credential probe could not complete.",
-          remediation: "Inspect the Codekeeper repository assistant verification run, repair the App credentials, then verify again."
-        })
       );
     }
   }

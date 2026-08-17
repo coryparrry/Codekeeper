@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Run report-only analysis (true) or manually allow live GitHub mutation (false)
+        description: Analyse and seal without GitHub mutation
         required: true
         type: boolean
         default: true
@@ -28,8 +28,7 @@ jobs:
       package_version: "PACKAGE_VERSION"
       package_integrity: "PACKAGE_INTEGRITY"
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
-      # Scheduled runs are report-only. A manual dispatch can explicitly choose dry or live mode.
-      dry_run: ${{ github.event_name == 'schedule' || inputs.dry_run }}
+      dry_run: ${{ inputs.dry_run || false }}
       # Optional for dry_run=true; required when dry_run=false publishes changes.
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
       app_contents_permission: "APP_CONTENTS_PERMISSION"

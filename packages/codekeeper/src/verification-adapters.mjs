@@ -14,7 +14,6 @@ const REQUIRED_DRY_RUN_JOBS = Object.freeze([
   "Codekeeper maintenance analysis",
   "Codekeeper maintenance verification",
 ]);
-const APP_CREDENTIAL_JOB = "Codekeeper App credential verification";
 
 function successful(result) {
   return (
@@ -32,40 +31,7 @@ function variableValue(variables, name) {
   return null;
 }
 
-function exactPermissions(value, expected) {
-  return JSON.stringify(Object.entries(value ?? {}).sort()) ===
-    JSON.stringify(Object.entries(expected).sort());
-}
-
-function permissionDelta(expected, registration, installation) {
-  return [...new Set([
-    ...Object.keys(expected),
-    ...Object.keys(registration ?? {}),
-    ...Object.keys(installation ?? {})
-  ])]
-    .sort()
-    .filter((permission) => registration?.[permission] !== expected[permission] || installation?.[permission] !== expected[permission])
-    .map((permission) => Object.freeze({
-      permission,
-      required: expected[permission] ?? "none",
-      registered: registration?.[permission] ?? "none",
-      installed: installation?.[permission] ?? "none"
-    }));
-}
-
-function appSettingsUrl(app, slug) {
-  const owner = app?.owner;
-  if (owner?.type === "Organization" && typeof owner.login === "string" && owner.login) {
-    return `https://github.com/organizations/${encodeURIComponent(owner.login)}/settings/apps/${encodeURIComponent(slug)}/permissions`;
-  }
-  return `https://github.com/settings/apps/${encodeURIComponent(slug)}/permissions`;
-}
-
-function appProof(status, details = {}) {
-  return Object.freeze({ status, ...details });
-}
-
-export async function inspectInstalledAppRegistration({
+export async function inspectInstalledApp({
   runner,
   root,
   repository,
@@ -97,19 +63,19 @@ export async function inspectInstalledAppRegistration({
     readVariable("CODEKEEPER_AUTOMATION_BOT_LOGIN"),
   ]);
   const slug = botLogin?.match(/^([a-z0-9](?:[a-z0-9-]{0,99}))\[bot\]$/)?.[1];
-  if (!clientId || !slug) return appProof("mismatch", { reason: "missing-identity" });
+  if (!clientId || !slug) return false;
 
   const appResult = await runner.run(
     "gh",
     ["api", "--hostname", "github.com", `apps/${slug}`],
     { cwd: root },
   );
-  if (!successful(appResult)) return appProof("mismatch", { reason: "registration-unavailable" });
+  if (!successful(appResult)) return false;
   let app;
   try {
     app = JSON.parse(appResult.stdout);
   } catch {
-    return appProof("mismatch", { reason: "registration-invalid" });
+    return false;
   }
   const capabilities = installation?.policy
     ? {
@@ -130,19 +96,14 @@ export async function inspectInstalledAppRegistration({
     metadata: required.metadata,
     pull_requests: required.pullRequests
   };
-  const settingsUrl = appSettingsUrl(app, slug);
   if (
     app.client_id !== clientId ||
+    JSON.stringify(Object.entries(app.permissions ?? {}).sort()) !==
+      JSON.stringify(Object.entries(expectedPermissions).sort()) ||
     !Array.isArray(app.events) ||
     app.events.length !== 0
   ) {
-    return appProof("mismatch", {
-      reason: "registration-identity",
-      slug,
-      settingsUrl,
-      expectedPermissions,
-      registrationPermissions: app.permissions ?? {}
-    });
+    return false;
   }
 
   const installationsResult = await runner.run(
@@ -157,7 +118,7 @@ export async function inspectInstalledAppRegistration({
     ],
     { cwd: root },
   );
-  if (!successful(installationsResult)) return appProof("mismatch", { reason: "installation-unavailable", slug, settingsUrl });
+  if (!successful(installationsResult)) return false;
   let appInstallation;
   try {
     const pages = JSON.parse(installationsResult.stdout);
@@ -169,31 +130,13 @@ export async function inspectInstalledAppRegistration({
         candidate?.app_slug === slug && candidate?.suspended_at == null,
     );
   } catch {
-    return appProof("mismatch", { reason: "installation-invalid", slug, settingsUrl });
+    return false;
   }
   if (
     !Number.isSafeInteger(appInstallation?.id) ||
     appInstallation.repository_selection !== "selected"
   )
-    return appProof("mismatch", { reason: "installation-scope", slug, settingsUrl });
-
-  const delta = permissionDelta(
-    expectedPermissions,
-    app.permissions,
-    appInstallation.permissions
-  );
-  if (!exactPermissions(app.permissions, expectedPermissions) ||
-      !exactPermissions(appInstallation.permissions, expectedPermissions)) {
-    return appProof("mismatch", {
-      reason: "permissions",
-      slug,
-      settingsUrl,
-      expectedPermissions: Object.freeze({ ...expectedPermissions }),
-      registrationPermissions: Object.freeze({ ...(app.permissions ?? {}) }),
-      installationPermissions: Object.freeze({ ...(appInstallation.permissions ?? {}) }),
-      permissionDelta: Object.freeze(delta)
-    });
-  }
+    return false;
 
   const repositoriesResult = await runner.run(
     "gh",
@@ -205,31 +148,19 @@ export async function inspectInstalledAppRegistration({
     ],
     { cwd: root },
   );
-  if (!successful(repositoriesResult)) return appProof("mismatch", { reason: "repositories-unavailable", slug, settingsUrl });
+  if (!successful(repositoriesResult)) return false;
   try {
     const response = JSON.parse(repositoriesResult.stdout);
-    const repositoryMatches = (
+    return (
       response?.total_count === 1 &&
       Array.isArray(response.repositories) &&
       response.repositories.length === 1 &&
       response.repositories[0]?.full_name?.toLowerCase() ===
         repository.toLowerCase()
     );
-    return repositoryMatches
-      ? appProof("pass", {
-          slug,
-          settingsUrl,
-          installationId: appInstallation.id,
-          expectedPermissions: Object.freeze({ ...expectedPermissions })
-        })
-      : appProof("mismatch", { reason: "repository-scope", slug, settingsUrl });
   } catch {
-    return appProof("mismatch", { reason: "repositories-invalid", slug, settingsUrl });
+    return false;
   }
-}
-
-export async function inspectInstalledApp(options) {
-  return (await inspectInstalledAppRegistration(options)).status === "pass";
 }
 
 export async function verifyInstalledPackage(
@@ -392,100 +323,4 @@ export async function runMaintenanceDryRun(
     { cwd: root },
   );
   return requiredJobsPassed(viewed);
-}
-
-function appCredentialRunIds(result, verificationId) {
-  if (!successful(result)) return null;
-  try {
-    const runs = JSON.parse(result.stdout);
-    if (!Array.isArray(runs) || runs.some((run) => !Number.isSafeInteger(run?.databaseId) || typeof run?.displayTitle !== "string")) {
-      return null;
-    }
-    const expectedTitle = `Codekeeper App credential verification ${verificationId}`;
-    return runs
-      .filter((run) => run.displayTitle === expectedTitle)
-      .map((run) => run.databaseId);
-  } catch {
-    return null;
-  }
-}
-
-function appCredentialJobPassed(result) {
-  if (!successful(result)) return false;
-  try {
-    const response = JSON.parse(result.stdout);
-    return Array.isArray(response?.jobs) && response.jobs.some(
-      (job) => job?.name === APP_CREDENTIAL_JOB && job?.conclusion === "success"
-    );
-  } catch {
-    return false;
-  }
-}
-
-export async function runAppCredentialProbe(
-  { runner, root, repository, installation },
-  {
-    wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
-    verificationId = randomUUID()
-  } = {}
-) {
-  if (!installation || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(verificationId)) {
-    return false;
-  }
-  const dispatched = await runner.run(
-    "gh",
-    [
-      "workflow",
-      "run",
-      "codekeeper-assistant.yml",
-      "--repo",
-      repository,
-      "--ref",
-      installation.policy.repository.defaultBranch,
-      "--field",
-      `verification_id=${verificationId}`
-    ],
-    { cwd: root }
-  );
-  if (!successful(dispatched)) return false;
-
-  let matchingIds = [];
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    if (attempt > 0) await wait(2_000);
-    const listed = await runner.run(
-      "gh",
-      [
-        "run",
-        "list",
-        "--repo",
-        repository,
-        "--workflow",
-        "codekeeper-assistant.yml",
-        "--event",
-        "workflow_dispatch",
-        "--limit",
-        "20",
-        "--json",
-        "databaseId,displayTitle"
-      ],
-      { cwd: root }
-    );
-    matchingIds = appCredentialRunIds(listed, verificationId);
-    if (!matchingIds || matchingIds.length > 1) return false;
-    if (matchingIds.length === 1) break;
-  }
-  if (matchingIds.length !== 1) return false;
-
-  const runId = String(matchingIds[0]);
-  const watched = await runner.run(
-    "gh",
-    ["run", "watch", runId, "--repo", repository, "--exit-status"],
-    { cwd: root, stdio: "ignore", timeoutMs: 10 * 60 * 1000 }
-  );
-  if (!successful(watched)) return false;
-  return appCredentialJobPassed(await runner.run(
-    "gh",
-    ["run", "view", runId, "--repo", repository, "--json", "jobs"],
-    { cwd: root }
-  ));
 }

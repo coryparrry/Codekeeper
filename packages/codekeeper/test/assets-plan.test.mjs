@@ -512,13 +512,6 @@ test("assistant rendering honors an explicit disabled owner-request setting", as
   assert.match(rendered, /app_contents_permission: "read"/);
   assert.match(rendered, /app_issues_permission: "read"/);
   assert.match(rendered, /app_pull_requests_permission: "read"/);
-  assert.match(rendered, /^  workflow_dispatch:/m);
-  assert.match(rendered, /name: Codekeeper App credential verification/);
-  assert.match(rendered, /actions\/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1/);
-  assert.match(rendered, /permission-contents: "read"/);
-  assert.match(rendered, /permission-issues: "read"/);
-  assert.match(rendered, /permission-pull-requests: "read"/);
-  assert.doesNotMatch(rendered, /VERIFY_APP_[A-Z_]+/);
 });
 
 test("generated callers honor the rendered policy automation controls", async () => {
@@ -578,7 +571,6 @@ test("maintenance scheduling can be disabled without removing manual dispatch or
   assert.equal(policy.automation.maintenanceSchedule, "17 7 * * *");
   assert.doesNotMatch(caller, /^  schedule:/m);
   assert.match(caller, /^  workflow_dispatch:/m);
-  assert.match(implicit, /dry_run: \$\{\{ github\.event_name == 'schedule' \|\| inputs\.dry_run \}\}/);
 });
 
 test("renderInstallFiles omits packaged profiles unless an explicit repository override is provided", async () => {
@@ -809,7 +801,7 @@ test("recommended starter plan selects review and manual maintenance without tra
   );
   assert.equal(policy.ai.tracing.enabled, false);
   assert.equal(plan.maintenanceScheduled, false);
-  assert.match(plan.pullRequest.body, /Scheduled report-only maintenance is \*\*disabled;/);
+  assert.match(plan.pullRequest.body, /Scheduled maintenance is \*\*disabled;/);
 });
 
 test("editing one packaged profile materializes only that repository override", async () => {

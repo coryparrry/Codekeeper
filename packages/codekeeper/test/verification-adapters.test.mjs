@@ -2,8 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   inspectInstalledApp,
-  inspectInstalledAppRegistration,
-  runAppCredentialProbe,
   runMaintenanceDryRun,
 } from "../src/verification-adapters.mjs";
 import { createRecordingRunner, result } from "./helpers.mjs";
@@ -20,7 +18,6 @@ function appRunner({
     metadata: "read",
     pull_requests: "write",
   },
-  installationPermissions = permissions,
   events = [],
   repositorySelection = "selected",
   suspendedAt = null,
@@ -36,7 +33,7 @@ function appRunner({
     }
     if (key === "gh api --hostname github.com apps/codekeeper-acme") {
       return result(
-        JSON.stringify({ client_id: clientId, permissions, events, owner: { login: "acme", type: "Organization" } }),
+        JSON.stringify({ client_id: clientId, permissions, events }),
       );
     }
     if (
@@ -52,7 +49,6 @@ function appRunner({
                 app_slug: "codekeeper-acme",
                 repository_selection: repositorySelection,
                 suspended_at: suspendedAt,
-                permissions: installationPermissions,
               },
             ],
           },
@@ -173,44 +169,6 @@ test("App proof rejects extra permissions, subscribed events, and a mismatched c
   }
 });
 
-test("App proof rejects stale or excessive installed permissions and reports the exact delta", async () => {
-  const stale = await inspectInstalledAppRegistration({
-    runner: appRunner({
-      installationPermissions: {
-        contents: "read",
-        issues: "write",
-        metadata: "read",
-        pull_requests: "write"
-      }
-    }),
-    root: ROOT,
-    repository: REPOSITORY
-  });
-  assert.equal(stale.status, "mismatch");
-  assert.equal(stale.reason, "permissions");
-  assert.match(stale.settingsUrl, /organizations\/acme\/settings\/apps\/codekeeper-acme\/permissions$/);
-  assert.deepEqual(stale.permissionDelta, [{
-    permission: "contents",
-    required: "write",
-    registered: "write",
-    installed: "read"
-  }]);
-
-  assert.equal(await inspectInstalledApp({
-    runner: appRunner({
-      installationPermissions: {
-        contents: "write",
-        issues: "write",
-        metadata: "read",
-        pull_requests: "write",
-        actions: "read"
-      }
-    }),
-    root: ROOT,
-    repository: REPOSITORY
-  }), false);
-});
-
 const VERIFICATION_ID = "123e4567-e89b-12d3-a456-426614174000";
 
 function dryRunRunner({ matchingIds = [101], jobs = [] } = {}) {
@@ -312,40 +270,4 @@ test("App proof rejects broad, suspended, and multi-repository installations", a
       false,
     );
   }
-});
-
-function credentialRunner({ matchingIds = [201], jobs = [{ name: "Codekeeper App credential verification", conclusion: "success" }] } = {}) {
-  return createRecordingRunner(({ command, args, options }) => {
-    const key = `${command} ${args.join(" ")}`;
-    if (key.startsWith("gh workflow run codekeeper-assistant.yml")) return result();
-    if (key.includes("gh run list")) {
-      return result(JSON.stringify([
-        { databaseId: 200, displayTitle: "Codekeeper App credential verification another-run" },
-        ...matchingIds.map((databaseId) => ({
-          databaseId,
-          displayTitle: `Codekeeper App credential verification ${VERIFICATION_ID}`
-        }))
-      ]));
-    }
-    if (key === `gh run watch 201 --repo ${REPOSITORY} --exit-status`) {
-      assert.equal(options.stdio, "ignore");
-      return result();
-    }
-    if (key === `gh run view 201 --repo ${REPOSITORY} --json jobs`) {
-      return result(JSON.stringify({ jobs }));
-    }
-    throw new Error(`Unexpected command: ${key}`);
-  });
-}
-
-test("App credential probe correlates one no-mutation assistant dispatch and exact job", async () => {
-  const input = {
-    runner: credentialRunner(),
-    root: ROOT,
-    repository: REPOSITORY,
-    installation: { policy: { repository: { defaultBranch: "main" } } }
-  };
-  assert.equal(await runAppCredentialProbe(input, { wait: async () => {}, verificationId: VERIFICATION_ID }), true);
-  assert.equal(await runAppCredentialProbe({ ...input, runner: credentialRunner({ matchingIds: [201, 202] }) }, { wait: async () => {}, verificationId: VERIFICATION_ID }), false);
-  assert.equal(await runAppCredentialProbe({ ...input, runner: credentialRunner({ jobs: [] }) }, { wait: async () => {}, verificationId: VERIFICATION_ID }), false);
 });
