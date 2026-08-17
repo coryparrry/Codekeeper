@@ -144,7 +144,7 @@ test("review validator allows a low-severity introduced contract failure to bloc
     mode: "review",
     summary: "The changed expiry boundary violates the documented cache contract.",
     risk: "medium",
-    labels: ["bug"],
+    labels: [config.review.allowedLabels[0]],
     blockingFindings: [{
       title: "Cache entry expires at its still-valid boundary",
       explanation: "The changed comparison evicts the entry when now equals expiresAt.",

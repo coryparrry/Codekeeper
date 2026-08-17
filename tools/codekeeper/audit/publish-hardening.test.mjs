@@ -473,7 +473,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     } catch (error) {
       firstError = error;
     }
-    markerPresentAfterFirstAttempt = pull.labels.some((label) => label.name === "auto repaired");
+    markerPresentAfterFirstAttempt = pull.labels.some((label) => label.name === "codekeeper:auto-repaired");
     const retry = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" });
     assert.deepEqual({
       firstError: firstError?.message,
@@ -517,7 +517,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" })
     ]);
     assert.deepEqual({
-      markerPresent: pull.labels.some((label) => label.name === "auto repaired"),
+      markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
       dispatches: dispatchAttempts - dispatchesBeforeConcurrentRun,
       removals: removalAttempts - removalsBeforeConcurrentRun,
       fulfilled: concurrent.filter((outcome) => outcome.status === "fulfilled").length
@@ -538,7 +538,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       /lease completion unavailable/
     );
     assert.deepEqual({
-      markerPresent: pull.labels.some((label) => label.name === "auto repaired"),
+      markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
       removals: removalAttempts - removalsBeforeCompletionFailure
     }, {
       markerPresent: true,
@@ -559,7 +559,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       token: "unused"
     });
     assert.deepEqual({
-      markerPresent: pull.labels.some((label) => label.name === "auto repaired"),
+      markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
       dispatches: dispatchAttempts - dispatchesBeforeAmbiguousAdd
     }, {
       markerPresent: true,
@@ -577,7 +577,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       /dispatch response lost/
     );
     assert.deepEqual({
-      markerPresent: pull.labels.some((label) => label.name === "auto repaired"),
+      markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
       removals: removalAttempts - removalsBeforeAmbiguousDispatch
     }, {
       markerPresent: false,

@@ -1017,7 +1017,7 @@ test("fix preparation includes only the last five bounded owner clarifications",
   }
 });
 
-test("enabled issue implementation accepts a trusted ready-label run without an owner command", async () => {
+test("enabled issue implementation requires codekeeper:ready and treats generic paused as fail-closed", async () => {
   const root = await createRepository();
   const directory = bundle(root, "automatic-fix-input");
   const config = structuredClone(templateConfig);
@@ -1043,6 +1043,19 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
     return new Response(JSON.stringify([]), { status: 200 });
   };
   try {
+    await assert.rejects(
+      prepareFix({
+        targetNumber: 5,
+        actor: "codekeeper-app[bot]",
+        authorizationMode: "policy",
+        directory,
+        config,
+        token: "read-token",
+        ...agentProfileOptions(root, "fix")
+      }),
+      /codekeeper:ready/
+    );
+    issueLabels = [...fillerLabels, { name: "codekeeper:ready" }];
     const prepared = await prepareFix({
       targetNumber: 5,
       actor: "codekeeper-app[bot]",
@@ -1055,8 +1068,8 @@ test("enabled issue implementation accepts a trusted ready-label run without an 
     assert.equal(prepared.authorizationMode, "policy");
     assert.equal(prepared.requestedBy, "codekeeper-app[bot]");
     assert.equal(prepared.issue.labels.length, 30);
-    assert.equal(prepared.issue.labels.includes("ready"), false);
-    issueLabels = [...fillerLabels, { name: "ready" }, { name: "paused" }];
+    assert.equal(prepared.issue.labels.includes("codekeeper:ready"), false);
+    issueLabels = [...fillerLabels, { name: "codekeeper:ready" }, { name: "paused" }];
     await assert.rejects(
       prepareFix({
         targetNumber: 5,
@@ -1201,7 +1214,7 @@ test("automatic PR repair requires its current-head marker and every repair hono
     );
     assert.match(prepared.pullRequest.comments[0].body, /blocking review finding/);
     assert.doesNotMatch(JSON.stringify(prepared.pullRequest.comments), /ATTACKER INSTRUCTION/);
-    assert.equal(labels.some((label) => label.name === "auto repaired"), false);
+    assert.equal(labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
     assert.deepEqual(prepared.pullRequest.reviewThreads, [{
       id: "PRRT_thread",
       isResolved: false,

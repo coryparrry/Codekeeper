@@ -39,11 +39,11 @@ test("review labels distinguish missing coverage from unknown evidence", () => {
     tests: { adequate: false, notes: "External evidence is unavailable.", missingTest: null }
   };
 
-  assert.equal(reviewLabels(result).includes("needs tests"), false);
+  assert.equal(reviewLabels(result).includes("codekeeper:needs-tests"), false);
   assert.equal(reviewLabels({
     ...result,
     tests: { ...result.tests, missingTest: "Add a dispatch test and expect one durable run name." }
-  }).includes("needs tests"), true);
+  }).includes("codekeeper:needs-tests"), true);
 });
 
 test("patch policy accepts bounded source changes but rejects protected paths", () => {
@@ -74,7 +74,7 @@ test("auto-merge is limited to low-risk allowlisted automation PRs", () => {
     draft: false,
     user: { login: "codekeeper[bot]", type: "Bot" },
     head: { ref: `${config.repository.automationBranchPrefix}audit-1`, repo: { full_name: "owner/repository" } },
-    base: { repo: { full_name: "owner/repository" } }
+    base: { ref: config.repository.defaultBranch, repo: { full_name: "owner/repository" } }
   };
   const reviewResult = {
     risk: "low",

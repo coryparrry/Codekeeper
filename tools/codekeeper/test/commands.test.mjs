@@ -259,6 +259,7 @@ test("defer requires the Issues workflow before reading review evidence", async 
       issue: { number: 42 },
       comment: {
         id: 99,
+        pull_request_review_id: 1,
         body: "/codekeeper defer",
         author_association: "OWNER",
         user: { login: "repository-owner" },
@@ -306,7 +307,7 @@ test("documentation advertises the exact supported mention grammar", async () =>
   assert.match(readme, /`@<app-slug> review`/);
   assert.match(
     readme,
-    /free-form requests such as `@<app-slug> please review this` are ignored/,
+    /free-form requests such as `@<app-slug> please review this` are ignored/i,
   );
   assert.doesNotMatch(readme, /same fixed actions in natural language/);
 });
@@ -416,7 +417,7 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
     number: 42,
     state: "open",
     pull_request: {},
-    labels: [{ name: "paused" }],
+    labels: [{ name: "codekeeper:paused" }],
   });
   GitHubClient.prototype.removeLabel = async (number, label) => {
     removed.push({ number, label });
@@ -439,7 +440,7 @@ test("an explicit owner fix resumes a paused target before the new repair run", 
       automationIdentity: { login: "codekeeper[bot]", id: "123" },
     });
     assert.equal(result.command, "fix");
-    assert.deepEqual(removed, [{ number: 42, label: "paused" }]);
+    assert.deepEqual(removed, [{ number: 42, label: "codekeeper:paused" }]);
     assert.deepEqual(dispatches, [
       {
         eventType: "codekeeper_fix",
@@ -502,7 +503,7 @@ test("an owner fix rejects an ordinary issue before changing its state", async (
         token: "app-token",
         automationIdentity: { login: "codekeeper[bot]", id: "123" },
       }),
-      /\/codekeeper fix requires a pull request/,
+      /\/fix is not available on this issue/,
     );
   } finally {
     Object.assign(GitHubClient.prototype, originals);
@@ -667,7 +668,7 @@ test("a root mention-based defer command cannot become its own feedback source",
         token: "app-token",
         automationIdentity: { login: "codekeeper[bot]", id: "123" },
       }),
-      /must reply to the review comment/,
+      /\/defer is not available on this pull-request/,
     );
   } finally {
     Object.assign(GitHubClient.prototype, originals);

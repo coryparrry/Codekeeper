@@ -19,7 +19,7 @@ permissions:
 jobs:
   intent:
     name: Detect Codekeeper review feedback
-    runs-on: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     outputs:
       owner_command: ${{ steps.intent.outputs.owner_command }}
       route: ${{ steps.intent.outputs.route }}
@@ -45,7 +45,9 @@ jobs:
             const automationBot = String(process.env.AUTOMATION_BOT_LOGIN ?? "").toLowerCase();
             const mentionBot = automationBot.replace(/\[bot\]$/i, "");
             const escapedMention = mentionBot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const actions = ["status", "review", "rerun", "triage", "defer", "implement", "fix", "stop"];
+            // CODEKEEPER_OWNER_COMMANDS_START
+            const actions = ["help","status","review","rerun","triage","implement","repair","fix","defer","pause","stop"];
+            // CODEKEEPER_OWNER_COMMANDS_END
             const slash = new RegExp(`^/codekeeper\\s+(${actions.join("|")})$`, "i").test(body);
             const botMention = mentionBot && new RegExp(`^@${escapedMention}(?:\\s|$)`, "i").test(body);
             const mentioned = mentionBot && new RegExp(`^@${escapedMention}\\s+(${actions.join("|")})$`, "i").test(body);
@@ -64,7 +66,6 @@ jobs:
       package_version: "PACKAGE_VERSION"
       package_integrity: "PACKAGE_INTEGRITY"
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
-      runner: ${{ vars.CODEKEEPER_RUNNER || 'ubuntu-latest' }}
       auto_review: true
       feedback_triage: true
       owner_command: ${{ needs.intent.outputs.owner_command == 'true' }}

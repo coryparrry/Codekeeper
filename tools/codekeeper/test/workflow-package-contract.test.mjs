@@ -328,22 +328,24 @@ test("reusable workflows acquire one exact package and reverify it in every isol
   }
 });
 
-test("reusable workflows default to GitHub runners and allow a trusted caller override", async () => {
+test("product workflows require fresh GitHub-hosted Ubuntu runners", async () => {
   for (const mode of ["assistant", "maintain", "fix", "issues", "review"]) {
     const source = await workflow(mode);
     const caller = await repositoryFile(
       `examples/workflows/codekeeper-${mode}.yml.example`,
     );
-    assert.match(
-      source,
-      /runner:\n\s+description: Runner label used by every job in this reusable workflow\.\n\s+required: false\n\s+default: ubuntu-latest\n\s+type: string/,
-    );
-    assert.doesNotMatch(source, /^\s+runs-on: ubuntu-latest$/m);
-    assert.match(source, /^\s+runs-on: \$\{\{ inputs\.runner \}\}$/m);
-    assert.doesNotMatch(caller, /^\s+runs-on: ubuntu-latest$/m);
-    assert.match(
-      caller,
-      /^\s+runner: \$\{\{ vars\.CODEKEEPER_RUNNER \|\| 'ubuntu-latest' \}\}$/m,
+    assert.doesNotMatch(source, /inputs\.runner|CODEKEEPER_RUNNER/);
+    assert.doesNotMatch(caller, /vars\.CODEKEEPER_RUNNER|CODEKEEPER_RUNNER/);
+    assert.doesNotMatch(source, /^\s+runner:\s*$/m);
+    assert.doesNotMatch(caller, /^\s+runner:\s+/m);
+
+    const jobRunners = source.match(/^\s+runs-on: .*$/gm) ?? [];
+    assert.ok(jobRunners.length > 0);
+    assert.ok(jobRunners.every((line) => line.trim() === "runs-on: ubuntu-latest"));
+
+    const callerRunners = caller.match(/^\s+runs-on: .*$/gm) ?? [];
+    assert.ok(
+      callerRunners.every((line) => line.trim() === "runs-on: ubuntu-latest"),
     );
   }
 });

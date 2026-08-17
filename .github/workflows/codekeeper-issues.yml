@@ -15,11 +15,6 @@ on:
         required: false
         default: true
         type: boolean
-      runner:
-        description: Runner label used by every job in this reusable workflow.
-        required: false
-        default: ubuntu-latest
-        type: string
       auto_triage:
         description: Automatically triage eligible issue lifecycle events.
         required: false
@@ -67,21 +62,29 @@ concurrency:
 jobs:
   workspace:
     name: Codekeeper issue workspace specialist
-    # Automatic triage is limited to trusted issue lifecycle events. Owner requests
-    # arrive only through the App-authenticated repository assistant dispatch.
+    # Cheap event routing drops obvious bot, outsider, and direct-command comments.
+    # prepare-issue still re-fetches and fail-closes the complete trusted state.
+    # CODEKEEPER_OWNER_COMMANDS_START
     if: >-
       inputs.enabled &&
       !github.event.issue.pull_request &&
       ((inputs.auto_triage &&
-        github.event_name == 'issues' &&
-        (github.event.action == 'opened' ||
-         github.event.action == 'reopened' ||
-         github.event.action == 'edited' ||
-         github.event.action == 'closed')) ||
+        ((github.event_name == 'issues' &&
+          (github.event.action == 'opened' ||
+           github.event.action == 'reopened' ||
+           github.event.action == 'edited' ||
+           github.event.action == 'closed')) ||
+         (github.event_name == 'issue_comment' &&
+          github.event.action == 'created' &&
+          github.event.comment.user.login != inputs.automation_bot_login &&
+          (github.event.comment.user.login == github.event.issue.user.login ||
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) &&
+          !contains(fromJSON('["/codekeeper help","/codekeeper status","/codekeeper review","/codekeeper rerun","/codekeeper triage","/codekeeper implement","/codekeeper repair","/codekeeper fix","/codekeeper defer","/codekeeper pause","/codekeeper stop"]'), github.event.comment.body))) ||
        (github.event_name == 'repository_dispatch' &&
         github.event.action == 'codekeeper_issue' &&
         github.actor == inputs.automation_bot_login))
-    runs-on: ${{ inputs.runner }}
+    # CODEKEEPER_OWNER_COMMANDS_END
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: read
@@ -133,8 +136,10 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
-          TRIAGE_MODE: ${{ github.event_name == 'issues' && 'automatic' || 'manual' }}
+          TRIAGE_MODE: ${{ (github.event_name == 'issues' || github.event_name == 'issue_comment') && 'automatic' || 'manual' }}
           REQUESTED_BY: ${{ github.event.client_payload.requested_by || github.actor }}
+          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
+          CODEKEEPER_APP_CLIENT_ID: ${{ inputs.app_client_id }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -252,7 +257,7 @@ jobs:
     name: Codekeeper issue analysis
     needs: workspace
     if: needs.workspace.result == 'success'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: read
@@ -307,8 +312,10 @@ jobs:
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
-          TRIAGE_MODE: ${{ github.event_name == 'issues' && 'automatic' || 'manual' }}
+          TRIAGE_MODE: ${{ (github.event_name == 'issues' || github.event_name == 'issue_comment') && 'automatic' || 'manual' }}
           REQUESTED_BY: ${{ github.event.client_payload.requested_by || github.actor }}
+          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
+          CODEKEEPER_APP_CLIENT_ID: ${{ inputs.app_client_id }}
         run: |
           [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
           cp "$SOURCE_CONFIG" "$CONFIG"
@@ -380,7 +387,7 @@ jobs:
   seal:
     needs: [workspace, analyze]
     if: needs.analyze.result == 'success'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
@@ -446,7 +453,7 @@ jobs:
   publish:
     needs: [workspace, seal]
     if: needs.seal.result == 'success'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Download verified Codekeeper package

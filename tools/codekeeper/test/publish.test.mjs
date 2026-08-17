@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { GitHubClient, isOwnedMarkerComment, resolveGraphqlUrl } from "../src/lib/github.mjs";
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
-import { createCommitOnCurrentHead } from "../src/lib/git.mjs";
+import { createCommitOnCurrentHead, createValidationReceipt } from "../src/lib/git.mjs";
 import { automaticRepairMarker, deferredReviewMarker, deferredReviewFingerprint, findingFingerprint, findingMarker, fixRunMarker, repairMarker, repairNotificationMarker, reviewFeedbackReplyMarker, sha256 } from "../src/lib/markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "../src/lib/pr-repair.mjs";
 import { completeReviewFeedback } from "../src/lib/review-feedback.mjs";
@@ -103,6 +103,27 @@ async function writeSealedArtifact(artifactDirectory, {
   agentProfile: suppliedAgentProfile
 }) {
   const agentProfile = suppliedAgentProfile ?? profileBytes[mode];
+  const patchBytes = patch?.valid ? await readFile(path.join(artifactDirectory, "patch.diff")) : null;
+  const candidateSha256 = sha256(`fixture candidate ${mode}`);
+  const effectiveValidation = patch?.valid
+    ? {
+        ...validation,
+        receipt: createValidationReceipt({
+          candidateSha256,
+          configSha256,
+          patchSha256: sha256(patchBytes),
+          baseSha: context.baseSha,
+          commands: artifactConfig.audit.repair.validationCommands.map((command) => ({
+            command,
+            exitCode: 0,
+            durationMs: 1,
+            stdoutDigest: sha256(`fixture output for ${command}`),
+            startedAt: "2026-08-17T12:00:00.000Z",
+          })),
+          patchUnchanged: true,
+        }),
+      }
+    : validation;
   context.agentProfile ??= {
     path: AGENT_PROFILE_PATHS[mode],
     sha256: sha256(agentProfile),
@@ -112,7 +133,7 @@ async function writeSealedArtifact(artifactDirectory, {
     context: Buffer.from(JSON.stringify(context)),
     result: Buffer.from(JSON.stringify(result)),
     config: Buffer.from(JSON.stringify(artifactConfig)),
-    validation: Buffer.from(JSON.stringify(validation)),
+    validation: Buffer.from(JSON.stringify(effectiveValidation)),
     "runtime-metadata": Buffer.from(JSON.stringify({
       mode,
       provider: "offline",
@@ -135,7 +156,6 @@ async function writeSealedArtifact(artifactDirectory, {
     path.join(artifactDirectory, name === AGENT_PROFILE_BUNDLE_FILE ? name : `${name}.json`),
     bytes
   )));
-  const patchBytes = patch?.valid ? await readFile(path.join(artifactDirectory, "patch.diff")) : null;
   const manifest = {
     version: 3,
     sealed: true,
@@ -144,7 +164,8 @@ async function writeSealedArtifact(artifactDirectory, {
     configSha256,
     context,
     patch,
-    validation,
+    validation: effectiveValidation,
+    candidateSha256,
     contextSha256: sha256(components.context),
     resultSha256: sha256(components.result),
     configFileSha256: sha256(components.config),
@@ -331,7 +352,7 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
 
   const created = await upsertDeferredReviewFeedback(input);
   assert.deepEqual(created.map((item) => item.state), ["created"]);
-  assert.deepEqual(calls.created[0].labels, ["deferred", "testing"]);
+  assert.deepEqual(calls.created[0].labels, ["codekeeper:deferred", "codekeeper:type-testing"]);
   assert.match(calls.created[0].body, /pull\/7#discussion_r41/);
   assert.match(calls.created[0].body, new RegExp(deferredReviewMarker(fingerprint)));
   assert.equal(calls.replies[0].commentId, 41);
@@ -905,7 +926,7 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
       /review feedback changed after preparation/
     );
     assert.equal(dispatches, 0);
-    assert.equal(pull.labels.some((label) => label.name === "auto repaired"), false);
+    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
 
     resolved = false;
     const retried = await publishReview({
@@ -913,7 +934,7 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
     });
     assert.equal(retried.automaticRepair.dispatched, true);
     assert.equal(dispatches, 1);
-    assert.equal(pull.labels.some((label) => label.name === "auto repaired"), true);
+    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), true);
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -970,8 +991,8 @@ test("fix-now feedback blocks auto-merge even when repair dispatch is disabled",
   });
   assert.equal(decision.eligible, false);
   assert.match(decision.reasons.join("\n"), /fix-now review feedback/);
-  assert.ok(reviewLabels(result).includes("blocked"));
-  assert.ok(!reviewLabels(result).includes("auto merge"));
+  assert.ok(reviewLabels(result).includes("codekeeper:blocked"));
+  assert.ok(!reviewLabels(result).includes("codekeeper:auto-merge"));
 });
 
 test("a completed automatic repair consumes the pass after the pull request head changes", async () => {
@@ -984,7 +1005,7 @@ test("a completed automatic repair consumes the pass after the pull request head
     assert.equal(publication.automaticRepair.consumed, true);
     assert.equal(publication.automaticRepair.pending, false);
 
-    pull.labels = [{ name: "auto repaired" }];
+    pull.labels = [{ name: "codekeeper:auto-repaired" }];
     const repeated = await fixture.publish();
     assert.equal(repeated.autoMerge.eligible, false);
     assert.match(repeated.autoMerge.reasons.join("\n"), /repair pass is already consumed/i);
@@ -1051,7 +1072,7 @@ test("a completed automatic repair consumes the pass after the pull request head
   }
 });
 
-test("a legacy pending repair marker consumes only its matching active lease", async () => {
+test("a pending repair marker consumes only its matching active lease", async () => {
   const fixture = await automaticRepairReviewFixture();
   const { context, headSha, pull, repair } = fixture;
   const repairScope = sha256(JSON.stringify({
@@ -1065,12 +1086,12 @@ test("a legacy pending repair marker consumes only its matching active lease", a
     repair.state = `Automatic repair is pending for head ${headSha}.`;
     repair.head = headSha;
     repair.comments = [leaseComment("active")];
-    pull.labels = [{ name: "auto repaired" }];
-    const legacyPending = await fixture.publish();
-    assert.equal(legacyPending.automaticRepair.consumed, true);
-    assert.equal(legacyPending.automaticRepair.eligible, false);
-    assert.equal(legacyPending.automaticRepair.pending, true);
-    assert.equal(legacyPending.automaticRepair.staleMarker, false);
+    pull.labels = [{ name: "codekeeper:auto-repaired" }];
+    const pendingRepair = await fixture.publish();
+    assert.equal(pendingRepair.automaticRepair.consumed, true);
+    assert.equal(pendingRepair.automaticRepair.eligible, false);
+    assert.equal(pendingRepair.automaticRepair.pending, true);
+    assert.equal(pendingRepair.automaticRepair.staleMarker, false);
 
     for (const leaseState of ["failed", "released"]) {
       repair.comments = [leaseComment(leaseState)];
@@ -1117,7 +1138,7 @@ test("branch tips normalize GitHub branch data and treat a missing branch as abs
   }
 });
 
-test("label management preserves existing metadata and unrelated labels", async () => {
+test("Codekeeper label management preserves existing metadata and unrelated labels", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify(data), { status });
@@ -1131,24 +1152,24 @@ test("label management preserves existing metadata and unrelated labels", async 
         return json({ message: "Not Found" }, 404);
       }
       if (target.endsWith("/labels/race") && method === "GET") return json({ name: "race", color: "ffffff", description: "other owner" });
-      if (target.endsWith("/issues/7") && method === "GET") return json({ labels: [{ name: "external" }, { name: "managed-old" }] });
+      if (target.endsWith("/issues/7") && method === "GET") return json({ labels: [{ name: "external" }, { name: "codekeeper:managed-old" }] });
       if (target.endsWith("/issues/7/labels") && method === "POST") return json({});
-      if (target.endsWith("/issues/7/labels/managed-old") && method === "DELETE") return new Response(null, { status: 204 });
+      if (target.endsWith("/issues/7/labels/codekeeper%3Amanaged-old") && method === "DELETE") return new Response(null, { status: 204 });
       if (target.endsWith("/labels") && method === "POST") return json({ message: "already exists" }, 422);
       throw new Error(`Unexpected request ${method} ${target}`);
     };
     const github = new GitHubClient({ token: "token", repository: "owner/repository" });
     await github.ensureLabel("existing", { color: "000000", description: "must not overwrite" });
     await github.ensureLabel("race", { color: "000000", description: "create race" });
-    await github.replaceManagedLabels(7, ["managed-new"], ["managed-old", "managed-new"]);
+    await github.replaceManagedLabels(7, ["codekeeper:managed-new"], ["codekeeper:managed-old", "codekeeper:managed-new"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
   assert.equal(calls.some((call) => call.method === "PATCH"), false);
   assert.equal(calls.some((call) => call.target.endsWith("/issues/7") && call.method === "PATCH"), false);
   const add = calls.find((call) => call.target.endsWith("/issues/7/labels") && call.method === "POST");
-  assert.deepEqual(JSON.parse(add.body), { labels: ["managed-new"] });
-  assert.ok(calls.some((call) => call.target.endsWith("/issues/7/labels/managed-old") && call.method === "DELETE"));
+  assert.deepEqual(JSON.parse(add.body), { labels: ["codekeeper:managed-new"] });
+  assert.ok(calls.some((call) => call.target.endsWith("/issues/7/labels/codekeeper%3Amanaged-old") && call.method === "DELETE"));
 });
 
 test("publication fails if stale auto-merge cannot be disabled", async () => {
@@ -1365,11 +1386,11 @@ test("review publication activates auto-merge last and falls back safely", async
     assert.equal(publication.autoMerge.eligible, false);
     assert.equal(publication.autoMergeResult.enabled, false);
     assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "labels", "comment"]);
-    assert.ok(provisioned.desiredLabels.includes("auto merge"));
-    assert.ok(provisioned.desiredLabels.includes("manual review"));
-    assert.ok(labelCalls[0].desiredLabels.includes("auto merge"));
-    assert.ok(labels.desiredLabels.includes("manual review"));
-    assert.ok(!labels.desiredLabels.includes("auto merge"));
+    assert.ok(provisioned.desiredLabels.includes("codekeeper:auto-merge"));
+    assert.ok(provisioned.desiredLabels.includes("codekeeper:manual-review"));
+    assert.ok(labelCalls[0].desiredLabels.includes("codekeeper:auto-merge"));
+    assert.ok(labels.desiredLabels.includes("codekeeper:manual-review"));
+    assert.ok(!labels.desiredLabels.includes("codekeeper:auto-merge"));
     assert.match(comment.comment, /Ready for maintainer review/);
     assert.match(comment.comment, /Auto-merge is not active: GitHub rejected enablement/);
     assert.doesNotMatch(comment.comment, /Ready to merge/);
@@ -1626,7 +1647,10 @@ test("issue publication accepts its exact managed-label mutation and preserves a
     async getIssue() { return issue(); },
     async ensureLabels() {},
     async replaceManagedLabels(_number, desiredLabels) {
-      labels = [{ name: "external" }, ...desiredLabels.map((name) => ({ name }))];
+      labels = [
+        ...labels.filter((label) => !label.name.startsWith("codekeeper:")),
+        ...desiredLabels.map((name) => ({ name })),
+      ];
       updatedAt = "2026-08-05T10:01:00Z";
     },
     async upsertMarkerComment() { markerPublished = true; }
@@ -1637,7 +1661,14 @@ test("issue publication accepts its exact managed-label mutation and preserves a
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256, artifactConfig: issueConfig });
     await publishIssue({ artifactDirectory, config: issueConfig, configSha256, ...integrity, token: "token" });
     assert.equal(markerPublished, true);
-    assert.deepEqual(labels.map((label) => label.name).sort(), ["deferred", "priority p3", "ready", "bug", "external"].sort());
+    assert.deepEqual(labels.map((label) => label.name).sort(), [
+      "external",
+      "priority p1",
+      "deferred",
+      "codekeeper:type-bug",
+      "codekeeper:priority-p3",
+      "codekeeper:ready",
+    ].sort());
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -1695,7 +1726,7 @@ test("issue publication closes a GitHub-linked merged pull request resolution as
     try {
       const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
       const published = await publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
-      assert.deepEqual(published.desiredLabels.sort(), ["bug", "priority p3"]);
+      assert.deepEqual(published.desiredLabels.sort(), ["codekeeper:type-bug", "codekeeper:priority-p3"].sort());
       assert.equal(mutationOptions.allowClosed, true);
       assert.match(closingComment, /merged pull request \[#12\]/);
       assert.deepEqual(update, { state: "closed", state_reason: "completed" });
@@ -3093,7 +3124,7 @@ test("publication reloads the packaged default recorded during preparation", asy
     });
     assert.deepEqual(published, {
       issue: 7,
-      desiredLabels: ["bug", "priority p3"],
+      desiredLabels: ["codekeeper:type-bug", "codekeeper:priority-p3"],
       dryRun: true
     });
   } finally {

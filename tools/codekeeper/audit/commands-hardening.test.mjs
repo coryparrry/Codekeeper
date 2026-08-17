@@ -37,7 +37,7 @@ function patchGitHub(methods) {
 
 test("failed owner repair dispatch does not leave a target unpaused", async (t) => {
   const eventPath = await eventFile(t, "/codekeeper fix");
-  const labels = new Set(["paused"]);
+  const labels = new Set(["codekeeper:paused"]);
   const restore = patchGitHub({
     async getIssue() { return { number: 42, state: "open", labels: [...labels], pull_request: {} }; },
     async removeLabel(_number, label) { labels.delete(label); },
@@ -50,12 +50,12 @@ test("failed owner repair dispatch does not leave a target unpaused", async (t) 
     runOwnerCommand({ eventPath, config: ownerConfig, token: "audit-token", automationIdentity: identity }),
     /dispatch unavailable/
   );
-  assert.equal(labels.has("paused"), true, "dispatch failure removed the only pause guard");
+  assert.equal(labels.has("codekeeper:paused"), true, "dispatch failure removed the only pause guard");
 });
 
 test("ambiguous owner repair dispatch keeps a target unpaused", async (t) => {
   const eventPath = await eventFile(t, "/codekeeper fix");
-  const labels = new Set(["paused"]);
+  const labels = new Set(["codekeeper:paused"]);
   const restore = patchGitHub({
     async getIssue() { return { number: 42, state: "open", labels: [...labels], pull_request: {} }; },
     async removeLabel(_number, label) { labels.delete(label); },
@@ -73,12 +73,12 @@ test("ambiguous owner repair dispatch keeps a target unpaused", async (t) => {
     runOwnerCommand({ eventPath, config: ownerConfig, token: "audit-token", automationIdentity: identity }),
     /dispatch response lost/
   );
-  assert.equal(labels.has("paused"), false, "ambiguous dispatch restored the pause guard");
+  assert.equal(labels.has("codekeeper:paused"), false, "ambiguous dispatch restored the pause guard");
 });
 
 test("ambiguous pause removal is reconciled before owner repair dispatch", async (t) => {
   const eventPath = await eventFile(t, "/codekeeper fix");
-  const labels = new Set(["paused"]);
+  const labels = new Set(["codekeeper:paused"]);
   let dispatches = 0;
   const restore = patchGitHub({
     async getIssue() { return { number: 42, state: "open", labels: [...labels], pull_request: {} }; },
@@ -99,7 +99,7 @@ test("ambiguous pause removal is reconciled before owner repair dispatch", async
     /pause removal response lost/
   );
   assert.deepEqual({
-    paused: labels.has("paused"),
+    paused: labels.has("codekeeper:paused"),
     dispatches
   }, {
     paused: true,
@@ -107,7 +107,7 @@ test("ambiguous pause removal is reconciled before owner repair dispatch", async
   });
 });
 
-test("owner PR triage rejects a draft or retargeted pull request before dispatch", async (t) => {
+test("owner PR triage rejects a draft pull request before dispatch", async (t) => {
   const eventPath = await eventFile(t, "/codekeeper triage");
   let dispatches = 0;
   const restore = patchGitHub({

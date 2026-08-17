@@ -1,6 +1,7 @@
 import { automaticRepairMarker, sha256 } from "./markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
 import { completeReviewFeedback } from "./review-feedback.mjs";
+import { isCodekeeperOwnedLabel } from "./label-ownership.mjs";
 
 const API_VERSION = "2022-11-28";
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
@@ -114,6 +115,10 @@ function issueLabelNames(issue) {
     throw new Error(`Issue #${issue?.number ?? "unknown"} has invalid or duplicate label metadata`);
   }
   return [...names].sort();
+}
+
+function hasPauseGuard(labels) {
+  return labels.includes("codekeeper:paused") || labels.includes("paused");
 }
 
 function issueMutationSubject(issue) {
@@ -515,7 +520,7 @@ export class GitHubClient {
       ) {
         throw new Error(`Issue #${this.issueMutation.number} is no longer eligible`);
       }
-      if (this.issueMutation.rejectPaused && issueLabelNames(issue).includes("paused")) {
+      if (this.issueMutation.rejectPaused && hasPauseGuard(issueLabelNames(issue))) {
         throw new Error(`Issue #${issue.number} is paused; automatic publication stopped`);
       }
       if (this.issueMutation.trackSubject && this.issueMutation.subject !== null &&
@@ -689,7 +694,7 @@ export class GitHubClient {
     ]);
     this.assertPullMutationIdentity(pull);
     const currentLabels = labelNames(pull);
-    if (currentLabels.includes("paused")) {
+    if (hasPauseGuard(currentLabels)) {
       const error = new Error(`PR #${pull.number} is paused; publication will not mutate GitHub`);
       if (expected.repair?.rejectPaused) error.code = "CODEKEEPER_PAUSED";
       throw error;
@@ -772,6 +777,9 @@ export class GitHubClient {
   }
 
   async rollbackPullLabel(number, label) {
+    if (!isCodekeeperOwnedLabel(label)) {
+      throw new Error(`Cannot roll back label outside Codekeeper ownership: ${label}`);
+    }
     const expected = this.pullMutation;
     if (!expected || number !== expected.number || !expected.addedLabels.has(label)) {
       throw new Error(`Cannot roll back unowned conditional label ${label}`);
@@ -940,6 +948,22 @@ export class GitHubClient {
     return (await this.request("GET", this.repoPath(`/issues/${number}`))).data;
   }
 
+  async getUser(login) {
+    const normalized = String(login ?? "").trim();
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/.test(normalized)) {
+      throw new Error("GitHub user login is invalid");
+    }
+    return (await this.request("GET", `/users/${encodeURIComponent(normalized)}`)).data;
+  }
+
+  async getApp(slug) {
+    const normalized = String(slug ?? "").trim();
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,38})$/.test(normalized)) {
+      throw new Error("GitHub App slug is invalid");
+    }
+    return (await this.request("GET", `/apps/${encodeURIComponent(normalized)}`)).data;
+  }
+
   async listPullFiles(number, limit) {
     return this.paginate(this.repoPath(`/pulls/${number}/files`), { limit });
   }
@@ -999,6 +1023,16 @@ export class GitHubClient {
 
   async listIssueComments(number) {
     return this.paginate(this.repoPath(`/issues/${number}/comments`));
+  }
+
+  async listRecentIssueComments(number, limit) {
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 100) {
+      throw new Error("Recent issue comment limit must be between 1 and 100");
+    }
+    return this.paginate(
+      this.repoPath(`/issues/${number}/comments?sort=created&direction=desc`),
+      { limit }
+    );
   }
 
   async listOpenPulls(limit = Number.POSITIVE_INFINITY) {
@@ -1182,6 +1216,10 @@ export class GitHubClient {
   async replaceManagedLabels(number, desired, managed) {
     const managedSet = new Set(managed);
     const desiredSet = new Set(desired);
+    const nonCodekeeperManaged = [...managedSet].filter((label) => !isCodekeeperOwnedLabel(label));
+    if (nonCodekeeperManaged.length > 0) {
+      throw new Error(`Attempted to manage labels outside Codekeeper ownership: ${nonCodekeeperManaged.join(", ")}`);
+    }
     const unmanaged = [...desiredSet].filter((label) => !managedSet.has(label));
     if (unmanaged.length > 0) {
       throw new Error(`Attempted to mutate labels outside configured ownership: ${unmanaged.join(", ")}`);
@@ -1255,6 +1293,9 @@ export class GitHubClient {
   }
 
   async removeLabel(number, label) {
+    if (!isCodekeeperOwnedLabel(label)) {
+      throw new Error(`Attempted to remove label outside Codekeeper ownership: ${label}`);
+    }
     try {
       await this.request("DELETE", this.repoPath(`/issues/${number}/labels/${encodeURIComponent(label)}`));
     } catch (error) {

@@ -15,11 +15,6 @@ on:
         required: false
         default: true
         type: boolean
-      runner:
-        description: Runner label used by every job in this reusable workflow.
-        required: false
-        default: ubuntu-latest
-        type: string
       dry_run:
         required: false
         default: true
@@ -62,7 +57,7 @@ jobs:
   workspace:
     name: Codekeeper maintenance workspace specialist
     if: inputs.enabled
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
       contents: read
@@ -241,7 +236,7 @@ jobs:
     name: Codekeeper maintenance analysis
     needs: workspace
     if: needs.workspace.result == 'success'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
       contents: read
@@ -373,7 +368,7 @@ jobs:
     name: Codekeeper maintenance verification
     needs: [workspace, analyze]
     if: needs.analyze.result == 'success'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
@@ -424,11 +419,19 @@ jobs:
             --config "$CONFIG" \
             --candidate "$CANDIDATE" \
             --expected-candidate-sha "$CANDIDATE_SHA256"
+      - name: Upload maintenance validation receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codekeeper-maintenance-validation-receipt-${{ github.run_id }}
+          path: ${{ runner.temp }}/codekeeper-candidate/validation-receipt.json
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
 
   seal:
     needs: [workspace, analyze, verify]
     if: needs.analyze.result == 'success' && needs.verify.result == 'success'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
@@ -467,6 +470,11 @@ jobs:
         with:
           name: codekeeper-maintenance-candidate-${{ github.run_id }}
           path: ${{ runner.temp }}/codekeeper-candidate
+      - name: Download maintenance validation receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codekeeper-maintenance-validation-receipt-${{ github.run_id }}
+          path: ${{ runner.temp }}/codekeeper-candidate
       - name: Seal maintenance artifact without repository execution
         id: seal
         env:
@@ -494,7 +502,7 @@ jobs:
   publish:
     needs: [workspace, seal]
     if: needs.seal.result == 'success' && !inputs.dry_run
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Download verified Codekeeper package

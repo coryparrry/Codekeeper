@@ -158,14 +158,14 @@ const SCENARIOS = Object.freeze([
     specialistResult: { evidence: "The changed retry boundary is observable, and the supplied test report covers only an unrelated formatter." },
     fixture: {
       ...noFindingReview({ risk: "medium", adequate: false, noActionReason: null }),
-      labels: ["needs tests"],
+      labels: ["codekeeper:needs-tests"],
       summary: "The retry behavior changes without deterministic coverage.",
       nonBlockingFindings: [{ title: "Changed retry limit lacks coverage", explanation: "No deterministic test exercises the new retry boundary.", severity: "medium", confidence: "high", classification: "current", validation: "The current tests do not exercise the changed retry limit.", preventionTest: "Exercise success and exhaustion at the new retry boundary.", file: "src/retry.mjs", line: 1 }]
     },
     assert(output) {
       assert(output.tests.adequate === false, "uncovered changed behavior must be inadequate");
       assert(output.mergeRecommendation !== "auto", "insufficient tests must not auto-merge");
-      assert(output.labels.includes("needs tests"), "insufficient tests require the needs-tests label");
+      assert(output.labels.includes("codekeeper:needs-tests"), "insufficient tests require the needs-tests label");
       assert(output.blockingFindings.length === 0, "bounded insufficient tests finding must remain non-blocking");
       assert(output.nonBlockingFindings.length === 1 && output.nonBlockingFindings[0].severity === "medium", "bounded insufficient tests finding must remain medium and non-blocking");
     }
@@ -182,7 +182,7 @@ const SCENARIOS = Object.freeze([
       mode: "review",
       summary: "The PR breaks valid login on the changed success path.",
       risk: "high",
-      labels: ["bug"],
+      labels: ["codekeeper:type-bug"],
       blockingFindings: [{ title: "Valid login always returns an authorization error", explanation: "The changed success branch returns before session creation, so every valid login fails.", severity: "high", confidence: "high", classification: "current", validation: "The current-head test fails while the base succeeds.", preventionTest: "Keep a valid-login success-path regression test.", file: "src/session.mjs", line: 1 }],
       nonBlockingFindings: [],
       tests: {
@@ -211,7 +211,7 @@ const SCENARIOS = Object.freeze([
       mode: "review",
       summary: "The PR evicts cache entries at a still-valid boundary.",
       risk: "medium",
-      labels: ["bug"],
+      labels: ["codekeeper:type-bug"],
       blockingFindings: [{ title: "Cache entry expires at its still-valid boundary", explanation: "The changed comparison evicts the entry when now equals expiresAt, violating the documented boundary contract.", severity: "low", confidence: "high", classification: "current", validation: "The current-head equality-boundary test fails while the base comparison succeeds.", preventionTest: "Keep an equality-boundary test that expects the cached value.", file: "src/cache.mjs", line: 1 }],
       nonBlockingFindings: [],
       tests: {
