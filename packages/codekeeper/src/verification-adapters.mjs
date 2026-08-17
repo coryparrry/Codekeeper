@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -6,6 +7,7 @@ import {
   stageVerifiedPackage,
 } from "./updater.mjs";
 import { verifyCodekeeperRelease } from "./release-verifier.mjs";
+import { appPermissions } from "./plan.mjs";
 
 const REQUIRED_DRY_RUN_JOBS = Object.freeze([
   "Codekeeper maintenance workspace specialist",
@@ -33,6 +35,7 @@ export async function inspectInstalledApp({
   runner,
   root,
   repository,
+  installation = null,
   variables = null,
 }) {
   const readVariable = async (name) => {
@@ -74,11 +77,23 @@ export async function inspectInstalledApp({
   } catch {
     return false;
   }
+  const capabilities = installation?.policy
+    ? {
+        reviewRepair: installation.policy.review?.autoRepair === true,
+        repair: installation.policy.audit?.repair?.enabled === true,
+        issueImplementation: installation.policy.issues?.allowAiImplementation === true,
+        autoMerge: installation.policy.merge?.enabled === true
+      }
+    : ["reviewRepair", "repair", "issueImplementation", "autoMerge"];
+  const required = appPermissions({
+    modes: installation?.modes,
+    capabilities
+  });
   const expectedPermissions = {
-    contents: "write",
-    issues: "write",
-    metadata: "read",
-    pull_requests: "write",
+    contents: required.contents,
+    issues: required.issues,
+    metadata: required.metadata,
+    pull_requests: required.pullRequests
   };
   if (
     app.client_id !== clientId ||
@@ -103,13 +118,13 @@ export async function inspectInstalledApp({
     { cwd: root },
   );
   if (!successful(installationsResult)) return false;
-  let installation;
+  let appInstallation;
   try {
     const pages = JSON.parse(installationsResult.stdout);
     const installations = Array.isArray(pages)
       ? pages.flatMap((page) => page?.installations ?? [])
       : [];
-    installation = installations.find(
+    appInstallation = installations.find(
       (candidate) =>
         candidate?.app_slug === slug && candidate?.suspended_at == null,
     );
@@ -117,8 +132,8 @@ export async function inspectInstalledApp({
     return false;
   }
   if (
-    !Number.isSafeInteger(installation?.id) ||
-    installation.repository_selection !== "selected"
+    !Number.isSafeInteger(appInstallation?.id) ||
+    appInstallation.repository_selection !== "selected"
   )
     return false;
 
@@ -128,7 +143,7 @@ export async function inspectInstalledApp({
       "api",
       "--hostname",
       "github.com",
-      `user/installations/${installation.id}/repositories?per_page=2`,
+      `user/installations/${appInstallation.id}/repositories?per_page=2`,
     ],
     { cwd: root },
   );
@@ -201,23 +216,24 @@ export async function verifyInstalledPackage(
   }
 }
 
-function runIds(result) {
+function matchingRunIds(result, verificationId) {
   if (!successful(result)) return null;
   try {
     const runs = JSON.parse(result.stdout);
     if (
       !Array.isArray(runs) ||
-      runs.some((run) => !Number.isSafeInteger(run?.databaseId))
+      runs.some((run) => !Number.isSafeInteger(run?.databaseId) || typeof run?.displayTitle !== "string")
     )
       return null;
-    return new Set(runs.map((run) => run.databaseId));
+    const expectedTitle = `Codekeeper maintenance verification ${verificationId}`;
+    return runs.filter((run) => run.displayTitle === expectedTitle).map((run) => run.databaseId);
   } catch {
     return null;
   }
 }
 
-async function listDryRuns(runner, root, repository) {
-  return runIds(
+async function listDryRuns(runner, root, repository, verificationId) {
+  return matchingRunIds(
     await runner.run(
       "gh",
       [
@@ -232,10 +248,11 @@ async function listDryRuns(runner, root, repository) {
         "--limit",
         "20",
         "--json",
-        "databaseId",
+        "databaseId,displayTitle",
       ],
       { cwd: root },
     ),
+    verificationId,
   );
 }
 
@@ -259,11 +276,11 @@ export async function runMaintenanceDryRun(
   {
     wait = (milliseconds) =>
       new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    verificationId = randomUUID(),
   } = {},
 ) {
   if (!installation?.modes?.includes("maintain")) return false;
-  const before = await listDryRuns(runner, root, repository);
-  if (!before) return false;
+  if (!/^[0-9a-f-]{36}$/.test(verificationId)) return false;
   const dispatched = await runner.run(
     "gh",
     [
@@ -276,23 +293,23 @@ export async function runMaintenanceDryRun(
       installation.policy.repository.defaultBranch,
       "--field",
       "dry_run=true",
+      "--field",
+      `verification_id=${verificationId}`,
     ],
     { cwd: root },
   );
   if (!successful(dispatched)) return false;
 
-  let newRunIds = [];
+  let matchingIds = [];
   for (let attempt = 0; attempt < 10; attempt += 1) {
     if (attempt > 0) await wait(2_000);
-    const after = await listDryRuns(runner, root, repository);
-    if (!after) return false;
-    newRunIds = [...after].filter((id) => !before.has(id));
-    if (newRunIds.length > 1) return false;
-    if (newRunIds.length === 1) break;
+    matchingIds = await listDryRuns(runner, root, repository, verificationId);
+    if (!matchingIds || matchingIds.length > 1) return false;
+    if (matchingIds.length === 1) break;
   }
-  if (newRunIds.length !== 1) return false;
+  if (matchingIds.length !== 1) return false;
 
-  const runId = String(newRunIds[0]);
+  const runId = String(matchingIds[0]);
   const watched = await runner.run(
     "gh",
     ["run", "watch", runId, "--repo", repository, "--exit-status"],

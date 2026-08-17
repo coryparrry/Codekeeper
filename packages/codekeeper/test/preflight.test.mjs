@@ -540,7 +540,10 @@ test("existing generated files with every optional profile missing are recognize
     structuredOutputs: false,
     supportsReasoningEffort: false
   });
-  assert.equal(installation.policy.labels["deferred"].color, "C5DEF5");
+  assert.equal(
+    installation.policy.labels["codekeeper:deferred"].color,
+    "C5DEF5",
+  );
   assert.equal(installation.policy.ai.agents.review.model, "gpt-5.6-luna");
   assert.equal(installation.policy.ai.agents.plan, undefined);
   for (const agent of ["review", "audit", "issue", "fix"]) {
@@ -644,7 +647,8 @@ test("repository preflight returns a frozen snapshot only after every local and 
     headSha: HEAD_SHA,
     remoteDefaultSha: HEAD_SHA,
     viewerLogin: "cory",
-    displayName: "widget"
+    displayName: "widget",
+    validationCommandCandidate: null
   });
   assert.ok(Object.isFrozen(inspected));
   assert.ok(runner.calls.every((call) => !call.options.env));

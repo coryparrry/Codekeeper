@@ -1,0 +1,32 @@
+name: Feature proposal
+description: Propose an evidence-backed improvement to Codekeeper.
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the maintainer outcome, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: authority
+    attributes:
+      label: Authority, data, or runner impact
+      description: Explain any effect on GitHub permissions, model input, credentials, runners, or mutations.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+    validations:
+      required: true

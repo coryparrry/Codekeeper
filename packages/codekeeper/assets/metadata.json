@@ -2,12 +2,12 @@
   "version": 1,
   "source": {
     "repository": "coryparrry/Codekeeper",
-    "commit": "59a0ccc6dae19d12b65a6ea1418d1db0231d6ac7"
+    "commit": "1fb76533618eeeca4eaff30dbaae42926d68fdea"
   },
   "assets": {
     "agents/pr-reviewer.md": {
-      "sha256": "edcb2d24d78c39290129ae8e80931eca067a0175568a6a72eb13e8c7c001af41",
-      "bytes": 5048,
+      "sha256": "0a5fbe580ffe777c58655ac31f2491438e1fd2d4fc5763b598c93097c7d01581",
+      "bytes": 5800,
       "sourcePath": "tools/codekeeper/agents/pr-reviewer.md"
     },
     "agents/repository-auditor.md": {
@@ -16,8 +16,8 @@
       "sourcePath": "tools/codekeeper/agents/repository-auditor.md"
     },
     "agents/issue-triager.md": {
-      "sha256": "387961b2138ef227f268efcb80afc254af24a3d91fdbda31bf359d7fe645705c",
-      "bytes": 3145,
+      "sha256": "8825b1ee920a298931c6c7be372d7955536d109ba7fac4705dd1805cd5f69432",
+      "bytes": 3606,
       "sourcePath": "tools/codekeeper/agents/issue-triager.md"
     },
     "agents/fixer.md": {
@@ -26,13 +26,13 @@
       "sourcePath": "tools/codekeeper/agents/fixer.md"
     },
     "policies/mixed.json": {
-      "sha256": "8431b2352fe5be158bdf3957b6077a86747ac199ae2fb4717b59a7cbe3620286",
-      "bytes": 9905,
+      "sha256": "7d5d9d2c84d85b87a96aea41453fca4ed62090c9a7014b270bd184d335d8cf35",
+      "bytes": 11236,
       "sourcePath": ".github/codekeeper.json"
     },
     "policies/openai.json": {
-      "sha256": "59a30700d883a117100b31f2a16675f48e8ba9eafe66d3b6e2a34dcce1aa4a10",
-      "bytes": 9742,
+      "sha256": "da3fbf41ac815f4f66c1936caa3986bf9ab9f315124846df3cbd612583cd0da5",
+      "bytes": 11073,
       "sourcePath": ".github/codekeeper.json#preset=openai"
     },
     "repository/README.md": {
@@ -109,8 +109,8 @@
       "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
     },
     "toolingManifest": {
-      "sha256": "91e524eaa8799271f074981a03317d459590164c1e657b5073dc9784da4fc427",
-      "bytes": 4492,
+      "sha256": "f68724356eb49b302cd25ad7102cb7cefece496a046eb976fd0594323e1cf02f",
+      "bytes": 4633,
       "sourcePath": "tools/codekeeper/tooling-manifest.json"
     }
   }

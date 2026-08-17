@@ -300,18 +300,18 @@ test("settings reject runtime-incompatible model settings and managed-label remo
 
   const missingReviewLabel = structuredClone(settings);
   missingReviewLabel.policy.review.managedLabels = missingReviewLabel.policy.review.managedLabels
-    .filter((label) => label !== "reviewed");
+    .filter((label) => label !== "codekeeper:reviewed");
   assert.throws(
     () => validateEditableSettings(missingReviewLabel, policy),
-    /review must explicitly manage emitted label reviewed/
+    /review must explicitly manage emitted label codekeeper:reviewed/
   );
 
   const missingIssueLabel = structuredClone(settings);
   missingIssueLabel.policy.issues.managedLabels = missingIssueLabel.policy.issues.managedLabels
-    .filter((label) => label !== "ready");
+    .filter((label) => label !== "codekeeper:ready");
   assert.throws(
     () => validateEditableSettings(missingIssueLabel, policy),
-    /issues must explicitly manage emitted label ready/
+    /issues must explicitly manage emitted label codekeeper:ready/
   );
 });
 
@@ -479,6 +479,8 @@ test("fresh settings can enable capabilities after bundled defaults are verified
   const { bundle, settings } = await fixture(["review", "fix"]);
   const edited = structuredClone(settings);
   edited.policy.review.autoRepair = true;
+  edited.validationCommandCandidate = "npm test";
+  edited.validationCommand = "npm test";
   const plan = buildInstallPlan({
     bundle,
     snapshot: {
@@ -486,7 +488,8 @@ test("fresh settings can enable capabilities after bundled defaults are verified
       repository: "acme/widget",
       defaultBranch: "main",
       headSha: HEAD_SHA,
-      viewerLogin: "coryparrry"
+      viewerLogin: "coryparrry",
+      validationCommandCandidate: "npm test"
     },
     answers: {
       ...settingsAnswers(edited),

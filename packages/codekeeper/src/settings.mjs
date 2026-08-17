@@ -229,6 +229,8 @@ export function createEditableSettings({
   modes,
   enabled,
   maintenanceScheduled = true,
+  validationCommandCandidate = null,
+  validationCommand = null,
   profiles = {},
   profileDefaults = profiles,
   profileSources = null,
@@ -250,8 +252,40 @@ export function createEditableSettings({
     modes: [...modes],
     enabled: enabled !== false,
     maintenanceScheduled,
+    validationCommandCandidate,
+    validationCommand: validationCommand === validationCommandCandidate ? validationCommand : null,
     ...normalizedProfiles
   };
+}
+
+function hasWriteAuthority(policy) {
+  return policy.review.autoRepair === true
+    || policy.audit.repair.enabled === true
+    || policy.issues.allowAiImplementation === true;
+}
+
+function assertCapabilityWorkflowModes(policy, modes) {
+  if (policy.review.createDeferredIssues && !modes.includes("issues")) {
+    throw new InstallerError("Deferred issue creation requires the Issue triage workflow.", { code: "SETTING_INVALID" });
+  }
+  if (policy.review.autoRepair && !(modes.includes("review") && modes.includes("fix"))) {
+    throw new InstallerError("Automatic PR repair requires both the Review and Fixer workflows.", { code: "SETTING_INVALID" });
+  }
+  if (policy.audit.repair.enabled && !modes.includes("maintain")) {
+    throw new InstallerError("Repository repair requires the Maintenance workflow.", { code: "SETTING_INVALID" });
+  }
+  if (policy.issues.allowAiImplementation && !(modes.includes("issues") && modes.includes("fix"))) {
+    throw new InstallerError("Issue implementation requires both the Issue triage and Fixer workflows.", { code: "SETTING_INVALID" });
+  }
+  if (policy.issues.closeExactDuplicates && !modes.includes("issues")) {
+    throw new InstallerError("Duplicate closure requires the Issue triage workflow.", { code: "SETTING_INVALID" });
+  }
+  if (policy.issues.closeResolvedIssues && !modes.includes("issues")) {
+    throw new InstallerError("Resolved issue closure requires the Issue triage workflow.", { code: "SETTING_INVALID" });
+  }
+  if (policy.merge.enabled && !(modes.includes("review") && modes.some((mode) => mode === "maintain" || mode === "fix"))) {
+    throw new InstallerError("Automatic merge requires the Review workflow and a repair workflow.", { code: "SETTING_INVALID" });
+  }
 }
 
 function inactiveRow(row, workflow) {
@@ -314,6 +348,24 @@ export function settingsRows(settings, { advanced = false } = {}) {
       kind: "boolean",
       value: settings.maintenanceScheduled !== false
     }] : []),
+    ...(settings.validationCommandCandidate
+      ? [{
+          id: "validation-command-confirmed",
+          section: "audit",
+          label: "Confirm repository validation",
+          description: `Allow Codekeeper to record ${settings.validationCommandCandidate} as the deterministic validation command for code-changing capabilities. The installer does not run it.`,
+          kind: "boolean",
+          value: settings.validationCommand === settings.validationCommandCandidate,
+        }]
+      : [{
+          id: "validation-command-unavailable",
+          section: "audit",
+          label: "Repository validation",
+          description: "No trusted root package validation command was found. Code-changing capabilities must remain off until a supported package lockfile and check or test script are available.",
+          kind: "readonly",
+          value: "not found",
+          readOnly: true,
+        }]),
     ...standardPaths.map(([path, label]) => policyRow(settings.policy, path, label))
   );
   for (const profile of AGENT_PROFILE_IDS) {
@@ -359,6 +411,7 @@ export function setSetting(settings, row, value) {
   const next = clone(settings);
   if (row.id === "enabled") next.enabled = value;
   else if (row.id === "maintenance-scheduled") next.maintenanceScheduled = value;
+  else if (row.id === "validation-command-confirmed") next.validationCommand = value ? next.validationCommandCandidate : null;
   else if (row.id.startsWith("workflow:")) {
     const mode = row.id.slice("workflow:".length);
     next.modes = value
@@ -468,6 +521,28 @@ export function validateEditableSettings(settings, baselinePolicy) {
   }
   if (policy.projectInvariants === undefined) policy.projectInvariants = [];
   for (const agent of Object.values(policy.ai?.agents ?? {})) agent.modelSettings ??= {};
+  assertCapabilityWorkflowModes(policy, settings.modes);
+  if (hasWriteAuthority(policy) && (
+    typeof settings.validationCommandCandidate !== "string"
+    || !settings.validationCommandCandidate
+    || settings.validationCommand !== settings.validationCommandCandidate
+  )) {
+    throw new InstallerError(
+      settings.validationCommandCandidate
+        ? `Confirm ${settings.validationCommandCandidate} before enabling code-changing capabilities.`
+        : "Code-changing capabilities require a trusted repository validation command. Add a supported root package lockfile and check or test script, then rerun setup.",
+      { code: "SETTING_INVALID" },
+    );
+  }
+  if (hasWriteAuthority(policy)) {
+    policy.audit.repair.validationCommands = [
+      "git diff --check",
+      ...policy.audit.repair.validationCommands.filter(
+        (command) => command !== "git diff --check" && command !== settings.validationCommand,
+      ),
+      settings.validationCommand,
+    ];
+  }
   try {
     validatePolicy(policy);
   } catch (cause) {
@@ -491,21 +566,6 @@ export function validateEditableSettings(settings, baselinePolicy) {
         code: "SETTING_INVALID"
       });
     }
-  }
-  if (policy.review.createDeferredIssues && !settings.modes.includes("issues")) {
-    throw new InstallerError("Deferred issue creation requires the Issue triage workflow.", { code: "SETTING_INVALID" });
-  }
-  if (policy.review.autoRepair && !(settings.modes.includes("review") && settings.modes.includes("fix"))) {
-    throw new InstallerError("Automatic PR repair requires both the Review and Fixer workflows.", { code: "SETTING_INVALID" });
-  }
-  if (policy.audit.repair.enabled && !settings.modes.includes("maintain")) throw new InstallerError("Repository repair requires the Maintenance workflow.", { code: "SETTING_INVALID" });
-  if (policy.issues.allowAiImplementation && !(settings.modes.includes("issues") && settings.modes.includes("fix"))) {
-    throw new InstallerError("Issue implementation requires both the Issue triage and Fixer workflows.", { code: "SETTING_INVALID" });
-  }
-  if (policy.issues.closeExactDuplicates && !settings.modes.includes("issues")) throw new InstallerError("Duplicate closure requires the Issue triage workflow.", { code: "SETTING_INVALID" });
-  if (policy.issues.closeResolvedIssues && !settings.modes.includes("issues")) throw new InstallerError("Resolved issue closure requires the Issue triage workflow.", { code: "SETTING_INVALID" });
-  if (policy.merge.enabled && !(settings.modes.includes("review") && settings.modes.some((mode) => mode === "maintain" || mode === "fix"))) {
-    throw new InstallerError("Automatic merge requires the Review workflow and a repair workflow.", { code: "SETTING_INVALID" });
   }
   for (const profile of AGENT_PROFILE_IDS) {
     const source = settings.profiles[profile];
@@ -547,6 +607,9 @@ export function settingsAnswers(settings) {
     modes: [...settings.modes],
     enabled: settings.enabled,
     maintenanceScheduled: settings.maintenanceScheduled === undefined ? true : settings.maintenanceScheduled,
+    validationCommand: settings.validationCommand === settings.validationCommandCandidate
+      ? settings.validationCommand
+      : null,
     policy: clone(policy),
     profiles: clone(settings.profiles),
     profileSources: clone(settings.profileSources),

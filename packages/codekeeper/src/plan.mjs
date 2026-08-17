@@ -211,22 +211,43 @@ export function normalizeModelChoices({ modes, preset, bundle, choices = {}, pol
   return Object.freeze(normalized);
 }
 
-export function appRegistrationUrl({ repository, displayName, ownerType = "User" }) {
+export function appPermissions({ modes = MODE_IDS, capabilities = ["reviewRepair", "repair", "issueImplementation", "autoMerge"] } = {}) {
+  const selectedModes = new Set(normalizeModes(modes));
+  const enabledCapabilities = new Set(
+    Array.isArray(capabilities)
+      ? capabilities
+      : Object.entries(capabilities ?? {}).filter(([, enabled]) => enabled === true).map(([id]) => id)
+  );
+  const canWriteContents = ["reviewRepair", "repair", "issueImplementation"].some((id) => enabledCapabilities.has(id));
+  const canWritePullRequests = selectedModes.has("review")
+    || selectedModes.has("fix")
+    || canWriteContents
+    || enabledCapabilities.has("autoMerge");
+  return Object.freeze({
+    contents: canWriteContents ? "write" : "read",
+    issues: "write",
+    pullRequests: canWritePullRequests ? "write" : "read",
+    metadata: "read"
+  });
+}
+
+export function appRegistrationUrl({ repository, displayName, ownerType = "User", modes, capabilities }) {
   const [owner] = repository.split("/");
   if (ownerType !== "User" && ownerType !== "Organization") {
     throw new InstallerError("GitHub App registration requires a personal or organization repository owner.", { code: "PLAN_INVALID" });
   }
   const name = `Codekeeper ${displayName}`.slice(0, 34);
+  const permissions = appPermissions({ modes, capabilities });
   const parameters = new URLSearchParams({
     name,
     description: `Codekeeper automation for ${repository}`,
     url: `https://github.com/${repository}`,
     public: "false",
     webhook_active: "false",
-    contents: "write",
-    issues: "write",
-    pull_requests: "write",
-    metadata: "read"
+    contents: permissions.contents,
+    issues: permissions.issues,
+    pull_requests: permissions.pullRequests,
+    metadata: permissions.metadata
   });
   const registrationPath = ownerType === "Organization"
     ? `/organizations/${encodeURIComponent(owner)}/settings/apps/new`
@@ -291,6 +312,10 @@ function editableSettingsForInstallation(snapshot, bundle) {
     modes: installation.modes,
     enabled: snapshot.existingSettings.enabled,
     maintenanceScheduled: installation.maintenanceScheduled,
+    validationCommandCandidate: snapshot.validationCommandCandidate,
+    validationCommand: installation.policy.audit.repair.validationCommands.includes(snapshot.validationCommandCandidate)
+      ? snapshot.validationCommandCandidate
+      : null,
     profiles,
     profileDefaults,
     profileOverrides: AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target))
@@ -405,18 +430,21 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
   const packagedProfileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
-  const inputPolicy =
+  const inputPolicy = structuredClone(
     answers.policy ??
     createEditableSettings({
       policy: baselinePolicy,
       modes,
       enabled: answers.enabled !== false,
       maintenanceScheduled,
+      validationCommandCandidate: snapshot.validationCommandCandidate,
+      validationCommand: answers.validationCommand,
       profiles: answers.profiles ?? effectiveProfiles,
       profileDefaults: packagedProfileDefaults,
       profileSources: answers.profileSources,
       profileOverrides: installation ? AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target)) : []
-    }).policy;
+    }).policy
+  );
   const displayName = answers.policy?.repository.displayName ?? answers.displayName;
   if (!validDisplayName(displayName))
     throw new InstallerError("Repository display name is invalid.", {
@@ -436,6 +464,44 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     policySource
   });
   const tracing = answers.policy ? answers.policy.ai.tracing.enabled : answers.tracing !== false;
+  const codeChanging = capabilities.reviewRepair || capabilities.repair || capabilities.issueImplementation;
+  const validationCommand = answers.validationCommand === snapshot.validationCommandCandidate
+    ? answers.validationCommand
+    : null;
+  if (codeChanging && !validationCommand) {
+    throw new InstallerError(
+      snapshot.validationCommandCandidate
+        ? `Confirm ${snapshot.validationCommandCandidate} before enabling code-changing capabilities.`
+        : "Code-changing capabilities require a trusted repository validation command. Add a supported root package lockfile and check or test script, then rerun setup.",
+      { code: "PLAN_INVALID" },
+    );
+  }
+  if (validationCommand) {
+    inputPolicy.audit.repair.validationCommands = [
+      "git diff --check",
+      ...inputPolicy.audit.repair.validationCommands.filter((command) => command !== "git diff --check" && command !== validationCommand),
+      validationCommand,
+    ];
+  }
+  inputPolicy.review.autoRepair = capabilities.reviewRepair;
+  inputPolicy.audit.repair.enabled = capabilities.repair;
+  inputPolicy.issues.allowAiImplementation = capabilities.issueImplementation;
+  inputPolicy.issues.closeExactDuplicates = capabilities.duplicateClosure;
+  inputPolicy.merge.enabled = capabilities.autoMerge;
+  inputPolicy.ai.tracing.enabled = tracing;
+  for (const [mode, selection] of Object.entries(models)) {
+    const agent = inputPolicy.ai.agents[MODES[mode]?.policyAgent ?? mode];
+    agent.provider = selection.provider;
+    agent.model = selection.model;
+    agent.effort = selection.effort;
+    agent.modelSettings = Object.hasOwn(selection, "modelSettings")
+      ? structuredClone(selection.modelSettings)
+      : selection.provider === "openai"
+        ? { text: { verbosity: "low" } }
+        : selection.provider === "deepseek"
+          ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
+          : {};
+  }
   const desiredProfileSettings = normalizeProfileSettings({
     profiles: answers.profiles ?? effectiveProfiles,
     defaults: packagedProfileDefaults,
@@ -461,10 +527,10 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     models,
     tracing,
     maintenanceScheduled,
-    policySource: answers.policy ? policySource : JSON.stringify(inputPolicy),
+    policySource,
     profileSources,
     enforceBundledDefaults: !installation,
-    policyOverride: answers.policy ?? null,
+    policyOverride: inputPolicy,
     refreshReleaseBoundaries: releaseUpdate
   });
   const effectivePolicy = JSON.parse(files.find((file) => file.path === ".github/codekeeper.json").contents);
@@ -474,6 +540,8 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
       modes,
       enabled: answers.enabled !== false,
       maintenanceScheduled,
+      validationCommandCandidate: snapshot.validationCommandCandidate,
+      validationCommand,
       profiles: desiredProfileSettings.profiles,
       profileDefaults: desiredProfileSettings.profileDefaults,
       profileSources: desiredProfileSettings.profileSources
@@ -574,6 +642,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     ownerLogins,
     enabled,
     capabilities,
+    appPermissions: appPermissions({ modes, capabilities }),
     models,
     modelSummary: Object.freeze(
       Object.fromEntries(
@@ -648,6 +717,7 @@ function freshSettings(snapshot, bundle, preset = RECOMMENDED_PRESET) {
       modes: RECOMMENDED_MODES,
       enabled: true,
       maintenanceScheduled: false,
+      validationCommandCandidate: snapshot.validationCommandCandidate,
       profiles: profileDefaults
     })
   };
@@ -720,6 +790,8 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
           modes: initialAnswers.modes,
           enabled: initialAnswers.enabled,
           maintenanceScheduled: initialAnswers.maintenanceScheduled,
+          validationCommandCandidate: snapshot.validationCommandCandidate,
+          validationCommand: initialAnswers.validationCommand,
           profiles: initialAnswers.profiles,
           profileDefaults,
           profileSources: initialAnswers.profileSources
@@ -961,6 +1033,37 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
       ]
     }))
     : [];
+  const codeChangingCapability = capabilities.some((id) => ["reviewRepair", "repair", "issueImplementation"].includes(id));
+  let validationCommand = null;
+  if (codeChangingCapability) {
+    if (!snapshot.validationCommandCandidate) {
+      throw new InstallerError(
+        "Code-changing capabilities require a trusted repository validation command. Add a supported root package lockfile and check or test script, then rerun setup.",
+        { code: "SETTING_INVALID" },
+      );
+    }
+    const validationConfirmed = await prompt.confirm(
+      tuiOptions(
+        prompt,
+        {
+          message: `Record ${snapshot.validationCommandCandidate} as the required validation command for code changes?`,
+          defaultValue: false,
+        },
+        {
+          step: "validation",
+          description: ["The installer never runs this command.", "Codekeeper's fresh credential-free verifier will run this exact command before it can publish a repair."],
+          yesLabel: "Confirm validation command",
+          noLabel: "Cancel code-changing setup",
+        },
+      ),
+    );
+    if (!validationConfirmed) {
+      throw new InstallerError("Code-changing capabilities were not enabled because the repository validation command was not confirmed.", {
+        code: "USER_CANCELLED",
+      });
+    }
+    validationCommand = snapshot.validationCommandCandidate;
+  }
   const maintenanceScheduled = modes.includes("maintain")
     ? await prompt.confirm(
         tuiOptions(
@@ -1068,7 +1171,8 @@ export async function collectSetupAnswers({ prompt, snapshot, bundle, output, in
     ownerLogins: normalizeOwnerLogins(ownersText.split(",")),
     enabled,
     maintenanceScheduled,
-    capabilities
+    capabilities,
+    validationCommand,
   });
 }
 

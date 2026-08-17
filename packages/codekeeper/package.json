@@ -2,6 +2,14 @@
   "name": "codekeeper",
   "version": "0.2.0",
   "description": "Complete CLI, TUI, runtime, and workflow release package for Codekeeper",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coryparrry/Codekeeper.git"
+  },
+  "homepage": "https://github.com/coryparrry/Codekeeper#readme",
+  "bugs": {
+    "url": "https://github.com/coryparrry/Codekeeper/issues"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -28,12 +36,18 @@
     "node": ">=22"
   },
   "scripts": {
+    "prepublishOnly": "node bin/prepublish-guard.mjs",
     "prepare:runtime-test": "npm --prefix runtime-package ci --ignore-scripts --no-audit --no-fund",
     "test:unit": "node --test test/*.test.mjs audit/*.test.mjs",
     "test": "npm run prepare:runtime-test && npm run test:unit",
     "check": "npm run prepare:runtime-test && node ../../scripts/sync-policy-validator.mjs --check && bash -c 'for file in bin/*.mjs src/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && npm run test:unit"
   },
   "keywords": [
+    "github-actions",
+    "pull-request-review",
+    "issue-triage",
+    "repository-automation",
+    "ai-code-review",
     "github",
     "automation",
     "codekeeper"

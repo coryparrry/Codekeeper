@@ -1,0 +1,268 @@
+name: Publish Codekeeper release
+
+on:
+  push:
+    tags:
+      - "codekeeper-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing codekeeper-vX.Y.Z tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codekeeper-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      integrity: ${{ steps.receipt.outputs.integrity }}
+      manifest_sha256: ${{ steps.receipt.outputs.manifest_sha256 }}
+      source_commit: ${{ steps.receipt.outputs.source_commit }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.receipt.outputs.version }}
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="$REF_NAME"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$INPUT_TAG"
+          fi
+          [[ "$tag" =~ ^codekeeper-v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || {
+            echo "Release tag must be codekeeper-vX.Y.Z" >&2
+            exit 1
+          }
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm immutable release tag
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          git tag --points-at HEAD "$RELEASE_TAG" | grep -Fx "$RELEASE_TAG"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Install pinned npm
+        run: npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
+      - name: Confirm clean source snapshot
+        run: test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Install repository checks
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify source release inventory
+        run: npm run check
+      - name: Install runtime checks
+        working-directory: tools/codekeeper
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify runtime checks
+        working-directory: tools/codekeeper
+        run: npm run check
+      - name: Install installer checks
+        working-directory: packages/codekeeper
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify installer package checks
+        working-directory: packages/codekeeper
+        run: npm run check
+      - name: Pack a verified release outside the checkout
+        env:
+          RELEASE_ROOT: ${{ runner.temp }}/codekeeper-release
+        run: |
+          set -euo pipefail
+          test ! -e "$RELEASE_ROOT"
+          node scripts/pack-codekeeper-package.mjs --destination "$RELEASE_ROOT" > "$RUNNER_TEMP/codekeeper-pack-report.json"
+      - name: Verify local package receipt
+        id: receipt
+        env:
+          RELEASE_ROOT: ${{ runner.temp }}/codekeeper-release
+          PACK_REPORT: ${{ runner.temp }}/codekeeper-pack-report.json
+        run: |
+          set -euo pipefail
+          RELEASE_ROOT="$RELEASE_ROOT" PACK_REPORT="$PACK_REPORT" EXPECTED_SOURCE_COMMIT="$(git rev-parse HEAD)" node --input-type=module -e '
+          import { createHash } from "node:crypto";
+          import { lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+          import { tmpdir } from "node:os";
+          import { basename, join } from "node:path";
+          import { execFileSync } from "node:child_process";
+          const report = JSON.parse(readFileSync(process.env.PACK_REPORT, "utf8"));
+          if (!report || report.name !== "codekeeper" || !/^\d+\.\d+\.\d+/.test(report.version) || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(report.integrity)) throw new Error("invalid local npm pack receipt");
+          const tarball = join(process.env.RELEASE_ROOT, report.filename);
+          if (basename(tarball) !== report.filename || !lstatSync(tarball).isFile()) throw new Error("packed tarball is missing");
+          const integrity = `sha512-${createHash("sha512").update(readFileSync(tarball)).digest("base64")}`;
+          if (integrity !== report.integrity) throw new Error("packed tarball integrity mismatch");
+          const root = mkdtempSync(join(tmpdir(), "codekeeper-release-verify-"));
+          try {
+            execFileSync("tar", ["-xzf", tarball, "--strip-components=1", "-C", root], { stdio: "inherit" });
+            const output = execFileSync(process.execPath, ["bin/verify-package.mjs", "--root", root, "--expected-name", "codekeeper", "--expected-version", report.version, "--expected-source-commit", process.env.EXPECTED_SOURCE_COMMIT], { cwd: root, encoding: "utf8" });
+            const verified = JSON.parse(output);
+            const manifest = readFileSync(join(root, "release", "manifest.json"));
+            const manifestSha256 = createHash("sha256").update(manifest).digest("hex");
+            process.stdout.write(`integrity=${integrity}\nversion=${verified.package.version}\nsource_commit=${verified.source.commit}\nmanifest_sha256=${manifestSha256}\n`);
+          } finally {
+            rmSync(root, { recursive: true, force: true });
+          }
+          ' >> "$GITHUB_OUTPUT"
+      - name: Upload verified release tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codekeeper-release-${{ steps.receipt.outputs.version }}-${{ github.sha }}
+          path: ${{ runner.temp }}/codekeeper-release/codekeeper-${{ steps.receipt.outputs.version }}.tgz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Attest verified release tarball
+        uses: actions/attest-build-provenance@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/codekeeper-release/codekeeper-${{ steps.receipt.outputs.version }}.tgz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - name: Install pinned npm
+        run: npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
+      - name: Download verified release tarball
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codekeeper-release-${{ needs.build.outputs.version }}-${{ github.sha }}
+          path: ${{ runner.temp }}/codekeeper-release
+      - name: Reverify publish input
+        env:
+          RELEASE_ROOT: ${{ runner.temp }}/codekeeper-release
+          EXPECTED_INTEGRITY: ${{ needs.build.outputs.integrity }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
+          EXPECTED_SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+          EXPECTED_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          tarball="$RELEASE_ROOT/codekeeper-$EXPECTED_VERSION.tgz"
+          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | base64)"
+          test "$actual_integrity" = "$EXPECTED_INTEGRITY"
+          stage="$RUNNER_TEMP/codekeeper-release-publish-input"
+          mkdir "$stage"
+          tar -xzf "$tarball" --strip-components=1 -C "$stage"
+          node "$stage/bin/verify-package.mjs" \
+            --root "$stage" \
+            --expected-name codekeeper \
+            --expected-version "$EXPECTED_VERSION" \
+            --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
+            --expected-source-commit "$EXPECTED_SOURCE_COMMIT"
+      - name: Publish exact verified tarball with npm provenance
+        env:
+          TARBALL: ${{ runner.temp }}/codekeeper-release/codekeeper-${{ needs.build.outputs.version }}.tgz
+        run: npm publish "$TARBALL" --access public --provenance --ignore-scripts
+      - name: Re-fetch and verify public registry receipt
+        env:
+          EXPECTED_INTEGRITY: ${{ needs.build.outputs.integrity }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
+          EXPECTED_SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+          EXPECTED_VERSION: ${{ needs.build.outputs.version }}
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+          NPM_CONFIG_UPDATE_NOTIFIER: "false"
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/codekeeper-public-npmrc
+        run: |
+          set -euo pipefail
+          : > "$NPM_CONFIG_USERCONFIG"
+          receipt="$RUNNER_TEMP/codekeeper-registry-receipt.json"
+          npm view "codekeeper@$EXPECTED_VERSION" version dist.integrity dist.tarball --json > "$receipt"
+          RECEIPT="$receipt" EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
+          import { readFileSync } from "node:fs";
+          const receipt = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
+          if (receipt.version !== process.env.EXPECTED_VERSION || receipt?.dist?.integrity !== process.env.EXPECTED_INTEGRITY || typeof receipt?.dist?.tarball !== "string" || !receipt.dist.tarball.startsWith("https://registry.npmjs.org/")) throw new Error("public npm registry receipt does not match the published release");
+          '
+          download="$RUNNER_TEMP/codekeeper-registry-download"
+          mkdir "$download"
+          npm pack --json --ignore-scripts --pack-destination "$download" "codekeeper@$EXPECTED_VERSION" > "$download/report.json"
+          actual_tarball="$download/codekeeper-$EXPECTED_VERSION.tgz"
+          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$actual_tarball" | base64)"
+          test "$actual_integrity" = "$EXPECTED_INTEGRITY"
+          stage="$RUNNER_TEMP/codekeeper-registry-stage"
+          mkdir "$stage"
+          tar -xzf "$actual_tarball" --strip-components=1 -C "$stage"
+          node "$stage/bin/verify-package.mjs" \
+            --root "$stage" \
+            --expected-name codekeeper \
+            --expected-version "$EXPECTED_VERSION" \
+            --expected-integrity "$EXPECTED_INTEGRITY" \
+            --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
+            --expected-source-commit "$EXPECTED_SOURCE_COMMIT"
+      - name: Run fresh exact-version install canary
+        env:
+          EXPECTED_VERSION: ${{ needs.build.outputs.version }}
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+          NPM_CONFIG_UPDATE_NOTIFIER: "false"
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/codekeeper-canary-npmrc
+        run: |
+          set -euo pipefail
+          : > "$NPM_CONFIG_USERCONFIG"
+          canary="$RUNNER_TEMP/codekeeper-release-canary"
+          mkdir "$canary"
+          (
+            cd "$canary"
+            npm install --ignore-scripts --no-audit --no-fund "codekeeper@$EXPECTED_VERSION"
+            installed_version="$(node --input-type=module -e 'import packageManifest from "./node_modules/codekeeper/package.json" with { type: "json" }; process.stdout.write(packageManifest.version)')"
+            test "$installed_version" = "$EXPECTED_VERSION"
+            ./node_modules/.bin/codekeeper --help
+          )
+      - name: Create immutable-tag GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+          TARBALL: ${{ runner.temp }}/codekeeper-release/codekeeper-${{ needs.build.outputs.version }}.tgz
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^codekeeper-v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]
+          test "${RELEASE_TAG#codekeeper-v}" = "$RELEASE_VERSION"
+          test -f "$TARBALL"
+          sidecar="$TARBALL.sha512"
+          sha512sum "$TARBALL" > "$sidecar"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.ref' | grep -Fx "refs/tags/$RELEASE_TAG"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && {
+            echo "GitHub release already exists for $RELEASE_TAG" >&2
+            exit 1
+          }
+          gh release create "$RELEASE_TAG" "$TARBALL" "$sidecar" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Codekeeper $RELEASE_VERSION" \
+            --notes "Verified package source: $SOURCE_COMMIT" \
+            --verify-tag

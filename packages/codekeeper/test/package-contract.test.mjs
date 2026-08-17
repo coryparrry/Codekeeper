@@ -7,7 +7,7 @@ import { PACKAGE_SOURCE_REPOSITORY, PACKAGE_SOURCE_REPOSITORY_URL } from "../src
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
-const REVIEWED_SOURCE_CHECKPOINT = "59a0ccc6dae19d12b65a6ea1418d1db0231d6ac7";
+const REVIEWED_SOURCE_CHECKPOINT = "1fb76533618eeeca4eaff30dbaae42926d68fdea";
 const PRODUCTION_SOURCE_PATHS = [
   "tools/codekeeper",
   ".github/workflows/codekeeper-assistant.yml",
@@ -64,19 +64,21 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.check, /npm run test:unit/);
 });
 
-test("published installer leads while recovery tarball preserves the exact npm pack receipt", async () => {
+test("unpublished installer docs fail closed while local packing preserves the exact receipt", async () => {
   const installGuide = await readFile(new URL("../../../INSTALL.md", import.meta.url), "utf8");
   const packageReadme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   const bashBlocks = [...installGuide.matchAll(/```bash\n(.*?)\n```/gs)].map(([, block]) => block);
-  assert.match(bashBlocks[0] ?? "", /^npx --yes codekeeper@0\.2\.0 init$/);
   const rootTarballCommands = bashBlocks.find((block) => block.includes("PACK_REPORT=")) ?? "";
+  const localInstallCommands = bashBlocks.find((block) => block.includes("codekeeper init --current-package")) ?? "";
   assert.match(rootTarballCommands, /npm install --global npm@12\.0\.2/);
   assert.match(rootTarballCommands, /PACK_REPORT=.*npm run --silent package:pack -- --destination/);
-  assert.match(rootTarballCommands, /npm exec --package .*-- codekeeper init --current-package --package-integrity "\$PACKAGE_INTEGRITY"/);
-  assert.match(packageReadme, /npx --yes codekeeper@0\.2\.0 init/);
-  assert.match(packageReadme, /npx --yes codekeeper@0\.2\.0 update/);
+  assert.match(localInstallCommands, /npm exec --package "\$PACKAGE_DESTINATION\/\$PACKAGE_FILE" --/);
+  assert.match(localInstallCommands, /codekeeper init --current-package --package-integrity "\$PACKAGE_INTEGRITY"/);
   assert.match(packageReadme, /codekeeper init --current-package --package-integrity 'sha512-\.\.\.'/);
-  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /unpublished|private acceptance|Do not assume npx/i);
+  assert.match(installGuide, /npm view codekeeper@0\.2\.0.*E404/s);
+  assert.match(packageReadme, /not currently available from npm/i);
+  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /npx --yes codekeeper@0\.2\.0 (?:init|update)/);
+  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /codekeeper@0\.2\.0 is published/i);
   const extractionScripts = [...rootTarballCommands.matchAll(/node -e '\n([\s\S]*?)\n' "\$PACK_REPORT"/g)].map(([, script]) => script);
   assert.equal(extractionScripts.length, 2);
   const keyedReport = {
