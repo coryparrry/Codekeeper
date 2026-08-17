@@ -144,12 +144,14 @@ function canonicalDisplayCommand(command) {
   return `/codekeeper ${normalizeOwnerCommand(command) ?? command}`;
 }
 
-export function commandsForSurface(surface) {
+export function commandsForSurface(surface, { repairAvailable = true } = {}) {
   const normalizedSurface = COMMAND_SURFACES.includes(surface)
     ? surface
     : "issue";
-  return OWNER_COMMAND_DEFINITIONS.filter((definition) =>
-    definition.surfaces.includes(normalizedSurface),
+  return OWNER_COMMAND_DEFINITIONS.filter(
+    (definition) =>
+      definition.surfaces.includes(normalizedSurface) &&
+      (repairAvailable || definition.command !== "repair"),
   );
 }
 
@@ -165,11 +167,11 @@ function compatibilityText(definitions = OWNER_COMMAND_DEFINITIONS, surface = nu
   return aliases.length ? `Compatibility aliases: ${aliases.join(", ")}.` : "";
 }
 
-export function renderOwnerCommandHelp(surface = "issue") {
+export function renderOwnerCommandHelp(surface = "issue", options = {}) {
   const normalizedSurface = COMMAND_SURFACES.includes(surface)
     ? surface
     : "issue";
-  const commands = commandsForSurface(normalizedSurface);
+  const commands = commandsForSurface(normalizedSurface, options);
   const rows = commands.map(
     (definition) =>
       `- \`/codekeeper ${definition.command}\` — ${definition.description}`,
@@ -198,12 +200,14 @@ export function renderOwnerCommandStatus({
   outcome,
   config,
   surface = "issue",
+  repairAvailable = true,
 }) {
   const active = labels(issue).filter(
     (label) => config?.labels && Object.hasOwn(config.labels, label),
   );
   const canonical = normalizeOwnerCommand(command) ?? command;
-  const available = commandsForSurface(surface)
+  const commands = commandsForSurface(surface, { repairAvailable });
+  const available = commands
     .map((definition) => `\`/codekeeper ${definition.command}\``)
     .join(", ");
   return [
@@ -218,7 +222,7 @@ export function renderOwnerCommandStatus({
     "",
     `Available commands: ${available}.`,
     "",
-    compatibilityText(commandsForSurface(surface), surface),
+    compatibilityText(commands, surface),
   ].join("\n");
 }
 

@@ -47,7 +47,7 @@
     },
     {
       "path": "src/lib/commands.mjs",
-      "sha256": "b4715abd991449e3760402671ac427ad2c4f8e098007b8527cf5ad97bc4a20b9"
+      "sha256": "7d42d55c60a154f7e3fea97c5c12794ea2b0db9daf7684b7772c927c8d829f24"
     },
     {
       "path": "src/lib/config.mjs",
@@ -79,11 +79,11 @@
     },
     {
       "path": "src/lib/owner-commands.mjs",
-      "sha256": "0a6831f56dcbc85c8d4837277fe78c836c82443e4e0a6bd8d1c66858a5fc0403"
+      "sha256": "63812bf8310f85b6a28fdcb78f5eaf3bf1166a8065bad55ed733dcaf178f6d7a"
     },
     {
       "path": "src/lib/policy-validator.mjs",
-      "sha256": "78719be95291aa1db4fbe1659c124169be4b8d1c93e3cd65f3bddb8811642aad"
+      "sha256": "17a63b32ecf2f82f78fc219b4912b6f7415c85fc586d06e579f103379ba5d17a"
     },
     {
       "path": "src/lib/policy.mjs",
@@ -107,7 +107,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "e56b290eafdd9b74804ab013b623de22adff5c3fc7399534a498d0ffe1f1affa"
+      "sha256": "53f482172d85272153091a614475f7ccbac262abb8f4f36b3e83ddf3ea7b3d94"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",

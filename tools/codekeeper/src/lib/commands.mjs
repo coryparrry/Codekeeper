@@ -126,6 +126,16 @@ function assertEligibleReviewPull(pull, number, repository) {
   return pull;
 }
 
+function assertEligibleRepairPull(pull, number, repository, defaultBranch) {
+  assertEligibleReviewPull(pull, number, repository);
+  if (pull.base.ref !== defaultBranch) {
+    throw new Error(
+      `PR #${number} targets ${pull.base.ref}; /codekeeper repair supports default-branch pull requests only. Stacked pull requests support review only; repair is unavailable.`,
+    );
+  }
+  return pull;
+}
+
 async function dispatchAfterUnpausing(
   github,
   issue,
@@ -200,10 +210,14 @@ export async function runOwnerCommand({
   let outcome;
 
   if (canonicalCommand === "help") {
+    const repairAvailable =
+      !issue.pull_request ||
+      (await github.getPull(number)).base?.ref ===
+        config.repository.defaultBranch;
     await github.upsertMarkerComment(
       number,
       COMMAND_STATUS_MARKER,
-      renderOwnerCommandHelp(surface),
+      renderOwnerCommandHelp(surface, { repairAvailable }),
       automationIdentity,
     );
     return {
@@ -321,7 +335,12 @@ export async function runOwnerCommand({
       authorization_mode: "owner",
       requested_by: actor,
     };
-    const pull = await github.getPull(number);
+    const pull = assertEligibleRepairPull(
+      await github.getPull(number),
+      number,
+      repository,
+      config.repository.defaultBranch,
+    );
     payload.head_sha = pull.head.sha;
     if (event.comment?.pull_request_review_id) {
       const threads = await github.listPullReviewThreads(number);
@@ -367,6 +386,10 @@ export async function runOwnerCommand({
   }
 
   issue = await github.getIssue(number);
+  const repairAvailable =
+    !issue.pull_request ||
+    (await github.getPull(number)).base?.ref ===
+      config.repository.defaultBranch;
   await github.upsertMarkerComment(
     number,
     COMMAND_STATUS_MARKER,
@@ -376,6 +399,7 @@ export async function runOwnerCommand({
       outcome,
       config,
       surface,
+      repairAvailable,
     }),
     automationIdentity,
   );

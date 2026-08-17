@@ -1636,7 +1636,7 @@ test("issue publication accepts its exact managed-label mutation and preserves a
   const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
   const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
   let updatedAt = context.issue.updatedAt;
-  let labels = [{ name: "external" }, { name: "priority p1" }, { name: "deferred" }];
+  let labels = [{ name: "external" }, { name: "priority p1" }, { name: "deferred" }, { name: "codekeeper:needs-information" }];
   let markerPublished = false;
   const issue = () => ({
     number: 7, title: "Report", body: `Details\n${deferredReviewMarker("f".repeat(64))}`, state: "open", updated_at: updatedAt,
@@ -1669,6 +1669,46 @@ test("issue publication accepts its exact managed-label mutation and preserves a
       "codekeeper:priority-p3",
       "codekeeper:ready",
     ].sort());
+  } finally {
+    restoreGitHub();
+    if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = previousLogin;
+    if (previousId === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_ID = previousId;
+    await rm(artifactDirectory, { recursive: true, force: true });
+  }
+});
+
+test("issue publication adds the managed needs-information label from triage", async () => {
+  const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-needs-information-test-"));
+  const configSha256 = "b".repeat(64);
+  const context = { mode: "issue", repository: "owner/repository", configSha256, runId: "7013", runUrl: "https://github.com/owner/repository/actions/runs/7013", issue: { number: 7, title: "Report", updatedAt: "2026-08-13T11:00:00Z" } };
+  const result = {
+    mode: "issue", summary: "More information is needed.", type: "bug", priority: "p3", labels: [], actionable: false,
+    missingInformation: ["Which version contains this behavior?"], duplicateOf: null, duplicateConfidence: "none", implementationRecommendation: "manual",
+    decision: {
+      required: true,
+      question: "Which version contains this behavior?",
+      rationale: "Version is required to reproduce the report.",
+      options: [{
+        label: "Provide the version",
+        description: "Reply with the version where the behavior occurs.",
+        recommended: true,
+      }],
+    },
+    comment: "Please provide the version."
+  };
+  const restoreGitHub = replaceGitHubMethods({
+    async beginIssueMutation() { return { number: 7, title: "Report", state: "open", labels: [] }; },
+  });
+  const previousLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  const previousId = process.env.CODEKEEPER_AUTOMATION_BOT_ID;
+  try {
+    process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = identity.login;
+    process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
+    const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
+    const published = await publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token", dryRun: true });
+    assert.ok(published.desiredLabels.includes("codekeeper:needs-information"));
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;

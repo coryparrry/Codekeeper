@@ -43,6 +43,12 @@ test("owner help is scoped to issue, pull request, and review-thread surfaces", 
   const issueHelp = renderOwnerCommandHelp("issue");
   const pullHelp = renderOwnerCommandHelp("pull-request");
   const threadHelp = renderOwnerCommandHelp("review-thread");
+  const stackedPullHelp = renderOwnerCommandHelp("pull-request", {
+    repairAvailable: false,
+  });
+  const stackedThreadHelp = renderOwnerCommandHelp("review-thread", {
+    repairAvailable: false,
+  });
 
   assert.match(issueHelp, /Commands available on this issue/);
   assert.match(issueHelp, /`\/codekeeper implement`/);
@@ -55,6 +61,10 @@ test("owner help is scoped to issue, pull request, and review-thread surfaces", 
   assert.match(threadHelp, /`\/codekeeper defer`/);
   assert.match(threadHelp, /`\/codekeeper repair`/);
   assert.match(threadHelp, /`\/codekeeper fix` → `\/codekeeper repair`/);
+  assert.doesNotMatch(stackedPullHelp, /`\/codekeeper repair`/);
+  assert.doesNotMatch(stackedPullHelp, /`\/codekeeper fix`/);
+  assert.doesNotMatch(stackedThreadHelp, /`\/codekeeper repair`/);
+  assert.doesNotMatch(stackedThreadHelp, /`\/codekeeper fix`/);
   assert.match(threadHelp, /Free-form requests are ignored/);
   assert.deepEqual(
     commandsForSurface("not-a-surface").map((definition) => definition.command),
@@ -84,10 +94,12 @@ test("status uses the same canonical commands and reports the active surface", (
     outcome: "Automatic work is paused.",
     config: { labels: { "codekeeper:paused": {} } },
     surface: "pull-request",
+    repairAvailable: false,
   });
   assert.match(status, /\| Surface \| pull request \|/);
   assert.match(status, /\| Command \| `\/codekeeper pause` \|/);
   assert.match(status, /`codekeeper:paused`/);
   assert.match(status, /`\/codekeeper stop` → `\/codekeeper pause`/);
   assert.doesNotMatch(status, /Available commands:.*triage/);
+  assert.doesNotMatch(status, /Available commands:.*repair/);
 });

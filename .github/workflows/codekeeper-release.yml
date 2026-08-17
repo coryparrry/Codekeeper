@@ -180,7 +180,43 @@ jobs:
             --expected-version "$EXPECTED_VERSION" \
             --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
             --expected-source-commit "$EXPECTED_SOURCE_COMMIT"
+      - name: Determine npm publication state
+        id: publication-state
+        env:
+          EXPECTED_INTEGRITY: ${{ needs.build.outputs.integrity }}
+          EXPECTED_VERSION: ${{ needs.build.outputs.version }}
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+          NPM_CONFIG_UPDATE_NOTIFIER: "false"
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/codekeeper-public-npmrc
+        run: |
+          set -euo pipefail
+          : > "$NPM_CONFIG_USERCONFIG"
+          receipt="$RUNNER_TEMP/codekeeper-prepublish-receipt.json"
+          error_report="$RUNNER_TEMP/codekeeper-prepublish-error.json"
+          set +e
+          npm view "codekeeper@$EXPECTED_VERSION" version dist.integrity --json > "$receipt" 2> "$error_report"
+          status=$?
+          set -e
+          if (( status == 0 )); then
+            RECEIPT="$receipt" EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const receipt = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
+            if (receipt?.version !== process.env.EXPECTED_VERSION || receipt?.dist?.integrity !== process.env.EXPECTED_INTEGRITY) throw new Error("existing public npm release does not match the verified tarball");
+            '
+            printf 'should_publish=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RECEIPT="$receipt" node --input-type=module -e '
+          import { readFileSync } from "node:fs";
+          const error = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
+          if (error?.error?.code !== "E404") throw new Error("npm lookup failed without a confirmed E404");
+          '
+          printf 'should_publish=true\n' >> "$GITHUB_OUTPUT"
       - name: Publish exact verified tarball with npm provenance
+        if: steps.publication-state.outputs.should_publish == 'true'
         env:
           TARBALL: ${{ runner.temp }}/codekeeper-release/codekeeper-${{ needs.build.outputs.version }}.tgz
         run: npm publish "$TARBALL" --access public --provenance --ignore-scripts
@@ -258,12 +294,34 @@ jobs:
           sidecar="$TARBALL.sha512"
           sha512sum "$TARBALL" > "$sidecar"
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.ref' | grep -Fx "refs/tags/$RELEASE_TAG"
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && {
-            echo "GitHub release already exists for $RELEASE_TAG" >&2
-            exit 1
-          }
-          gh release create "$RELEASE_TAG" "$TARBALL" "$sidecar" \
+          release="$RUNNER_TEMP/codekeeper-github-release.json"
+          release_error="$RUNNER_TEMP/codekeeper-github-release-error.txt"
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$release" 2> "$release_error"; then
+            # JavaScript template literals are intentionally passed verbatim.
+            # shellcheck disable=SC2016
+            RELEASE="$release" RELEASE_TAG="$RELEASE_TAG" RELEASE_VERSION="$RELEASE_VERSION" SOURCE_COMMIT="$SOURCE_COMMIT" node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const release = JSON.parse(readFileSync(process.env.RELEASE, "utf8"));
+            const expectedTitle = `Codekeeper ${process.env.RELEASE_VERSION}`;
+            const expectedBody = `Verified package source: ${process.env.SOURCE_COMMIT}`;
+            if (release?.tag_name !== process.env.RELEASE_TAG || release?.name !== expectedTitle || release?.body !== expectedBody || release?.draft !== false || release?.prerelease !== false) throw new Error("existing GitHub release metadata does not match the verified release");
+            '
+          else
+            grep -Fx 'gh: Not Found (HTTP 404)' "$release_error"
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Codekeeper $RELEASE_VERSION" \
+              --notes "Verified package source: $SOURCE_COMMIT" \
+              --verify-tag
+          fi
+          gh release upload "$RELEASE_TAG" "$TARBALL" "$sidecar" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Codekeeper $RELEASE_VERSION" \
-            --notes "Verified package source: $SOURCE_COMMIT" \
-            --verify-tag
+            --clobber
+          download="$RUNNER_TEMP/codekeeper-github-release-assets"
+          mkdir "$download"
+          tarball_name="$(basename "$TARBALL")"
+          sidecar_name="$(basename "$sidecar")"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$tarball_name" --dir "$download"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$sidecar_name" --dir "$download"
+          cmp -s "$TARBALL" "$download/$tarball_name"
+          cmp -s "$sidecar" "$download/$sidecar_name"
