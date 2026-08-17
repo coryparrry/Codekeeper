@@ -7,6 +7,7 @@ import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
 import { readJson, writeJson, writeText } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, automaticRepairMarker, parseIssueTriageStateMarker, sha256 } from "./markers.mjs";
 import { parseOwnerCommand } from "./owner-commands.mjs";
+import { evaluateReviewEligibility } from "./policy.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject } from "./pr-repair.mjs";
 import { completeReviewFeedback } from "./review-feedback.mjs";
 import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
@@ -42,14 +43,18 @@ function isConfiguredOwner(config, actor) {
   return normalizedActor.length > 0 && configuredOwnerLogins(config).has(normalizedActor);
 }
 
-function ensureSameRepositoryPullRequest(event, repository) {
+function pullRequestFromEvent(event, repository) {
   const pull = event.pull_request;
   if (!pull) throw new Error("Pull request payload is missing");
   if (pull.head?.repo?.full_name !== repository || (pull.base?.repo?.full_name && pull.base.repo.full_name !== repository)) {
-    throw new Error("Fork pull requests are not eligible for Codekeeper automation");
+    throw new Error("Fork pull requests are unsupported; manual review is required");
   }
-  if (pull.draft) throw new Error("Draft pull requests are not eligible for automatic review");
   return pull;
+}
+
+function changedFileLimitReason(error) {
+  const message = String(error?.message ?? "");
+  return message.startsWith("Review changed-file context exceeds configured maximum of ") ? message : null;
 }
 
 async function writeBundle({ directory, context, prompt, workspacePrompt, schema, agentProfile }) {
@@ -319,7 +324,7 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
       throw new Error(`PR #${number} moved before the requested review started`);
     }
   }
-  const pull = ensureSameRepositoryPullRequest(event, repository);
+  const pull = pullRequestFromEvent(event, repository);
   const feedbackEvent = Boolean(event.review || event.comment?.pull_request_review_id || event.client_payload?.review_feedback);
   if (feedbackEvent && event.action !== "codekeeper_review" && config.automation.reviewFeedbackTriage !== true) {
     throw new Error("Automatic review-feedback triage is off in the Codekeeper policy");
@@ -342,10 +347,14 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
       body: boundedText(pull.body, 20000),
       author: boundedText(pull.user?.login, 256, "…"),
       url: boundedText(pull.html_url, 2048, "…"),
+      state: pull.state,
+      draft: pull.draft === true,
       baseRef: boundedText(pull.base?.ref ?? config.repository.defaultBranch, 512, "…"),
       headRef: boundedText(pull.head?.ref, 512, "…"),
       baseSha: pull.base?.sha,
       headSha: pull.head?.sha,
+      baseRepository: boundedText(pull.base?.repo?.full_name, 512, "…"),
+      headRepository: boundedText(pull.head?.repo?.full_name, 512, "…"),
       labels: boundedLabels(pull.labels),
       reviewFeedbackFrozen: feedbackEvent,
       reviewFeedback
@@ -361,7 +370,7 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     truncated: false,
     disabled: true
   };
-  const [changeSummary, diff] = await Promise.all([
+  const [changeResult, diffResult] = await Promise.allSettled([
     boundedChangedFileStatsBetween(
       context.pullRequest.baseSha,
       context.pullRequest.headSha,
@@ -375,6 +384,21 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
         )
       : disabledDiff
   ]);
+  const reviewReasons = [];
+  let changeSummary;
+  if (changeResult.status === "fulfilled") {
+    changeSummary = changeResult.value;
+  } else {
+    const reason = changedFileLimitReason(changeResult.reason);
+    if (!reason) throw changeResult.reason;
+    reviewReasons.push(reason);
+    changeSummary = { files: [], additions: 0, deletions: 0, changedLines: 0, largestFileChangedLines: 0 };
+  }
+  if (diffResult.status === "rejected") throw diffResult.reason;
+  const diff = diffResult.value;
+  if (diff.truncated) {
+    reviewReasons.push(`Review diff is ${diff.bytes} bytes; configured context maximum is ${config.review.maximumDiffBytes}`);
+  }
   context.pullRequest.changedFiles = changeSummary.files.map((file) => file.path);
   context.pullRequest.changeSummary = {
     changedFiles: changeSummary.files.length,
@@ -384,6 +408,7 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     largestFileChangedLines: changeSummary.largestFileChangedLines
   };
   context.pullRequest.diff = diff;
+  context.pullRequest.eligibility = evaluateReviewEligibility({ config, pullRequest: context.pullRequest, repository, reviewReasons });
   context.pullRequest.reasoningEscalation = reviewReasoningEscalation(config, context);
   await writeBundle({
     directory,

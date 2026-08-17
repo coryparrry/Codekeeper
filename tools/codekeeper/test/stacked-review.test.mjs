@@ -7,6 +7,7 @@ import test from "node:test";
 import { GitHubClient } from "../src/lib/github.mjs";
 import { prepareReview } from "../src/lib/prepare.mjs";
 import { evaluateAutoMerge } from "../src/lib/policy.mjs";
+import { reviewPublicationDisposition } from "../src/lib/publish.mjs";
 
 const config = JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8"),
@@ -23,19 +24,19 @@ function currentSha() {
   return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 }
 
-function pullState({ baseRef = "stack/base", autoMerge = null } = {}) {
+function pullState({ baseRef = "stack/base", autoMerge = null, draft = false, headRepository = repository } = {}) {
   return {
     number: 7,
     node_id: "PR_7",
     state: "open",
-    draft: false,
+    draft,
     auto_merge: autoMerge,
     labels: [],
     user: { login: "codekeeper[bot]", type: "Bot" },
     head: {
       sha: "a".repeat(40),
       ref: "automation/codekeeper/review",
-      repo: { full_name: repository },
+      repo: { full_name: headRepository },
     },
     base: {
       sha: "b".repeat(40),
@@ -142,6 +143,25 @@ test("review publication admits same-repository stacked bases while repair retai
   );
 });
 
+test("live publication disposition wins over stale sealed draft state", () => {
+  const context = {
+    repository,
+    pullRequest: { number: 7, headSha: "a".repeat(40), baseSha: "b".repeat(40), baseRef: "main", draft: false },
+  };
+  assert.equal(reviewPublicationDisposition(context, pullState({ baseRef: "main", draft: true })).disposition, "manual");
+  assert.equal(
+    reviewPublicationDisposition(
+      { ...context, pullRequest: { ...context.pullRequest, draft: true } },
+      pullState({ baseRef: "main" }),
+    ).disposition,
+    "eligible",
+  );
+  assert.equal(
+    reviewPublicationDisposition(context, pullState({ baseRef: "main", headRepository: "fork/repository" })).disposition,
+    "unsupported",
+  );
+});
+
 test("stacked review policy cannot enable auto-merge even for a trusted automation branch", () => {
   const decision = evaluateAutoMerge({
     config: { ...config, merge: { ...config.merge, enabled: true } },
@@ -162,7 +182,7 @@ test("stacked review policy cannot enable auto-merge even for a trusted automati
   assert.ok(decision.reasons.some((reason) => reason.includes("configured default branch")));
 });
 
-test("same-repository stacked reviews prepare, while forks and drafts remain unsupported", async (t) => {
+test("same-repository stacked and draft reviews prepare, while forks remain unsupported", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-stacked-review-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const common = {
@@ -187,16 +207,15 @@ test("same-repository stacked reviews prepare, while forks and drafts remain uns
       eventPath: await reviewEvent(root, eventPull({ headRepository: "fork/example" })),
       directory: path.join(root, "fork"),
     }),
-    /Fork pull requests are not eligible/,
+    /Fork pull requests are unsupported; manual review is required/,
   );
-  await assert.rejects(
-    prepareReview({
-      ...common,
-      eventPath: await reviewEvent(root, eventPull({ draft: true })),
-      directory: path.join(root, "draft"),
-    }),
-    /Draft pull requests are not eligible/,
-  );
+  const draft = await prepareReview({
+    ...common,
+    eventPath: await reviewEvent(root, eventPull({ draft: true })),
+    directory: path.join(root, "draft"),
+  });
+  assert.equal(draft.pullRequest.eligibility.readOnlyReview.eligible, true);
+  assert.equal(draft.pullRequest.eligibility.reportPublication.eligible, false);
 });
 
 test("review workflows admit stacked publication but keep forks, drafts, and merge queues manual", async () => {
@@ -211,7 +230,10 @@ test("review workflows admit stacked publication but keep forks, drafts, and mer
   assert.match(reusable, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
   assert.doesNotMatch(reusable, /github\.event\.pull_request\.base\.ref == github\.event\.repository\.default_branch/);
   assert.match(reusable, /Stacked pull request target \$BASE_REF is review-publication-only/);
-  assert.doesNotMatch(reusable, /Only default-branch pull request targets are supported/);
+  assert.match(reusable, /Fork pull requests are unsupported; manual review is required/);
+  assert.match(reusable, /PUBLISH_DISPOSITION/);
+  assert.doesNotMatch(reusable, /PUBLISH_RESULT:|IS_DRAFT:|github-actions%5Bbot%5D/);
+  assert.match(reusable, /merge_group does not provide/);
   assert.doesNotMatch(reusable, /merge_group:/);
   assert.match(caller, /stacked PRs receive review publication/);
   assert.doesNotMatch(caller, /merge_group:/);
