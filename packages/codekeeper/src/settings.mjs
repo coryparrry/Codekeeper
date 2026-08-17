@@ -62,7 +62,7 @@ const STANDARD_DESCRIPTIONS = Object.freeze({
   "issues.closeExactDuplicates": "Close an issue when Codekeeper finds an exact open duplicate.",
   "issues.closeResolvedIssues": "Close an issue after its linked fix is merged.",
   "merge.enabled": "Let Codekeeper merge a pull request after every required check passes.",
-  "automation.maintenanceSchedule": "Set when scheduled repository maintenance runs. This value uses GitHub cron syntax.",
+  "automation.maintenanceSchedule": "Set when scheduled report-only maintenance runs. This value uses GitHub cron syntax; only a manual dispatch can choose live maintenance.",
   "ai.tracing.enabled": "Send OpenAI trace data when an OpenAI trace key is available."
 });
 
@@ -343,8 +343,8 @@ export function settingsRows(settings, { advanced = false } = {}) {
     ...(settings.modes.includes("maintain") ? [{
       id: "maintenance-scheduled",
       section: "automation",
-      label: "Scheduled maintenance",
-      description: "Run repository maintenance on its cron schedule. Turn this off to keep manual maintenance available through workflow_dispatch.",
+      label: "Scheduled report-only maintenance",
+      description: "Run report-only repository maintenance on its cron schedule. Turn this off to keep manual maintenance available through workflow_dispatch, where you can explicitly choose dry or live mode.",
       kind: "boolean",
       value: settings.maintenanceScheduled !== false
     }] : []),
