@@ -101,7 +101,7 @@ jobs:
           PACK_REPORT: ${{ runner.temp }}/codekeeper-pack-report.json
         run: |
           set -euo pipefail
-          # shellcheck disable=SC2016 -- JavaScript template literals must remain literal shell input.
+          # shellcheck disable=SC2016
           RELEASE_ROOT="$RELEASE_ROOT" PACK_REPORT="$PACK_REPORT" EXPECTED_SOURCE_COMMIT="$(git rev-parse HEAD)" node --input-type=module -e '
           import { createHash } from "node:crypto";
           import { lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
