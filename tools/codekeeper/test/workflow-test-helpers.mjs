@@ -17,6 +17,8 @@ export const actionPins = Object.freeze({
   "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
   "actions/attest-build-provenance": "1e69f48acb82d1966a394da916b4c1698aa569d6",
   "actions/create-github-app-token": "bcd2ba49218906704ab6c1aa796996da409d3eb1",
+  "actions/dependency-review-action": "a1d282b36b6f3519aa1f3fc636f609c47dddb294",
+  "github/codeql-action": "5595ccaf912efad79be6eef63a5619ff05969be3",
   "reviewdog/action-actionlint": "d63ba7532e0942965320cd8d73cbae4c7b3c5283",
   "peter-evans/create-pull-request": "22a9089034f40e5a961c8808d113e2c98fb63676",
 });

@@ -11,10 +11,11 @@
     "governance:check": "node scripts/repository-governance.mjs --validate && node --test scripts/repository-governance.test.mjs",
     "release:tag:check": "node --test scripts/release-tag-integrity.test.mjs",
     "source:manifest:check": "node --test scripts/verify-source-manifest.test.mjs",
+    "security:check": "node --test scripts/generate-sbom.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
-    "check": "npm run lint && npm run format:check && npm run governance:check && npm run release:tag:check && npm run source:manifest:check && bash scripts/release-source.sh --verify-worktree"
+    "check": "npm run lint && npm run format:check && npm run governance:check && npm run release:tag:check && npm run source:manifest:check && npm run security:check && bash scripts/release-source.sh --verify-worktree"
   },
   "devDependencies": {
     "eslint": "10.8.1",
