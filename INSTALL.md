@@ -1,19 +1,21 @@
 # Install Codekeeper in a GitHub.com repository
 
-## Current availability
+The usual path is the published package. From a clean checkout of the target
+repository's default branch:
 
-Codekeeper is currently evaluated from a local, verified tarball. On
-2026-08-17, `npm view codekeeper@0.2.0` returned `E404`; there is no public npm
-installation command to copy from this document. A future release must publish
-its exact version, integrity, provenance, and release notes before an npm
-command is documented here.
+```bash
+npx codekeeper@0.2.0 init
+```
 
-This guide is for experienced maintainers evaluating the source checkout on a
-private or same-repository target. It requires Node.js 22+, Git, and an
-authenticated current GitHub CLI. The installer refuses unsafe repository
-state; it creates a setup pull request and never merges it. Its generated
-runtime workflows acquire the pinned package from npm, so the current E404
-prevents a local installer test from becoming a proven live installation.
+You need Node.js 22+, Git, an authenticated current GitHub CLI, and permission
+to administer the repository. The installer refuses unsafe repository state. It
+creates a setup pull request and never merges it.
+
+This page is the source-checkout path: pack an exact local tarball from this
+repository when you are evaluating a commit, recovering an install, or cannot
+use the registry package. Treat the tarball and its SHA-512 receipt as one
+pair. Do not substitute an integrity value from another build or registry
+response.
 
 ## 1. Build an exact local package
 
@@ -52,8 +54,7 @@ process.stdout.write(entry.integrity);
 ```
 
 The pack command enforces the repository's pinned npm version and release
-snapshot checks. Treat the local package and its receipt as one pair; do not
-substitute an integrity value from another file or registry response.
+snapshot checks.
 
 ## 2. Run the guided installer
 
@@ -114,7 +115,7 @@ otherwise read-only; metadata remains read-only. These are still real
 permissions, so review the exact final authority summary before creating the
 App.
 
-## 4. Record the current proof boundary
+## 4. Verify after merge
 
 After the setup PR merges, run the same local package command from a clean,
 current checkout:
@@ -124,31 +125,30 @@ npm exec --package "$PACKAGE_DESTINATION/$PACKAGE_FILE" -- \
   codekeeper verify
 ```
 
-After a public package release, `verify` checks the installed catalog, required
-GitHub setting names, App identity and scope where the credential can prove
-them, package acquisition, and the credential-free policy check. A controlled
-maintenance dry run is optional; it cannot prove App publication because dry
-runs do not mint the App token.
+`verify` checks the installed catalog, required GitHub setting names, App
+identity and scope where the credential can prove them, package acquisition,
+and the credential-free policy check. A controlled maintenance dry run is
+optional; it cannot prove App publication because dry runs do not mint the App
+token.
 
-At the current E404 boundary, this command cannot prove package acquisition or
-a live workflow. Treat that as an expected release blocker, not a successful
-installation. Do not make the review gate required or enable scheduled or
-code-changing automation from this local setup alone.
+A local tarball proves this checkout. The installed runtime still acquires the
+pinned npm package by version and SHA-512. If that package is not the one you
+packed, treat package acquisition as unproven until the receipts match.
 
-After the package is available, open a small same-repository pull request
-against the default branch and confirm the App-authored summary, labels, and
-gate result before requiring the review gate in branch protection. Keep normal
+After a successful install, open a small same-repository pull request against
+the default branch and confirm the App-authored summary, labels, and gate
+result before requiring the review gate in branch protection. Keep normal
 build, test, approval, and deployment checks independently required.
 
 ## Manual installation and recovery
 
-The local tarball installer is the supported evaluation path. Manual copying of
-workflows is useful only for audit or recovery and has more provenance and
-update risk. If it is unavoidable, copy the policy, selected caller templates,
-matching reusable workflows, and package-acquisition action together; pin every
-caller to the exact local package version and SHA-512 receipt. Never copy a
-source commit, an unverified tarball, or a package integrity from a different
-build into an adopter repository.
+The local tarball installer is the supported source-evaluation path. Manual
+copying of workflows is useful only for audit or recovery and has more
+provenance and update risk. If it is unavoidable, copy the policy, selected
+caller templates, matching reusable workflows, and package-acquisition action
+together; pin every caller to the exact local package version and SHA-512
+receipt. Never copy a source commit, an unverified tarball, or a package
+integrity from a different build into an adopter repository.
 
 ## Supported limits
 

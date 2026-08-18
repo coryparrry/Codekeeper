@@ -69,8 +69,9 @@ an estimated spend into a guaranteed ceiling. Set organisational billing limits
 outside Codekeeper until per-run budget controls and public measurements are
 available.
 
-Current local-package evaluation also cannot establish a real workflow cost or
-latency result while the generated runtime package is unavailable from npm.
+A local tarball evaluation does not establish a real workflow cost or latency
+result. Measure spend from live GitHub Actions and provider billing after a
+controlled adopter run.
 
 ## Before enabling a mutation
 
