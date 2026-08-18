@@ -43,17 +43,17 @@ export function getAgentConfig(config, mode, { context } = {}) {
   if (!AGENT_MODES.includes(mode)) throw new Error(`Unknown Codekeeper agent mode: ${mode}`);
   const configuredAgent = config.ai.agents[mode];
   const escalation = mode === "review" ? reviewReasoningEscalation(config, context) : null;
+  const escalationPolicy = config.review?.reasoningEscalation;
   const agent = escalation?.escalated
     ? {
         ...configuredAgent,
         provider: escalation.provider,
         model: escalation.model,
         effort: escalation.effort,
-        workspace: {
-          ...configuredAgent.workspace,
-          model: escalation.model,
-          effort: escalation.effort
-        }
+        modelSettings: structuredClone(escalationPolicy?.modelSettings ?? {}),
+        workspace: escalationPolicy?.workspace
+          ? { ...configuredAgent.workspace, ...escalationPolicy.workspace }
+          : configuredAgent.workspace
       }
     : configuredAgent;
   return {

@@ -8,6 +8,7 @@ import { readJson, readOptionalRegularJson, writeJson } from "./io.mjs";
 import { sha256 } from "./markers.mjs";
 import { CODEX_BIN } from "./runtime-paths.mjs";
 import { providerCompatibleJsonSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
+import { assertNoPublicSecurityFindings, isSecurityFindingWithheld } from "./security-containment.mjs";
 
 export { providerCompatibleJsonSchema } from "./schemas.mjs";
 
@@ -581,6 +582,7 @@ export async function runConfiguredAgent({
   let lastError;
   let lastFailureStage = "provider-run";
   let lastFailureAttempt = 0;
+  let securityWithholdingError = null;
   try {
     if (!apiKey || !String(apiKey).trim()) {
       lastFailureStage = "api-key";
@@ -706,6 +708,7 @@ export async function runConfiguredAgent({
           }
         };
       } catch (error) {
+        if (isSecurityFindingWithheld(error)) throw error;
         lastError = error;
         lastFailureAttempt = attempt;
         if (attempt >= agent.maximumAttempts || !retryableFailure(lastFailureStage)) break;
@@ -723,6 +726,7 @@ export async function runConfiguredAgent({
     }
     throw new Error(`Codekeeper ${mode} agent failed after ${agent.maximumAttempts} attempt(s): ${lastError?.message ?? lastError}`);
   } catch (error) {
+    if (isSecurityFindingWithheld(error)) securityWithholdingError = error;
     reportDiagnostic(diagnostic, lastFailureStage, lastFailureAttempt);
     throw error;
   } finally {
@@ -731,6 +735,8 @@ export async function runConfiguredAgent({
         await closeProviderWithDeadline(modelProvider, turnTimeoutMs);
       } catch (error) {
         reportDiagnostic(diagnostic, "provider-close", lastFailureAttempt);
+        // eslint-disable-next-line no-unsafe-finally
+        if (securityWithholdingError) throw securityWithholdingError;
         // The provider close failure is the final runtime result at this boundary.
         // eslint-disable-next-line no-unsafe-finally
         throw error;
@@ -741,7 +747,9 @@ export async function runConfiguredAgent({
 
 function validatorForBundle(mode, config, context) {
   if (mode === "review") return (output) => validateReviewResult(output, config);
-  if (mode === "audit") return (output) => validateAuditResult(output, config);
+  if (mode === "audit") {
+    return (output) => assertNoPublicSecurityFindings(validateAuditResult(output, config));
+  }
   if (mode === "issue") return (output) => validateIssueResult(output, config);
   if (mode === "fix") {
     const target = context?.target;
@@ -835,6 +843,10 @@ function validatedWorkspaceRuntimeMetadata(metadata, mode, config, context) {
     const escalation = metadata.postReviewEscalation;
     const changedFiles = new Set(context?.pullRequest?.changedFiles ?? []);
     const escalationPolicy = config.review?.reasoningEscalation;
+    const escalationWorkspace = escalationPolicy?.workspace ?? {
+      model: settings.workspaceModel,
+      effort: settings.workspaceEffort
+    };
     const secondPass = metadata.passes[1];
     if (!escalation || !Array.isArray(escalation.reasons) || escalation.reasons.length === 0
       || escalation.reasons.some((reason) => !["blocking-finding:critical", "blocking-finding:high"].includes(reason))
@@ -843,7 +855,7 @@ function validatedWorkspaceRuntimeMetadata(metadata, mode, config, context) {
       || !Number.isSafeInteger(escalation.findingCount) || escalation.findingCount <= 0
       || metadata.mode !== "review" || settings.reasoningEscalation?.escalated
       || metadata.passes.length !== 2 || secondPass.tier !== "focused-max"
-      || secondPass.model !== escalationPolicy?.model || secondPass.effort !== escalationPolicy?.effort) {
+      || secondPass.model !== escalationWorkspace.model || secondPass.effort !== escalationWorkspace.effort) {
       throw new Error("Workspace runtime metadata has an invalid post-review escalation");
     }
   } else if (metadata.passes.some((pass) => pass.tier === "focused-max")) {
@@ -910,6 +922,7 @@ export async function runWorkspaceAgentFromBundle({
     timeout: DEFAULT_CODEX_MCP_TIMEOUT_SECONDS * 1000
   });
   await server.connect();
+  let securityWithholdingError = null;
   try {
     const toolNames = (await server.listTools()).map((tool) => tool.name);
     if (!toolNames.includes("codex")) {
@@ -942,15 +955,19 @@ export async function runWorkspaceAgentFromBundle({
     });
     let postReviewEscalation = null;
     const escalationPolicy = config.review?.reasoningEscalation;
-    const alreadyAtEscalationTier = settings.workspaceModel === escalationPolicy?.model
-      && settings.workspaceEffort === escalationPolicy?.effort;
+    const escalationWorkspace = escalationPolicy?.workspace ?? {
+      model: settings.workspaceModel,
+      effort: settings.workspaceEffort
+    };
+    const alreadyAtEscalationTier = settings.workspaceModel === escalationWorkspace.model
+      && settings.workspaceEffort === escalationWorkspace.effort;
     if (mode === "review" && escalationPolicy?.enabled && !alreadyAtEscalationTier) {
       postReviewEscalation = reviewResultEscalation(output, context);
       if (postReviewEscalation) {
         output = await runPass({
           passPrompt: buildFocusedMaxReviewPrompt(prompt, output, postReviewEscalation),
-          model: escalationPolicy.model,
-          effort: escalationPolicy.effort,
+          model: escalationWorkspace.model,
+          effort: escalationWorkspace.effort,
           tier: "focused-max"
         });
       }
@@ -965,8 +982,18 @@ export async function runWorkspaceAgentFromBundle({
     };
     await writeJson(path.join(path.dirname(resultPath), "workspace-runtime-metadata.json"), workspaceMetadata);
     return { completed: true, passes: passes.length, postReviewEscalated: postReviewEscalation !== null };
+  } catch (error) {
+    if (isSecurityFindingWithheld(error)) securityWithholdingError = error;
+    throw error;
   } finally {
-    await server.close();
+    try {
+      await server.close();
+    } catch (error) {
+      // eslint-disable-next-line no-unsafe-finally
+      if (securityWithholdingError) throw securityWithholdingError;
+      // eslint-disable-next-line no-unsafe-finally
+      throw error;
+    }
   }
 }
 
@@ -1080,6 +1107,9 @@ export async function runAgentFromBundle({
   }
   if (specialistResult === null && workspaceMetadata !== null) {
     throw new Error(`Codekeeper ${mode} received workspace runtime metadata without specialist evidence`);
+  }
+  if (mode === "audit" && specialistResult !== null) {
+    validateOutput(specialistResult);
   }
   if (specialistResult === null && mode !== "issue") {
     const output = validateOutput(deterministicNoWorkspaceResult(mode, context));

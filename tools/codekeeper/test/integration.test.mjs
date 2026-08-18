@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_PROFILE_BUNDLE_FILE, agentProfilePathForMode } from "../src/lib/agent-profiles.mjs";
 import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
+import { issueDispatchReceipt } from "../src/lib/commands.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges, runValidationCommands, validationEnvironment } from "../src/lib/git.mjs";
 import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
 import { validateFrozenReviewFeedback } from "../src/lib/validate.mjs";
@@ -713,15 +714,42 @@ test("manual issue preparation requires an explicitly authorised actor", async (
 
   const dispatchEvent = bundle(root, "issue-dispatch-event.json");
   const dispatchDirectory = bundle(root, "issue-dispatch-input");
+  const expectedReceipt = issueDispatchReceipt({
+    repository: "acme/example",
+    number: 5,
+    command: "triage",
+    actor: "repository-owner",
+    commentId: 70
+  });
   await writeFile(dispatchEvent, JSON.stringify({
     action: "codekeeper_issue",
     repository: { full_name: "acme/example" },
-    client_payload: { number: 5, requested_by: "repository-owner" }
+    client_payload: {
+      number: 5,
+      requested_by: "repository-owner",
+      command_name: "triage",
+      command_request_id: expectedReceipt.requestId,
+      command_comment_id: 70,
+      command_receipt_comment_id: 71,
+      command_receipt_sha256: expectedReceipt.sha256
+    },
+    sender: { login: "codekeeper[bot]", id: 123, type: "Bot" }
   }), "utf8");
   const originalFetch = globalThis.fetch;
+  const originalBotLogin = process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+  process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = "codekeeper[bot]";
   globalThis.fetch = async (url) => new Response(JSON.stringify(
     String(url).endsWith("/graphql")
       ? closingPullRequestsResponse()
+      : String(url).endsWith("/issues/comments/71")
+        ? {
+          id: 71,
+          issue_url: "https://api.github.com/repos/acme/example/issues/5",
+          body: expectedReceipt.content,
+          created_at: "2026-08-17T10:00:00Z",
+          updated_at: "2026-08-17T10:00:00Z",
+          user: { login: "codekeeper[bot]", id: 123, type: "Bot" }
+        }
       : String(url).includes("/issues/5")
         ? { number: 5, title: "Example", body: "Details", html_url: "https://github.com/acme/example/issues/5", user: { login: "reporter" } }
         : []
@@ -741,6 +769,8 @@ test("manual issue preparation requires an explicitly authorised actor", async (
     assert.equal(prepared.triageMode, "manual");
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalBotLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
+    else process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN = originalBotLogin;
   }
 });
 

@@ -209,6 +209,34 @@ test("the real command runner sends a provider key only through child stdin", as
   assert.doesNotMatch(JSON.stringify(child), new RegExp(secret));
 });
 
+test("command runner rejects delayed credential-input failure after an immediate successful close", async () => {
+  const runner = createCommandRunner({
+    spawnImpl() {
+      const child = new EventEmitter();
+      child.stdin = {
+        writable: true,
+        destroy() {},
+        end() {},
+        write() {}
+      };
+      child.kill = () => true;
+      queueMicrotask(() => child.emit("close", 0, null));
+      return child;
+    }
+  });
+
+  await assert.rejects(
+    runner.run("gh", ["secret", "set", "CODEKEEPER_APP_PRIVATE_KEY"], {
+      timeoutMs: null,
+      provideInput: async () => {
+        await new Promise((resolve) => process.nextTick(resolve));
+        throw new Error("test-only delayed input failure");
+      }
+    }),
+    (error) => error.code === "COMMAND_INPUT_FAILED"
+  );
+});
+
 test("command runner bounds captured output and requireSuccess rejects failure, timeout, or truncation", async () => {
   const runner = createCommandRunner();
   const large = await runner.run(process.execPath, ["-e", "process.stdout.write('x'.repeat(140000))"]);

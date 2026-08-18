@@ -1,7 +1,15 @@
 import { repairMarker } from "./markers.mjs";
+import { redactCredentialShapedValues } from "./security-containment.mjs";
+
+function neutralizeUntrustedMentions(value) {
+  return value.replace(
+    /(^|[^A-Za-z0-9._%+-])@([A-Za-z0-9](?:[A-Za-z0-9_-]{0,99})(?:\/[A-Za-z0-9](?:[A-Za-z0-9_-]{0,99}))?)/g,
+    "$1@\u200b$2"
+  );
+}
 
 function safeMarkdown(value) {
-  return String(value ?? "")
+  return neutralizeUntrustedMentions(redactCredentialShapedValues(value))
     .replace(/<!--\s*codekeeper:/gi, "&lt;!-- codekeeper:")
     .replace(
       /\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?[ \t]+((?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https?:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:issues|pull)\/\d+)/gi,
@@ -10,6 +18,22 @@ function safeMarkdown(value) {
 }
 
 export const sanitizeMarkdown = safeMarkdown;
+
+export function sanitizePublicTitle(value, maximum = 256) {
+  const truncated = safeMarkdown(value)
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .slice(0, maximum);
+  let openCodeIndex = -1;
+  for (let index = 0; index < truncated.length; index += 1) {
+    if (truncated[index] !== "`" || truncated[index - 1] === "\\") continue;
+    openCodeIndex = openCodeIndex === -1 ? index : -1;
+  }
+  return openCodeIndex === -1
+    ? truncated
+    : truncated.slice(0, openCodeIndex).trimEnd();
+}
 
 const GENERATED_WORKFLOW_PATHS = new Set([
   ".github/workflows/codekeeper-assistant.yml",
@@ -59,6 +83,12 @@ function safeTableCell(value) {
   return safeMarkdown(value)
     .replace(/[\r\n\t]+/g, " ")
     .replaceAll("|", "\\|");
+}
+
+function trustedFrozenIdentity(value) {
+  return String(value ?? "unknown")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim();
 }
 
 function findingList(findings) {
@@ -227,7 +257,7 @@ ${safeMarkdown(finding.proposedAction)}
 
 export function renderDeferredIssue({ feedback, pullRequest, sources, marker, runUrl = "" }) {
   const sourceLinks = sources.length
-    ? sources.map((source) => `- [${safeMarkdown(source.sourceKey)}](${source.url}) — ${safeMarkdown(source.author || "unknown")}`).join("\n")
+    ? sources.map((source) => `- [${safeMarkdown(source.sourceKey)}](${source.url}) — ${trustedFrozenIdentity(source.author)}`).join("\n")
     : "- The original review source is no longer linkable.";
   const run = runUrl ? `\n- Review run: ${runUrl}` : "";
   return `## Deferred outcome
@@ -272,7 +302,7 @@ ${changed}
 
 ## Validation
 
-${validationSummary || "Validation is delegated to repository CI and Xcode Cloud where applicable."}
+${validationSummary || "- No repository-specific validation commands were configured."}
 
 ${links}
 

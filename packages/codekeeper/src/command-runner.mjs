@@ -389,8 +389,27 @@ export function createCommandRunner({
         }
 
         let inputFailed = false;
-        if (provideInput) {
-          Promise.resolve().then(() => provideInput((chunk) => {
+        let inputSettled = !provideInput;
+        let closeResult = null;
+        const settleClosedCommand = () => {
+          if (settled || closeResult === null || !inputSettled) return;
+          settled = true;
+          clearTimers();
+          if (inputFailed) {
+            reject(new InstallerError("The credential input was cancelled or failed to send safely.", { code: "COMMAND_INPUT_FAILED" }));
+            return;
+          }
+          resolve(Object.freeze({
+            status: closeResult.status ?? 1,
+            signal: closeResult.signal,
+            timedOut,
+            stdout: Buffer.concat(stdout).toString("utf8"),
+            stderr: Buffer.concat(stderr).toString("utf8"),
+            truncated: stdoutState.truncated || stderrState.truncated
+          }));
+        };
+        const inputPromise = provideInput
+          ? Promise.resolve().then(() => provideInput((chunk) => {
             if (typeof chunk !== "string" || !chunk || /[\r\n\u0000]/.test(chunk)) {
               throw new TypeError("Credential input must be a nonempty single-line string");
             }
@@ -402,8 +421,12 @@ export function createCommandRunner({
             inputFailed = true;
             child.stdin?.destroy();
             child.kill("SIGTERM");
-          });
-        }
+          })
+          : Promise.resolve();
+        inputPromise.finally(() => {
+          inputSettled = true;
+          settleClosedCommand();
+        });
 
         const timer = timeoutMs === null ? null : setTimeout(() => {
           timedOut = true;
@@ -426,20 +449,8 @@ export function createCommandRunner({
         });
         child.once("close", (status, signal) => {
           if (settled) return;
-          settled = true;
-          clearTimers();
-          if (inputFailed) {
-            reject(new InstallerError("The credential input was cancelled or failed to send safely.", { code: "COMMAND_INPUT_FAILED" }));
-            return;
-          }
-          resolve(Object.freeze({
-            status: status ?? 1,
-            signal,
-            timedOut,
-            stdout: Buffer.concat(stdout).toString("utf8"),
-            stderr: Buffer.concat(stderr).toString("utf8"),
-            truncated: stdoutState.truncated || stderrState.truncated
-          }));
+          closeResult = { status, signal };
+          settleClosedCommand();
         });
       });
     }

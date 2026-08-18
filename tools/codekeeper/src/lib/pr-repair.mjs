@@ -23,6 +23,15 @@ export { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepai
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
 const SHA256 = /^[0-9a-f]{64}$/i;
+const REPAIR_PUBLICATION_PHASE = Object.freeze({
+  PREPARED: "prepared",
+  COMMIT_CREATED: "commit-created",
+  PUSH_ATTEMPTED: "push-attempted",
+  PUSH_CONFIRMED: "push-confirmed",
+  PR_REVALIDATED: "pr-revalidated",
+  THREADS_RECONCILED: "threads-reconciled",
+  COMPLETE: "complete"
+});
 
 function requiredText(value, name) {
   const normalized = String(value ?? "").trim();
@@ -132,12 +141,42 @@ async function exactPatch({ artifactDirectory, manifest, context, config }) {
   return { files: policy.files, stagePaths: changes.files.flatMap((file) => [file.path, file.sourcePath].filter(Boolean)) };
 }
 
-async function publishFailureComment(github, context, target, error, automationIdentity) {
+function remoteReadSummary(result, resource) {
+  if (result.status === "rejected") {
+    const reason = sanitizeMarkdown(String(result.reason?.message ?? result.reason).replace(/[\r\n\t]+/g, " ").slice(0, 500));
+    return `${resource} read failed (${reason})`;
+  }
+  if (!result.value) return `${resource} is missing`;
+  const commitSha = resource === "PR" ? result.value.head?.sha : result.value.commit?.sha;
+  return `${resource} head is ${COMMIT_SHA.test(String(commitSha ?? "")) ? `\`${commitSha}\`` : "unavailable"}`;
+}
+
+async function rereadPushedRepairState(github, target) {
+  const [pull, branch] = await Promise.allSettled([
+    github.getPull(target.number),
+    github.getBranch(target.headRef)
+  ]);
+  return `Direct GitHub re-read: ${remoteReadSummary(pull, "PR")}; ${remoteReadSummary(branch, "branch")}.`;
+}
+
+function postPushFailure(error, publication) {
+  const failure = new Error(
+    `The repair commit ${publication.commitSha} was pushed, but final GitHub reconciliation is incomplete: ${error.message}`,
+    { cause: error }
+  );
+  failure.code = "CODEKEEPER_PR_REPAIR_RECONCILIATION_INCOMPLETE";
+  return failure;
+}
+
+async function publishFailureComment(github, context, target, error, automationIdentity, publication) {
   const reason = sanitizeMarkdown(String(error?.message ?? error).replace(/[\r\n\t]+/g, " ").slice(0, 2000));
+  const body = publication.remoteState
+    ? `The repair commit \`${publication.commitSha}\` was pushed, but final GitHub reconciliation is incomplete. ${reason} ${publication.remoteState}`
+    : `Codekeeper did not update this pull request. ${reason}`;
   await github.upsertMarkerComment(
     target.number,
     fixRunMarker(context.runId),
-    `Codekeeper did not update this pull request. ${reason}`,
+    body,
     automationIdentity
   );
 }
@@ -161,6 +200,11 @@ export async function publishPullRequestRepair({
 }) {
   const target = frozenPullRepairTarget(context, config);
   const evidencePolicy = repairEvidencePolicy(context, config);
+  const publication = {
+    phase: REPAIR_PUBLICATION_PHASE.PREPARED,
+    commitSha: null,
+    remoteState: null
+  };
   const pull = await github.beginPullRepairMutation({
     repository: context.repository,
     target,
@@ -194,14 +238,19 @@ export async function publishPullRequestRepair({
       message: "fix: apply owner-requested pull request repair",
       paths: patch.stagePaths
     });
+    publication.commitSha = commitSha;
+    publication.phase = REPAIR_PUBLICATION_PHASE.COMMIT_CREATED;
+    publication.phase = REPAIR_PUBLICATION_PHASE.PUSH_ATTEMPTED;
     await github.mutatePullHeadIfCurrent(commitSha, () =>
       gitOperations.pushHeadToBranch(target.headRef, github.token)
     );
+    publication.phase = REPAIR_PUBLICATION_PHASE.PUSH_CONFIRMED;
     const updatedPull = assertLivePullRepairTarget(
       await github.getPull(target.number, { expectedHeadSha: commitSha }),
       target,
       { expectedHeadSha: commitSha }
     );
+    publication.phase = REPAIR_PUBLICATION_PHASE.PR_REVALIDATED;
     let resolvedReviewThreadIds = [];
     let reviewThreadWarning = null;
     try {
@@ -225,6 +274,8 @@ export async function publishPullRequestRepair({
     } catch (error) {
       reviewThreadWarning = `The repair commit was pushed, but review-thread reconciliation was incomplete: ${sanitizeMarkdown(error.message)}`;
     }
+    publication.phase = REPAIR_PUBLICATION_PHASE.THREADS_RECONCILED;
+    publication.phase = REPAIR_PUBLICATION_PHASE.COMPLETE;
     return {
       updated: true,
       pullRequest: target.number,
@@ -238,13 +289,19 @@ export async function publishPullRequestRepair({
       dryRun: false
     };
   } catch (error) {
+    let reportedError = error;
     if (!dryRun && error.code !== "CODEKEEPER_PAUSED") {
       try {
-        await publishFailureComment(github, context, target, error, automationIdentity);
+        if (publication.phase === REPAIR_PUBLICATION_PHASE.PUSH_CONFIRMED ||
+            publication.phase === REPAIR_PUBLICATION_PHASE.PR_REVALIDATED) {
+          publication.remoteState = await rereadPushedRepairState(github, target);
+          reportedError = postPushFailure(error, publication);
+        }
+        await publishFailureComment(github, context, target, error, automationIdentity, publication);
       } catch (commentError) {
-        throw new Error(`${error.message}; failure comment could not be published: ${commentError.message}`, { cause: error });
+        throw new Error(`${reportedError.message}; failure comment could not be published: ${commentError.message}`, { cause: reportedError });
       }
     }
-    throw error;
+    throw reportedError;
   }
 }

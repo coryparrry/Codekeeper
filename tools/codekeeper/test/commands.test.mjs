@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   authorizeOwnerCommand,
   authorizeOwnerRequest,
+  issueDispatchReceipt,
   runOwnerCommand,
   parseCommand,
   parseMentionIntent,
@@ -711,6 +712,7 @@ test("a direct issue triage command queues the issue workflow through the assist
       repository: { full_name: "owner/repository" },
       issue: { number: 42 },
       comment: {
+        id: 700,
         body: "/codekeeper triage",
         author_association: "OWNER",
         user: { login: "repository-owner" },
@@ -723,6 +725,9 @@ test("a direct issue triage command queues the issue workflow through the assist
     upsertMarkerComment: GitHubClient.prototype.upsertMarkerComment,
   };
   const dispatches = [];
+  const operations = [];
+  let targetVersion = 0;
+  let workerSnapshot;
   GitHubClient.prototype.getIssue = async () => ({
     number: 42,
     state: "open",
@@ -731,8 +736,26 @@ test("a direct issue triage command queues the issue workflow through the assist
   GitHubClient.prototype.createRepositoryDispatch = async (
     eventType,
     payload,
-  ) => dispatches.push({ eventType, payload });
-  GitHubClient.prototype.upsertMarkerComment = async () => {};
+  ) => {
+    workerSnapshot = targetVersion;
+    operations.push("dispatch");
+    dispatches.push({ eventType, payload });
+  };
+  let receiptMarker;
+  GitHubClient.prototype.upsertMarkerComment = async (number, marker, body) => {
+    assert.equal(number, 42);
+    assert.match(marker, /^<!-- codekeeper:command-dispatch=[a-f0-9]{64} -->$/);
+    assert.match(body, /dispatch requested/i);
+    assert.match(
+      body,
+      /does not confirm that GitHub accepted or started a worker/i,
+    );
+    assert.doesNotMatch(body, /was queued|queued successfully/i);
+    receiptMarker = marker;
+    targetVersion += 1;
+    operations.push("receipt");
+    return { id: 701 };
+  };
   try {
     const result = await runOwnerCommand({
       eventPath,
@@ -748,12 +771,25 @@ test("a direct issue triage command queues the issue workflow through the assist
       result.outcome,
       "The issue was queued for owner-requested triage.",
     );
-    assert.deepEqual(dispatches, [
-      {
-        eventType: "codekeeper_issue",
-        payload: { number: 42, requested_by: "repository-owner" },
-      },
-    ]);
+    assert.deepEqual(operations, ["receipt", "dispatch"]);
+    assert.equal(targetVersion, workerSnapshot);
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].eventType, "codekeeper_issue");
+    assert.deepEqual(dispatches[0].payload, {
+      number: 42,
+      requested_by: "repository-owner",
+      command_request_id: receiptMarker.match(/[a-f0-9]{64}/)[0],
+      command_name: "triage",
+      command_comment_id: 700,
+      command_receipt_comment_id: 701,
+      command_receipt_sha256: issueDispatchReceipt({
+        repository: "owner/repository",
+        number: 42,
+        command: "triage",
+        actor: "repository-owner",
+        commentId: 700,
+      }).sha256,
+    });
   } finally {
     Object.assign(GitHubClient.prototype, originals);
     await rm(directory, { recursive: true, force: true });
@@ -771,6 +807,7 @@ test("an owner mention queues issue triage through the trusted assistant dispatc
       repository: { full_name: "owner/repository" },
       issue: { number: 42 },
       comment: {
+        id: 800,
         body: "@codekeeper triage",
         author_association: "OWNER",
         user: { login: "repository-owner" },
@@ -792,7 +829,7 @@ test("an owner mention queues issue triage through the trusted assistant dispatc
     eventType,
     payload,
   ) => dispatches.push({ eventType, payload });
-  GitHubClient.prototype.upsertMarkerComment = async () => {};
+  GitHubClient.prototype.upsertMarkerComment = async () => ({ id: 801 });
   try {
     const result = await runOwnerCommand({
       eventPath,
@@ -804,16 +841,196 @@ test("an owner mention queues issue triage through the trusted assistant dispatc
       automationIdentity: { login: "codekeeper[bot]", id: "123" },
     });
     assert.equal(result.command, "triage");
-    assert.deepEqual(dispatches, [
-      {
-        eventType: "codekeeper_issue",
-        payload: { number: 42, requested_by: "repository-owner" },
-      },
-    ]);
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].eventType, "codekeeper_issue");
+    assert.equal(dispatches[0].payload.number, 42);
+    assert.equal(dispatches[0].payload.requested_by, "repository-owner");
+    assert.equal(dispatches[0].payload.command_comment_id, 800);
+    assert.equal(dispatches[0].payload.command_receipt_comment_id, 801);
+    assert.match(dispatches[0].payload.command_request_id, /^[a-f0-9]{64}$/);
+    assert.equal(dispatches[0].payload.command_name, "triage");
+    assert.match(
+      dispatches[0].payload.command_receipt_sha256,
+      /^[a-f0-9]{64}$/,
+    );
   } finally {
     Object.assign(GitHubClient.prototype, originals);
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("issue implementation freezes after its immutable dispatch receipt", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-implement-interleaving-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        id: 900,
+        body: "/codekeeper implement",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    removeLabel: GitHubClient.prototype.removeLabel,
+    addLabels: GitHubClient.prototype.addLabels,
+    createRepositoryDispatch: GitHubClient.prototype.createRepositoryDispatch,
+    upsertMarkerComment: GitHubClient.prototype.upsertMarkerComment,
+  };
+  const operations = [];
+  let targetVersion = 0;
+  let workerSnapshot;
+  let dispatch;
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    labels: [{ name: "codekeeper:paused" }],
+  });
+  GitHubClient.prototype.removeLabel = async () => {
+    targetVersion += 1;
+    operations.push("unpause");
+  };
+  GitHubClient.prototype.addLabels = async () => {
+    throw new Error("a successful dispatch must not restore the pause label");
+  };
+  GitHubClient.prototype.upsertMarkerComment = async () => {
+    targetVersion += 1;
+    operations.push("receipt");
+    return { id: 901 };
+  };
+  GitHubClient.prototype.createRepositoryDispatch = async (
+    eventType,
+    payload,
+  ) => {
+    workerSnapshot = targetVersion;
+    operations.push("dispatch");
+    dispatch = { eventType, payload };
+  };
+  try {
+    const result = await runOwnerCommand({
+      eventPath,
+      config: {
+        automation: { ownerRequests: true },
+        repository: { ownerLogins: ["repository-owner"] },
+      },
+      token: "app-token",
+      automationIdentity: { login: "codekeeper[bot]", id: "123" },
+    });
+    assert.equal(result.command, "implement");
+    assert.equal(
+      result.outcome,
+      "The bounded owner-requested implementation was queued.",
+    );
+    assert.deepEqual(operations, ["receipt", "unpause", "dispatch"]);
+    assert.equal(targetVersion, workerSnapshot);
+    assert.equal(dispatch.eventType, "codekeeper_fix");
+    assert.equal(dispatch.payload.number, 42);
+    assert.equal(dispatch.payload.authorization_mode, "owner");
+    assert.equal(dispatch.payload.requested_by, "repository-owner");
+    assert.equal(dispatch.payload.command_comment_id, 900);
+    assert.equal(dispatch.payload.command_receipt_comment_id, 901);
+    assert.match(dispatch.payload.command_request_id, /^[a-f0-9]{64}$/);
+    assert.equal(dispatch.payload.command_name, "implement");
+    assert.match(dispatch.payload.command_receipt_sha256, /^[a-f0-9]{64}$/);
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ambiguous issue dispatch leaves only a non-definitive request receipt", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-ambiguous-dispatch-"),
+  );
+  const eventPath = path.join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { full_name: "owner/repository" },
+      issue: { number: 42 },
+      comment: {
+        id: 950,
+        body: "/codekeeper triage",
+        author_association: "OWNER",
+        user: { login: "repository-owner" },
+      },
+    }),
+  );
+  const originals = {
+    getIssue: GitHubClient.prototype.getIssue,
+    createRepositoryDispatch: GitHubClient.prototype.createRepositoryDispatch,
+    upsertMarkerComment: GitHubClient.prototype.upsertMarkerComment,
+  };
+  const receipts = [];
+  GitHubClient.prototype.getIssue = async () => ({
+    number: 42,
+    state: "open",
+    labels: [],
+  });
+  GitHubClient.prototype.upsertMarkerComment = async (number, marker, body) => {
+    receipts.push({ number, marker, body });
+    return { id: 951 };
+  };
+  GitHubClient.prototype.createRepositoryDispatch = async () => {
+    const error = new Error("repository dispatch response was lost");
+    error.githubMutationOutcome = "ambiguous";
+    throw error;
+  };
+  try {
+    await assert.rejects(
+      runOwnerCommand({
+        eventPath,
+        config: {
+          automation: { ownerRequests: true },
+          repository: { ownerLogins: ["repository-owner"] },
+        },
+        token: "app-token",
+        automationIdentity: { login: "codekeeper[bot]", id: "123" },
+      }),
+      /repository dispatch response was lost/,
+    );
+    assert.equal(receipts.length, 1);
+    assert.match(receipts[0].body, /dispatch requested/i);
+    assert.match(receipts[0].body, /does not confirm/i);
+    assert.doesNotMatch(receipts[0].body, /was queued|queued successfully/i);
+  } finally {
+    Object.assign(GitHubClient.prototype, originals);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a human issue change after worker preparation still invalidates stale implementation", async () => {
+  const worker = new GitHubClient({
+    token: "app-token",
+    repository: "owner/repository",
+  });
+  let liveIssue = {
+    number: 42,
+    state: "open",
+    updated_at: "2026-08-17T10:00:00Z",
+    labels: [],
+  };
+  worker.getIssue = async () => structuredClone(liveIssue);
+
+  await worker.beginIssueMutation({
+    issue: { number: 42, updatedAt: liveIssue.updated_at },
+  });
+  liveIssue = {
+    ...liveIssue,
+    updated_at: "2026-08-17T10:01:00Z",
+  };
+
+  await assert.rejects(
+    worker.assertMutationCurrent(),
+    /changed after implementation started; stale action will not publish/,
+  );
 });
 
 test("a root mention-based defer command cannot become its own feedback source", async () => {

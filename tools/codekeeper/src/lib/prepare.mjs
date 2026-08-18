@@ -1,6 +1,7 @@
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
+import { issueDispatchReceipt } from "./commands.mjs";
 import { reviewReasoningEscalation } from "./config.mjs";
 import { boundedChangedFileStatsBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
@@ -145,10 +146,13 @@ function boundedOwnerComments(comments, config) {
 
 const TRUSTED_ISSUE_COMMENT_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const ISSUE_CONVERSATION_MAXIMUM_COMMENTS = 40;
+const ISSUE_CONVERSATION_MAXIMUM_WINDOW_COMMENTS = ISSUE_CONVERSATION_MAXIMUM_COMMENTS + 1;
 const ISSUE_CONVERSATION_MAXIMUM_COMMENT_BODY = 4_000;
 
 function normalizedLogin(value) {
-  return String(value ?? "").trim().toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 function numericCommentId(value) {
@@ -182,7 +186,7 @@ function requireCommentShape(comment, name) {
   return { id, author, createdAt };
 }
 
-function issueConversation(comments, totalComments) {
+function issueConversation(comments, totalComments, { truncatedBefore = false } = {}) {
   const frozen = comments
     .map((comment) => {
       const { id, author, createdAt } = requireCommentShape(comment, `Issue comment ${comment?.id ?? "unknown"}`);
@@ -197,15 +201,22 @@ function issueConversation(comments, totalComments) {
         bodyTruncated: body.length !== comment.body.length
       };
     })
-    .sort((left, right) => compareCommentsByTime(
-      { id: left.id, created_at: left.createdAt, updated_at: left.updatedAt },
-      { id: right.id, created_at: right.createdAt, updated_at: right.updatedAt }
-    ));
+    .sort((left, right) =>
+      compareCommentsByTime(
+        { id: left.id, created_at: left.createdAt, updated_at: left.updatedAt },
+        {
+          id: right.id,
+          created_at: right.createdAt,
+          updated_at: right.updatedAt
+        }
+      )
+    );
   return {
     comments: frozen,
     includedComments: frozen.length,
     totalComments,
-    truncated: totalComments > frozen.length || frozen.some((comment) => comment.bodyTruncated)
+    truncatedBefore,
+    truncated: truncatedBefore || totalComments > frozen.length || frozen.some((comment) => comment.bodyTruncated)
   };
 }
 
@@ -217,13 +228,7 @@ async function configuredIssueTriageIdentity(github) {
     throw new Error("Comment-triggered triage requires the configured GitHub App bot login and client ID");
   }
   const [app, user] = await Promise.all([github.getApp(match[1]), github.getUser(login)]);
-  if (
-    normalizedLogin(app?.slug) !== match[1]
-    || String(app?.client_id ?? "") !== clientId
-    || normalizedLogin(user?.login) !== login
-    || user?.type !== "Bot"
-    || !numericCommentId(user?.id)
-  ) {
+  if (normalizedLogin(app?.slug) !== match[1] || String(app?.client_id ?? "") !== clientId || normalizedLogin(user?.login) !== login || user?.type !== "Bot" || !numericCommentId(user?.id)) {
     throw new Error("Configured GitHub App identity could not be verified for comment-triggered triage");
   }
   return { login, id: numericCommentId(user.id) };
@@ -234,6 +239,63 @@ function trustedIssueCommentAuthor(comment, issue) {
   if (!author) return false;
   if (author === normalizedLogin(issue?.user?.login)) return true;
   return TRUSTED_ISSUE_COMMENT_ASSOCIATIONS.has(String(comment?.author_association ?? "").toUpperCase());
+}
+
+async function verifiedIssueDispatchReceipt({ event, github, repository, number, actor, allowedCommands }) {
+  const payload = event?.client_payload;
+  const command = String(payload?.command_name ?? "")
+    .trim()
+    .toLowerCase();
+  if (!allowedCommands.includes(command)) {
+    throw new Error("Owner-command dispatch has an invalid issue command");
+  }
+  const requestedBy = String(payload?.requested_by ?? "").trim();
+  const commandCommentId = numericCommentId(payload?.command_comment_id);
+  const receiptCommentId = numericCommentId(payload?.command_receipt_comment_id);
+  if (!requestedBy || normalizedLogin(requestedBy) !== normalizedLogin(actor) || !commandCommentId || !receiptCommentId) {
+    throw new Error("Owner-command dispatch identity is incomplete");
+  }
+  const expected = issueDispatchReceipt({
+    repository,
+    number,
+    command,
+    actor: requestedBy,
+    commentId: commandCommentId
+  });
+  if (payload?.command_request_id !== expected.requestId || payload?.command_receipt_sha256 !== expected.sha256) {
+    throw new Error("Owner-command dispatch receipt identity is invalid");
+  }
+
+  const configuredLogin = normalizedLogin(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? process.env.GITHUB_ACTOR);
+  const senderId = numericCommentId(event?.sender?.id);
+  if (!configuredLogin || normalizedLogin(event?.sender?.login) !== configuredLogin || event?.sender?.type !== "Bot" || !senderId) {
+    throw new Error("Owner-command dispatch sender is not the configured GitHub App");
+  }
+
+  const receipt = (await github.request("GET", github.repoPath(`/issues/comments/${receiptCommentId}`))).data;
+  const receiptCreatedAt = validTimestamp(receipt?.created_at);
+  const receiptUpdatedAt = validTimestamp(receipt?.updated_at);
+  const expectedIssuePath = `/repos/${String(repository).toLowerCase()}/issues/${number}`;
+  let receiptIssuePath = "";
+  try {
+    receiptIssuePath = new URL(receipt?.issue_url).pathname.toLowerCase();
+  } catch {
+    // The exact issue URL is checked below.
+  }
+  const authorIdentity = { login: configuredLogin, id: senderId };
+  if (numericCommentId(receipt?.id) !== receiptCommentId || receiptIssuePath !== expectedIssuePath || !receiptCreatedAt || !receiptUpdatedAt || !isOwnedMarkerComment(receipt, expected.marker, authorIdentity) || receipt.body !== expected.content || sha256(receipt.body) !== expected.sha256) {
+    throw new Error("Owner-command dispatch receipt is not the exact immutable App receipt");
+  }
+  return {
+    command: expected.command,
+    requestId: expected.requestId,
+    commandCommentId,
+    receiptCommentId,
+    receiptSha256: expected.sha256,
+    receiptAuthor: authorIdentity,
+    receiptCreatedAt,
+    receiptUpdatedAt
+  };
 }
 
 async function freezeCommentTriggeredIssue({ event, github }) {
@@ -248,22 +310,28 @@ async function freezeCommentTriggeredIssue({ event, github }) {
   if (!issue || issue.pull_request || issue.number !== number || !Number.isSafeInteger(issue.comments) || issue.comments < 0) {
     throw new Error("Comment-triggered triage must target one current GitHub issue");
   }
-  const comments = await github.listRecentIssueComments(number, ISSUE_CONVERSATION_MAXIMUM_COMMENTS);
-  if (!Array.isArray(comments) || comments.length > ISSUE_CONVERSATION_MAXIMUM_COMMENTS || comments.length > issue.comments) {
+  const identity = await configuredIssueTriageIdentity(github);
+  const liveTrigger = await github.getIssueComment(eventCommentId);
+  requireCommentShape(liveTrigger, `Issue comment ${eventCommentId}`);
+  const eventAuthor = normalizedLogin(eventComment?.user?.login);
+  if (!eventAuthor || eventAuthor !== normalizedLogin(liveTrigger.user?.login) || String(eventComment?.body ?? "") !== String(liveTrigger.body ?? "")) {
+    throw new Error("Comment-triggered triage event no longer matches the current comment");
+  }
+  const recent = await github.listIssueCommentWindow(number, eventCommentId, ISSUE_CONVERSATION_MAXIMUM_COMMENTS);
+  if (!recent || !Array.isArray(recent.comments) || typeof recent.truncatedBefore !== "boolean" || typeof recent.truncatedAfter !== "boolean" || recent.comments.length > ISSUE_CONVERSATION_MAXIMUM_COMMENTS * 3 || recent.comments.length > issue.comments) {
     throw new Error("Comment-triggered triage received an invalid current issue conversation");
   }
+  const comments = recent.comments.sort(compareCommentsByTime);
   for (const comment of comments) requireCommentShape(comment, `Issue comment ${comment?.id ?? "unknown"}`);
   const trigger = comments.find((comment) => numericCommentId(comment?.id) === eventCommentId);
-  if (!trigger) throw new Error("Comment-triggered triage comment is not present in the bounded current conversation");
-  const eventAuthor = normalizedLogin(eventComment?.user?.login);
-  if (!eventAuthor || eventAuthor !== normalizedLogin(trigger.user?.login) || String(eventComment?.body ?? "") !== String(trigger.body ?? "")) {
+  if (!trigger || recent.triggerIncluded === false) {
+    throw new Error("Comment-triggered triage exceeded its bounded comment-retrieval budget before reaching the triggering comment");
+  }
+  if (normalizedLogin(trigger.user?.login) !== normalizedLogin(liveTrigger.user?.login) || String(trigger.body ?? "") !== String(liveTrigger.body ?? "") || commentTimestamp(trigger) !== commentTimestamp(liveTrigger)) {
     throw new Error("Comment-triggered triage event no longer matches the current comment");
   }
   const configuredBotLogin = normalizedLogin(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN);
-  if (
-    trigger?.user?.type === "Bot"
-    && normalizedLogin(trigger.user?.login) === configuredBotLogin
-  ) {
+  if (trigger?.user?.type === "Bot" && normalizedLogin(trigger.user?.login) === configuredBotLogin) {
     throw new Error("Codekeeper comments cannot trigger issue triage");
   }
   if (parseOwnerCommand(trigger.body, configuredBotLogin)) {
@@ -272,19 +340,14 @@ async function freezeCommentTriggeredIssue({ event, github }) {
   if (!trustedIssueCommentAuthor(trigger, issue)) {
     throw new Error("Comment-triggered triage requires the reporter or a trusted maintainer");
   }
-  const identity = await configuredIssueTriageIdentity(github);
-  if (
-    trigger?.user?.type === "Bot"
-    && normalizedLogin(trigger.user?.login) === identity.login
-    && String(trigger.user?.id ?? "") === identity.id
-  ) {
+  if (trigger?.user?.type === "Bot" && normalizedLogin(trigger.user?.login) === identity.login && String(trigger.user?.id ?? "") === identity.id) {
     throw new Error("Codekeeper comments cannot trigger issue triage");
   }
-  const ownedMarkers = comments
-    .filter((comment) => isOwnedMarkerComment(comment, ISSUE_TRIAGE_MARKER, identity))
-    .sort(compareCommentsByTime);
+  const ownedMarkers = comments.filter((comment) => isOwnedMarkerComment(comment, ISSUE_TRIAGE_MARKER, identity)).sort(compareCommentsByTime);
   const latestMarker = ownedMarkers.at(-1);
-  if (!latestMarker) throw new Error("Comment-triggered triage requires a current Codekeeper triage marker");
+  if (!latestMarker) {
+    throw new Error("Comment-triggered triage requires a current Codekeeper triage marker");
+  }
   const previousTriage = parseIssueTriageStateMarker(latestMarker.body);
   if (!previousTriage || previousTriage.missingInformation.length === 0) {
     throw new Error("Comment-triggered triage requires a validated Codekeeper missing-information result");
@@ -294,9 +357,17 @@ async function freezeCommentTriggeredIssue({ event, github }) {
   if (!Number.isFinite(triggerTime) || !Number.isFinite(markerTime) || triggerTime <= markerTime) {
     throw new Error("Comment-triggered triage comment is stale relative to the latest Codekeeper triage result");
   }
+  const markerIndex = comments.findIndex((comment) => numericCommentId(comment.id) === numericCommentId(latestMarker.id));
+  const triggerIndex = comments.findIndex((comment) => numericCommentId(comment.id) === eventCommentId);
+  const conversation = comments.slice(markerIndex, triggerIndex + 1);
+  if (markerIndex < 0 || triggerIndex <= markerIndex || conversation.length > ISSUE_CONVERSATION_MAXIMUM_WINDOW_COMMENTS) {
+    throw new Error("Comment-triggered triage conversation exceeds the bounded comment window");
+  }
   return {
     issue,
-    conversation: issueConversation(comments, issue.comments),
+    conversation: issueConversation(conversation, issue.comments, {
+      truncatedBefore: recent.truncatedBefore || markerIndex > 0
+    }),
     previousTriage: {
       ...previousTriage,
       markerCommentId: numericCommentId(latestMarker.id),
@@ -464,10 +535,20 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   const event = await readJson(eventPath);
   const repository = repositoryFromEvent(event);
   const github = new GitHubClient({ token, repository });
+  let ownerCommandDispatch = null;
   if (!event.issue && event.action === "codekeeper_issue") {
     const number = Number(event.client_payload?.number);
     if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Issue dispatch has no valid issue number");
+    if (triageMode !== "manual") throw new Error("Owner-command issue dispatch requires manual triage mode");
     event.issue = await github.getIssue(number);
+    ownerCommandDispatch = await verifiedIssueDispatchReceipt({
+      event,
+      github,
+      repository,
+      number,
+      actor,
+      allowedCommands: ["review", "triage"]
+    });
   }
   const commentTriggered = event.action === "created" && Boolean(event.comment);
   const continuation = commentTriggered
@@ -489,6 +570,7 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
     ...runMetadata({ toolingSha, configSha256 }),
     agentProfile: agentProfile.metadata,
     runUrl: runUrl(repository),
+    ownerCommandDispatch,
     issue: {
       number: issue.number,
       title: boundedText(issue.title, 512, "…"),
@@ -517,7 +599,7 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
   return context;
 }
 
-export async function prepareFix({ targetNumber, actor, authorizationMode = "owner", expectedHead = "", reviewThreadIds = [], directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
+export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, targetNumber, actor, authorizationMode = "owner", expectedHead = "", reviewThreadIds = [], directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
   const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   if (!["owner", "policy"].includes(authorizationMode)) {
     throw new Error("Codekeeper fix authorization mode must be owner or policy");
@@ -540,6 +622,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
   let target;
   let baseSha;
   let subject;
+  let ownerCommandDispatch = null;
   if (issue.pull_request) {
     const pull = await github.getPull(targetNumber);
     if (pull.number !== targetNumber || pull.state !== "open") throw new Error(`PR #${targetNumber} is not open`);
@@ -607,6 +690,22 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     };
     target.subjectSha256 = sha256(JSON.stringify(frozenSubject));
   } else {
+    if (eventPath) {
+      const event = await readJson(eventPath);
+      if (event.action === "codekeeper_fix") {
+        if (authorizationMode !== "owner" || Number(event.client_payload?.number) !== targetNumber) {
+          throw new Error("Owner-command issue implementation dispatch is invalid");
+        }
+        ownerCommandDispatch = await verifiedIssueDispatchReceipt({
+          event,
+          github,
+          repository,
+          number: targetNumber,
+          actor,
+          allowedCommands: ["implement"]
+        });
+      }
+    }
     if (authorizationMode === "policy" && !config.issues.allowAiImplementation) {
       throw new Error("AI issue implementation is disabled by issues.allowAiImplementation=false");
     }
@@ -643,6 +742,7 @@ export async function prepareFix({ targetNumber, actor, authorizationMode = "own
     defaultBranch: config.repository.defaultBranch,
     requestedBy: actor,
     authorizationMode,
+    ownerCommandDispatch,
     target,
     ...subject
   };

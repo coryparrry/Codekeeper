@@ -542,6 +542,37 @@ test("GHES pagination preserves the REST API path prefix", async () => {
   ]);
 });
 
+test("issue comment windows walk from the oldest REST page through the triggering comment without unsupported sort parameters", async () => {
+  const urls = [];
+  const github = client({
+    fetch: async (url) => {
+      const href = String(url);
+      urls.push(href);
+      if (href.endsWith("/issues/7/comments?per_page=40&page=1")) {
+        return new Response(JSON.stringify(Array.from({ length: 40 }, (_, index) => ({ id: index + 1 }))), {
+          headers: {
+            link: '<https://api.github.com/repos/owner/repository/issues/7/comments?per_page=40&page=2>; rel="next", <https://api.github.com/repos/owner/repository/issues/7/comments?per_page=40&page=2>; rel="last"'
+          }
+        });
+      }
+      return new Response(JSON.stringify([{ id: 41 }]), {
+        headers: {
+          link: '<https://api.github.com/repos/owner/repository/issues/7/comments?per_page=40&page=1>; rel="prev"'
+        }
+      });
+    }
+  });
+
+  const recent = await github.listIssueCommentWindow(7, 41, 40);
+  assert.deepEqual(recent.comments.map((comment) => comment.id).sort((left, right) => left - right), Array.from({ length: 41 }, (_, index) => index + 1));
+  assert.equal(recent.truncatedBefore, false);
+  assert.deepEqual(urls, [
+    "https://api.github.com/repos/owner/repository/issues/7/comments?per_page=40&page=1",
+    "https://api.github.com/repos/owner/repository/issues/7/comments?per_page=40&page=2"
+  ]);
+  assert.equal(urls.some((url) => url.includes("sort=") || url.includes("direction=")), false);
+});
+
 test("review replies update the App-owned marker in the originating thread", async () => {
   const marker = "<!-- codekeeper:deferred-reply=test -->";
   const requests = [];

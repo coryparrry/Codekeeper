@@ -9,6 +9,7 @@ const DEFAULT_RETRY_ATTEMPTS = 2;
 const MAX_RETRY_ATTEMPTS = 2;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_PAGINATION_PAGES = 1_000;
+const RECENT_ISSUE_COMMENT_PAGE_BUDGET = 3;
 const RETRYABLE_STATUS = new Set([408, 429]);
 const TRANSIENT_GRAPHQL_ERROR_TYPES = new Set(["INTERNAL", "INTERNAL_ERROR", "RATE_LIMITED", "SERVICE_UNAVAILABLE"]);
 const PULL_MUTATION_COMPENSATION = Symbol("pull-mutation-compensation");
@@ -980,6 +981,13 @@ export class GitHubClient {
     return (await this.request("GET", this.repoPath(`/pulls/comments/${commentId}`))).data;
   }
 
+  async getIssueComment(commentId) {
+    if (!/^[1-9][0-9]*$/.test(String(commentId ?? ""))) {
+      throw new Error("Issue comment ID must be a positive integer");
+    }
+    return (await this.request("GET", this.repoPath(`/issues/comments/${commentId}`))).data;
+  }
+
   async listPullReviewComments(number) {
     return this.paginate(this.repoPath(`/pulls/${number}/comments`));
   }
@@ -1029,14 +1037,78 @@ export class GitHubClient {
     return this.paginate(this.repoPath(`/issues/${number}/comments`));
   }
 
-  async listRecentIssueComments(number, limit) {
+  async listIssueCommentWindow(number, triggerCommentId, limit) {
     if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 100) {
       throw new Error("Recent issue comment limit must be between 1 and 100");
     }
-    return this.paginate(
-      this.repoPath(`/issues/${number}/comments?sort=created&direction=desc`),
-      { limit }
-    );
+    if (!Number.isSafeInteger(number) || number <= 0) {
+      throw new Error("Issue number must be a positive integer");
+    }
+    if (!/^[1-9][0-9]*$/.test(String(triggerCommentId ?? ""))) {
+      throw new Error("Triggering issue comment ID must be a positive integer");
+    }
+
+    // GitHub's per-issue comments endpoint is always chronological and does
+    // not support sort or direction. Inspect the oldest page for delayed
+    // events, then the final page and its predecessor for current events.
+    const apiBase = new URL(`${this.apiUrl}/`);
+    const firstUrl = this.repoPath(`/issues/${number}/comments?per_page=${limit}&page=1`);
+    const seen = new Set();
+    const comments = [];
+    let requests = 0;
+
+    const resolveTrustedPage = (url) => {
+      const resolved = url.startsWith("/")
+        ? new URL(`${this.apiUrl}${url}`)
+        : new URL(url, apiBase);
+      if (resolved.origin !== apiBase.origin || !resolved.pathname.startsWith(apiBase.pathname)) {
+        throw new Error("GitHub issue-comment pagination returned an untrusted URL");
+      }
+      return resolved.toString();
+    };
+
+    const fetchPage = async (url) => {
+      const resolved = resolveTrustedPage(url);
+      if (seen.has(resolved)) throw new Error("GitHub issue-comment pagination returned a repeated URL");
+      if (requests >= RECENT_ISSUE_COMMENT_PAGE_BUDGET) {
+        throw new Error(`GitHub issue-comment pagination exceeded ${RECENT_ISSUE_COMMENT_PAGE_BUDGET} pages`);
+      }
+      seen.add(resolved);
+      requests += 1;
+      const response = await this.request("GET", url);
+      if (!Array.isArray(response.data)) throw new Error(`Expected array from ${url}`);
+      return { comments: response.data, links: parseLinkHeader(response.headers.get("link")), resolved };
+    };
+
+    const first = await fetchPage(firstUrl);
+    comments.push(...first.comments);
+    const firstHasTrigger = first.comments.some((comment) => String(comment?.id ?? "") === String(triggerCommentId));
+    if (firstHasTrigger) {
+      return { comments, truncatedBefore: false, truncatedAfter: Boolean(first.links.next) };
+    }
+
+    const last = first.links.last;
+    if (!last || resolveTrustedPage(last) === first.resolved) {
+      return { comments, truncatedBefore: false, truncatedAfter: false, triggerIncluded: false };
+    }
+    const finalPage = await fetchPage(last);
+    const tailComments = [...finalPage.comments];
+    let previous = finalPage.links.prev ?? "";
+    if (previous && resolveTrustedPage(previous) !== first.resolved && requests < RECENT_ISSUE_COMMENT_PAGE_BUDGET) {
+      const previousPage = await fetchPage(previous);
+      tailComments.push(...previousPage.comments);
+      previous = previousPage.links.prev ?? "";
+    }
+    const triggerIncluded = tailComments.some((comment) => String(comment?.id ?? "") === String(triggerCommentId));
+    const tailTouchesFirst = Boolean(previous && resolveTrustedPage(previous) === first.resolved);
+    return {
+      comments: triggerIncluded
+        ? tailTouchesFirst ? [...comments, ...tailComments] : tailComments
+        : [...comments, ...tailComments],
+      truncatedBefore: triggerIncluded && !tailTouchesFirst,
+      truncatedAfter: false,
+      triggerIncluded
+    };
   }
 
   async listOpenPulls(limit = Number.POSITIVE_INFINITY) {

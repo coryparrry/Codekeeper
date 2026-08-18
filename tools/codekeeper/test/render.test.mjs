@@ -3,9 +3,45 @@ import assert from "node:assert/strict";
 import {
   normalizeReleaseOwnedPinReview,
   renderIssueTriage,
+  renderRepairPullRequest,
   renderReviewComment,
   sanitizeMarkdown,
 } from "../src/lib/render.mjs";
+
+test("repair pull requests render sealed validation evidence without generic CI claims", () => {
+  const candidateSha256 = "a".repeat(64);
+  const baseSha = "b".repeat(40);
+  const rendered = renderRepairPullRequest({
+    titleSummary: "Apply the bounded repair.",
+    body: "Updates the affected path.",
+    finding: null,
+    issueNumber: 7,
+    fingerprint: "f".repeat(64),
+    validationSummary: [
+      "- `npm test`: passed in 42 ms; stdout SHA-256 `" + "c".repeat(64) + "`",
+      `- Candidate SHA-256: \`${candidateSha256}\``,
+      `- Base commit: \`${baseSha}\``,
+    ].join("\n"),
+    files: ["src/example.mjs"],
+  });
+
+  assert.match(rendered, /`npm test`: passed/);
+  assert.match(rendered, new RegExp(candidateSha256));
+  assert.match(rendered, new RegExp(baseSha));
+  assert.doesNotMatch(rendered, /Xcode Cloud|delegated validation/i);
+
+  const withoutCommands = renderRepairPullRequest({
+    titleSummary: "Apply the bounded repair.",
+    body: "Updates the affected path.",
+    finding: null,
+    issueNumber: null,
+    fingerprint: "e".repeat(64),
+    validationSummary: "",
+    files: [],
+  });
+  assert.match(withoutCommands, /No repository-specific validation commands were configured/);
+  assert.doesNotMatch(withoutCommands, /Xcode Cloud|delegated validation/i);
+});
 
 test("review comment contains deterministic policy decision", () => {
   const markdown = renderReviewComment(
