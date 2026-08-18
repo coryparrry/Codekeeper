@@ -20,7 +20,7 @@ test("installed release inspection reads the validated repository manifest", asy
     `${JSON.stringify({
       version: 2,
       package: {
-        name: "codekeeper",
+        name: "@coryparry/codekeeper",
         version: "1.4.2",
         integrity: RELEASE_INTEGRITY
       },
@@ -70,7 +70,7 @@ test("a newer latest release resolves an exact receipt then runs that exact pack
     runner
   });
   assert.equal(status, 0);
-  assert.deepEqual(calls[0].args, ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "codekeeper@latest", "version", "dist.integrity", "--json"]);
+  assert.deepEqual(calls[0].args, ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "@coryparry/codekeeper@latest", "version", "dist.integrity", "--json"]);
   assert.deepEqual(calls[1].args, ["/verified/codekeeper/bin/codekeeper.mjs", "update", "--current-package", "--package-integrity", RELEASE_INTEGRITY]);
   assert.equal(calls[1].options.stdio, "inherit");
   assert.equal(calls[1].options.timeoutMs, null);
@@ -149,7 +149,7 @@ test("an exact update target resolves and launches only that verified release", 
     runner
   });
   assert.equal(status, 0);
-  assert.deepEqual(calls[0].args.slice(0, 3), ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "codekeeper@1.4.2"]);
+  assert.deepEqual(calls[0].args.slice(0, 3), ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "@coryparry/codekeeper@1.4.2"]);
   assert.deepEqual(calls[1].args, ["/verified/codekeeper/bin/codekeeper.mjs", "update", "--current-package", "--package-integrity", RELEASE_INTEGRITY]);
   assert.equal(calls[1].options.env.CODEKEEPER_UPDATE_EXPECTED_VERSION, "1.4.2");
 });
@@ -195,7 +195,7 @@ test("update check resolves metadata without staging or launching a package", as
   });
   assert.equal(status, 0);
   assert.equal(runner.calls.length, 1);
-  assert.deepEqual(runner.calls[0].args.slice(0, 3), ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "codekeeper@latest"]);
+  assert.deepEqual(runner.calls[0].args.slice(0, 3), ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "@coryparry/codekeeper@latest"]);
   assert.match(output.toString(), /Installed Codekeeper release: 1\.3\.0/);
   assert.match(output.toString(), /Latest published Codekeeper release: 1\.4\.2/);
   assert.match(output.toString(), /codekeeper update --to 1\.4\.2/);
@@ -362,7 +362,7 @@ test("the trusted launcher rejects changed tarball bytes for the same package ve
       downloadRoot,
       reportSource: JSON.stringify([
         {
-          name: "codekeeper",
+          name: "@coryparry/codekeeper",
           version: "1.4.2",
           integrity: expectedIntegrity,
           filename
@@ -385,7 +385,7 @@ for (const [description, wrapReport] of [
     const bytes = Buffer.from(`${description} package bytes`);
     const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
     await writeFile(path.join(downloadRoot, filename), bytes);
-    const entry = { name: "codekeeper", version: "1.4.2", integrity, filename };
+    const entry = { name: "@coryparry/codekeeper", version: "1.4.2", integrity, filename };
     assert.equal(
       await verifyDownloadedTarball({
         downloadRoot,
@@ -398,8 +398,8 @@ for (const [description, wrapReport] of [
 }
 
 for (const [description, report] of [
-  ["an array with multiple reports", [{ name: "codekeeper" }, { name: "codekeeper" }]],
-  ["an object with multiple reports", { codekeeper: { name: "codekeeper" }, other: { name: "other" } }]
+  ["an array with multiple reports", [{ name: "@coryparry/codekeeper" }, { name: "@coryparry/codekeeper" }]],
+  ["an object with multiple reports", { "@coryparry/codekeeper": { name: "@coryparry/codekeeper" }, other: { name: "other" } }]
 ]) {
   test(`the trusted launcher rejects ${description}`, async (t) => {
     await assert.rejects(
@@ -458,7 +458,7 @@ test("the release resolver queries an explicit version and requires an exact mat
     version: "1.4.2",
     integrity: RELEASE_INTEGRITY
   });
-  assert.deepEqual(runner.calls[0].args, ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "codekeeper@1.4.2", "version", "dist.integrity", "--json"]);
+  assert.deepEqual(runner.calls[0].args, ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "@coryparry/codekeeper@1.4.2", "version", "dist.integrity", "--json"]);
 });
 
 test("the release resolver rejects ranges before invoking npm", async () => {

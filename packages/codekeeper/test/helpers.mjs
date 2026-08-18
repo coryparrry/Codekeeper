@@ -11,7 +11,7 @@ export const PINNED_COMMIT = "2baccf969f76a3dc89dc40d3b758431da04fb402";
 export const HEAD_SHA = "a".repeat(40);
 export const TEST_PACKAGE_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
 export const TEST_PACKAGE_RELEASE = Object.freeze({
-  name: "codekeeper",
+  name: "@coryparry/codekeeper",
   version: "0.2.0",
   integrity: TEST_PACKAGE_INTEGRITY
 });

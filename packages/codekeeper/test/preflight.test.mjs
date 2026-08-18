@@ -279,7 +279,7 @@ test("release manifests admit only digest-bound retired Codekeeper workflows", a
   const manifestPath = path.join(root, ".github", "codekeeper-release.json");
   const manifest = {
     version: 1,
-    package: { name: "codekeeper", version: "0.2.0" },
+    package: { name: "@coryparry/codekeeper", version: "0.2.0" },
     source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
     managedFiles: { [retiredTarget]: sha256(retiredSource) }
   };

@@ -51,7 +51,7 @@ test("package stage contains one release with separate closed installer and runt
   const { destination, manifest } = await buildFixtureStage(t);
   const paths = manifest.files.map((entry) => entry.path);
   assert.deepEqual(paths, [...paths].sort());
-  assert.equal(manifest.package.name, "codekeeper");
+  assert.equal(manifest.package.name, "@coryparry/codekeeper");
   assert.match(manifest.package.version, /^\d+\.\d+\.\d+/);
   assert.match(manifest.source.commit, /^[0-9a-f]{40}$/);
   assert.equal(paths.includes("runtime/action.yml"), false);

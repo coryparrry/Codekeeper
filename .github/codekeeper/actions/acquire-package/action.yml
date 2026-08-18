@@ -62,7 +62,7 @@ runs:
           report="$download_root/npm-pack.json"
           (
             cd "$download_root"
-            npm pack --json --ignore-scripts --pack-destination "$download_root" "codekeeper@$CODEKEEPER_PACKAGE_VERSION" > "$report"
+            npm pack --json --ignore-scripts --pack-destination "$download_root" "@coryparry/codekeeper@$CODEKEEPER_PACKAGE_VERSION" > "$report"
           )
 
           # JavaScript template literals are intentionally single-quoted from Bash.
@@ -80,7 +80,7 @@ runs:
           const report = Array.isArray(parsed) ? parsed : Object.values(parsed ?? {});
           if (report.length !== 1) throw new Error("npm pack returned an invalid report");
           const entry = report[0];
-          if (entry?.name !== "codekeeper" || entry.version !== version || entry.integrity !== integrity) throw new Error("npm pack did not return the exact Codekeeper release");
+          if (entry?.name !== "@coryparry/codekeeper" || entry.version !== version || entry.integrity !== integrity) throw new Error("npm pack did not return the exact Codekeeper release");
           if (typeof entry.filename !== "string" || basename(entry.filename) !== entry.filename || !entry.filename.endsWith(".tgz")) throw new Error("npm pack returned an unsafe filename");
           const root = realpathSync(process.env.DOWNLOAD_ROOT);
           const tarball = realpathSync(join(root, entry.filename));
@@ -134,7 +134,7 @@ runs:
           const manifestBytes = await regular(join(process.env.TOOLING_ROOT, "release", "manifest.json"), "release manifest");
           const manifestSha256 = digest(manifestBytes);
           const manifest = JSON.parse(manifestBytes);
-          if (manifest?.package?.name !== "codekeeper" || manifest.package.version !== process.env.CODEKEEPER_PACKAGE_VERSION || manifest?.source?.repository !== "https://github.com/coryparrry/Codekeeper" || !/^[0-9a-f]{40}$/.test(manifest?.source?.commit ?? "")) throw new Error("Codekeeper package manifest identity mismatch");
+          if (manifest?.package?.name !== "@coryparry/codekeeper" || manifest.package.version !== process.env.CODEKEEPER_PACKAGE_VERSION || manifest?.source?.repository !== "https://github.com/coryparrry/Codekeeper" || !/^[0-9a-f]{40}$/.test(manifest?.source?.commit ?? "")) throw new Error("Codekeeper package manifest identity mismatch");
           if (process.env.CODEKEEPER_PACKAGE_SOURCE === "artifact") {
             if (!/^[0-9a-f]{64}$/.test(process.env.CODEKEEPER_EXPECTED_MANIFEST_SHA256 ?? "") || manifestSha256 !== process.env.CODEKEEPER_EXPECTED_MANIFEST_SHA256) throw new Error("Codekeeper package manifest digest mismatch");
             if (!/^[0-9a-f]{40}$/.test(process.env.CODEKEEPER_EXPECTED_SOURCE_COMMIT ?? "") || manifest.source.commit !== process.env.CODEKEEPER_EXPECTED_SOURCE_COMMIT) throw new Error("Codekeeper package source commit mismatch");
@@ -157,7 +157,7 @@ runs:
         source_commit="$(sed -n '2p' "$result_path")"
         node "$tooling_root/bin/verify-package.mjs" \
           --root "$tooling_root" \
-          --expected-name "codekeeper" \
+          --expected-name "@coryparry/codekeeper" \
           --expected-version "$CODEKEEPER_PACKAGE_VERSION" \
           --expected-integrity "$CODEKEEPER_PACKAGE_INTEGRITY" \
           --expected-manifest-sha256 "$package_manifest_sha256" \

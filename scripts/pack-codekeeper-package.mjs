@@ -11,6 +11,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { npmTarballFilename } from "../packages/codekeeper/src/package-identity.mjs";
 import {
   buildCodekeeperPackageStage,
   verifyCodekeeperPackageStage,
@@ -175,7 +176,7 @@ async function requirePackDestination(
   ) {
     fail("the pack destination must be outside the source repository");
   }
-  const tarball = path.join(destination, `codekeeper-${packageVersion}.tgz`);
+  const tarball = path.join(destination, npmTarballFilename(undefined, packageVersion));
   try {
     await lstat(tarball);
   } catch (error) {
@@ -189,7 +190,7 @@ function validatePackReport(report, manifest, packageManifest) {
   if (
     report.name !== manifest.package.name ||
     report.version !== manifest.package.version ||
-    report.filename !== `codekeeper-${manifest.package.version}.tgz`
+    report.filename !== npmTarballFilename(manifest.package.name, manifest.package.version)
   ) {
     fail("npm pack returned the wrong package identity");
   }
@@ -310,7 +311,7 @@ export async function packCodekeeperPackage({
     await verifyCodekeeperPackageStage(stage);
     const tarball = path.join(
       destination,
-      `codekeeper-${packageManifest.version}.tgz`,
+      npmTarballFilename(packageManifest.name, packageManifest.version),
     );
     try {
       const output = execFileSync(

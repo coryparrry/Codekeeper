@@ -66,8 +66,8 @@
       "sourcePath": "examples/workflows/codekeeper-fix.yml.example"
     },
     "runtime-actions/acquire-package/action.yml": {
-      "sha256": "1818e5810f202a8ebf9933eec52564033d3e71904f81a34f2faefd1c1009ca3f",
-      "bytes": 10444,
+      "sha256": "62b1451952adf82418e54a93cbe457314dfa1a228bc97eceb12de2a2d3fc14c6",
+      "bytes": 10488,
       "sourcePath": ".github/codekeeper/actions/acquire-package/action.yml",
       "packagePath": "release/actions/acquire-package/action.yml"
     },

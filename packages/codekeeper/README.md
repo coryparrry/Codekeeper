@@ -18,7 +18,7 @@ repository.
 From a clean checkout of the repository's default branch:
 
 ```bash
-npx codekeeper@0.2.0 init
+npx @coryparry/codekeeper@0.2.0 init
 ```
 
 The installer:
@@ -33,7 +33,7 @@ The installer:
 After you merge that pull request, from a clean checkout of the default branch:
 
 ```bash
-npx codekeeper@0.2.0 verify
+npx @coryparry/codekeeper@0.2.0 verify
 ```
 
 Open one small same-repository pull request and confirm the App-authored
@@ -78,13 +78,13 @@ terminal; choose the downloaded file in the installer.
 ## CLI
 
 ```text
-npx codekeeper@0.2.0 init
-npx codekeeper@0.2.0 update
-npx codekeeper@0.2.0 update --to X.Y.Z
-npx codekeeper@0.2.0 update --check
-npx codekeeper@0.2.0 rollback --to X.Y.Z
-npx codekeeper@0.2.0 doctor [--json]
-npx codekeeper@0.2.0 verify [--json] [--controlled]
+npx @coryparry/codekeeper@0.2.0 init
+npx @coryparry/codekeeper@0.2.0 update
+npx @coryparry/codekeeper@0.2.0 update --to X.Y.Z
+npx @coryparry/codekeeper@0.2.0 update --check
+npx @coryparry/codekeeper@0.2.0 rollback --to X.Y.Z
+npx @coryparry/codekeeper@0.2.0 doctor [--json]
+npx @coryparry/codekeeper@0.2.0 verify [--json] [--controlled]
 ```
 
 `init` also reopens guided settings for an existing installation. `update`

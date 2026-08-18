@@ -37,7 +37,7 @@ test("publication guard rejects the source package because it is not a generated
 test("publication guard accepts a closed generated package stage", async (t) => {
   const stage = await buildStage(t);
   const result = await runGuard(stage);
-  assert.match(result.stdout, /Verified generated Codekeeper release stage codekeeper@0\.2\.0 from [0-9a-f]{40}/);
+  assert.match(result.stdout, /Verified generated Codekeeper release stage @coryparry\/codekeeper@0\.2\.0 from [0-9a-f]{40}/);
 });
 
 test("publication guard rejects a stage whose verifier no longer matches its manifest", async (t) => {

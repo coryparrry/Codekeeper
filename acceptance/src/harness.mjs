@@ -94,7 +94,7 @@ function validatePackageRelease(value) {
     value
       && typeof value === "object"
       && !Array.isArray(value)
-      && value.name === "codekeeper"
+      && value.name === "@coryparry/codekeeper"
       && typeof value.version === "string"
       && PACKAGE_VERSION.test(value.version)
       && digest?.length === 64

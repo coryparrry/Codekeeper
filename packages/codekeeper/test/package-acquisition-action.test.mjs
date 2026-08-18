@@ -48,7 +48,7 @@ async function localPackage(t) {
     requireClean: false,
   });
   await cp(stage, archivePackage, { recursive: true });
-  const filename = `codekeeper-${manifest.package.version}.tgz`;
+  const filename = `coryparry-codekeeper-${manifest.package.version}.tgz`;
   const tarball = path.join(packed, filename);
   await execFile("tar", ["-czf", tarball, "-C", archiveRoot, "package"]);
   const integrity = `sha512-${createHash("sha512")
@@ -82,8 +82,8 @@ const destinationIndex = process.argv.indexOf("--pack-destination");
 if (process.argv[2] !== "pack" || destinationIndex < 0) process.exit(2);
 const filename = basename(process.env.CODEKEEPER_TEST_TARBALL);
 copyFileSync(process.env.CODEKEEPER_TEST_TARBALL, require("node:path").join(process.argv[destinationIndex + 1], filename));
-const entry = { name: "codekeeper", version: process.env.CODEKEEPER_PACKAGE_VERSION, integrity: process.env.CODEKEEPER_PACKAGE_INTEGRITY, filename };
-process.stdout.write(JSON.stringify(process.env.CODEKEEPER_TEST_REPORT_SHAPE === "array" ? [entry] : { codekeeper: entry }));
+const entry = { name: "@coryparry/codekeeper", version: process.env.CODEKEEPER_PACKAGE_VERSION, integrity: process.env.CODEKEEPER_PACKAGE_INTEGRITY, filename };
+process.stdout.write(JSON.stringify(process.env.CODEKEEPER_TEST_REPORT_SHAPE === "array" ? [entry] : { "@coryparry/codekeeper": entry }));
 `,
   );
   await chmod(fakeNpm, 0o755);
