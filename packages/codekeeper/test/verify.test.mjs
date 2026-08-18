@@ -26,7 +26,7 @@ function installation() {
     },
     releaseManifest: {
       package: {
-        name: "codekeeper",
+        name: "@coryparry/codekeeper",
         version: "0.2.0",
         integrity: TEST_PACKAGE_INTEGRITY,
       },
@@ -211,7 +211,7 @@ test("package acquisition uses the injected exact receipt verifier and controls 
     }),
   );
   assert.deepEqual(received, {
-    name: "codekeeper",
+    name: "@coryparry/codekeeper",
     version: "0.2.0",
     integrity: TEST_PACKAGE_INTEGRITY,
   });

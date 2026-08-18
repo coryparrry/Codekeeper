@@ -8,7 +8,7 @@ is enabled. Completing a local pack or this workflow does not publish anything.
 
 - Source evaluation uses the verified local-tarball process in
   [INSTALL.md](../INSTALL.md).
-- `npx codekeeper ...` is future public-release syntax, not a currently proven
+- `npx @coryparry/codekeeper ...` is future public-release syntax, not a currently proven
   installation route.
 - The publication workflow remains dormant until a reviewed
   `codekeeper-vX.Y.Z` tag is deliberately created.

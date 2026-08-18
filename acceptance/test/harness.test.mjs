@@ -25,7 +25,7 @@ import { EvidenceError, prepareEvidenceDestination, validateEvidence, writeEvide
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const HEAD = "fedcba9876543210fedcba9876543210fedcba98";
 const PACKAGE_RELEASE = Object.freeze({
-  name: "codekeeper",
+  name: "@coryparry/codekeeper",
   version: "0.2.0",
   integrity: `sha512-${Buffer.alloc(64).toString("base64")}`
 });

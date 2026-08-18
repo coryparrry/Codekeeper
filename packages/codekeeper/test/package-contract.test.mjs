@@ -68,13 +68,17 @@ test("installer checks include hardening audit tests", async () => {
 test("published installer docs keep the local-tarball receipt path", async () => {
   const installGuide = await readFile(new URL("../../../INSTALL.md", import.meta.url), "utf8");
   const packageReadme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const rootReadme = await readFile(new URL("../../../README.md", import.meta.url), "utf8");
   const bashBlocks = [...installGuide.matchAll(/```bash\n(.*?)\n```/gs)].map(([, block]) => block);
   const rootTarballCommands = bashBlocks.find((block) => block.includes("PACK_REPORT=")) ?? "";
   const localInstallCommands = bashBlocks.find((block) => block.includes("codekeeper init --current-package")) ?? "";
-  assert.match(packageReadme, /npx codekeeper@0\.2\.0 init/);
-  assert.match(installGuide, /npx codekeeper@0\.2\.0 init/);
-  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /not currently available from npm/i);
-  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /npm view codekeeper@0\.2\.0.*E404/s);
+  assert.match(packageReadme, /npx @coryparry\/codekeeper@0\.2\.0 init/);
+  assert.match(installGuide, /npx @coryparry\/codekeeper@0\.2\.0 init/);
+  assert.match(rootReadme, /npx @coryparry\/codekeeper init/);
+  assert.match(rootReadme, /https:\/\/img\.shields\.io\/npm\/v\/@coryparry\/codekeeper/);
+  assert.match(rootReadme, /https:\/\/www\.npmjs\.com\/package\/@coryparry\/codekeeper/);
+  assert.doesNotMatch(`${installGuide}\n${packageReadme}\n${rootReadme}`, /not currently available from npm/i);
+  assert.doesNotMatch(`${installGuide}\n${packageReadme}\n${rootReadme}`, /npm view codekeeper@0\.2\.0.*E404/s);
   assert.match(rootTarballCommands, /npm install --global npm@12\.0\.2/);
   assert.match(rootTarballCommands, /PACK_REPORT=.*npm run --silent package:pack -- --destination/);
   assert.match(localInstallCommands, /npm exec --package "\$PACKAGE_DESTINATION\/\$PACKAGE_FILE" --/);

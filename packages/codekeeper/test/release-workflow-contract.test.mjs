@@ -70,7 +70,7 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   assert.match(source, /Determine npm publication state/);
   assert.match(
     source,
-    /npm view "codekeeper@\$EXPECTED_VERSION" version dist\.integrity --json > "\$receipt" 2> "\$error_report"/,
+    /npm view "\$EXPECTED_NAME@\$EXPECTED_VERSION" version dist\.integrity --json > "\$receipt" 2> "\$error_report"/,
   );
   assert.match(source, /receipt\?\.version !== process\.env\.EXPECTED_VERSION/);
   assert.match(
@@ -95,7 +95,7 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   );
   assert.match(
     source,
-    /npm view "codekeeper@\$EXPECTED_VERSION" version dist\.integrity dist\.tarball --json/,
+    /npm view "\$EXPECTED_NAME@\$EXPECTED_VERSION" version dist\.integrity dist\.tarball --json/,
   );
   assert.match(source, /npm pack --json --ignore-scripts --pack-destination/);
   assert.match(source, /--expected-integrity "\$EXPECTED_INTEGRITY"/);
@@ -106,7 +106,7 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   assert.match(source, /Run fresh exact-version install canary/);
   assert.match(
     source,
-    /npm install --ignore-scripts --no-audit --no-fund "codekeeper@\$EXPECTED_VERSION"/,
+    /npm install --ignore-scripts --no-audit --no-fund "\$EXPECTED_NAME@\$EXPECTED_VERSION"/,
   );
   assert.match(source, /\.\/node_modules\/\.bin\/codekeeper --help/);
   assert.match(source, /Create immutable-tag GitHub release/);

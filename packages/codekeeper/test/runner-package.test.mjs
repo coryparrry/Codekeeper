@@ -8,6 +8,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { normalizeNpmPackReport, packCodekeeperPackage, verifyReleaseAuthority } from "../../../scripts/pack-codekeeper-package.mjs";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
+import { PACKAGE_NAME } from "../src/package-identity.mjs";
 import { git, PACKAGE_ROOT, PINNED_COMMIT, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const RUNTIME_PACKAGE_ROOT = path.join(PACKAGE_ROOT, "runtime-package");
@@ -295,7 +296,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     .filter((file) => !file.startsWith("node_modules/"))
     .sort();
   const expected = [...releaseManifest.files.map((file) => file.path), "release/manifest.json"].sort();
-  assert.equal(packed.name, "codekeeper");
+  assert.equal(packed.name, PACKAGE_NAME);
   assert.equal(packed.version, "0.2.0");
   assert.deepEqual(files, expected);
   assert.ok(files.every((file) => !file.includes("/test/") && file !== "package-lock.json"));
@@ -320,11 +321,11 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   const installerManifest = {
     name: "codekeeper-install-test",
     private: true,
-    dependencies: { codekeeper: `file:${tarball}` }
+    dependencies: { [PACKAGE_NAME]: `file:${tarball}` }
   };
   await writeFile(path.join(npmInstallRoot, "package.json"), JSON.stringify(installerManifest));
   execFileSync("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--allow-file=root", "--prefix", npmInstallRoot], { cwd: npmInstallRoot, ...npmOptions });
-  const npmInstalledRoot = path.join(npmInstallRoot, "node_modules", "codekeeper");
+  const npmInstalledRoot = path.join(npmInstallRoot, "node_modules", PACKAGE_NAME);
   const npmInstalledPackage = JSON.parse(await readFile(path.join(npmInstalledRoot, "package.json"), "utf8"));
   const expectedBins = {
     codekeeper: "bin/codekeeper.mjs",
@@ -411,8 +412,8 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     })}\n`
   );
   const verifier = path.join(npmInstallRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper-verify-package.cmd" : "codekeeper-verify-package");
-  const verifierOutput = invoke(verifier, ["--root", installedRoot, "--expected-name", "codekeeper", "--expected-version", packageManifest.version, "--expected-integrity", expectedIntegrity, "--expected-manifest-sha256", expectedManifestSha256, "--expected-source-commit", releaseManifest.source.commit]);
-  assert.match(verifierOutput, /^CODEKEEPER_PACKAGE_VERIFIED name=codekeeper version=0\.2\.0 source=[0-9a-f]{40}$/m);
+  const verifierOutput = invoke(verifier, ["--root", installedRoot, "--expected-name", PACKAGE_NAME, "--expected-version", packageManifest.version, "--expected-integrity", expectedIntegrity, "--expected-manifest-sha256", expectedManifestSha256, "--expected-source-commit", releaseManifest.source.commit]);
+  assert.match(verifierOutput, /^CODEKEEPER_PACKAGE_VERIFIED name=@coryparry\/codekeeper version=0\.2\.0 source=[0-9a-f]{40}$/m);
 
   const runtimeInstallParent = await temporaryDirectory(t, "codekeeper-runtime-install-");
   const runtimeRoot = path.join(runtimeInstallParent, "runtime");

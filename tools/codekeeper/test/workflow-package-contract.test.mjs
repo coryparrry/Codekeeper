@@ -423,7 +423,7 @@ test("package acquisition validates tarball SRI before deriving package provenan
   );
   assert.match(
     source,
-    /npm pack --json --ignore-scripts[^\n]+"codekeeper@\$CODEKEEPER_PACKAGE_VERSION"/,
+    /npm pack --json --ignore-scripts[^\n]+"@coryparry\/codekeeper@\$CODEKEEPER_PACKAGE_VERSION"/,
   );
   assert.match(
     source,

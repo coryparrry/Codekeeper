@@ -1,5 +1,5 @@
 {
-  "name": "codekeeper",
+  "name": "@coryparry/codekeeper",
   "version": "0.2.0",
   "description": "Complete CLI, TUI, runtime, and workflow release package for Codekeeper",
   "repository": {

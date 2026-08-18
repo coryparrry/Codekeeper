@@ -4,7 +4,7 @@ The usual path is the published package. From a clean checkout of the target
 repository's default branch:
 
 ```bash
-npx codekeeper@0.2.0 init
+npx @coryparry/codekeeper@0.2.0 init
 ```
 
 You need Node.js 22+, Git, an authenticated current GitHub CLI, and permission

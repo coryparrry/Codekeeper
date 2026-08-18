@@ -2,7 +2,7 @@
   <img width="1600" height="480" alt="Codekeeper — Control your own GitHub maintainer from one guided terminal." src="brand/collateral/github/readme-banner-1600x480.png" />
 </h1>
 
-[![npm](https://img.shields.io/npm/v/codekeeper?style=for-the-badge&label=npm)](https://www.npmjs.com/package/codekeeper)
+[![npm](https://img.shields.io/npm/v/@coryparry/codekeeper?style=for-the-badge&label=npm)](https://www.npmjs.com/package/@coryparry/codekeeper)
 ![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)
 [![License](https://img.shields.io/badge/License-Apache--2.0-2563eb?style=for-the-badge)](LICENSE)
 
@@ -37,7 +37,7 @@ You need:
 From the repository you want Codekeeper to maintain, run:
 
 ```bash
-npx codekeeper init
+npx @coryparry/codekeeper init
 ```
 
 The guided installer checks the repository before it changes anything. It then helps you:
@@ -68,13 +68,13 @@ Review the generated policy, workflows, model choices, validation commands, and 
 From a clean, current checkout of the merged default branch, run:
 
 ```bash
-npx codekeeper verify
+npx @coryparry/codekeeper verify
 ```
 
 Verification checks the installed release catalog, package receipt, policy, GitHub settings, and App installation. For an additional controlled maintenance dry run, use:
 
 ```bash
-npx codekeeper verify --controlled
+npx @coryparry/codekeeper verify --controlled
 ```
 
 Finally, open a small same-repository pull request and confirm that Codekeeper publishes its App-authored summary, labels, and review gate. Keep the gate optional until this first live review succeeds.
@@ -97,13 +97,13 @@ Suggested markup:
 
 ```mermaid
 flowchart LR
-    A["Run npx codekeeper init"] --> B["Check repository readiness"]
+    A["Run npx @coryparry/codekeeper init"] --> B["Check repository readiness"]
     B --> C["Choose Recommended or Customize"]
     C --> D["Create and install the GitHub App"]
     D --> E["Review policy and authority"]
     E --> F["Open the setup pull request"]
     F --> G["Review and merge"]
-    G --> H["Run npx codekeeper verify"]
+    G --> H["Run npx @coryparry/codekeeper verify"]
     H --> I["Prove the first live review"]
 ```
 
@@ -151,7 +151,7 @@ The CLI is Codekeeper's control surface. It generates and maintains the required
 Run the setup command again whenever you want to change the current configuration:
 
 ```bash
-npx codekeeper init
+npx @coryparry/codekeeper init
 ```
 
 Codekeeper detects the existing installation and opens the guided settings screen. You can add or remove workflows, change models, adjust automatic triggers, enable or disable capabilities, update validation commands, and review the resulting authority before anything changes. A settings-only change is applied directly when safe; a repository configuration change is prepared as a pull request.
@@ -159,7 +159,7 @@ Codekeeper detects the existing installation and opens the guided settings scree
 To move an installation to the latest Codekeeper release, run:
 
 ```bash
-npx codekeeper update
+npx @coryparry/codekeeper update
 ```
 
 The updater preserves your choices, verifies the new package, shows what changed, and opens an update pull request when managed repository files need to change.
@@ -183,14 +183,14 @@ The same commands can mention the installed App, for example `@<app-slug> review
 
 | Command | Purpose |
 |---|---|
-| `npx codekeeper init` | Install Codekeeper or reopen the guided settings for an existing installation. |
-| `npx codekeeper doctor` | Report installation prerequisites without changing the repository. |
-| `npx codekeeper doctor --json` | Return the readiness report as structured JSON. |
-| `npx codekeeper update` | Review the latest release and open an update pull request when managed files change. |
-| `npx codekeeper verify` | Prove the installed default-branch configuration and remote settings. |
-| `npx codekeeper verify --controlled` | Verify the installation and run a controlled maintenance dry run. |
+| `npx @coryparry/codekeeper init` | Install Codekeeper or reopen the guided settings for an existing installation. |
+| `npx @coryparry/codekeeper doctor` | Report installation prerequisites without changing the repository. |
+| `npx @coryparry/codekeeper doctor --json` | Return the readiness report as structured JSON. |
+| `npx @coryparry/codekeeper update` | Review the latest release and open an update pull request when managed files change. |
+| `npx @coryparry/codekeeper verify` | Prove the installed default-branch configuration and remote settings. |
+| `npx @coryparry/codekeeper verify --controlled` | Verify the installation and run a controlled maintenance dry run. |
 
-Run `npx codekeeper --help` for the current command surface.
+Run `npx @coryparry/codekeeper --help` for the current command surface.
 
 ## Supported surface
 
