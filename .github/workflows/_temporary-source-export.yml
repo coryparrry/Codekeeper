@@ -1,6 +1,8 @@
 name: Temporary source export
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [perf/consolidate-review-runners]
 
