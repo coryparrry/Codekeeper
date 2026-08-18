@@ -38,6 +38,9 @@ codekeeper update --check
 codekeeper rollback --to X.Y.Z
 codekeeper doctor [--json]
 codekeeper verify [--json] [--controlled]
+codekeeper status [--json]
+codekeeper explain [--json] [--capability ID]
+codekeeper plan --config FILE [--package-integrity SHA512] [--json] [--apply]
 codekeeper resume [--branch codekeeper/setup] [--json] [--apply]
 codekeeper remove [--json] [--apply]
 ```
@@ -45,24 +48,26 @@ codekeeper remove [--json] [--apply]
 `update` resolves the latest published release and runs it only when it is
 strictly newer than the installed release. `--to X.Y.Z` selects one exact,
 strictly newer semantic-version release after npm returns and verifies its
-SHA-512 receipt.
-`update --check` reads the installed release manifest, resolves registry
-metadata, and reports the installed and latest published versions without
-changing repository files, GitHub settings, or pull requests.
+SHA-512 receipt. `update --check` reads the installed release manifest and
+registry metadata without changing repository files or GitHub settings.
 
-`rollback --to X.Y.Z` uses the same verified package path, then asks the target
-CLI's existing forward-update protocol to create a normal release-update pull
-request for that older release. The target must be older than the installed
-release. It never resets, reverts, or force-pushes. If the verified target
-cannot complete that protocol, the launcher fails closed without claiming that
-rollback succeeded.
+`status` and `explain` are read-only views of the installed package, workflows,
+owners, models, App permissions, capabilities, triggers, validation, and
+budgets. They show required secret names but never read secret values.
+
+`plan --config` uses a strict credential-free JSON file and the normal
+installer preflight and plan builders. It is read-only by default. Applying it
+requires `CODEKEEPER_NONINTERACTIVE_APPLY=true`, rechecks repository state, and
+refuses changes requiring secret entry. It can open a setup/update pull request
+but never merges it.
+
+`rollback --to X.Y.Z` creates a normal forward update pull request from one
+verified older release. It never resets, reverts, or force-pushes.
 
 `resume` inspects an already-pushed `codekeeper/setup` or
-`codekeeper/update-<sha>` branch. Without `--apply`, it is read-only. With
-`--apply`, it can set a missing startup variable to `false` and recreate a
-missing pull request after proving the remote branch tip and committed
-Codekeeper policy. It never reads secret values; missing secrets and
-identity variables remain explicit actions.
+`codekeeper/update-<sha>` branch. Without `--apply`, it is read-only. Apply mode
+can establish a safe disabled startup variable and recreate a missing pull
+request, but cannot read or replace secret values.
 
 `remove` is plan-only unless `--apply` is supplied. It verifies every
 release-owned file against `.github/codekeeper-release.json`, disables
@@ -70,33 +75,28 @@ Codekeeper, creates one exact deletion commit, pushes a dedicated branch, and
 opens a pull request. It does not merge, delete secrets or variables, remove
 labels, or uninstall the adopter-owned GitHub App.
 
-`init`, exact updates, and rollback's target-side forward update use
-`--current-package --package-integrity` only for an exact local tarball or
-verified staged package. `doctor` is read-only. `verify` is post-merge evidence;
-it does not turn an opened setup pull request into a working installation.
-While the registry package is unavailable, it cannot prove the generated
-runtime's package-acquisition path.
+While the registry package is unavailable, verification cannot prove the
+generated runtime's public package-acquisition path.
 
 ## Safety and operating model
 
-- The installer creates a reviewed setup or update pull request; it never
-  merges it.
+- Installation, update, noninteractive configuration, and removal arrive as
+  reviewed pull requests; the CLI never merges them.
+- Machine-readable plans hash variable values and contain no credentials.
 - Recovery only reconciles an existing pushed branch; it does not regenerate or
   overwrite repository code.
 - Removal deletes only manifest-owned files whose current SHA-256 still matches
   the installed release receipt.
 - The Recommended path enables automatic PR review and manual maintenance;
-  scheduled maintenance, tracing, repair, issue implementation, duplicate
-  closure, and automatic merge start off.
-- Each adopter owns its GitHub App, model credentials, Actions usage, and
-  policy.
-- Installed runtime workflows use GitHub-hosted ephemeral runners. Persistent
-  shared self-hosted runners are outside the supported trust boundary.
+  schedules, tracing, repair, issue implementation, duplicate closure, and
+  automatic merge start off.
+- Each adopter owns its GitHub App, model credentials, Actions usage, and policy.
+- Installed runtime workflows use GitHub-hosted ephemeral runners.
 
-Read [Installer recovery and removal](../../docs/INSTALLER_RECOVERY.md) before
-resuming an interrupted setup or removing an installation. Read
-[Authority, data, and cost](../../docs/authority-data-cost.md) before providing
-repository content to a model or enabling code changes.
+Read [CLI control surface](../../docs/CONTROL_SURFACE.md),
+[Installer recovery and removal](../../docs/INSTALLER_RECOVERY.md), and
+[Authority, data, and cost](../../docs/authority-data-cost.md) before enabling
+mutation authority.
 
 ## Package metadata
 

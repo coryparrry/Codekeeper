@@ -3,6 +3,7 @@
 | Document | Type | Purpose |
 |---|---|---|
 | [Installation](../INSTALL.md) | How-to | Evaluate a local package and prove an installation. |
+| [CLI control surface](CONTROL_SURFACE.md) | Reference | Inspect installed authority and create strict machine-readable setup plans. |
 | [Installer recovery and removal](INSTALLER_RECOVERY.md) | How-to | Reconcile an already-pushed setup branch or prepare a manifest-bound removal pull request. |
 | [Unpublished release readiness](RELEASE_READINESS.md) | How-to | Produce and retain a non-publishing release candidate and evidence boundary. |
 | [Repository governance](REPOSITORY_GOVERNANCE.md) | How-to | Review and deliberately apply branch and immutable-tag rules. |

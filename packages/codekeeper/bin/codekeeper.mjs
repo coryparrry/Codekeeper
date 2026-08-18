@@ -8,7 +8,14 @@ const argv = process.argv.slice(2);
 const exactPackage = argv.includes("--current-package");
 
 try {
-  if (argv[0] === "resume") {
+  if (["status", "explain", "plan"].includes(argv[0])) {
+    const { runControlSurfaceCli } = await import("../src/control-surface.mjs");
+    process.exitCode = await runControlSurfaceCli({
+      command: argv[0],
+      argv: argv.slice(1),
+      runner: createCommandRunner()
+    });
+  } else if (argv[0] === "resume") {
     const { runRecoveryCli } = await import("../src/recovery.mjs");
     process.exitCode = await runRecoveryCli({
       argv: argv.slice(1),
