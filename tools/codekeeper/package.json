@@ -14,7 +14,7 @@
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.mjs audit/*.test.mjs",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/*.mjs' --test-coverage-include='src/lib/*.mjs' --test-coverage-lines=80 --test-coverage-branches=65 --test-coverage-functions=85 --test-concurrency=1 test/*.test.mjs audit/*.test.mjs evals/*.test.mjs",
+    "coverage": "bash ../../scripts/run-coverage-gates.sh ../../scripts/coverage-critical-runtime.json node --test --experimental-test-coverage --test-coverage-include='src/*.mjs' --test-coverage-include='src/lib/*.mjs' --test-coverage-lines=80 --test-coverage-branches=65 --test-coverage-functions=85 --test-concurrency=1 test/*.test.mjs audit/*.test.mjs evals/*.test.mjs",
     "eval:offline": "node evals/decision-quality.mjs --offline",
     "eval:live": "node evals/decision-quality.mjs",
     "eval:live-review": "node evals/live-review-suite.mjs",
