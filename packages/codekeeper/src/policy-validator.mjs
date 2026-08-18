@@ -3,6 +3,7 @@ import { isCodekeeperOwnedLabel } from "./label-ownership.mjs";
 export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "fix"]);
 const PROVIDER_APIS = new Set(["responses", "chat_completions"]);
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "max", "xhigh"]);
+const CODEX_WORKSPACE_MODEL = /^(?:gpt-[A-Za-z0-9][A-Za-z0-9._-]*|o[1-9](?:-[A-Za-z0-9][A-Za-z0-9._-]*)?|codex-[A-Za-z0-9][A-Za-z0-9._-]*)$/;
 const CRON_MONTHS = new Map([["JAN", 1], ["FEB", 2], ["MAR", 3], ["APR", 4], ["MAY", 5], ["JUN", 6], ["JUL", 7], ["AUG", 8], ["SEP", 9], ["OCT", 10], ["NOV", 11], ["DEC", 12]]);
 const CRON_WEEKDAYS = new Map([["SUN", 0], ["MON", 1], ["TUE", 2], ["WED", 3], ["THU", 4], ["FRI", 5], ["SAT", 6]]);
 const CRON_FIELDS = Object.freeze([
@@ -72,6 +73,15 @@ function nonEmptyString(value, name, maximumLength = LIMITS.stringLength) {
   assert(typeof value === "string" && value.trim().length > 0, `${name} must be a non-empty string`);
   assert(value.length <= maximumLength, `${name} must be at most ${maximumLength} characters`);
   return value;
+}
+
+function codexWorkspaceRoute(workspace, name) {
+  nonEmptyString(workspace.model, `${name}.model`, 256);
+  assert(
+    CODEX_WORKSPACE_MODEL.test(workspace.model),
+    `${name}.model must be a Codex-compatible OpenAI model`,
+  );
+  assert(REASONING_EFFORTS.has(workspace.effort), `${name}.effort is unsupported`);
 }
 
 function stringArray(value, name, { maximumEntries = LIMITS.listEntries, maximumLength = LIMITS.stringLength } = {}) {
@@ -348,8 +358,7 @@ function validateAi(config) {
     boolean(workspace.enabled, `ai.agents.${mode}.workspace.enabled`);
     boolean(workspace.allowWrites, `ai.agents.${mode}.workspace.allowWrites`);
     if (workspace.enabled) {
-      nonEmptyString(workspace.model, `ai.agents.${mode}.workspace.model`, 256);
-      assert(REASONING_EFFORTS.has(workspace.effort), `ai.agents.${mode}.workspace.effort is unsupported`);
+      codexWorkspaceRoute(workspace, `ai.agents.${mode}.workspace`);
     }
     if (mode === "review" || mode === "issue") {
       assert(!workspace.allowWrites, `ai.agents.${mode}.workspace.allowWrites must remain false`);
@@ -408,7 +417,7 @@ export function validatePolicy(config) {
   for (const label of [...REVIEW_MANAGED_LABELS, ...config.review.allowedLabels]) {
     assert(managedReviewLabels.has(label), `review must explicitly manage emitted label ${label}`);
   }
-  const escalation = fixedObject(config.review.reasoningEscalation, "review.reasoningEscalation", ["enabled", "provider", "model", "effort", "labels", "pathPatterns", "minimumChangedLines", "minimumSingleFileChangedLines"]);
+  const escalation = fixedObject(config.review.reasoningEscalation, "review.reasoningEscalation", ["enabled", "provider", "model", "effort", "modelSettings", "workspace", "labels", "pathPatterns", "minimumChangedLines", "minimumSingleFileChangedLines"]);
   boolean(escalation.enabled, "review.reasoningEscalation.enabled");
   nonEmptyString(escalation.provider, "review.reasoningEscalation.provider", 256);
   assert(config.ai.providers[escalation.provider], `review.reasoningEscalation.provider references undefined provider ${escalation.provider}`);
@@ -418,6 +427,18 @@ export function validatePolicy(config) {
     escalation.effort === "none" || config.ai.providers[escalation.provider].supportsReasoningEffort,
     `review.reasoningEscalation.effort requires ai.providers.${escalation.provider}.supportsReasoningEffort=true`
   );
+  if (escalation.modelSettings !== undefined) {
+    plainObject(escalation.modelSettings, "review.reasoningEscalation.modelSettings");
+    validateJsonValue(escalation.modelSettings, "review.reasoningEscalation.modelSettings");
+    assert(
+      !(isPlainObject(escalation.modelSettings.reasoning) && Object.hasOwn(escalation.modelSettings.reasoning, "effort")),
+      "review.reasoningEscalation.modelSettings.reasoning.effort must not be set; use review.reasoningEscalation.effort"
+    );
+  }
+  if (escalation.workspace !== undefined) {
+    const workspace = fixedObject(escalation.workspace, "review.reasoningEscalation.workspace", ["model", "effort"]);
+    codexWorkspaceRoute(workspace, "review.reasoningEscalation.workspace");
+  }
   stringArray(escalation.labels, "review.reasoningEscalation.labels", { maximumEntries: LIMITS.listEntries, maximumLength: 256 });
   stringArray(escalation.pathPatterns, "review.reasoningEscalation.pathPatterns", { maximumEntries: LIMITS.listEntries, maximumLength: 1_024 });
   assert(escalation.labels.length > 0, "review.reasoningEscalation.labels must not be empty");

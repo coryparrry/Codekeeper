@@ -98,16 +98,71 @@ export function rulesetPayload(ruleset) {
   return structuredClone(ruleset);
 }
 
+function sortedValue(value) {
+  if (Array.isArray(value)) return value.map((item) => sortedValue(item));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, sortedValue(value[key])]),
+  );
+}
+
+function projectOnto(desired, current) {
+  if (desired === null || typeof desired !== "object") return current;
+  if (Array.isArray(desired)) {
+    if (!Array.isArray(current)) return current;
+    if (
+      desired.every(
+        (item) => item && typeof item === "object" && !Array.isArray(item) && typeof item.type === "string",
+      )
+    ) {
+      const remaining = [...current];
+      const projected = desired.map((desiredItem) => {
+        const index = remaining.findIndex((item) => item && item.type === desiredItem.type);
+        if (index === -1) return { type: `\0missing:${desiredItem.type}` };
+        const [currentItem] = remaining.splice(index, 1);
+        return projectOnto(desiredItem, currentItem);
+      });
+      return remaining.length === 0 ? projected : [...projected, ...remaining];
+    }
+    if (
+      desired.every(
+        (item) => item && typeof item === "object" && !Array.isArray(item) && typeof item.context === "string",
+      )
+    ) {
+      const remaining = [...current];
+      const projected = desired.map((desiredItem) => {
+        const index = remaining.findIndex((item) => item && item.context === desiredItem.context);
+        if (index === -1) return { context: `\0missing:${desiredItem.context}` };
+        const [currentItem] = remaining.splice(index, 1);
+        return projectOnto(desiredItem, currentItem);
+      });
+      return remaining.length === 0 ? projected : [...projected, ...remaining];
+    }
+    if (current.length !== desired.length) return current;
+    return desired.map((item, index) => projectOnto(item, current[index]));
+  }
+  if (current === null || typeof current !== "object" || Array.isArray(current)) return current;
+  const projected = {};
+  for (const key of Object.keys(desired)) {
+    projected[key] = Object.hasOwn(current, key) ? projectOnto(desired[key], current[key]) : current[key];
+  }
+  return projected;
+}
+
 function canonicalRuleset(ruleset) {
   const payload = rulesetPayload(ruleset);
-  return JSON.stringify({
-    name: payload.name,
-    target: payload.target,
-    enforcement: payload.enforcement,
-    bypass_actors: payload.bypass_actors ?? [],
-    conditions: payload.conditions,
-    rules: payload.rules,
-  });
+  return JSON.stringify(
+    sortedValue({
+      name: payload.name,
+      target: payload.target,
+      enforcement: payload.enforcement,
+      bypass_actors: payload.bypass_actors ?? [],
+      conditions: payload.conditions,
+      rules: payload.rules,
+    }),
+  );
 }
 
 export function reconciliationPlan(desiredRulesets, currentRulesets) {
@@ -115,7 +170,7 @@ export function reconciliationPlan(desiredRulesets, currentRulesets) {
   return desiredRulesets.map((desired) => {
     const current = currentByName.get(desired.name);
     if (!current) return { action: "create", desired };
-    return canonicalRuleset(current) === canonicalRuleset(desired)
+    return canonicalRuleset(projectOnto(desired, current)) === canonicalRuleset(desired)
       ? { action: "unchanged", desired, current }
       : { action: "update", desired, current };
   });

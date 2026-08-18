@@ -85,6 +85,53 @@ test("reconciliation creates, updates, and preserves matching rulesets", () => {
   );
 });
 
+test("reconciliation ignores GitHub default fields and key order", () => {
+  const desired = policy().rulesets;
+  const githubMain = {
+    id: 21006876,
+    name: "main",
+    target: "branch",
+    enforcement: "active",
+    bypass_actors: [],
+    conditions: {
+      ref_name: {
+        exclude: [],
+        include: ["refs/heads/main"],
+      },
+    },
+    rules: [
+      {
+        type: "pull_request",
+        parameters: {
+          required_approving_review_count: 0,
+          required_reviewers: [],
+          allowed_merge_methods: ["merge", "squash", "rebase"],
+        },
+      },
+    ],
+    current_user_can_bypass: "never",
+  };
+  const githubTags = {
+    id: 21006878,
+    name: "tags",
+    target: "tag",
+    enforcement: "active",
+    bypass_actors: [],
+    conditions: {
+      ref_name: {
+        exclude: [],
+        include: ["refs/tags/codekeeper-v*"],
+      },
+    },
+    rules: [{ type: "update" }],
+  };
+
+  assert.deepEqual(
+    reconciliationPlan(desired, [githubTags, githubMain]).map((item) => item.action),
+    ["unchanged", "unchanged"],
+  );
+});
+
 test("API payloads contain only the reviewed ruleset contract", () => {
   const source = policy().rulesets[0];
   const payload = rulesetPayload(source);
