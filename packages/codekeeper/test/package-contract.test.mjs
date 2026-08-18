@@ -65,21 +65,20 @@ test("installer checks include hardening audit tests", async () => {
   assert.match(packageJson.scripts.check, /npm run coverage/);
 });
 
-test("unpublished installer docs fail closed while local packing preserves the exact receipt", async () => {
+test("published installer docs keep the local-tarball receipt path", async () => {
   const installGuide = await readFile(new URL("../../../INSTALL.md", import.meta.url), "utf8");
   const packageReadme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   const bashBlocks = [...installGuide.matchAll(/```bash\n(.*?)\n```/gs)].map(([, block]) => block);
   const rootTarballCommands = bashBlocks.find((block) => block.includes("PACK_REPORT=")) ?? "";
   const localInstallCommands = bashBlocks.find((block) => block.includes("codekeeper init --current-package")) ?? "";
+  assert.match(packageReadme, /npx codekeeper@0\.2\.0 init/);
+  assert.match(installGuide, /npx codekeeper@0\.2\.0 init/);
+  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /not currently available from npm/i);
+  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /npm view codekeeper@0\.2\.0.*E404/s);
   assert.match(rootTarballCommands, /npm install --global npm@12\.0\.2/);
   assert.match(rootTarballCommands, /PACK_REPORT=.*npm run --silent package:pack -- --destination/);
   assert.match(localInstallCommands, /npm exec --package "\$PACKAGE_DESTINATION\/\$PACKAGE_FILE" --/);
   assert.match(localInstallCommands, /codekeeper init --current-package --package-integrity "\$PACKAGE_INTEGRITY"/);
-  assert.match(packageReadme, /codekeeper init --current-package --package-integrity 'sha512-\.\.\.'/);
-  assert.match(installGuide, /npm view codekeeper@0\.2\.0.*E404/s);
-  assert.match(packageReadme, /not currently available from npm/i);
-  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /npx --yes codekeeper@0\.2\.0 (?:init|update)/);
-  assert.doesNotMatch(`${installGuide}\n${packageReadme}`, /codekeeper@0\.2\.0 is published/i);
   const extractionScripts = [...rootTarballCommands.matchAll(/node -e '\n([\s\S]*?)\n' "\$PACK_REPORT"/g)].map(([, script]) => script);
   assert.equal(extractionScripts.length, 2);
   const keyedReport = {
