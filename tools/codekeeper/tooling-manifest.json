@@ -34,8 +34,12 @@
       "sha256": "b224cc71b19d4c3d5ddd4e48b64531db70c0b7b95af16adb2bdecad043b48a46"
     },
     {
-      "path": "src/cli.mjs",
+      "path": "src/cli-heavy.mjs",
       "sha256": "ec07bc42161bb1db5de34afe99b14f70a347b01e8cc59efa6267ef98e735ea1d"
+    },
+    {
+      "path": "src/cli.mjs",
+      "sha256": "fb7f88928d7bfc0ece1f2fd6d1f24b8a3249c1126b7e0608bd8cf9b73fb8ff1e"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
