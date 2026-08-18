@@ -56,7 +56,7 @@ jobs:
           ref: refs/tags/${{ steps.release.outputs.tag }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Confirm immutable release tag
+      - name: Confirm local release tag
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
@@ -67,6 +67,15 @@ jobs:
         with:
           node-version: 24.19.0
           package-manager-cache: false
+      - name: Bind remote release tag to source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          node scripts/release-tag-integrity.mjs \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --expected-commit "$(git rev-parse HEAD)"
       - name: Install pinned npm
         run: npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
       - name: Confirm clean source snapshot
@@ -147,6 +156,11 @@ jobs:
       contents: write
       id-token: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.19.0
@@ -180,6 +194,16 @@ jobs:
             --expected-version "$EXPECTED_VERSION" \
             --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
             --expected-source-commit "$EXPECTED_SOURCE_COMMIT"
+      - name: Reconfirm remote release tag before registry mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+        run: |
+          node scripts/release-tag-integrity.mjs \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --expected-commit "$SOURCE_COMMIT"
       - name: Determine npm publication state
         id: publication-state
         env:
@@ -279,6 +303,16 @@ jobs:
             test "$installed_version" = "$EXPECTED_VERSION"
             ./node_modules/.bin/codekeeper --help
           )
+      - name: Reconfirm remote release tag before GitHub Release mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+        run: |
+          node scripts/release-tag-integrity.mjs \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --expected-commit "$SOURCE_COMMIT"
       - name: Create immutable-tag GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -293,7 +327,6 @@ jobs:
           test -f "$TARBALL"
           sidecar="$TARBALL.sha512"
           sha512sum "$TARBALL" > "$sidecar"
-          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.ref' | grep -Fx "refs/tags/$RELEASE_TAG"
           release="$RUNNER_TEMP/codekeeper-github-release.json"
           release_error="$RUNNER_TEMP/codekeeper-github-release-error.txt"
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$release" 2> "$release_error"; then

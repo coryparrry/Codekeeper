@@ -1,0 +1,110 @@
+name: Codekeeper unpublished release readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or full commit to validate without publishing
+        required: false
+        default: main
+        type: string
+      release_tag:
+        description: Optional existing codekeeper-vX.Y.Z tag to bind to the source commit
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codekeeper-release-readiness-${{ inputs.source_ref }}
+  cancel-in-progress: false
+
+jobs:
+  prove-unpublished-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Install pinned npm
+        run: npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
+      - name: Bind optional remote release tag
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          node scripts/release-tag-integrity.mjs \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --expected-commit "$(git rev-parse HEAD)"
+      - name: Verify repository source
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+      - name: Verify runtime
+        working-directory: tools/codekeeper
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+      - name: Verify installer
+        working-directory: packages/codekeeper
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+      - name: Verify acceptance harness
+        working-directory: acceptance
+        run: npm run check
+      - name: Pack exact unpublished candidate
+        env:
+          RELEASE_ROOT: ${{ runner.temp }}/codekeeper-unpublished-release
+        run: |
+          set -euo pipefail
+          test ! -e "$RELEASE_ROOT"
+          node scripts/pack-codekeeper-package.mjs --destination "$RELEASE_ROOT" > "$RUNNER_TEMP/codekeeper-pack-report.json"
+      - name: Record bounded readiness evidence
+        env:
+          PACK_REPORT: ${{ runner.temp }}/codekeeper-pack-report.json
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          SOURCE_COMMIT="$(git rev-parse HEAD)" \
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+          node --input-type=module -e '
+          import { readFileSync, writeFileSync } from "node:fs";
+          const pack = JSON.parse(readFileSync(process.env.PACK_REPORT, "utf8"));
+          const evidence = {
+            version: 1,
+            publicationPerformed: false,
+            repository: process.env.GITHUB_REPOSITORY,
+            sourceRef: process.env.SOURCE_REF,
+            sourceCommit: process.env.SOURCE_COMMIT,
+            releaseTag: process.env.RELEASE_TAG || null,
+            workflowRun: process.env.RUN_URL,
+            package: {
+              name: pack.name,
+              version: pack.version,
+              filename: pack.filename,
+              integrity: pack.integrity,
+            },
+          };
+          writeFileSync("release-readiness-evidence.json", `${JSON.stringify(evidence, null, 2)}\n`);
+          '
+      - name: Upload unpublished candidate evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codekeeper-unpublished-readiness-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/codekeeper-unpublished-release/codekeeper-*.tgz
+            release-readiness-evidence.json
+          if-no-files-found: error
+          retention-days: 30
