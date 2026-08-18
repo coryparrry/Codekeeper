@@ -23,7 +23,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "5f4e825967cf5fe6a81e1baafa8e4fd98d9017a688717d8d8b6eab1eabd6c14c"
+      "sha256": "eb2b48a503db9b948a8a0181c29f145128b512c0e121de91150b46cce8f78e12"
     },
     {
       "path": "presets/catalogue.mjs",
@@ -34,8 +34,12 @@
       "sha256": "b224cc71b19d4c3d5ddd4e48b64531db70c0b7b95af16adb2bdecad043b48a46"
     },
     {
-      "path": "src/cli.mjs",
+      "path": "src/cli-heavy.mjs",
       "sha256": "ec07bc42161bb1db5de34afe99b14f70a347b01e8cc59efa6267ef98e735ea1d"
+    },
+    {
+      "path": "src/cli.mjs",
+      "sha256": "fb7f88928d7bfc0ece1f2fd6d1f24b8a3249c1126b7e0608bd8cf9b73fb8ff1e"
     },
     {
       "path": "src/lib/agent-profiles.mjs",
@@ -58,8 +62,16 @@
       "sha256": "6c7b8e2a0859e2e7311b33fd22933c769e3e48cbc7cc24d0d847c8167d733fd3"
     },
     {
-      "path": "src/lib/github.mjs",
+      "path": "src/lib/github-budget.mjs",
+      "sha256": "6944f9183eff79e00577c6e5b37f6d400e0ea878a78d0e574234cfa0a3c5fd68"
+    },
+    {
+      "path": "src/lib/github-core.mjs",
       "sha256": "f6701e54d24fdb71fdd5ee2f77434777f741963e997fdb7663079b61e60bb0c2"
+    },
+    {
+      "path": "src/lib/github.mjs",
+      "sha256": "5363965530f4f4a31385e3f26d2d3ae81f492cec8ede16edad2191765f1cad78"
     },
     {
       "path": "src/lib/glob.mjs",
@@ -67,7 +79,7 @@
     },
     {
       "path": "src/lib/io.mjs",
-      "sha256": "8657605683c5114c32183f410487cc9d8b5e92001e38189f43fc20266fa96755"
+      "sha256": "2b93d3339ffdfebe860b58d63fc79a23145ff76c8d6acc639149f2db9ee20ee9"
     },
     {
       "path": "src/lib/label-ownership.mjs",

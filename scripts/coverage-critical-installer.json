@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "files": {
+    "src/command-runner.mjs": { "lines": 55, "branches": 35, "functions": 55 },
+    "src/install.mjs": { "lines": 55, "branches": 35, "functions": 55 },
+    "src/preflight.mjs": { "lines": 50, "branches": 30, "functions": 50 },
+    "src/updater.mjs": { "lines": 50, "branches": 30, "functions": 50 },
+    "src/verify.mjs": { "lines": 50, "branches": 30, "functions": 50 }
+  }
+}

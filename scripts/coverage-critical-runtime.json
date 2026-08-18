@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "files": {
+    "src/lib/agents-runtime.mjs": { "lines": 90, "branches": 80, "functions": 85 },
+    "src/lib/commands.mjs": { "lines": 70, "branches": 65, "functions": 80 },
+    "src/lib/github-core.mjs": { "lines": 85, "branches": 72, "functions": 85 },
+    "src/lib/pr-repair.mjs": { "lines": 82, "branches": 45, "functions": 95 },
+    "src/lib/publish.mjs": { "lines": 88, "branches": 72, "functions": 90 },
+    "src/lib/validate.mjs": { "lines": 72, "branches": 42, "functions": 78 }
+  }
+}

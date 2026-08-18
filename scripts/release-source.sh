@@ -7,7 +7,7 @@ usage() {
 Usage: scripts/release-source.sh [--verify|--verify-worktree] [--output DIRECTORY] [REVISION]
 
 Builds a deterministic gzip-compressed source archive from tracked content at
-REVISION (default: HEAD), validates its exact inventory and MANIFEST.sha256
+REVISION (default: HEAD), validates its exact inventory and source manifests
 after unpacking, and prints the archive SHA-256. --verify performs the same
 checks in temporary storage and retains no archive. --verify-worktree checks
 the complete non-ignored working-tree inventory and content without creating an archive.
@@ -60,41 +60,9 @@ cd "$repo_root"
 verify_release_tree() {
   local tree_root=$1
   local tree_inventory=$2
-  local manifest_paths_unsorted="$work_dir/manifest-paths-unsorted"
-  local manifest_paths="$work_dir/manifest-paths"
-  local release_inventory="$work_dir/release-inventory"
-  local duplicate_paths
-
-  [[ -f $tree_root/MANIFEST.sha256 ]] || die 'release tree is missing MANIFEST.sha256'
-  : > "$manifest_paths_unsorted"
-  while IFS= read -r manifest_line || [[ -n $manifest_line ]]; do
-    [[ $manifest_line =~ ^[[:xdigit:]]{64}[[:space:]][[:space:]](.+)$ ]] || die 'MANIFEST.sha256 contains a malformed entry'
-    manifest_path=${BASH_REMATCH[1]}
-    [[ $manifest_path == ./* ]] && manifest_path=${manifest_path#./}
-    [[ -n $manifest_path ]] || die 'MANIFEST.sha256 contains an empty path'
-    case "$manifest_path" in
-      /*|*'//'*) die "MANIFEST.sha256 contains an unsafe path: $manifest_path" ;;
-    esac
-    IFS=/ read -r -a manifest_components <<< "$manifest_path"
-    for manifest_component in "${manifest_components[@]}"; do
-      [[ -n $manifest_component && $manifest_component != . && $manifest_component != .. ]] || die "MANIFEST.sha256 contains an unsafe path: $manifest_path"
-    done
-    printf '%s\n' "$manifest_path" >> "$manifest_paths_unsorted"
-  done < "$tree_root/MANIFEST.sha256"
-  LC_ALL=C sort "$manifest_paths_unsorted" > "$manifest_paths"
-  duplicate_paths=$(LC_ALL=C uniq -d "$manifest_paths")
-  if [[ -n $duplicate_paths ]]; then
-    die 'MANIFEST.sha256 contains duplicate paths'
-  fi
-  grep -vx 'MANIFEST.sha256' "$tree_inventory" > "$release_inventory"
-  cmp -s "$release_inventory" "$manifest_paths" || {
-    diff -u "$release_inventory" "$manifest_paths" >&2 || true
-    die 'MANIFEST.sha256 paths do not exactly cover the release inventory'
-  }
-  (
-    cd "$tree_root"
-    shasum -a 256 -c MANIFEST.sha256
-  )
+  node "$tree_root/scripts/verify-source-manifest.mjs" \
+    --root "$tree_root" \
+    --inventory "$tree_inventory"
 }
 
 if $verify_worktree; then

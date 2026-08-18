@@ -1,0 +1,97 @@
+name: Codekeeper security analysis
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codekeeper-security-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  codeql:
+    name: CodeQL JavaScript analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          languages: javascript-typescript
+      - name: Analyze source
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          category: "/language:javascript-typescript"
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          config-file: ./.github/dependency-review-config.yml
+
+  supply-chain:
+    name: Dependency, license, and SBOM evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Codekeeper Node toolchain
+        uses: ./.github/actions/setup-codekeeper-node
+        with:
+          node-version: 24.19.0
+      - name: Generate deterministic SBOM and license report
+        env:
+          SOURCE_DATE_EPOCH: "0"
+        run: |
+          node scripts/generate-sbom.mjs \
+            --lock package-lock.json \
+            --lock tools/codekeeper/package-lock.json \
+            --lock packages/codekeeper/package-lock.json \
+            --policy security/license-policy.json \
+            --output security-artifacts/codekeeper.spdx.json \
+            --report security-artifacts/license-report.json
+      - name: Audit root dependencies
+        run: npm audit --package-lock-only --omit=dev --audit-level=high --ignore-scripts
+      - name: Audit runtime dependencies
+        working-directory: tools/codekeeper
+        run: npm audit --package-lock-only --omit=dev --audit-level=high --ignore-scripts
+      - name: Audit installer dependencies
+        working-directory: packages/codekeeper
+        run: npm audit --package-lock-only --omit=dev --audit-level=high --ignore-scripts
+      - name: Upload bounded security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codekeeper-security-evidence-${{ github.sha }}
+          path: security-artifacts
+          if-no-files-found: error
+          retention-days: 30

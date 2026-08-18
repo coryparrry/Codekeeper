@@ -1,0 +1,8 @@
+fail-on-severity: high
+vulnerability-check: true
+license-check: true
+deny-licenses:
+  - AGPL-3.0-only
+  - AGPL-3.0-or-later
+  - BUSL-1.1
+  - SSPL-1.0

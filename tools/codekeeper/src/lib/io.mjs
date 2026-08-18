@@ -1,5 +1,9 @@
-import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { appendFile, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+const GITHUB_OUTPUT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const GITHUB_OUTPUT_ATTEMPTS = 16;
 
 export async function readRegularFile(filePath) {
   const information = await lstat(filePath);
@@ -97,13 +101,32 @@ export function parseArgs(argv) {
   };
 }
 
-export function setGitHubOutput(name, value) {
+function outputDelimiter(normalized, randomBytesImpl) {
+  const occupied = new Set(normalized.split(/\r?\n/));
+  for (let attempt = 0; attempt < GITHUB_OUTPUT_ATTEMPTS; attempt += 1) {
+    const bytes = randomBytesImpl(18);
+    if (!Buffer.isBuffer(bytes) || bytes.length !== 18) {
+      throw new TypeError("GitHub output delimiter entropy must be an 18-byte Buffer");
+    }
+    const delimiter = `CODEKEEPER_${bytes.toString("hex")}`;
+    if (!occupied.has(delimiter)) return delimiter;
+  }
+  throw new Error("Could not create a collision-free GitHub output delimiter");
+}
+
+export function githubOutputPayload(name, value, { randomBytesImpl = randomBytes } = {}) {
+  if (!GITHUB_OUTPUT_NAME.test(String(name ?? ""))) {
+    throw new Error("GitHub output name is invalid");
+  }
+  const normalized = value === undefined || value === null ? "" : String(value);
+  const delimiter = outputDelimiter(normalized, randomBytesImpl);
+  return `${name}<<${delimiter}\n${normalized}\n${delimiter}\n`;
+}
+
+export async function setGitHubOutput(name, value) {
   const outputPath = process.env.GITHUB_OUTPUT;
   if (!outputPath) return;
-  const normalized = value === undefined || value === null ? "" : String(value);
-  const delimiter = `CODEKEEPER_${Math.random().toString(16).slice(2)}`;
-  const payload = `${name}<<${delimiter}\n${normalized}\n${delimiter}\n`;
-  return import("node:fs").then(({ appendFileSync }) => appendFileSync(outputPath, payload));
+  await appendFile(outputPath, githubOutputPayload(name, value), "utf8");
 }
 
 export function log(message, details = undefined) {
@@ -114,8 +137,19 @@ export function log(message, details = undefined) {
   }
 }
 
-export function workflowCommandValue(value) {
-  return String(value ?? "")
+function defaultDiagnostic(value, debug) {
+  const text = String(value ?? "");
+  if (debug) return text;
+  const lines = text.split(/\r?\n/);
+  const stackLike = lines.slice(1).some((line) => /^\s*(?:at\s|file:\/\/|node:)/.test(line));
+  return stackLike ? lines[0] : text;
+}
+
+export function workflowCommandValue(
+  value,
+  { debug = process.env.CODEKEEPER_DEBUG === "true" } = {}
+) {
+  return defaultDiagnostic(value, debug)
     .replaceAll("%", "%25")
     .replaceAll("\r", "%0D")
     .replaceAll("\n", "%0A");
