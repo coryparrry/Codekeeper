@@ -10,13 +10,14 @@
     "coverage": "npm --prefix tools/codekeeper run coverage && npm --prefix packages/codekeeper run coverage && npm --prefix acceptance run coverage",
     "documentation:check": "node scripts/documentation-contract.mjs && node --test scripts/documentation-contract.test.mjs",
     "governance:check": "node scripts/repository-governance.mjs --validate && node --test scripts/repository-governance.test.mjs",
+    "module-boundaries:check": "node scripts/check-module-boundaries.mjs && node --test scripts/check-module-boundaries.test.mjs",
     "release:tag:check": "node --test scripts/release-tag-integrity.test.mjs",
     "source:manifest:check": "node --test scripts/verify-source-manifest.test.mjs",
     "security:check": "node --test scripts/generate-sbom.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
-    "check": "npm run lint && npm run format:check && npm run documentation:check && npm run governance:check && npm run release:tag:check && npm run source:manifest:check && npm run security:check && bash scripts/release-source.sh --verify-worktree"
+    "check": "npm run lint && npm run format:check && npm run documentation:check && npm run governance:check && npm run module-boundaries:check && npm run release:tag:check && npm run source:manifest:check && npm run security:check && bash scripts/release-source.sh --verify-worktree"
   },
   "devDependencies": {
     "eslint": "10.8.1",

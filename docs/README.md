@@ -8,6 +8,7 @@
 | [Unpublished release readiness](RELEASE_READINESS.md) | How-to | Produce and retain a non-publishing release candidate and evidence boundary. |
 | [Repository governance](REPOSITORY_GOVERNANCE.md) | How-to | Review and deliberately apply branch and immutable-tag rules. |
 | [Repository security checks](SECURITY_CHECKS.md) | Reference | Understand CodeQL, dependency review, SBOM, license, and GitHub-setting evidence. |
+| [Module boundary ratchet](MODULE_BOUNDARIES.md) | Explanation | Keep oversized legacy modules from growing while staged behavior-preserving splits land. |
 | [Configuration](CONFIGURATION.md) | Reference | Configure policy, workflows, providers, and capabilities. |
 | [Architecture](ARCHITECTURE.md) | Explanation | Understand the runtime trust pipeline. |
 | [Authority, data, and cost](authority-data-cost.md) | Explanation | Decide what Codekeeper may change, send, and consume. |

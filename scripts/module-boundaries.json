@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "newModuleMaxLines": 800,
+  "newModuleMaxBytes": 40000,
+  "roots": [
+    "tools/codekeeper/src/lib",
+    "packages/codekeeper/src"
+  ],
+  "legacy": {
+    "tools/codekeeper/src/lib/agents-runtime.mjs": {
+      "maxBytes": 49648
+    },
+    "tools/codekeeper/src/lib/github-core.mjs": {
+      "maxBytes": 61928
+    },
+    "tools/codekeeper/src/lib/publish.mjs": {
+      "maxBytes": 63585
+    },
+    "packages/codekeeper/src/plan.mjs": {
+      "maxBytes": 54594
+    },
+    "packages/codekeeper/src/preflight.mjs": {
+      "maxBytes": 63835
+    }
+  }
+}
