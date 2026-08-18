@@ -58,8 +58,16 @@
       "sha256": "6c7b8e2a0859e2e7311b33fd22933c769e3e48cbc7cc24d0d847c8167d733fd3"
     },
     {
-      "path": "src/lib/github.mjs",
+      "path": "src/lib/github-budget.mjs",
+      "sha256": "6944f9183eff79e00577c6e5b37f6d400e0ea878a78d0e574234cfa0a3c5fd68"
+    },
+    {
+      "path": "src/lib/github-core.mjs",
       "sha256": "f6701e54d24fdb71fdd5ee2f77434777f741963e997fdb7663079b61e60bb0c2"
+    },
+    {
+      "path": "src/lib/github.mjs",
+      "sha256": "5363965530f4f4a31385e3f26d2d3ae81f492cec8ede16edad2191765f1cad78"
     },
     {
       "path": "src/lib/glob.mjs",
