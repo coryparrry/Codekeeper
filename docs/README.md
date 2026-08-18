@@ -3,8 +3,10 @@
 | Document | Type | Purpose |
 |---|---|---|
 | [Installation](../INSTALL.md) | How-to | Evaluate a local package and prove an installation. |
+| [Installer recovery and removal](INSTALLER_RECOVERY.md) | How-to | Reconcile an already-pushed setup branch or prepare a manifest-bound removal pull request. |
 | [Unpublished release readiness](RELEASE_READINESS.md) | How-to | Produce and retain a non-publishing release candidate and evidence boundary. |
 | [Repository governance](REPOSITORY_GOVERNANCE.md) | How-to | Review and deliberately apply branch and immutable-tag rules. |
+| [Repository security checks](SECURITY_CHECKS.md) | Reference | Understand CodeQL, dependency review, SBOM, license, and GitHub-setting evidence. |
 | [Configuration](CONFIGURATION.md) | Reference | Configure policy, workflows, providers, and capabilities. |
 | [Architecture](ARCHITECTURE.md) | Explanation | Understand the runtime trust pipeline. |
 | [Authority, data, and cost](authority-data-cost.md) | Explanation | Decide what Codekeeper may change, send, and consume. |

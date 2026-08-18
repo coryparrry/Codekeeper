@@ -38,6 +38,8 @@ codekeeper update --check
 codekeeper rollback --to X.Y.Z
 codekeeper doctor [--json]
 codekeeper verify [--json] [--controlled]
+codekeeper resume [--branch codekeeper/setup] [--json] [--apply]
+codekeeper remove [--json] [--apply]
 ```
 
 `update` resolves the latest published release and runs it only when it is
@@ -55,6 +57,19 @@ release. It never resets, reverts, or force-pushes. If the verified target
 cannot complete that protocol, the launcher fails closed without claiming that
 rollback succeeded.
 
+`resume` inspects an already-pushed `codekeeper/setup` or
+`codekeeper/update-<sha>` branch. Without `--apply`, it is read-only. With
+`--apply`, it can set a missing startup variable to `false` and recreate a
+missing pull request after proving the remote branch tip and committed
+Codekeeper policy. It never reads secret values; missing secrets and
+identity variables remain explicit actions.
+
+`remove` is plan-only unless `--apply` is supplied. It verifies every
+release-owned file against `.github/codekeeper-release.json`, disables
+Codekeeper, creates one exact deletion commit, pushes a dedicated branch, and
+opens a pull request. It does not merge, delete secrets or variables, remove
+labels, or uninstall the adopter-owned GitHub App.
+
 `init`, exact updates, and rollback's target-side forward update use
 `--current-package --package-integrity` only for an exact local tarball or
 verified staged package. `doctor` is read-only. `verify` is post-merge evidence;
@@ -66,6 +81,10 @@ runtime's package-acquisition path.
 
 - The installer creates a reviewed setup or update pull request; it never
   merges it.
+- Recovery only reconciles an existing pushed branch; it does not regenerate or
+  overwrite repository code.
+- Removal deletes only manifest-owned files whose current SHA-256 still matches
+  the installed release receipt.
 - The Recommended path enables automatic PR review and manual maintenance;
   scheduled maintenance, tracing, repair, issue implementation, duplicate
   closure, and automatic merge start off.
@@ -74,8 +93,10 @@ runtime's package-acquisition path.
 - Installed runtime workflows use GitHub-hosted ephemeral runners. Persistent
   shared self-hosted runners are outside the supported trust boundary.
 
-Read [Authority, data, and cost](../../docs/authority-data-cost.md) before
-providing repository content to a model or enabling code changes.
+Read [Installer recovery and removal](../../docs/INSTALLER_RECOVERY.md) before
+resuming an interrupted setup or removing an installation. Read
+[Authority, data, and cost](../../docs/authority-data-cost.md) before providing
+repository content to a model or enabling code changes.
 
 ## Package metadata
 
