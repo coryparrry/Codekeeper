@@ -75,7 +75,7 @@
     },
     {
       "path": "src/lib/io.mjs",
-      "sha256": "8657605683c5114c32183f410487cc9d8b5e92001e38189f43fc20266fa96755"
+      "sha256": "2b93d3339ffdfebe860b58d63fc79a23145ff76c8d6acc639149f2db9ee20ee9"
     },
     {
       "path": "src/lib/label-ownership.mjs",
