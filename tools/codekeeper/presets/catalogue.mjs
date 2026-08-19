@@ -41,7 +41,7 @@ export function applyPolicyPreset(starterPolicy, presetName, { openaiIssueCandid
     modelSettings: { text: { verbosity: "low" } },
     workspace: {
       ...policy.ai.agents.issue.workspace,
-      enabled: false,
+      enabled: true,
       allowWrites: false,
       model: candidate.model,
       effort: candidate.effort
