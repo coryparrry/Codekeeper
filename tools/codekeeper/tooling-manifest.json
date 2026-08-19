@@ -27,7 +27,7 @@
     },
     {
       "path": "presets/catalogue.mjs",
-      "sha256": "bcc71060b4fb3281c4157760e84da530d98ff8b547bab28de9e661a3beb1059d"
+      "sha256": "7990b211a3c7bad3b4ba10154c10d1d7c1f81cdd1f5a3b687e210e6108bbc36e"
     },
     {
       "path": "scripts/verify-tooling-artifact.mjs",
