@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const harness = await readFile(new URL("../src/harness.mjs", import.meta.url), "utf8");
-const publish = await readFile(new URL("../../tools/codekeeper/src/lib/publish.mjs", import.meta.url), "utf8");
+const auditPublishSource = await readFile(new URL("../../tools/codekeeper/src/lib/publish/audit.mjs", import.meta.url), "utf8");
 const github = await readFile(new URL("../../tools/codekeeper/src/lib/github/mutation-guard.mjs", import.meta.url), "utf8");
 
 function section(source, startMarker, endMarker) {
@@ -31,8 +31,7 @@ test("acceptance quiescence accounts for workflow runs beyond the first page", (
 });
 
 test("audit publication binds mutations to the remote default branch", () => {
-  const auditPublication = section(publish, "export async function publishAudit", "export async function publishFix");
   const branchMutation = section(github, "  async beginBranchMutation", "\n  async beginIssueMutation");
-  assertContains(auditPublication, /github\.beginBranchMutation/u, "audit publication does not enter the branch mutation seam");
+  assertContains(auditPublishSource, /beginBranchMutation/u, "audit publication does not enter the branch mutation seam");
   assertContains(branchMutation, /assertMutationCurrent/u, "branch mutation is not checked inside the GitHub adapter");
 });

@@ -155,19 +155,35 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "55ef38d4af23782abe33b6bb87d1ab39f08630ef0d6f2508ac227b9bd05fdf4d"
+      "sha256": "a82bd4bf6720805191403099a0d81e2b98e69e8580946b934fc7e628d8d281e1"
     },
     {
       "path": "src/lib/publish/artifacts.mjs",
       "sha256": "87bc5e34097f9e954bd5f2a4a27d864ce51c18a6a99eb9ba2e4c687f565fbcff"
     },
     {
+      "path": "src/lib/publish/audit.mjs",
+      "sha256": "49505366ce8ad03d4305b0ad39c9944a723dd943d0ee75f24fed28b0329f1a53"
+    },
+    {
       "path": "src/lib/publish/common.mjs",
       "sha256": "09db211108eedb44783e23fae754592a47f04cc0e3d1173ba8b2444ba69dd9b3"
     },
     {
+      "path": "src/lib/publish/fix.mjs",
+      "sha256": "c06f50a71f2a70d5f11fe05e8c859bbc7e96f1a3f96a0cb46717899d9892a886"
+    },
+    {
+      "path": "src/lib/publish/index.mjs",
+      "sha256": "a2d54f89ce89a5445a614cd9cec6146b856c6906ca74abbeabee32fc5806ba1e"
+    },
+    {
       "path": "src/lib/publish/issue.mjs",
       "sha256": "7f03c30c2083af2cdf8a6ad310b97b82ef28a2c8e827a3d187ba8c7a7f1c1069"
+    },
+    {
+      "path": "src/lib/publish/repair-pr.mjs",
+      "sha256": "409a01f5d65030a622e46bcfa3afe7d39a5bd383f7913cfc994866782abf37a8"
     },
     {
       "path": "src/lib/publish/review.mjs",
