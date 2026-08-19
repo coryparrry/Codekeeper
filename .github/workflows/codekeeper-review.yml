@@ -278,6 +278,11 @@ jobs:
           install -m 600 /dev/null "$BUNDLE/workspace-result.json"
           install -m 600 /dev/null "$BUNDLE/workspace-runtime-metadata.json"
           {
+            echo '[safe]'
+            printf '\tdirectory = %s\n' "$REPOSITORY_PATH"
+          } > "$CODEX_HOME/.gitconfig"
+          chmod 600 "$CODEX_HOME/.gitconfig"
+          {
             echo 'project_doc_max_bytes = 0'
             echo 'project_doc_fallback_filenames = []'
             echo
@@ -326,10 +331,6 @@ jobs:
             LOGNAME="$WORKSPACE_USER" \
             TMPDIR="$WORKSPACE_TEMP" \
             CODEX_HOME="$CODEX_HOME" \
-            GIT_OPTIONAL_LOCKS=0 \
-            GIT_CONFIG_COUNT=1 \
-            GIT_CONFIG_KEY_0=safe.directory \
-            GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE/worktree" \
             CODEKEEPER_WORKSPACE_API_KEY="$CODEKEEPER_WORKSPACE_API_KEY" \
             "$NODE_BIN" "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" run-workspace-agent \
               --config "$CONFIG" \
