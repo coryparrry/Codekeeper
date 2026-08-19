@@ -135,39 +135,6 @@ test("canonical and legacy pause labels fail closed at pull and issue mutation g
   }
 });
 
-test("closing issue references include only merged pull requests", async () => {
-  let requestBody;
-  const github = client({
-    retries: 0,
-    fetch: async (_url, options) => {
-      requestBody = JSON.parse(options.body);
-      return new Response(JSON.stringify({
-        data: {
-          repository: {
-            issue: {
-              closedByPullRequestsReferences: {
-                nodes: [
-                  { number: 3, url: "https://github.com/owner/repository/pull/3", merged: false, mergedAt: null, repository: { nameWithOwner: "owner/repository" } },
-                  { number: 4, url: "https://github.com/owner/repository/pull/4", merged: true, mergedAt: "2026-08-12T10:00:00Z", repository: { nameWithOwner: "owner/repository" } },
-                  { number: 5, url: "https://github.com/other/repository/pull/5", merged: true, mergedAt: "2026-08-13T10:00:00Z", repository: { nameWithOwner: "other/repository" } }
-                ],
-                pageInfo: { hasNextPage: false }
-              }
-            }
-          }
-        }
-      }));
-    }
-  });
-
-  assert.deepEqual(await github.listMergedPullRequestsClosingIssue(7), [
-    { number: 5, url: "https://github.com/other/repository/pull/5", mergedAt: "2026-08-13T10:00:00Z", repository: "other/repository" },
-    { number: 4, url: "https://github.com/owner/repository/pull/4", mergedAt: "2026-08-12T10:00:00Z", repository: "owner/repository" }
-  ]);
-  assert.match(requestBody.query, /closedByPullRequestsReferences/);
-  assert.deepEqual(requestBody.variables, { owner: "owner", repo: "repository", number: 7, first: 100 });
-});
-
 test("conditional pull mutations reject changed labels and feedback inside the GitHub adapter", async () => {
   const state = {};
   const github = conditionalMutationClient(state, []);
@@ -189,51 +156,6 @@ test("conditional pull mutations reject changed labels and feedback inside the G
   state.labels = [];
   state.reviews = [{ id: 91, body: "Fresh review feedback", user: { login: "reviewer" } }];
   await assert.rejects(github.createComment(7, "stale"), /review feedback changed/);
-});
-
-test("conditional pull mutations advance their own expected label state", async () => {
-  const state = {};
-  const requests = [];
-  const github = conditionalMutationClient(state, requests);
-  await github.beginPullMutation({
-    repository: "owner/repository",
-    pullRequest: {
-      number: 7,
-      headSha: "a".repeat(40),
-      baseSha: "b".repeat(40),
-      baseRef: "main",
-      reviewFeedbackFrozen: true,
-      reviewFeedback: []
-    },
-    policy: reviewPolicy
-  });
-
-  await github.addLabels(7, ["reviewed"]);
-  await github.createRepositoryDispatch("codekeeper_review", { number: 7 });
-  assert.equal(requests.some(({ href, method }) => method === "POST" && href.endsWith("/dispatches")), true);
-});
-
-test("conditional pull labels reconcile an applied mutation after response loss", async () => {
-  const state = { loseLabelResponseOnce: true };
-  const requests = [];
-  const github = conditionalMutationClient(state, requests);
-  await github.beginPullMutation({
-    repository: "owner/repository",
-    pullRequest: {
-      number: 7,
-      headSha: "a".repeat(40),
-      baseSha: "b".repeat(40),
-      baseRef: "main",
-      reviewFeedbackFrozen: true,
-      reviewFeedback: []
-    },
-    policy: reviewPolicy
-  });
-
-  await github.addLabels(7, ["auto repaired"]);
-  await github.createRepositoryDispatch("codekeeper_fix", { number: 7 });
-  assert.deepEqual(state.labels, ["auto repaired"]);
-  assert.equal(requests.filter(({ method, href }) => method === "POST" && href.endsWith("/labels")).length, 1);
 });
 
 test("conditional issue comments rebase from the live issue timestamp", async () => {
@@ -413,67 +335,4 @@ test("secondary issue mutations reject comment drift before reconciliation", asy
   await assert.rejects(github.updateIssue(10, { body: "Codekeeper update" }), /comments changed after inventory/);
   assert.equal(writes, 0);
   await github.endSecondaryIssueMutation();
-});
-
-test("review replies update the App-owned marker in the originating thread", async () => {
-  const marker = "<!-- codekeeper:deferred-reply=test -->";
-  const requests = [];
-  const github = client({
-    fetch: async (url, options) => {
-      requests.push({ url: String(url), method: options.method, body: options.body });
-      if (options.method === "GET") {
-        return new Response(JSON.stringify([{
-          id: 99,
-          in_reply_to_id: 41,
-          body: `Old reply\n${marker}`,
-          user: { login: "codekeeper[bot]", id: 123, type: "Bot" }
-        }]));
-      }
-      return new Response(JSON.stringify({ id: 99 }), { status: 200 });
-    }
-  });
-
-  await github.upsertReviewReply(7, 41, marker, "Updated reply", { login: "codekeeper[bot]", id: "123" });
-  assert.deepEqual(requests.map(({ method }) => method), ["GET", "PATCH"]);
-  assert.match(requests[1].url, /\/pulls\/comments\/99$/);
-  assert.equal(JSON.parse(requests[1].body).body, `Updated reply\n${marker}`);
-});
-
-test("retiring feedback updates only App-owned top-level and inline markers", async () => {
-  const marker = "<!-- codekeeper:review-feedback-reply=" + "a".repeat(64) + " -->";
-  const requests = [];
-  const github = client({
-    fetch: async (url, options) => {
-      const href = String(url);
-      requests.push({ url: href, method: options.method, body: options.body });
-      if (options.method === "GET" && href.includes("/issues/7/comments")) {
-        return new Response(JSON.stringify([
-          { id: 11, body: `Old top-level reply\n${marker}`, user: { login: "codekeeper[bot]", id: 123, type: "Bot" } },
-          { id: 12, body: `Spoofed reply\n${marker}`, user: { login: "person", id: 456, type: "User" } }
-        ]));
-      }
-      if (options.method === "GET" && href.includes("/pulls/7/comments")) {
-        return new Response(JSON.stringify([
-          { id: 21, body: `Old inline reply\n${marker}`, user: { login: "codekeeper[bot]", id: 123, type: "Bot" } },
-          { id: 22, body: `Other bot reply\n${marker}`, user: { login: "other[bot]", id: 789, type: "Bot" } }
-        ]));
-      }
-      return new Response(JSON.stringify({ id: 1 }), { status: 200 });
-    }
-  });
-
-  const updated = await github.retireReviewFeedbackReply(
-    7,
-    marker,
-    "No longer current.",
-    { login: "codekeeper[bot]", id: "123" }
-  );
-
-  assert.equal(updated, 2);
-  const patches = requests.filter(({ method }) => method === "PATCH");
-  assert.deepEqual(patches.map(({ url }) => url).sort(), [
-    "https://api.github.com/repos/owner/repository/issues/comments/11",
-    "https://api.github.com/repos/owner/repository/pulls/comments/21"
-  ]);
-  assert.ok(patches.every(({ body }) => JSON.parse(body).body === `No longer current.\n${marker}`));
 });

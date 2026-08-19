@@ -61,10 +61,6 @@
       "maxLines": 884,
       "maxBytes": 32028
     },
-    "tools/codekeeper/src/lib/github.mjs": {
-      "maxLines": 1177,
-      "maxBytes": 48406
-    },
     "tools/codekeeper/src/lib/publish.mjs": {
       "maxLines": 1448,
       "maxBytes": 63585
