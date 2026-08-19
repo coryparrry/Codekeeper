@@ -389,7 +389,7 @@ test("maintenance and fix dry runs do not require App credentials, but publicati
     );
     assert.match(
       caller,
-      /Optional for `dry_run=true`; required when `dry_run=false` publishes changes\./,
+      /Optional for dry_run=true; required when dry_run=false publishes changes\./,
     );
     assert.match(
       caller,
@@ -775,7 +775,7 @@ test("owner-commanded pull request repair can update only the frozen existing he
   const assistantRoute = jobSection(assistant, "route");
   assert.match(
     assistantRoute,
-    /Route deterministic owner requests[\s\S]*CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/,
+    /Route deterministic owner request[\s\S]*CONFIG: \$\{\{ github\.workspace \}\}\/repository\/\.github\/codekeeper\.json/,
   );
   assert.doesNotMatch(
     assistantRoute,
@@ -878,14 +878,14 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
     await repositoryFile("tools/codekeeper/package-lock.json"),
   );
   assert.deepEqual(packageJson.dependencies, {
-    "@openai/agents": "0.15.0",
+    "@openai/agents": "0.16.0",
     "@openai/codex": "0.147.0",
     zod: "4.4.3",
   });
   assert.equal(packageLock.lockfileVersion, 3);
   assert.equal(
     packageLock.packages[""].dependencies["@openai/agents"],
-    "0.15.0",
+    "0.16.0",
   );
   assert.equal(
     packageLock.packages[""].dependencies["@openai/codex"],

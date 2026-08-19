@@ -593,6 +593,6 @@ test("all checkouts discard persisted credentials and tool versions are exact", 
   const runtimePackage = JSON.parse(
     await repositoryFile("tools/codekeeper/package.json"),
   );
-  assert.equal(runtimePackage.dependencies["@openai/agents"], "0.15.0");
+  assert.equal(runtimePackage.dependencies["@openai/agents"], "0.16.0");
   assert.equal(runtimePackage.dependencies["@openai/codex"], "0.147.0");
 });

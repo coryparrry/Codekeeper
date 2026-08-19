@@ -61,7 +61,7 @@ function renderReviewCondition(source, relativePath) {
   const { match, pattern } = markerBlock(source, relativePath);
   const block = match[0];
   const conditionPattern =
-    /contains\(fromJSON\('[^']*'\), github\.event\.comment\.body\)\)/g;
+    /contains\(fromJSON\('[^']*'\), github\.event\.comment\.body\)(\))?/g;
   const matches = block.match(conditionPattern) ?? [];
   if (matches.length !== 1) {
     throw new Error(
@@ -72,7 +72,8 @@ function renderReviewCondition(source, relativePath) {
     pattern,
     block.replace(
       conditionPattern,
-      `contains(fromJSON('${slashCommandJson()}'), github.event.comment.body))`,
+      (_full, extraParen = "") =>
+        `contains(fromJSON('${slashCommandJson()}'), github.event.comment.body)${extraParen}`,
     ),
   );
 }
