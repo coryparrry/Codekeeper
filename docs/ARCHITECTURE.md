@@ -6,37 +6,33 @@ Codekeeper is distributed as one versioned npm package containing the installer,
 Adopter event, default-branch policy, and exact package receipt
         |
         v
-Local runtime workflow starts its independent jobs in parallel
+Local runtime workflow selects the smallest safe execution shape
         |
-        +-- first runtime job acquires one exact npm package
-        +-- later isolated jobs reverify its run-scoped artifact
-        |     - verifies SHA-512, closed manifest, inventory, hashes, and source commit
-        |     - rejects links and hidden paths before installing the locked runtime
+        +-- audit, fix, and issue modes retain staged isolated jobs
+        |     - workspace specialist -> coordinator -> optional verification
+        |     - tokenless sealing -> App-token publication
         |
-        +-- workspace specialist: optional workspace key and read-only GitHub token
-        |     - frozen policy, exact-head context, bounded review diff, and schema
-        |     - optional single Codex workspace specialist
-        |     - untrusted specialist result and, for audit/fix, patch artifact
-        |
-        +-- coordinator (fresh runner): provider and optional trace keys; no workspace or App key
-        |     - reconstructs its own frozen bundle from trusted inputs
-        |     - one tool-less Agents SDK coordinator selected per mode with its versioned profile
-        |     - applies an audit/fix untrusted patch only after model execution
-        |     - deterministic result validation and structured candidate artifact
-        |
-        +-- verification (repairs only): no credentials
-        |     - fresh checkout and patch validation
-        |
-        +-- sealing: no credentials
-        |     - immutable candidate and context hashes
-        |
-        +-- publication: short-lived adopter App token, no provider, trace, or workspace key
-              - labels, comments, issues, repair PRs, auto-merge
+        +-- pull-request review uses two fresh runners
+              |
+              +-- analysis runner
+              |     - deterministic intent routing before expensive setup
+              |     - one exact package acquisition and one frozen PR bundle
+              |     - optional Codex specialist in a temporary unprivileged OS account
+              |     - local specialist evidence handoff to the coordinator
+              |     - deterministic candidate validation
+              |
+              +-- trusted gate runner
+                    - one run-scoped package-and-candidate handoff
+                    - independent package reverification and locked runtime install
+                    - tokenless sealing before any App credential exists
+                    - short-lived adopter App token, publication, and fail-closed gate
 ```
 
 ## Trust boundaries
 
-The generated caller pins an exact npm package version and SHA-512 integrity, then invokes the adopter's local runtime workflow directly. The first runtime job uses the repository-owned acquisition action to download the exact tarball and verify its SHA-512, manifest identity, source commit, exact inventory, file hashes, and absence of links or hidden paths. It uploads the verified package as a one-day, run-scoped artifact. Every later isolated job downloads and independently reverifies the artifact before installing the nested locked runtime dependency graph. The jobs do not wait for a separate serial package-bootstrap job. Only then may the Codekeeper CLI run. The local reusable workflow uses `job.workflow_sha` for adopter-workflow provenance and reads policy only from the adopter default branch. The review caller is a default-branch `pull_request_target` definition that only invokes local reusable workflows; it never checks out or executes PR code. Pull request heads, issue data, comments, repository files, package downloads before verification, and model output are untrusted.
+The generated caller pins an exact npm package version and SHA-512 integrity, then invokes the adopter's local runtime workflow directly. The first runtime consumer uses the repository-owned acquisition action to download the exact tarball and verify its SHA-512, manifest identity, source commit, exact inventory, file hashes, and absence of links or hidden paths. Any later consumer independently reverifies the transferred package before installing the nested locked runtime dependency graph. Only then may the Codekeeper CLI run. The local reusable workflow uses `job.workflow_sha` for adopter-workflow provenance and reads policy only from the adopter default branch. The review caller is a default-branch `pull_request_target` definition that only invokes local reusable workflows; it never checks out or executes PR code. Pull request heads, issue data, comments, repository files, package downloads before verification, and model output are untrusted.
+
+For audit, fix, and issue modes, the verified package and intermediate evidence remain one-day, run-scoped artifacts between isolated jobs. Pull-request review uses a narrower two-runner path: its analysis runner acquires and verifies the package once, and its trusted gate runner independently reverifies the package from the single publication handoff. This preserves the security boundary that matters while removing artifact transfers that existed only because intent, specialist, coordinator, sealing, and publication were split across five runner allocations.
 
 ### Legacy source-pinned compatibility
 
@@ -54,11 +50,17 @@ The first two planes use closed manifests, so an added production file inside an
 
 Release-owned copied artifacts are digest-bound. Generated callers instead receive semantic validation so supported adopter controls survive updates; every planned deletion is still bound to the exact inspected bytes. A release can add or update a copied artifact by changing catalog data and its asset. A rename lists the prior target; a retirement keeps an explicit release-owned tombstone until every supported installation can delete the old target. Mixed policy and adopter-owned profile overrides retain their specialized preservation rules. Catalog targets are limited to the Codekeeper-owned `.github` namespaces, so neither a package nor an installed manifest can claim arbitrary repository files.
 
-The workspace specialist and coordinator are separate jobs on fresh GitHub-hosted Ubuntu runners. Product workflows use the literal `ubuntu-latest` runner for every job; custom or persistent self-hosted runner overrides are deliberately not part of the supported adopter surface. This keeps untrusted workspace inspection from sharing a persistent machine with coordinator, verification, or publication jobs that handle credentials. The workspace job launches the pinned Codex CLI as a local stdio MCP server through the Agents SDK; there is no separately hosted MCP service or Codex GitHub Action. The MCP host receives only its workspace credential and passes a minimal environment to Codex, while Codex's shell policy excludes secret variables from spawned commands. It never receives the provider, trace, or App credential. The coordinator rebuilds its frozen bundle from trusted checkouts and must match that bundle’s context digest to the workspace job output before reading specialist data. It reads only the specialist JSON result and, for write-capable audit/fix modes, a patch artifact as untrusted evidence; it rejects non-regular artifact files and applies that patch only after the model call completes.
+Audit, fix, and issue workflows keep the workspace specialist and coordinator on separate fresh GitHub-hosted Ubuntu runners. Product workflows use the literal `ubuntu-latest` runner for every job; custom or persistent self-hosted runner overrides are deliberately not part of the supported adopter surface.
+
+Pull-request review safely combines the specialist and coordinator on one fresh analysis runner by adding an operating-system identity boundary inside that runner. Before the specialist starts, Codekeeper makes the repository, policy, verified tooling, and frozen bundle non-writable to other users, leaves only two evidence files writable inside the bundle, and launches the pinned Codex CLI under a temporary unprivileged account with a clean environment and dedicated home and temporary directories. That account receives only the workspace credential; Git is limited to the exact checkout with optional index locks disabled so read-only repository inspection still works across the UID boundary. When the specialist finishes, Codekeeper terminates every process owned by that UID, rejects symlinked or non-regular evidence, transfers ownership of the evidence back to the runner account, deletes the isolated `CODEX_HOME` and temporary directory, and removes the account. Only after that boundary is closed do the provider and optional trace credentials enter the coordinator step. The App private key is never present on this runner.
+
+The workspace job launches the pinned Codex CLI as a local stdio MCP server through the Agents SDK; there is no separately hosted MCP service or Codex GitHub Action. The MCP host receives only its workspace credential and passes a minimal environment to Codex, while Codex's shell policy excludes secret variables from spawned commands. It never receives the provider, trace, or App credential. The coordinator reads only the specialist JSON result as untrusted evidence and must match the frozen bundle's context digest before using it. For write-capable audit and fix modes, a separate coordinator job rebuilds its frozen bundle from trusted checkouts, rejects non-regular artifact files, and applies the untrusted patch only after its model call completes.
 
 The workspace specialist receives the full frozen task prompt and produces bounded evidence. A review normally makes one workspace call. If that Medium result contains a current, high-confidence, blocking `high` or `critical` finding at a concrete line in the frozen changed-file list, the same MCP session makes one focused Max call in the same checkout. Overall risk, proposed labels, general security language, non-blocking findings, and unlocated findings cannot trigger that call. The Max result replaces the Medium result rather than being merged with it. Reviews pre-routed to Max from trusted labels, configured paths, or change-size thresholds make only their original Max call.
 
-When a specialist finishes, the coordinator receives a separate compact prompt containing only target metadata, policy constraints, and the final specialist evidence; every emitted claim must be copied from that result. It may omit optional evidence or choose a strictly more conservative enum state, but cannot add or rewrite findings, commands, tests, implementation claims, maintainer decisions, comments, summaries, repair metadata, or explanatory reasons. A specialist-required maintainer decision must remain required, so it cannot be bypassed by an `ai-ready` result. Issue triage uses the full bounded issue context only when its specialist is disabled. Workspace-disabled review, audit, and fix modes return deterministic fail-safe results without a provider call. Coordinators run for one turn and omit textual schemas when the provider enforces structured output. Before the prompt runs, the runtime selects one versioned Markdown profile for `Agent.instructions`: the verified packaged default, or the coordinator's fixed `.github/codekeeper/agents/*.md` path from the adopter default branch when that optional override exists. It records the source identity and SHA-256, freezes the selected bytes for the workspace and coordinator, and revalidates them before publication. The profile states its output responsibilities and boundaries; the shared instructions retain the no-tool security contract. The coordinator has no independent shell, filesystem, GitHub, credential, or arbitrary network tools. Candidate artifacts hash and retain the context, result, per-pass workspace timings, runtime usage and cache metadata, validation record, and optional patch; a later credential-free job validates repair patches again in a fresh checkout. A final job mints the adopter GitHub App token and publishes only the sealed artifact. It does not execute adopter repository code.
+When a specialist finishes, the coordinator receives a separate compact prompt containing only target metadata, policy constraints, and the final specialist evidence; every emitted claim must be copied from that result. It may omit optional evidence or choose a strictly more conservative enum state, but cannot add or rewrite findings, commands, tests, implementation claims, maintainer decisions, comments, summaries, repair metadata, or explanatory reasons. A specialist-required maintainer decision must remain required, so it cannot be bypassed by an `ai-ready` result. Issue triage uses the full bounded issue context only when its specialist is disabled. Workspace-disabled review, audit, and fix modes return deterministic fail-safe results without a provider call. Coordinators run for one turn and omit textual schemas when the provider enforces structured output. Before the prompt runs, the runtime selects one versioned Markdown profile for `Agent.instructions`: the verified packaged default, or the coordinator's fixed `.github/codekeeper/agents/*.md` path from the adopter default branch when that optional override exists. It records the source identity and SHA-256, freezes the selected bytes for the workspace and coordinator, and revalidates them before publication. The profile states its output responsibilities and boundaries; the shared instructions retain the no-tool security contract. The coordinator has no independent shell, filesystem, GitHub, credential, or arbitrary network tools. Candidate artifacts hash and retain the context, result, per-pass workspace timings, runtime usage and cache metadata, validation record, and optional patch; a later credential-free job validates repair patches again in a fresh checkout.
+
+A final trusted runner independently reverifies the package and candidate handoff, installs the locked runtime, and seals the candidate before it receives an App credential. The App token is minted only after sealing, and publication executes no adopter repository code. For review, sealing, publication, and the required gate share this trusted runner. Audit, fix, and issue modes keep sealing and publication as separate jobs because their broader repair and issue handoffs retain different retry and isolation requirements.
 
 Every Codex workspace uses a fresh runner-owned `CODEX_HOME` with `project_doc_max_bytes=0`, fallback project documents disabled, and automatic skill instructions disabled. Because pinned Codex independently discovers repository skills, `.agents/skills` and `.codex/skills` are moved into a runner-owned quarantine for the model invocation and restored before patch capture. Any replacement instruction surface created during the run fails the job.
 
@@ -69,13 +71,13 @@ Every Codex workspace uses a fresh runner-owned `CODEX_HOME` with `project_doc_m
 | Repository auditor | `tools/codekeeper/agents/repository-auditor.md` | `.github/codekeeper/agents/repository-auditor.md` |
 | Fixer | `tools/codekeeper/agents/fixer.md` | `.github/codekeeper/agents/fixer.md` |
 
-The selected provider’s `model_api_key` is required for analysis and never falls back to an OpenAI key. Codex may use `workspace_api_key` or its legacy `openai_api_key` compatibility fallback because it requires OpenAI. OpenAI trace export uses a distinct `trace_api_key` that exists only in the fresh coordinator job, never the Codex workspace or publication job. The trace exporter may not reuse a model-provider key. The starter policy keeps sensitive trace data off by default.
+The selected provider's `model_api_key` is required for analysis and never falls back to an OpenAI key. Codex may use `workspace_api_key` or its legacy `openai_api_key` compatibility fallback because it requires OpenAI. OpenAI trace export uses a distinct `trace_api_key` that exists only after the review specialist boundary has closed, or in the fresh coordinator job for other modes. It never enters the Codex workspace or publication step. The trace exporter may not reuse a model-provider key. The starter policy keeps sensitive trace data off by default.
 
 Labels and sticky comments are owned only when both their marker and configured App bot identity match. Maintenance fingerprints and repair-PR markers use the same identity check, avoiding a separate state store.
 
 ## Policy validation seam
 
-The production runtime owns the complete version 3 policy contract in `tools/codekeeper/src/lib/policy-validator.mjs`. Both file loading and the guided installer call its loader-independent `validatePolicy` boundary, so accepted object keys, relationships, bounds, schedules, labels, providers, agents, and safety constraints cannot drift between setup and execution. The unified npm release stage contains the canonical runtime and a generated byte-identical installer copy; repository checks fail if that copy differs. Generated callers invoke local reusable workflows. The first job downloads and verifies the exact package version. Later isolated jobs independently reverify its run-scoped artifact and install the nested locked runtime graph without lifecycle scripts. Existing source-pinned Actions remain valid at their historical commit until the adopter merges a generated package-migration update.
+The production runtime owns the complete version 3 policy contract in `tools/codekeeper/src/lib/policy-validator.mjs`. Both file loading and the guided installer call its loader-independent `validatePolicy` boundary, so accepted object keys, relationships, bounds, schedules, labels, providers, agents, and safety constraints cannot drift between setup and execution. The unified npm release stage contains the canonical runtime and a generated byte-identical installer copy; repository checks fail if that copy differs. Generated callers invoke local reusable workflows. Every runtime consumer downloads or restores and verifies the exact package version before installing the nested locked runtime graph without lifecycle scripts. Existing source-pinned Actions remain valid at their historical commit until the adopter merges a generated package-migration update.
 
 Installer validation adds only installation-context constraints: immutable safety fields cannot be edited, enabled capabilities must have their executing workflows, model providers must have an installer credential mapping, and edited profile overrides must be bounded Markdown. These checks do not redefine the runtime policy schema.
 
@@ -87,7 +89,16 @@ GitHub does not provide a transaction or compare-and-swap precondition spanning 
 
 ## Review gate and auto-merge
 
-The reusable review workflow exposes a PR-native, fail-closed gate in the same trusted post-seal job as publication, avoiding a serial runner allocation without combining the workspace, coordinator, seal, or App-token trust boundaries. The gate step always runs and passes only after analysis, sealing, and publication succeed for the supported PR shape. It is not an external commit-status publisher.
+The review caller performs deterministic no-op filtering in its job-level expression, so known Codekeeper-authored feedback and exact trusted slash commands do not allocate a machine. Mention-based commands still enter the reusable workflow so its canonical parser remains the single source of routing policy.
+
+An eligible review uses two runner allocations rather than five:
+
+1. The analysis runner performs intent detection before setup, checks out trusted policy and the exact PR head once, acquires one exact package, prepares one frozen bundle, runs the optional OS-isolated specialist, passes its bounded evidence locally to the coordinator, and validates the candidate.
+2. The trusted gate runner downloads one run-scoped handoff, independently reverifies the package, seals the candidate without credentials, then mints the short-lived App token, publishes, and runs the PR-native fail-closed gate.
+
+The single handoff deliberately contains only the verified package source and validated candidate, not the analysis runner's installed runtime or dependency tree. This lets a failed gate job be rerun without repeating model calls while avoiding the repeated setup and artifact transfers that previously existed between every stage. The gate always runs when routing did not explicitly return false, including when the analysis job failed before emitting an output, and passes only after analysis, sealing, and publication succeed for the supported PR shape. It is not an external commit-status publisher.
+
+A one-runner design was rejected because it would place the App private key on a machine that executed PR-controlled code. Cross-run dependency caches are also not part of the review path: a poisoned or stale cache would weaken package reproducibility, and GitHub's cache lookup would not remove runner scheduling. The remaining runtime installation may be removed in a future release only by shipping the complete locked dependency graph inside the already signed and closed package inventory.
 
 Auto-merge is separately evaluated from the model recommendation. It requires an allowed author or automation branch, same-repository open non-draft PR, low risk, adequate tests, no blocking findings, complete frozen review-diff context, and the configured file, line, and path limits. A later ineligible review attempts to remove stale auto-merge.
 

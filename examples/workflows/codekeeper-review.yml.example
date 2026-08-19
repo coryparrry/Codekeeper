@@ -18,52 +18,30 @@ permissions:
 
 # Same-repository, non-draft stacked PRs receive review publication. Forks,
 # drafts, and merge queues remain manual; stacked targets never auto-repair or
-# auto-merge.
+# auto-merge. Intent routing runs inside the reusable workflow so an eligible
+# review does not allocate a separate machine before analysis.
 jobs:
-  intent:
-    name: Detect Codekeeper review feedback
-    runs-on: ubuntu-latest
-    outputs:
-      owner_command: ${{ steps.intent.outputs.owner_command }}
-      route: ${{ steps.intent.outputs.route }}
-    steps:
-      - name: Exclude owner commands and automation replies
-        id: intent
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
-          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
-          REVIEW_AUTHOR: ${{ github.event.review.user.login }}
-          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
-          AUTOMATION_BOT_LOGIN: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
-        run: |
-          node --input-type=module -e '
-            import { appendFileSync } from "node:fs";
-            const eventName = String(process.env.EVENT_NAME ?? "");
-            const body = String(process.env.COMMENT_BODY ?? "").trim();
-            const commentAuthor = String(process.env.COMMENT_AUTHOR ?? "").toLowerCase();
-            const reviewAuthor = String(process.env.REVIEW_AUTHOR ?? "").toLowerCase();
-            const author = eventName === "pull_request_review" ? reviewAuthor : commentAuthor;
-            const association = String(process.env.AUTHOR_ASSOCIATION ?? "");
-            const automationBot = String(process.env.AUTOMATION_BOT_LOGIN ?? "").toLowerCase();
-            const mentionBot = automationBot.replace(/\[bot\]$/i, "");
-            const escapedMention = mentionBot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            // CODEKEEPER_OWNER_COMMANDS_START
-            const actions = ["help","status","review","rerun","triage","implement","repair","fix","defer","pause","stop"];
-            // CODEKEEPER_OWNER_COMMANDS_END
-            const slash = new RegExp(`^/codekeeper\\s+(${actions.join("|")})$`, "i").test(body);
-            const botMention = mentionBot && new RegExp(`^@${escapedMention}(?:\\s|$)`, "i").test(body);
-            const mentioned = mentionBot && new RegExp(`^@${escapedMention}\\s+(${actions.join("|")})$`, "i").test(body);
-            const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
-            const commandIntent = eventName === "pull_request_review_comment" && trustedAssociation && (slash || mentioned);
-            const feedbackEvent = eventName === "pull_request_review" || eventName === "pull_request_review_comment";
-            const automationReply = feedbackEvent && automationBot && author === automationBot;
-            const route = (!feedbackEvent || Boolean(automationBot)) && !commandIntent && !automationReply && !botMention;
-            appendFileSync(process.env.GITHUB_OUTPUT, `owner_command=${commandIntent}\nroute=${route}\n`);
-          '
   review:
-    needs: intent
-    if: needs.intent.outputs.route == 'true'
+    # Deterministic no-op feedback is filtered without allocating a runner.
+    # Mention-based owner commands still enter the reusable workflow so its
+    # canonical parser can route them without duplicating regex policy here.
+    # CODEKEEPER_OWNER_COMMANDS_START
+    if: >-
+      !(
+        (github.event_name == 'pull_request_review' ||
+         github.event_name == 'pull_request_review_comment') &&
+        (
+          vars.CODEKEEPER_AUTOMATION_BOT_LOGIN == '' ||
+          github.event.review.user.login == vars.CODEKEEPER_AUTOMATION_BOT_LOGIN ||
+          github.event.comment.user.login == vars.CODEKEEPER_AUTOMATION_BOT_LOGIN
+        )
+      ) &&
+      !(
+        github.event_name == 'pull_request_review_comment' &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+        contains(fromJSON('["/codekeeper help","/codekeeper status","/codekeeper review","/codekeeper rerun","/codekeeper triage","/codekeeper implement","/codekeeper repair","/codekeeper fix","/codekeeper defer","/codekeeper pause","/codekeeper stop"]'), github.event.comment.body)
+      )
+    # CODEKEEPER_OWNER_COMMANDS_END
     uses: ./.github/workflows/codekeeper-runtime-review.yml
     with:
       package_version: "PACKAGE_VERSION"
@@ -71,7 +49,6 @@ jobs:
       enabled: ${{ vars.CODEKEEPER_ENABLED == 'true' }}
       auto_review: true
       feedback_triage: true
-      owner_command: ${{ needs.intent.outputs.owner_command == 'true' }}
       automation_bot_login: ${{ vars.CODEKEEPER_AUTOMATION_BOT_LOGIN }}
       app_client_id: ${{ vars.CODEKEEPER_APP_CLIENT_ID }}
       app_contents_permission: "APP_CONTENTS_PERMISSION"

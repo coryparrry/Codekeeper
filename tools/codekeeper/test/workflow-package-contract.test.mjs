@@ -90,30 +90,19 @@ test("four generic mode workflows expose workflow_call and caller templates rema
     reviewCaller,
     /run-name: "Codekeeper review #\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.number \}\} @\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.event\.client_payload\.head_sha \}\}"/,
   );
+  assert.doesNotMatch(reviewCaller, /^  intent:/m);
+  assert.doesNotMatch(reviewCaller, /needs\.intent|^\s+runs-on:/m);
   assert.match(
     reviewCaller,
-    /const botMention = mentionBot && new RegExp\(`\^@\$\{escapedMention\}\(\?:\\\\s\|\$\)`/,
+    /review:\n[\s\S]*?if: >-[\s\S]*?uses: \.\/\.github\/workflows\/codekeeper-runtime-review\.yml/,
   );
   assert.match(
     reviewCaller,
-    /const mentioned = mentionBot && new RegExp\(`\^@\$\{escapedMention\}\\\\s\+\(\$\{actions\.join\("\|"\)\}\)\$`/,
+    /Deterministic no-op feedback is filtered without allocating a runner/,
   );
-  assert.match(
-    reviewCaller,
-    /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply && !botMention/,
-  );
-  assert.match(
-    reviewCaller,
-    /REVIEW_AUTHOR: \$\{\{ github\.event\.review\.user\.login \}\}/,
-  );
-  assert.match(
-    reviewCaller,
-    /const author = eventName === "pull_request_review" \? reviewAuthor : commentAuthor/,
-  );
-  assert.match(
-    reviewCaller,
-    /const automationReply = feedbackEvent && automationBot && author === automationBot/,
-  );
+  assert.match(reviewCaller, /CODEKEEPER_OWNER_COMMANDS_START/);
+  assert.match(reviewCaller, /contains\(fromJSON\('\["\/codekeeper help"/);
+
   const assistantCaller = await repositoryFile(
     "examples/workflows/codekeeper-assistant.yml.example",
   );
@@ -167,7 +156,6 @@ test("reusable workflows acquire one exact package and reverify it in every isol
     maintain: ["workspace", "analyze", "verify", "seal", "publish"],
     fix: ["workspace", "analyze", "verify", "seal", "publish"],
     issues: ["workspace", "analyze", "seal", "publish"],
-    review: ["workspace", "analyze", "seal", "gate"],
   };
   for (const [mode, jobs] of Object.entries(consumerJobs)) {
     const count = jobs.length;
@@ -328,6 +316,48 @@ test("reusable workflows acquire one exact package and reverify it in every isol
   }
 });
 
+test("review package verification is consolidated across two trusted boundaries", async () => {
+  const source = await workflow("review");
+  const analyze = jobSection(source, "analyze", "gate");
+  const gate = jobSection(source, "gate");
+
+  assert.equal([...source.matchAll(/^\s+runs-on: ubuntu-latest$/gm)].length, 2);
+  assert.equal([...source.matchAll(/name: Acquire exact Codekeeper package/g)].length, 1);
+  assert.equal([...source.matchAll(/name: Verify downloaded Codekeeper package/g)].length, 1);
+  assert.equal([...source.matchAll(/name: Install exact Codekeeper runtime/g)].length, 2);
+  assert.equal(
+    [...source.matchAll(/run: node "\$GITHUB_WORKSPACE\/tooling\/tools\/codekeeper\/bin\/install-runtime\.mjs"/g)].length,
+    2,
+  );
+  assert.equal(
+    [...source.matchAll(/uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/g)].length,
+    2,
+  );
+  assert.equal([...source.matchAll(/uses: actions\/upload-artifact@/g)].length, 1);
+  assert.equal([...source.matchAll(/uses: actions\/download-artifact@/g)].length, 1);
+  assert.equal(
+    [...source.matchAll(/name: codekeeper-review-publication-\$\{\{ github\.run_id \}\}/g)].length,
+    2,
+  );
+  assert.doesNotMatch(source, /codekeeper-tooling-\$\{\{ github\.run_id \}\}/);
+  assert.match(analyze, /package_manifest_sha256: \$\{\{ steps\.codekeeper-package\.outputs\.package_manifest_sha256 \}\}/);
+  assert.match(analyze, /package_source_commit: \$\{\{ steps\.codekeeper-package\.outputs\.source_commit \}\}/);
+  assert.match(gate, /package_source: artifact/);
+  assert.match(
+    gate,
+    /expected_manifest_sha256: \$\{\{ needs\.analyze\.outputs\.package_manifest_sha256 \}\}/,
+  );
+  assert.match(
+    gate,
+    /expected_source_commit: \$\{\{ needs\.analyze\.outputs\.package_source_commit \}\}/,
+  );
+  assert.match(
+    analyze,
+    /mv "\$GITHUB_WORKSPACE\/tooling\/tools" "\$HANDOFF\/tooling\/tools"/,
+  );
+  assert.doesNotMatch(analyze, /mv "\$GITHUB_WORKSPACE\/tooling"/);
+});
+
 test("product workflows require fresh GitHub-hosted Ubuntu runners", async () => {
   for (const mode of ["assistant", "maintain", "fix", "issues", "review"]) {
     const source = await workflow(mode);
@@ -355,7 +385,7 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
     await repositoryFile("tools/codekeeper/package.json"),
   );
   assert.equal(runtimePackage.dependencies["@openai/codex"], "0.147.0");
-  for (const mode of modes) {
+  for (const mode of modes.filter((mode) => mode !== "review")) {
     const source = await workflow(mode);
     const caller = await repositoryFile(
       `examples/workflows/codekeeper-${mode}.yml.example`,
@@ -403,6 +433,31 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
     assert.doesNotMatch(source, /blacksmith/i);
     assert.doesNotMatch(caller, /blacksmith/i);
   }
+});
+
+test("review closes its temporary workspace user before coordinator credentials enter the runner", async () => {
+  const source = await workflow("review");
+  const caller = await repositoryFile(
+    "examples/workflows/codekeeper-review.yml.example",
+  );
+  const analyze = jobSection(source, "analyze", "gate");
+
+  assert.doesNotMatch(source, /codex_safety_strategy|openai\/codex-action@/);
+  assert.doesNotMatch(caller, /CODEKEEPER_CODEX_SAFETY_STRATEGY|codex_safety_strategy/);
+  assert.match(analyze, /sudo useradd --system/);
+  assert.match(analyze, /sudo --user "\$WORKSPACE_USER" -- env -i/);
+  assert.match(analyze, /CODEKEEPER_WORKSPACE_API_KEY/);
+  assert.match(analyze, /sudo pkill -TERM -u "\$WORKSPACE_USER"/);
+  assert.match(analyze, /sudo pkill -KILL -u "\$WORKSPACE_USER"/);
+  assert.match(analyze, /sudo userdel "\$WORKSPACE_USER"/);
+  assert.ok(
+    analyze.indexOf("Close the workspace isolation boundary") <
+      analyze.indexOf("Finalize review with configured Agents SDK model"),
+  );
+  assert.match(analyze, /CODEKEEPER_MODEL_API_KEY/);
+  assert.match(analyze, /CODEKEEPER_TRACE_API_KEY/);
+  assert.doesNotMatch(source, /blacksmith/i);
+  assert.doesNotMatch(caller, /blacksmith/i);
 });
 
 test("package acquisition validates tarball SRI before deriving package provenance", async () => {
