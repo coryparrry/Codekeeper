@@ -42,8 +42,12 @@
       "sha256": "66be6585838af4a74f96056fb14b5ab86ca4840593854f421a98ea2d42289442"
     },
     {
+      "path": "src/lib/agents-runtime-core.mjs",
+      "sha256": "8589a35cd90cb250686cbc3c9f18a06d17760f089c82bb1245210b062f946e84"
+    },
+    {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "76e0657731ee696ca499c0ac9e7ccee2c02bf4bc6e95750d3540e270dba107b1"
+      "sha256": "9ad305de6b40818b92e58b8e2abe5bbb8542a16e3c1b0e66ea76451d924d82a6"
     },
     {
       "path": "src/lib/commands.mjs",
@@ -116,6 +120,10 @@
     {
       "path": "src/lib/render.mjs",
       "sha256": "cba4791e6497777c6c9f8c91c902ebbcc57df5694dd84b8a04a979890eca207e"
+    },
+    {
+      "path": "src/lib/repository-context.mjs",
+      "sha256": "a2bf209043f80efd193751b7ff0941ceff91e1dcef19201c13ac78b7681ef43c"
     },
     {
       "path": "src/lib/review-feedback.mjs",
