@@ -36,7 +36,7 @@ These ceilings were measured on this tree. They are not targets to grow into.
 | `tools/codekeeper/test/agents-runtime.test.mjs` | 1,768 | 67,890 |
 | `tools/codekeeper/test/commands.test.mjs` | 1,163 | 35,565 |
 | `tools/codekeeper/test/integration.test.mjs` | 1,558 | 67,318 |
-| `tools/codekeeper/test/publish.test.mjs` | 3,069 | 134,794 |
+| `tools/codekeeper/test/publish.test.mjs` | 1,740 | 73,858 |
 | `tools/codekeeper/test/workflow-contract.test.mjs` | 1,042 | 38,321 |
 
 Remove a legacy entry only after the file is at or below the normal limit, or

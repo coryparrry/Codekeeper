@@ -114,3 +114,37 @@ test("conditional pull labels reconcile an applied mutation after response loss"
   assert.deepEqual(state.labels, ["auto repaired"]);
   assert.equal(requests.filter(({ method, href }) => method === "POST" && href.endsWith("/labels")).length, 1);
 });
+
+test("Codekeeper label management preserves existing metadata and unrelated labels", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const json = (data, status = 200) => new Response(JSON.stringify(data), { status });
+  try {
+    globalThis.fetch = async (url, options) => {
+      const method = options.method;
+      const target = String(url);
+      calls.push({ method, target, body: options.body });
+      if (target.endsWith("/labels/existing")) return json({ name: "existing", color: "ffffff", description: "repository-owned" });
+      if (target.endsWith("/labels/race") && method === "GET" && calls.filter((call) => call.target.endsWith("/labels/race")).length === 1) {
+        return json({ message: "Not Found" }, 404);
+      }
+      if (target.endsWith("/labels/race") && method === "GET") return json({ name: "race", color: "ffffff", description: "other owner" });
+      if (target.endsWith("/issues/7") && method === "GET") return json({ labels: [{ name: "external" }, { name: "codekeeper:managed-old" }] });
+      if (target.endsWith("/issues/7/labels") && method === "POST") return json({});
+      if (target.endsWith("/issues/7/labels/codekeeper%3Amanaged-old") && method === "DELETE") return new Response(null, { status: 204 });
+      if (target.endsWith("/labels") && method === "POST") return json({ message: "already exists" }, 422);
+      throw new Error(`Unexpected request ${method} ${target}`);
+    };
+    const github = new GitHubClient({ token: "token", repository: "owner/repository" });
+    await github.ensureLabel("existing", { color: "000000", description: "must not overwrite" });
+    await github.ensureLabel("race", { color: "000000", description: "create race" });
+    await github.replaceManagedLabels(7, ["codekeeper:managed-new"], ["codekeeper:managed-old", "codekeeper:managed-new"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.some((call) => call.method === "PATCH"), false);
+  assert.equal(calls.some((call) => call.target.endsWith("/issues/7") && call.method === "PATCH"), false);
+  const add = calls.find((call) => call.target.endsWith("/issues/7/labels") && call.method === "POST");
+  assert.deepEqual(JSON.parse(add.body), { labels: ["codekeeper:managed-new"] });
+  assert.ok(calls.some((call) => call.target.endsWith("/issues/7/labels/codekeeper%3Amanaged-old") && call.method === "DELETE"));
+});

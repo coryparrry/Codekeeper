@@ -18,6 +18,6 @@
     "eval:offline": "node evals/decision-quality.mjs --offline",
     "eval:live": "node evals/decision-quality.mjs",
     "eval:live-review": "node evals/live-review-suite.mjs",
-    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs src/lib/github/*.mjs src/lib/publish/*.mjs presets/*.mjs scripts/*.mjs evals/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node scripts/generate-tooling-manifest.mjs --check && npm run coverage"
+    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs src/lib/github/*.mjs src/lib/publish/*.mjs presets/*.mjs scripts/*.mjs evals/*.mjs test/*.mjs test/helpers/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node scripts/generate-tooling-manifest.mjs --check && npm run coverage"
   }
 }
