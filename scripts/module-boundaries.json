@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "newModuleMaxLines": 800,
+  "newModuleMaxBytes": 40000,
+  "newTestMaxLines": 1000,
+  "newTestMaxBytes": 60000,
+  "roots": [
+    "acceptance/audit",
+    "acceptance/bin",
+    "acceptance/src",
+    "acceptance/test",
+    "packages/codekeeper/audit",
+    "packages/codekeeper/bin",
+    "packages/codekeeper/src",
+    "packages/codekeeper/test",
+    "scripts",
+    "tools/codekeeper/audit",
+    "tools/codekeeper/evals",
+    "tools/codekeeper/scripts",
+    "tools/codekeeper/src",
+    "tools/codekeeper/test"
+  ],
+  "legacy": {
+    "acceptance/src/harness.mjs": {
+      "maxLines": 1455,
+      "maxBytes": 83761
+    },
+    "packages/codekeeper/src/install.mjs": {
+      "maxLines": 831,
+      "maxBytes": 33400
+    },
+    "packages/codekeeper/src/plan.mjs": {
+      "maxLines": 1229,
+      "maxBytes": 54594
+    },
+    "packages/codekeeper/src/preflight.mjs": {
+      "maxLines": 1472,
+      "maxBytes": 63835
+    },
+    "packages/codekeeper/src/tui.mjs": {
+      "maxLines": 948,
+      "maxBytes": 36271
+    },
+    "packages/codekeeper/test/assets-plan.test.mjs": {
+      "maxLines": 1589,
+      "maxBytes": 64635
+    },
+    "packages/codekeeper/test/cli.test.mjs": {
+      "maxLines": 1471,
+      "maxBytes": 54700
+    },
+    "packages/codekeeper/test/tui.test.mjs": {
+      "maxLines": 1462,
+      "maxBytes": 59021
+    },
+    "tools/codekeeper/src/lib/agents-runtime.mjs": {
+      "maxLines": 1143,
+      "maxBytes": 49648
+    },
+    "tools/codekeeper/src/lib/git.mjs": {
+      "maxLines": 884,
+      "maxBytes": 32028
+    },
+    "tools/codekeeper/src/lib/github.mjs": {
+      "maxLines": 1502,
+      "maxBytes": 61928
+    },
+    "tools/codekeeper/src/lib/publish.mjs": {
+      "maxLines": 1448,
+      "maxBytes": 63585
+    },
+    "tools/codekeeper/test/agents-runtime.test.mjs": {
+      "maxLines": 1768,
+      "maxBytes": 67890
+    },
+    "tools/codekeeper/test/commands.test.mjs": {
+      "maxLines": 1163,
+      "maxBytes": 35565
+    },
+    "tools/codekeeper/test/integration.test.mjs": {
+      "maxLines": 1558,
+      "maxBytes": 67318
+    },
+    "tools/codekeeper/test/publish.test.mjs": {
+      "maxLines": 3288,
+      "maxBytes": 146076
+    },
+    "tools/codekeeper/test/workflow-contract.test.mjs": {
+      "maxLines": 1042,
+      "maxBytes": 38321
+    }
+  }
+}
