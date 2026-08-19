@@ -2,9 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { sha256 } from "../src/assets.mjs";
 import {
   applicableCapabilityIds,
+  appPermissions,
+  appRegistrationUrl,
+  buildInstallPlan,
+  buildUpdateAnswers,
   capabilitySummary,
+  collectAppAnswers,
+  collectAppPrivateKeyPath,
+  collectAutomationBotLogin,
+  collectSetupAnswers,
+  completionGuidance,
+  documentMap,
   modelAssignments,
   normalizeCapabilities,
   normalizeModelChoices,
@@ -12,7 +23,14 @@ import {
   normalizeOwnerLogins,
   requiredSecretNames,
   requiresAutomationBotLogin,
+  setupPullRequestBody,
+  workflowMap,
 } from "../src/plan.mjs";
+import {
+  appPermissions as appPermissionsFromIndex,
+  appRegistrationUrl as appRegistrationUrlFromIndex,
+  buildInstallPlan as buildInstallPlanFromIndex,
+} from "../src/plan/index.mjs";
 import {
   applicableCapabilityIds as capabilityIdsFromCapabilities,
   capabilitySummary as capabilitySummaryFromCapabilities,
@@ -46,14 +64,30 @@ import {
   resolveValidationCommand,
 } from "../src/plan/policy.mjs";
 import {
+  AGENT_PROFILES,
   APP_SECRET,
   DEEPSEEK_SECRET,
   MODE_IDS,
   MODES,
   OPENAI_SECRET,
   OPENROUTER_SECRET,
+  RELEASE_MANIFEST_TARGET,
   TRACE_SECRET,
 } from "../src/constants.mjs";
+import { changedInstallFiles } from "../src/plan/files.mjs";
+import {
+  collectAppAnswers as collectAppAnswersFromPrompts,
+  collectAppPrivateKeyPath as collectAppPrivateKeyPathFromPrompts,
+  collectAutomationBotLogin as collectAutomationBotLoginFromPrompts,
+  collectSetupAnswers as collectSetupAnswersFromPrompts,
+} from "../src/plan/prompts.mjs";
+import {
+  completionGuidance as completionGuidanceFromPullRequest,
+  documentMap as documentMapFromPullRequest,
+  setupPullRequestBody as setupPullRequestBodyFromPullRequest,
+  workflowMap as workflowMapFromPullRequest,
+} from "../src/plan/pull-request.mjs";
+import { buildUpdateAnswers as buildUpdateAnswersFromUpdate } from "../src/plan/update.mjs";
 import { upgradePolicy } from "../src/policy.mjs";
 import {
   assertInstallerCode,
@@ -431,4 +465,184 @@ test("extracted policy helpers keep validation, capability, and model-setting be
     }
   });
   assert.deepEqual(preserved.ai.agents.review.modelSettings, { text: { verbosity: "high" } });
+});
+
+test("plan facade re-exports extracted files, prompts, pull-request, and update helpers", () => {
+  assert.equal(documentMap, documentMapFromPullRequest);
+  assert.equal(workflowMap, workflowMapFromPullRequest);
+  assert.equal(completionGuidance, completionGuidanceFromPullRequest);
+  assert.equal(setupPullRequestBody, setupPullRequestBodyFromPullRequest);
+  assert.equal(buildUpdateAnswers, buildUpdateAnswersFromUpdate);
+  assert.equal(collectSetupAnswers, collectSetupAnswersFromPrompts);
+  assert.equal(collectAutomationBotLogin, collectAutomationBotLoginFromPrompts);
+  assert.equal(collectAppAnswers, collectAppAnswersFromPrompts);
+  assert.equal(collectAppPrivateKeyPath, collectAppPrivateKeyPathFromPrompts);
+  assert.equal(buildInstallPlan, buildInstallPlanFromIndex);
+  assert.equal(appPermissions, appPermissionsFromIndex);
+  assert.equal(appRegistrationUrl, appRegistrationUrlFromIndex);
+});
+
+test("extracted file, pull-request, update, and index modules stay deterministic", async () => {
+  for (const fileName of ["files.mjs", "pull-request.mjs", "update.mjs", "index.mjs"]) {
+    const source = await readFile(path.join(PACKAGE_ROOT, "src", "plan", fileName), "utf8");
+    assert.doesNotMatch(source, /node:fs|node:child_process|node:readline|\.\.\/prompts\.mjs|\.\.\/tui\.mjs/);
+  }
+});
+
+test("extracted document map labels deletions, the release manifest, and catalog purposes", () => {
+  const mapped = documentMapFromPullRequest([
+    { path: RELEASE_MANIFEST_TARGET },
+    { path: ".github/codekeeper.json" },
+    { path: AGENT_PROFILES["pr-reviewer"].target, delete: true },
+    { path: "unknown.dat", delete: true },
+    { path: "unknown.dat" }
+  ]);
+  assert.deepEqual(mapped.map((item) => item.purpose), [
+    "Release version and managed generated-file inventory",
+    "Policy, model choices, protected paths, and startup controls",
+    `Remove this release-owned artifact. ${AGENT_PROFILES["pr-reviewer"].purpose}`,
+    "Remove this retired Codekeeper artifact",
+    "Codekeeper setup"
+  ]);
+  assert.ok(mapped.every((item) => Object.isFrozen(item)));
+});
+
+test("extracted workflow map preserves scheduled maintenance wording and selected order", () => {
+  assert.deepEqual(workflowMapFromPullRequest(["fix", "review"]).map((item) => item.mode), ["review", "fix"]);
+  assert.equal(
+    workflowMapFromPullRequest(["maintain"], { maintenanceScheduled: true })[0].trigger,
+    "scheduled report-only run and manual run"
+  );
+  assert.equal(
+    workflowMapFromPullRequest(["maintain"], { maintenanceScheduled: false })[0].trigger,
+    "manual run"
+  );
+  assert.equal(workflowMapFromPullRequest(["review"])[0].trigger, MODES.review.trigger);
+  assert.ok(Object.isFrozen(workflowMapFromPullRequest(["review"])[0]));
+});
+
+test("extracted completion guidance keeps setup, update, and disabled headings", () => {
+  assert.match(
+    completionGuidanceFromPullRequest(["review"], true, false).heading,
+    /setup pull request is ready/
+  );
+  assert.match(
+    completionGuidanceFromPullRequest(["review"], true, true).heading,
+    /keeps running the current default-branch configuration/
+  );
+  assert.match(
+    completionGuidanceFromPullRequest(["review"], false, false).heading,
+    /stays off after merge/
+  );
+  assert.equal(
+    completionGuidanceFromPullRequest(["review"], false, false).reviewGateWarning,
+    "Keep the Codekeeper review gate optional while Codekeeper is disabled."
+  );
+  assert.equal(completionGuidanceFromPullRequest(["review"], true, false).reviewGateWarning, null);
+  assert.equal(
+    completionGuidanceFromPullRequest(["review"], true, false).closing,
+    "After merge, run codekeeper verify from a clean, current default-branch checkout."
+  );
+});
+
+test("extracted changed-file comparison records previous hashes and managed deletions", () => {
+  const files = [
+    { path: ".github/codekeeper.json", contents: "new-policy", bytes: 10, sha256: "policy" },
+    {
+      path: RELEASE_MANIFEST_TARGET,
+      contents: JSON.stringify({ managedFiles: { ".github/codekeeper.json": "x" } }),
+      bytes: 20,
+      sha256: "manifest"
+    }
+  ];
+  assert.equal(changedInstallFiles({
+    files,
+    installation: null,
+    desiredProfileSettings: { profileSources: {} },
+    modes: ["review"]
+  }), files);
+
+  const profileTarget = AGENT_PROFILES["pr-reviewer"].target;
+  const issuesTarget = MODES.issues.target;
+  const retiredTarget = ".github/workflows/codekeeper-retired.yml";
+  const installation = {
+    modes: ["review", "issues"],
+    contents: {
+      ".github/codekeeper.json": "old-policy",
+      [RELEASE_MANIFEST_TARGET]: "old-manifest",
+      [profileTarget]: "override",
+      [issuesTarget]: "issues",
+      [retiredTarget]: "retired"
+    },
+    releaseManifest: {
+      managedFiles: {
+        ".github/codekeeper.json": "x",
+        [retiredTarget]: "y"
+      }
+    }
+  };
+  const changed = changedInstallFiles({
+    files,
+    installation,
+    desiredProfileSettings: {
+      profileSources: Object.fromEntries(Object.keys(AGENT_PROFILES).map((id) => [id, "package"]))
+    },
+    modes: ["review"]
+  });
+  assert.deepEqual(changed.map((file) => file.path), [
+    ".github/codekeeper.json",
+    RELEASE_MANIFEST_TARGET,
+    profileTarget,
+    issuesTarget,
+    retiredTarget
+  ]);
+  assert.equal(changed[0].previousSha256, sha256("old-policy"));
+  assert.equal(changed[1].previousSha256, sha256("old-manifest"));
+  assert.deepEqual(changed[2], {
+    path: profileTarget,
+    contents: null,
+    bytes: 0,
+    sha256: null,
+    previousSha256: sha256("override"),
+    delete: true
+  });
+  assert.equal(changed[3].delete, true);
+  assert.equal(changed[3].previousSha256, sha256("issues"));
+  assert.equal(changed[4].delete, true);
+  assert.equal(changed[4].previousSha256, sha256("retired"));
+});
+
+test("extracted setup pull request body keeps document and workflow tables", () => {
+  const plan = {
+    packageVersion: "0.2.0",
+    preset: "openai",
+    source: { repository: "acme/codekeeper", commit: "a".repeat(40) },
+    update: false,
+    enabled: true,
+    tracing: false,
+    maintenanceScheduled: false,
+    modes: ["review"],
+    models: {
+      review: { provider: "openai", model: "gpt-5.6-luna", effort: "medium" }
+    },
+    capabilities: {
+      reviewRepair: false,
+      repair: false,
+      issueImplementation: false,
+      duplicateClosure: false,
+      autoMerge: false
+    },
+    files: [{ path: RELEASE_MANIFEST_TARGET }],
+    variables: [{ name: "CODEKEEPER_ENABLED" }],
+    secrets: [{ name: "OPENAI_API_KEY" }]
+  };
+  const body = setupPullRequestBodyFromPullRequest(plan);
+  assert.match(body, /\| Document \| Purpose \|/);
+  assert.match(body, /\| Workflow \| Role \| What it does \| Trigger \| Provider and model \|/);
+  assert.match(body, /OpenAI traces are \*\*disabled\*\*/);
+  assert.match(body, /Scheduled report-only maintenance is \*\*disabled;/);
+  assert.match(body, /enabled after this setup pull request merges/i);
+  assert.match(body, /Required variables: `CODEKEEPER_ENABLED`/);
+  assert.match(body, /Required secrets: `OPENAI_API_KEY`/);
+  assert.match(body, /did not merge this pull request or prove a workflow/);
 });

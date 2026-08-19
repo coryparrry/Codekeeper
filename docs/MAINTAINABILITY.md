@@ -27,7 +27,6 @@ These ceilings were measured on this tree. They are not targets to grow into.
 |---|---:|---:|
 | `acceptance/src/harness.mjs` | 1,455 | 83,761 |
 | `packages/codekeeper/src/install.mjs` | 831 | 33,400 |
-| `packages/codekeeper/src/plan.mjs` | 1,041 | 44,644 |
 | `packages/codekeeper/src/tui.mjs` | 948 | 36,271 |
 | `packages/codekeeper/test/assets-plan.test.mjs` | 1,589 | 64,635 |
 | `packages/codekeeper/test/cli.test.mjs` | 1,471 | 54,700 |
