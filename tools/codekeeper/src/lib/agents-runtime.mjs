@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { loadFrozenAgentProfile } from "./agent-profiles.mjs";
 import * as core from "./agents-runtime-core.mjs";
 import { getAgentRuntimeSettings } from "./config.mjs";
 import { readJson, readOptionalRegularJson, writeJson } from "./io.mjs";
@@ -64,6 +65,7 @@ export async function runAgentFromBundle(options) {
     readOptionalRegularJson(path.join(path.dirname(workspaceResultPath), "workspace-runtime-metadata.json"))
   ]);
   if (context?.mode !== "issue") throw new Error(`Frozen context mode is ${context?.mode ?? "missing"}; expected issue`);
+  await loadFrozenAgentProfile({ mode: "issue", directory, context });
   const settings = getAgentRuntimeSettings(config, "issue", { mutationAuthorized: false, context });
 
   if (specialistResult === null) {
