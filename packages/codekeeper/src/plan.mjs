@@ -1,47 +1,78 @@
-import path from "node:path";
 import { registrationAppPermissions } from "./app-permissions.mjs";
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
   ALL_MODEL_OPTIONS,
-  APP_SECRET,
   BOT_LOGIN_VARIABLE,
   CAPABILITIES,
-  CAPABILITY_IDS,
   CLIENT_ID_VARIABLE,
   CONSERVATIVE_BOUNDARIES,
   ENABLED_VARIABLE,
   MODE_IDS,
   MODES,
   MODEL_PROVIDER_SECRETS,
-  OPENAI_SECRET,
-  PRESET_IDS,
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
   RELEASE_MANIFEST_TARGET,
   SECRET_PURPOSES,
   SETUP_BRANCH,
   SETUP_COMMIT_MESSAGE,
-  SETUP_PR_TITLE,
-  TRACE_SECRET
+  SETUP_PR_TITLE
 } from "./constants.mjs";
 import { renderInstallFiles, sha256 } from "./assets.mjs";
 import { InstallerError } from "./errors.mjs";
 import { upgradePolicy } from "./policy.mjs";
 import { repositoryArtifactForTarget } from "./repository-artifacts.mjs";
 import { createEditableSettings, normalizeProfileSettings, settingsAnswers, validateEditableSettings } from "./settings.mjs";
+import {
+  appSlugFromInput,
+  BOT_LOGIN,
+  normalizeModes,
+  normalizeOwnerLogins,
+  validClientId,
+  validDisplayName,
+  validPrivateKeyPath
+} from "./plan/normalization.mjs";
+import {
+  existingSecretNames,
+  modelAssignments,
+  modelSummary,
+  normalizeModelChoices,
+  requiredSecretNames
+} from "./plan/models.mjs";
+import {
+  applicableCapabilityIds,
+  capabilitySummary,
+  normalizeCapabilities,
+  requiresAutomationBotLogin
+} from "./plan/capabilities.mjs";
+import {
+  applyModelSettings,
+  applyPolicyCapabilities,
+  applyValidationCommand,
+  assertCodeChangingRequirements,
+  assertSupportedPreset,
+  createInputPolicy,
+  createValidationBaselinePolicy,
+  loadBaselinePolicy,
+  resolveValidationCommand
+} from "./plan/policy.mjs";
 
-const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
-const BOT_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,99})\[bot\]$/;
-const APP_SLUG = /^[a-z0-9](?:[a-z0-9-]{0,99})$/;
-const CLIENT_ID = /^(?:Iv[A-Za-z0-9]{18,253}|Iv1\.[A-Za-z0-9]{16,253})$/;
-
-function appSlugFromInput(value) {
-  const input = String(value ?? "").trim().toLowerCase();
-  const match = input.match(/^(?:https:\/\/github\.com)?\/(?:organizations\/[^/]+\/)?settings\/apps\/([a-z0-9-]+)\/?$/);
-  const slug = match?.[1] ?? input;
-  return APP_SLUG.test(slug) ? slug : null;
-}
+export {
+  normalizeModes,
+  normalizeOwnerLogins
+};
+export {
+  modelAssignments,
+  normalizeModelChoices,
+  requiredSecretNames
+};
+export {
+  applicableCapabilityIds,
+  capabilitySummary,
+  normalizeCapabilities,
+  requiresAutomationBotLogin
+};
 
 function tuiOptions(prompt, plain, tui) {
   return prompt?.kind === "ink" ? { ...plain, ...tui } : plain;
@@ -52,164 +83,6 @@ function deepFreeze(value) {
   Object.freeze(value);
   for (const child of Object.values(value)) deepFreeze(child);
   return value;
-}
-
-function validDisplayName(value) {
-  return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 100 && !/[\u0000-\u001f\u007f]/.test(value);
-}
-
-function validPrivateKeyPath(value) {
-  return typeof value === "string"
-    && path.isAbsolute(value)
-    && value.trim() === value
-    && !/[\u0000-\u001f\u007f]/.test(value);
-}
-
-function validClientId(value) {
-  return typeof value === "string"
-    && !/[\s\u0000-\u001f\u007f]/.test(value)
-    && CLIENT_ID.test(value);
-}
-
-export function normalizeModes(modes) {
-  if (!Array.isArray(modes))
-    throw new InstallerError("Select at least one Codekeeper mode.", {
-      code: "PLAN_INVALID"
-    });
-  const selected = [...new Set(modes)];
-  if (!selected.length || selected.some((mode) => !MODE_IDS.includes(mode))) {
-    throw new InstallerError("Select at least one supported Codekeeper mode.", {
-      code: "PLAN_INVALID"
-    });
-  }
-  return MODE_IDS.filter((mode) => selected.includes(mode));
-}
-
-export function modelAssignments(modes) {
-  return normalizeModes(modes).map((mode) => ({
-    key: mode,
-    agent: MODES[mode].policyAgent,
-    label: MODES[mode].agentLabel,
-    workflow: MODES[mode].label
-  }));
-}
-
-export function normalizeOwnerLogins(ownerLogins) {
-  if (!Array.isArray(ownerLogins) || !ownerLogins.length)
-    throw new InstallerError("At least one owner login is required.", {
-      code: "PLAN_INVALID"
-    });
-  const normalized = ownerLogins.map((login) => String(login).trim().toLowerCase());
-  if (normalized.some((login) => !LOGIN.test(login)) || new Set(normalized).size !== normalized.length) {
-    throw new InstallerError("Owner logins must be unique GitHub login names.", { code: "PLAN_INVALID" });
-  }
-  return normalized;
-}
-
-export function applicableCapabilityIds(modes) {
-  const selected = normalizeModes(modes);
-  return CAPABILITY_IDS.filter((id) => id === "reviewRepair"
-    ? selected.includes("review") && selected.includes("fix")
-    : CAPABILITIES[id].modes.some((mode) => selected.includes(mode)));
-}
-
-export function normalizeCapabilities(modes, selected = []) {
-  if (!Array.isArray(selected))
-    throw new InstallerError("Capability choices are invalid.", {
-      code: "PLAN_INVALID"
-    });
-  const applicable = applicableCapabilityIds(modes);
-  if (selected.some((id) => !applicable.includes(id)) || new Set(selected).size !== selected.length) {
-    throw new InstallerError("Capability choices do not match the selected workflows.", { code: "PLAN_INVALID" });
-  }
-  return Object.freeze(Object.fromEntries(CAPABILITY_IDS.map((id) => [id, selected.includes(id)])));
-}
-
-export function requiresAutomationBotLogin(modes, capabilities = [], ownerRequests = true) {
-  const issueImplementation = Array.isArray(capabilities)
-    ? capabilities.includes("issueImplementation")
-    : capabilities?.issueImplementation === true;
-  return ownerRequests || modes.includes("review") || (modes.includes("fix") && issueImplementation);
-}
-
-export function capabilitySummary(capabilities, modes = null) {
-  const ids = modes ? applicableCapabilityIds(modes) : CAPABILITY_IDS;
-  return ids.map((id) => `${CAPABILITIES[id].label}: ${capabilities[id] ? "on" : "off"}.`);
-}
-
-export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET, tracing = true, policy = null }) {
-  const selected = normalizeModes(modes);
-  const names = [];
-  const providers = new Set(modelAssignments(selected).map(({ key, agent }) => models?.[key]?.provider ?? policy?.ai?.agents?.[agent]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
-  for (const mode of selected) {
-    const agent = policy?.ai?.agents?.[MODES[mode].policyAgent];
-    if (MODES[mode].workspaceProvider && (!policy || agent?.workspace?.enabled === true)) {
-      providers.add(MODES[mode].workspaceProvider);
-    }
-  }
-  for (const [provider, secret] of Object.entries(MODEL_PROVIDER_SECRETS)) {
-    if (providers.has(provider)) names.push(secret);
-  }
-  if (policy && modelAssignments(selected).some(({ agent }) => policy.ai.agents[agent]?.workspace?.enabled)) names.push(OPENAI_SECRET);
-  if (tracing) names.push(TRACE_SECRET);
-  names.push(APP_SECRET);
-  return Object.freeze([...new Set(names)]);
-}
-
-function existingSecretNames(installation) {
-  const providers = new Set(modelAssignments(installation.modes).map(({ agent }) => installation.policy.ai.agents[agent].provider));
-  for (const mode of installation.modes) {
-    const agent = installation.policy.ai.agents[MODES[mode].policyAgent];
-    if (agent.workspace?.enabled && MODES[mode].workspaceProvider) providers.add(MODES[mode].workspaceProvider);
-  }
-  return new Set([
-    ...Object.entries(MODEL_PROVIDER_SECRETS)
-      .filter(([provider]) => providers.has(provider))
-      .map(([, secret]) => secret),
-    ...(modelAssignments(installation.modes).some(({ agent }) => installation.policy.ai.agents[agent]?.workspace?.enabled) ? [OPENAI_SECRET] : []),
-    ...(installation.policy.ai.tracing.enabled ? [TRACE_SECRET] : []),
-    APP_SECRET
-  ]);
-}
-
-export function normalizeModelChoices({ modes, preset, bundle, choices = {}, policySource = bundle.contents[`policies/${preset}.json`] }) {
-  const selected = normalizeModes(modes);
-  const policy = upgradePolicy(JSON.parse(policySource));
-  const normalized = {};
-  for (const assignment of modelAssignments(selected)) {
-    const { key, agent: agentId, workflow } = assignment;
-    const agent = policy.ai.agents[agentId];
-    const defaultOption = ALL_MODEL_OPTIONS.find((option) => option.provider === agent.provider && option.model === agent.model && option.effort === agent.effort);
-    const requested = choices[key] ?? defaultOption?.id;
-    const choice = typeof requested === "string" ? ALL_MODEL_OPTIONS.find((option) => option.id === requested) : requested;
-    if (!choice || typeof choice !== "object")
-      throw new InstallerError(`Model choice is invalid for ${workflow}.`, {
-        code: "PLAN_INVALID"
-      });
-    const provider = String(choice.provider ?? "").trim();
-    const model = String(choice.model ?? "").trim();
-    const effort = String(choice.effort ?? "none").trim();
-    if (!Object.hasOwn(MODEL_PROVIDER_SECRETS, provider) || !policy.ai.providers[provider] || !model || model.length > 256 || /[\s\u0000-\u001f\u007f]/.test(model) || !["none", "minimal", "low", "medium", "high", "max", "xhigh"].includes(effort) || (effort !== "none" && !policy.ai.providers[provider]?.supportsReasoningEffort)) {
-      throw new InstallerError(`Model choice is invalid for ${workflow}.`, {
-        code: "PLAN_INVALID"
-      });
-    }
-    const preservesCurrentSettings = provider === agent.provider
-      && model === agent.model
-      && effort === agent.effort;
-    normalized[key] = Object.freeze({
-      provider,
-      model,
-      effort,
-      choice: typeof requested === "string" ? choice.id : null,
-      ...(preservesCurrentSettings ? { modelSettings: structuredClone(agent.modelSettings) } : {})
-    });
-  }
-  const assignmentKeys = new Set(modelAssignments(selected).map(({ key }) => key));
-  if (Object.keys(choices).some((key) => !assignmentKeys.has(key))) {
-    throw new InstallerError("Model choices do not match the selected workflows.", { code: "PLAN_INVALID" });
-  }
-  return Object.freeze(normalized);
 }
 
 export function appPermissions({ modes = MODE_IDS, capabilities = ["reviewRepair", "repair", "issueImplementation", "autoMerge"], ownerRequests = true } = {}) {
@@ -408,34 +281,29 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
   const releaseUpdate = Boolean(installation && answers.releaseUpdate === true);
   const operation = releaseUpdate ? "release-update" : installation ? "configuration-update" : "setup";
   const policySource = installation?.policySource ?? bundle.contents[`policies/${answers.preset}.json`];
-  if (!PRESET_IDS.includes(answers.preset))
-    throw new InstallerError(`Unsupported preset: ${answers.preset}`, {
-      code: "PLAN_INVALID"
-    });
-  const baselinePolicy = upgradePolicy(JSON.parse(policySource));
-  const validationBaselinePolicy = releaseUpdate
-    ? upgradePolicy(JSON.parse(bundle.contents[`policies/${answers.preset}.json`]))
-    : baselinePolicy;
-  validationBaselinePolicy.repository.defaultBranch = snapshot.defaultBranch;
+  assertSupportedPreset(answers.preset);
+  const baselinePolicy = loadBaselinePolicy(policySource);
+  const validationBaselinePolicy = createValidationBaselinePolicy({
+    releaseUpdate,
+    baselinePolicy,
+    bundle,
+    preset: answers.preset,
+    defaultBranch: snapshot.defaultBranch
+  });
   const effectiveProfiles = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id,
     installation?.contents[AGENT_PROFILES[id].target] ?? bundle.contents[AGENT_PROFILES[id].asset]
   ]));
   const packagedProfileDefaults = Object.fromEntries(AGENT_PROFILE_IDS.map((id) => [id, bundle.contents[AGENT_PROFILES[id].asset]]));
-  const inputPolicy = structuredClone(
-    answers.policy ??
-    createEditableSettings({
-      policy: baselinePolicy,
-      modes,
-      enabled: answers.enabled !== false,
-      maintenanceScheduled,
-      validationCommandCandidate: snapshot.validationCommandCandidate,
-      validationCommand: answers.validationCommand,
-      profiles: answers.profiles ?? effectiveProfiles,
-      profileDefaults: packagedProfileDefaults,
-      profileSources: answers.profileSources,
-      profileOverrides: installation ? AGENT_PROFILE_IDS.filter((id) => Object.hasOwn(installation.contents, AGENT_PROFILES[id].target)) : []
-    }).policy
-  );
+  const inputPolicy = createInputPolicy({
+    answers,
+    baselinePolicy,
+    modes,
+    maintenanceScheduled,
+    snapshot,
+    installation,
+    effectiveProfiles,
+    packagedProfileDefaults
+  });
   const displayName = answers.policy?.repository.displayName ?? answers.displayName;
   if (!validDisplayName(displayName))
     throw new InstallerError("Repository display name is invalid.", {
@@ -455,44 +323,11 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     policySource
   });
   const tracing = answers.policy ? answers.policy.ai.tracing.enabled : answers.tracing !== false;
-  const codeChanging = capabilities.reviewRepair || capabilities.repair || capabilities.issueImplementation;
-  const validationCommand = answers.validationCommand === snapshot.validationCommandCandidate
-    ? answers.validationCommand
-    : null;
-  if (codeChanging && !validationCommand) {
-    throw new InstallerError(
-      snapshot.validationCommandCandidate
-        ? `Confirm ${snapshot.validationCommandCandidate} before enabling code-changing capabilities.`
-        : "Code-changing capabilities require a trusted repository validation command. Add a supported root package lockfile and check or test script, then rerun setup.",
-      { code: "PLAN_INVALID" },
-    );
-  }
-  if (validationCommand) {
-    inputPolicy.audit.repair.validationCommands = [
-      "git diff --check",
-      ...inputPolicy.audit.repair.validationCommands.filter((command) => command !== "git diff --check" && command !== validationCommand),
-      validationCommand,
-    ];
-  }
-  inputPolicy.review.autoRepair = capabilities.reviewRepair;
-  inputPolicy.audit.repair.enabled = capabilities.repair;
-  inputPolicy.issues.allowAiImplementation = capabilities.issueImplementation;
-  inputPolicy.issues.closeExactDuplicates = capabilities.duplicateClosure;
-  inputPolicy.merge.enabled = capabilities.autoMerge;
-  inputPolicy.ai.tracing.enabled = tracing;
-  for (const [mode, selection] of Object.entries(models)) {
-    const agent = inputPolicy.ai.agents[MODES[mode]?.policyAgent ?? mode];
-    agent.provider = selection.provider;
-    agent.model = selection.model;
-    agent.effort = selection.effort;
-    agent.modelSettings = Object.hasOwn(selection, "modelSettings")
-      ? structuredClone(selection.modelSettings)
-      : selection.provider === "openai"
-        ? { text: { verbosity: "low" } }
-        : selection.provider === "deepseek"
-          ? { temperature: 0.2, providerData: { thinking: { type: "disabled" }, response_format: { type: "json_object" } } }
-          : {};
-  }
+  const validationCommand = resolveValidationCommand(answers, snapshot);
+  assertCodeChangingRequirements(capabilities, validationCommand, snapshot);
+  applyValidationCommand(inputPolicy, validationCommand);
+  applyPolicyCapabilities(inputPolicy, capabilities, tracing);
+  applyModelSettings(inputPolicy, models);
   const desiredProfileSettings = normalizeProfileSettings({
     profiles: answers.profiles ?? effectiveProfiles,
     defaults: packagedProfileDefaults,
@@ -635,30 +470,7 @@ export function buildInstallPlan({ bundle, snapshot, answers }) {
     capabilities,
     appPermissions: appPermissions({ modes, capabilities, ownerRequests: effectivePolicy.automation.ownerRequests }),
     models,
-    modelSummary: Object.freeze(
-      Object.fromEntries(
-        modes.map((mode) => {
-          const agent = effectivePolicy.ai.agents[MODES[mode].policyAgent];
-          return [
-            mode,
-            Object.freeze({
-              coordinator: Object.freeze({
-                provider: agent.provider,
-                model: agent.model,
-                effort: agent.effort
-              }),
-              workspace: Object.freeze({
-                provider: MODES[mode].workspaceProvider,
-                enabled: agent.workspace?.enabled === true,
-                model: agent.workspace?.model ?? "",
-                effort: agent.workspace?.effort ?? "none",
-                allowWrites: agent.workspace?.allowWrites === true
-              })
-            })
-          ];
-        })
-      )
-    ),
+    modelSummary: modelSummary(modes, effectivePolicy),
     tracing,
     maintenanceScheduled,
     policy: effectivePolicy,

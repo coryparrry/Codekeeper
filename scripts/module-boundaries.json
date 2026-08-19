@@ -30,8 +30,8 @@
       "maxBytes": 33400
     },
     "packages/codekeeper/src/plan.mjs": {
-      "maxLines": 1229,
-      "maxBytes": 54594
+      "maxLines": 1041,
+      "maxBytes": 44644
     },
     "packages/codekeeper/src/tui.mjs": {
       "maxLines": 948,
