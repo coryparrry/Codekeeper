@@ -8,6 +8,7 @@ export const repositoryRoot = path.resolve(scriptDirectory, "../../..");
 export const TARGETS = Object.freeze([
   "examples/workflows/codekeeper-assistant.yml.example",
   "examples/workflows/codekeeper-review.yml.example",
+  "packages/codekeeper/assets/workflows/review.yml",
   ".github/workflows/codekeeper-review.yml",
   ".github/workflows/codekeeper-issues.yml",
 ]);
@@ -36,8 +37,8 @@ function markerBlock(source, relativePath) {
       `${relativePath} is missing the ${START_MARKER}/${END_MARKER} markers`,
     );
   }
-  const duplicate = source.match(new RegExp(START_MARKER, "g")) ?? [];
-  if (duplicate.length !== 1) {
+  const duplicates = source.match(new RegExp(START_MARKER, "g")) ?? [];
+  if (duplicates.length !== 1) {
     throw new Error(
       `${relativePath} must contain exactly one owner-command marker block`,
     );
@@ -47,14 +48,10 @@ function markerBlock(source, relativePath) {
 
 function renderActionList(source, relativePath) {
   const { match, pattern } = markerBlock(source, relativePath);
-  const startIndent = match[1];
-  const endIndent = match[3];
-  const startStyle = match[2];
-  const endStyle = match[4];
   const replacement = [
-    `${startIndent}${startStyle} ${START_MARKER}`,
-    `${startIndent}const actions = ${commandJson()};`,
-    `${endIndent}${endStyle} ${END_MARKER}`,
+    `${match[1]}${match[2]} ${START_MARKER}`,
+    `${match[1]}const actions = ${commandJson()};`,
+    `${match[3]}${match[4]} ${END_MARKER}`,
     "",
   ].join("\n");
   return source.replace(pattern, replacement);
@@ -71,15 +68,23 @@ function renderReviewCondition(source, relativePath) {
       `${relativePath} must contain exactly one generated review command condition`,
     );
   }
-  const updated = block.replace(
-    conditionPattern,
-    `contains(fromJSON('${slashCommandJson()}'), github.event.comment.body))`,
+  return source.replace(
+    pattern,
+    block.replace(
+      conditionPattern,
+      `contains(fromJSON('${slashCommandJson()}'), github.event.comment.body))`,
+    ),
   );
-  return source.replace(pattern, updated);
 }
 
 export function renderSource(source, relativePath) {
+  if (relativePath === ".github/workflows/codekeeper-review.yml") {
+    return renderActionList(source, relativePath);
+  }
   if (relativePath.startsWith(".github/workflows/")) {
+    return renderReviewCondition(source, relativePath);
+  }
+  if (relativePath.endsWith("codekeeper-review.yml.example") || relativePath.endsWith("assets/workflows/review.yml")) {
     return renderReviewCondition(source, relativePath);
   }
   return renderActionList(source, relativePath);
