@@ -152,6 +152,19 @@ test("missing legacy modules fail closed", () => {
   );
 });
 
+test("completed legacy exemptions must be removed", () => {
+  assert.throws(
+    () =>
+      evaluateModuleBoundaries({
+        config: config(),
+        files: validFiles.map((file) =>
+          file.path === "src/legacy.mjs" ? { ...file, bytes: 20000, lines: 500 } : file,
+        ),
+      }),
+    /src\/legacy\.mjs is within the normal 800-line\/40000-byte limit; remove its legacy exemption/,
+  );
+});
+
 test("symlinks in scanned roots fail closed", async (context) => {
   const root = await fixture({
     "scripts/module-boundaries.json": `${JSON.stringify(

@@ -26,8 +26,8 @@
       "maxBytes": 83761
     },
     "packages/codekeeper/src/install.mjs": {
-      "maxLines": 831,
-      "maxBytes": 33400
+      "maxLines": 812,
+      "maxBytes": 32748
     },
     "packages/codekeeper/src/tui.mjs": {
       "maxLines": 948,

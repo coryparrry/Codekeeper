@@ -116,6 +116,7 @@ export function evaluateModuleBoundaries({ config, files }) {
       fail(`invalid file measurements: ${file.path}`);
     }
     modulesChecked += 1;
+    const testFile = isTestModule(file.path);
     const legacyLimit = legacy.get(file.path);
     if (legacyLimit) {
       if (file.bytes > legacyLimit.maxBytes) {
@@ -128,9 +129,15 @@ export function evaluateModuleBoundaries({ config, files }) {
           `${file.path} grew from its legacy ${legacyLimit.maxLines}-line ceiling to ${file.lines} lines`,
         );
       }
+      const normalMaxLines = testFile ? config.newTestMaxLines : config.newModuleMaxLines;
+      const normalMaxBytes = testFile ? config.newTestMaxBytes : config.newModuleMaxBytes;
+      if (file.lines <= normalMaxLines && file.bytes <= normalMaxBytes) {
+        violations.push(
+          `${file.path} is within the normal ${normalMaxLines}-line/${normalMaxBytes}-byte limit; remove its legacy exemption`,
+        );
+      }
       continue;
     }
-    const testFile = isTestModule(file.path);
     const maxLines = testFile ? config.newTestMaxLines : config.newModuleMaxLines;
     const maxBytes = testFile ? config.newTestMaxBytes : config.newModuleMaxBytes;
     const kind = testFile ? "tests" : "modules";
