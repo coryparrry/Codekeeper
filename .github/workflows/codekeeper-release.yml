@@ -207,6 +207,7 @@ jobs:
           stage="$RUNNER_TEMP/codekeeper-release-publish-input"
           mkdir "$stage"
           tar -xzf "$tarball" --strip-components=1 -C "$stage"
+          # shellcheck disable=SC2016
           STAGE="$stage" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
           import { writeFileSync } from "node:fs";
           import { join } from "node:path";
@@ -304,6 +305,7 @@ jobs:
           stage="$RUNNER_TEMP/codekeeper-registry-stage"
           mkdir "$stage"
           tar -xzf "$actual_tarball" --strip-components=1 -C "$stage"
+          # shellcheck disable=SC2016
           STAGE="$stage" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
           import { writeFileSync } from "node:fs";
           import { join } from "node:path";
@@ -335,6 +337,7 @@ jobs:
           (
             cd "$canary"
             npm install --ignore-scripts --no-audit --no-fund "$EXPECTED_NAME@$EXPECTED_VERSION"
+            # shellcheck disable=SC2016
             installed_version="$(EXPECTED_NAME="$EXPECTED_NAME" node --input-type=module -e 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url); process.stdout.write(require(`${process.env.EXPECTED_NAME}/package.json`).version)')"
             test "$installed_version" = "$EXPECTED_VERSION"
             ./node_modules/.bin/codekeeper --help
@@ -364,6 +367,7 @@ jobs:
           sidecar="$TARBALL.sha512"
           sha512sum "$TARBALL" > "$sidecar"
           notes="$RUNNER_TEMP/codekeeper-github-release-notes.md"
+          # shellcheck disable=SC2016
           RELEASE_VERSION="$RELEASE_VERSION" SOURCE_COMMIT="$SOURCE_COMMIT" node --input-type=module -e '
           const version = process.env.RELEASE_VERSION;
           const source = process.env.SOURCE_COMMIT;
