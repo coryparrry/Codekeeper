@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,9 +11,12 @@ export const REPOSITORY_ROOT = path.resolve(PACKAGE_ROOT, "../..");
 export const PINNED_COMMIT = "87b4f9813c1a16dee6cbca020181cc72af5e21d5";
 export const HEAD_SHA = "a".repeat(40);
 export const TEST_PACKAGE_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"),
+).version;
 export const TEST_PACKAGE_RELEASE = Object.freeze({
   name: "@coryparry/codekeeper",
-  version: "0.2.0",
+  version: PACKAGE_VERSION,
   integrity: TEST_PACKAGE_INTEGRITY
 });
 
@@ -48,7 +52,7 @@ export function createRecordingRunner(handler = () => result()) {
       const call = { command, args: [...args], options: { ...options } };
       calls.push(call);
       return await handler(call, calls.length - 1);
-    }
+    },
   };
 }
 
@@ -62,7 +66,7 @@ export function textSink({ isTTY = true } = {}) {
     },
     toString() {
       return chunks.join("");
-    }
+    },
   };
 }
 

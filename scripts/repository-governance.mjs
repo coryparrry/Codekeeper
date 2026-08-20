@@ -153,10 +153,11 @@ export function validateGovernancePolicy(input) {
     (ruleset) => ruleset.target === "branch",
   );
   const protectedBranches = branchRuleset.conditions.ref_name.include;
-  for (const requiredBranch of ["refs/heads/main", "refs/heads/staging"]) {
-    if (!protectedBranches.includes(requiredBranch)) {
-      fail(`branch ruleset must protect ${requiredBranch}`);
-    }
+  if (
+    protectedBranches.length !== 1 ||
+    protectedBranches[0] !== "refs/heads/main"
+  ) {
+    fail("branch ruleset must protect only refs/heads/main");
   }
   const pullRequestRule = branchRuleset.rules.find(
     (rule) => rule.type === "pull_request",
@@ -173,9 +174,20 @@ export function validateGovernancePolicy(input) {
   const statusRule = branchRuleset.rules.find(
     (rule) => rule.type === "required_status_checks",
   );
-  const requiredChecks = statusRule?.parameters?.required_status_checks ?? [];
-  if (!requiredChecks.some((check) => check.context === "promotion-policy")) {
-    fail("branch ruleset must require the promotion-policy check");
+  const requiredChecks = new Set(
+    (statusRule?.parameters?.required_status_checks ?? []).map(
+      (check) => check.context,
+    ),
+  );
+  for (const requiredCheck of [
+    "acceptance-harness-checks",
+    "installer-checks (22.23.2)",
+    "installer-checks (24.19.0)",
+    "maintainer-checks",
+  ]) {
+    if (!requiredChecks.has(requiredCheck)) {
+      fail(`branch ruleset must require the ${requiredCheck} check`);
+    }
   }
   return input;
 }

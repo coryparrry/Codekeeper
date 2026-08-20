@@ -254,12 +254,14 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
 });
 
 test("Release Please prepares reviewed Codekeeper releases for the hardened publisher", async () => {
-  const [workflow, config, manifest, checks] = await Promise.all([
-    repositoryFile(".github/workflows/codekeeper-release-please.yml"),
-    repositoryFile("release-please-config.json"),
-    repositoryFile(".release-please-manifest.json"),
-    repositoryFile(".github/workflows/codekeeper-self-test.yml"),
-  ]);
+  const [workflow, config, manifest, checks, packageManifest] =
+    await Promise.all([
+      repositoryFile(".github/workflows/codekeeper-release-please.yml"),
+      repositoryFile("release-please-config.json"),
+      repositoryFile(".release-please-manifest.json"),
+      repositoryFile(".github/workflows/codekeeper-self-test.yml"),
+      repositoryFile("packages/codekeeper/package.json"),
+    ]);
   assert.match(workflow, /push:\n    branches:\n      - main/);
   assert.match(
     workflow,
@@ -273,35 +275,19 @@ test("Release Please prepares reviewed Codekeeper releases for the hardened publ
   assert.equal(packageConfig.component, "codekeeper");
   assert.equal(packageConfig["tag-separator"], "-");
   assert.equal(packageConfig["changelog-path"], "/CHANGELOG.md");
-  assert.deepEqual(JSON.parse(manifest), { "packages/codekeeper": "0.2.0" });
-  assert.match(checks, /name: promotion-policy/);
-  assert.match(checks, /"\$HEAD_REF" == "staging"/);
-  assert.match(checks, /"\$HEAD_REF" == release-please--branches--main\*/);
-});
-
-test("staging readiness rejects an incomplete normalized pack receipt", async () => {
-  const source = await repositoryFile(
-    ".github/workflows/codekeeper-release-readiness.yml",
-  );
-  assert.match(source, /push:\n    branches:\n      - staging/);
-  assert.match(source, /environment: staging/);
+  assert.deepEqual(JSON.parse(manifest), {
+    "packages/codekeeper": JSON.parse(packageManifest).version,
+  });
   assert.match(
-    source,
-    /node scripts\/pack-codekeeper-package\.mjs --candidate --destination "\$RELEASE_ROOT" > "\$RUNNER_TEMP\/codekeeper-pack-report\.json"/,
+    workflow,
+    /actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\.0\.1/,
   );
-  const publisher = await repositoryFile(
-    ".github/workflows/codekeeper-release.yml",
-  );
-  assert.doesNotMatch(publisher, /pack-codekeeper-package\.mjs --candidate/);
+  assert.match(workflow, /token: \$\{\{ secrets\.RELEASE_PLEASE_TOKEN \}\}/);
   assert.match(
-    source,
-    /const pack = JSON\.parse\(readFileSync\(process\.env\.PACK_REPORT/,
+    workflow,
+    /release-please--branches--main--components--codekeeper/,
   );
-  assert.match(
-    source,
-    /throw new Error\("invalid normalized npm pack receipt"\)/,
-  );
-  for (const field of ["name", "version", "filename", "integrity"]) {
-    assert.match(source, new RegExp(`${field}: pack\\.${field}`));
-  }
+  assert.match(workflow, /scripts\/refresh-release-manifest\.mjs/);
+  assert.doesNotMatch(checks, /promotion-policy/);
+  assert.doesNotMatch(checks, /staging/);
 });

@@ -7,17 +7,16 @@ The file is the reviewable source of truth. Merging it does **not** change GitHu
 settings. An administrator must deliberately apply it after the pull request has
 merged.
 
-## Protected delivery branches
+## Protected delivery branch
 
-The branch ruleset protects both `staging` and `main`. It:
+The branch ruleset protects `main`. It:
 
 - requires changes to arrive through pull requests;
 - requires one approving review and dismisses that approval when new commits are pushed;
 - routes ownership through `CODEOWNERS` without making the pull-request author
   the only eligible approver;
-- requires all package, runtime, acceptance, and promotion jobs from
+- requires all package, runtime, and acceptance jobs from
   `Codekeeper checks`;
-- permits ordinary `main` promotions only from `staging`;
 - requires review conversations to be resolved;
 - allows repository administrators to bypass pull-request rules only, so a
   sole-maintainer repository is not permanently locked; direct pushes, tag
@@ -25,11 +24,9 @@ The branch ruleset protects both `staging` and `main`. It:
 - blocks branch deletion; and
 - blocks force pushes.
 
-Contributors cannot approve their own pull requests. A feature therefore moves
-from its branch into `staging` only after maintainer approval. When the staged
-candidate is safe, a second pull request promotes `staging` to `main`. Release
-Please pull requests are the only other allowed `main` source and still require
-the same independent approval and checks. While the repository has only one
+Contributors cannot approve their own pull requests. Feature branches and Release
+Please branches both open pull requests directly against `main` and require the
+same independent approval and checks. While the repository has only one
 maintainer, that administrator can deliberately use the pull-request-only bypass
 after all checks pass; contributor roles cannot use it.
 
@@ -67,4 +64,4 @@ names exactly match this repository-owned contract. It does not delete unrelated
 rulesets.
 
 After applying, run `--check-remote` again and retain the command output with the
-release-readiness evidence.
+release evidence.
