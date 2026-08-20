@@ -148,6 +148,13 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
     /npm view "\$EXPECTED_NAME@\$EXPECTED_VERSION" version dist\.integrity dist\.tarball --json/,
   );
   assert.match(source, /npm pack --json --ignore-scripts --pack-destination/);
+  assert.equal(
+    source.match(
+      /actual_integrity="sha512-\$\(openssl dgst -sha512 -binary "\$(?:tarball|actual_tarball)" \| openssl base64 -A\)"/g,
+    )?.length,
+    2,
+    "both release SRI checks must use unwrapped OpenSSL base64 encoding",
+  );
   assert.match(source, /--expected-integrity "\$EXPECTED_INTEGRITY"/);
   assert.match(
     source,
