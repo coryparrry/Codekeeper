@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   resolveNpmCliPath,
@@ -234,10 +234,18 @@ export async function inspectInstalledApp(options) {
 
 export async function verifyInstalledPackage(
   { packageRelease, installation, root },
-  { runner, environment, platform },
+  {
+    runner,
+    environment,
+    platform,
+    resolveNpm = resolveNpmCliPath,
+    resolveRelease = resolveNpmRelease,
+    stagePackage = stageVerifiedPackage,
+    verifyRelease = verifyCodekeeperRelease,
+  },
 ) {
-  const npmCli = await resolveNpmCliPath({ cwd: root, environment, platform });
-  const resolved = await resolveNpmRelease({
+  const npmCli = await resolveNpm({ cwd: root, environment, platform });
+  const resolved = await resolveRelease({
     cwd: root,
     environment,
     platform,
@@ -246,7 +254,7 @@ export async function verifyInstalledPackage(
     runner,
   });
   if (resolved.integrity !== packageRelease.integrity) return false;
-  const staged = await stageVerifiedPackage({
+  const staged = await stagePackage({
     cwd: root,
     environment,
     platform,
@@ -256,13 +264,35 @@ export async function verifyInstalledPackage(
   });
   try {
     const packageRoot = path.dirname(path.dirname(staged.executable));
-    await verifyCodekeeperRelease({
+    await writeFile(
+      path.join(packageRoot, "release", "package-integrity.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          algorithm: "sha512",
+          integrity: packageRelease.integrity,
+        },
+        null,
+        2,
+      )}\n`,
+      { flag: "wx" },
+    );
+    await verifyRelease({
       root: packageRoot,
       expectedName: packageRelease.name,
       expectedVersion: packageRelease.version,
       expectedIntegrity: packageRelease.integrity,
-      expectedSourceCommit: installation.releaseManifest?.source?.commit,
     });
+    const packagedSource = JSON.parse(
+      await readFile(path.join(packageRoot, "assets", "metadata.json"), "utf8"),
+    ).source;
+    const installedSource = installation.releaseManifest?.source;
+    if (
+      packagedSource?.repository !== installedSource?.repository ||
+      packagedSource?.commit !== installedSource?.commit
+    ) {
+      return false;
+    }
     const runtimeRoot = path.join(packageRoot, "runtime");
     const installed = await runner.run(
       "node",
