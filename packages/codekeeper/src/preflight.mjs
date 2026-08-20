@@ -20,10 +20,26 @@ import { InstallerError } from "./errors.mjs";
 import { requireSuccess } from "./command-runner.mjs";
 import { upgradePolicy } from "./policy.mjs";
 import { normalizePackageIdentity, normalizePackageRelease } from "./package-release.mjs";
+import { assertInstallerEnvironment, assertNodeVersion } from "./preflight/environment.mjs";
+import {
+  inspectGitHubRepository,
+  parseJson,
+  readAuthenticatedViewer,
+} from "./preflight/github.mjs";
+import {
+  assertDefaultBranchCheckout,
+  assertFreshCleanCheckout,
+  assertGitIdentity,
+  inspectLocalCheckout,
+  parseGitHubRemote,
+  parseRemoteBranchSha,
+} from "./preflight/repository.mjs";
+
+export { assertNodeVersion };
+export { parseGitHubRemote, parseRemoteBranchSha };
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const GITHUB_WORKFLOW_REFERENCE = /(?:\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-|codekeeper@[0-9]|\.\/\.github\/workflows\/codekeeper-)/i;
 const PACKAGE_MANAGER_LOCKFILES = Object.freeze([
   Object.freeze({ manager: "npm", names: Object.freeze(["package-lock.json", "npm-shrinkwrap.json"]) }),
@@ -121,78 +137,6 @@ function callerSchedule(source) {
     throw new InstallerError("Existing maintenance caller has an invalid schedule.", { code: "EXISTING_INSTALLATION_INVALID" });
   }
   return value;
-}
-
-function trimGitSuffix(value) {
-  return value.endsWith(".git") ? value.slice(0, -4) : value;
-}
-
-function repositoryFromPathname(pathname) {
-  const parts = trimGitSuffix(pathname.replace(/^\//, "").replace(/\/$/, "")).split("/");
-  const repository = parts.length === 2 ? `${parts[0]}/${parts[1]}` : "";
-  if (!REPOSITORY.test(repository)) throw new InstallerError("origin is not a GitHub.com owner/repository URL.", { code: "UNSUPPORTED_ORIGIN" });
-  return repository;
-}
-
-export function parseGitHubRemote(remoteUrl) {
-  if (typeof remoteUrl !== "string" || !remoteUrl.trim()) {
-    throw new InstallerError("The Git origin URL is missing.", {
-      code: "UNSUPPORTED_ORIGIN"
-    });
-  }
-  const value = remoteUrl.trim();
-  const scp = /^git@github\.com:([^?#]+)$/.exec(value);
-  if (scp)
-    return Object.freeze({
-      host: "github.com",
-      repository: repositoryFromPathname(scp[1]),
-      protocol: "ssh"
-    });
-
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new InstallerError("origin must use GitHub.com HTTPS or SSH.", {
-      code: "UNSUPPORTED_ORIGIN"
-    });
-  }
-  if (parsed.hostname.toLowerCase() !== "github.com" || !["https:", "ssh:"].includes(parsed.protocol)) {
-    throw new InstallerError("GitHub Enterprise Server and non-GitHub origins are not supported.", { code: "UNSUPPORTED_ORIGIN" });
-  }
-  if (parsed.search || parsed.hash || parsed.password || (parsed.protocol === "https:" && parsed.username)) {
-    throw new InstallerError("origin must not contain credentials, query parameters, or fragments.", { code: "UNSUPPORTED_ORIGIN" });
-  }
-  if (parsed.protocol === "ssh:" && parsed.username !== "git") {
-    throw new InstallerError("GitHub SSH origins must use the git user.", {
-      code: "UNSUPPORTED_ORIGIN"
-    });
-  }
-  return Object.freeze({
-    host: "github.com",
-    repository: repositoryFromPathname(parsed.pathname),
-    protocol: parsed.protocol === "https:" ? "https" : "ssh"
-  });
-}
-
-export function assertNodeVersion(nodeVersion = process.versions.node) {
-  const major = Number(String(nodeVersion).split(".")[0]);
-  if (!Number.isInteger(major) || major < 22) {
-    throw new InstallerError("Node.js 22 or newer is required.", {
-      code: "UNSUPPORTED_NODE"
-    });
-  }
-}
-
-function parseJson(source, label) {
-  try {
-    return JSON.parse(source);
-  } catch (cause) {
-    throw new InstallerError(`${label} returned invalid JSON.`, {
-      code: "PREFLIGHT_INVALID_RESPONSE",
-      cause
-    });
-  }
 }
 
 async function exists(fsImpl, target) {
@@ -695,32 +639,6 @@ export async function inspectInstallationFiles(root, {
     releaseManifest,
     legacyFiles: Object.freeze(legacyFiles)
   });
-}
-
-async function assertNoGitOperation(root, runner, fsImpl) {
-  const names = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-merge", "rebase-apply"];
-  for (const name of names) {
-    const gitPath = await requireSuccess(runner, "git", ["rev-parse", "--git-path", name], { cwd: root }, "Could not inspect Git operation state.");
-    const resolved = path.isAbsolute(gitPath) ? gitPath : path.join(root, gitPath);
-    if (await exists(fsImpl, resolved)) {
-      throw new InstallerError("Finish the active Git operation before installing Codekeeper.", { code: "GIT_OPERATION_ACTIVE" });
-    }
-  }
-}
-
-export function parseRemoteBranchSha(output, defaultBranch) {
-  const lines = output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length !== 1) throw new InstallerError(`origin does not expose exactly one ${defaultBranch} branch tip.`, { code: "REMOTE_HEAD_INVALID" });
-  const [sha, ref, ...extra] = lines[0].split(/\s+/);
-  if (!FULL_SHA.test(sha) || ref !== `refs/heads/${defaultBranch}` || extra.length) {
-    throw new InstallerError("origin returned an invalid default-branch tip.", {
-      code: "REMOTE_HEAD_INVALID"
-    });
-  }
-  return sha;
 }
 
 export async function assertNoSetupBranch({ runner, root, repository, branch = SETUP_BRANCH }) {
@@ -1362,86 +1280,13 @@ export async function inspectRepository({
   interactive = true,
   fsImpl = { lstat, readdir, readFile, realpath }
 }) {
-  assertNodeVersion(nodeVersion);
-  if (!interactive) throw new InstallerError("Codekeeper init requires an interactive terminal.", { code: "NON_INTERACTIVE" });
-  await requireSuccess(runner, "git", ["--version"], { cwd }, "Git is required.");
-  await requireSuccess(runner, "gh", ["--version"], { cwd }, "GitHub CLI is required.");
-  const rootOutput = await requireSuccess(runner, "git", ["rev-parse", "--show-toplevel"], { cwd }, "Run Codekeeper init inside a Git checkout.");
-  const root = await fsImpl.realpath(rootOutput);
-  const bare = await requireSuccess(runner, "git", ["rev-parse", "--is-bare-repository"], { cwd: root }, "Could not inspect the Git checkout.");
-  if (bare !== "false")
-    throw new InstallerError("Bare repositories are not supported.", {
-      code: "UNSUPPORTED_CHECKOUT"
-    });
-  const sparse = await runner.run("git", ["config", "--bool", "core.sparseCheckout"], { cwd: root });
-  if (sparse.status === 0 && sparse.stdout.trim() === "true")
-    throw new InstallerError("Sparse checkouts are not supported.", {
-      code: "UNSUPPORTED_CHECKOUT"
-    });
-  if (![0, 1].includes(sparse.status))
-    throw new InstallerError("Could not inspect sparse-checkout state.", {
-      code: "PREFLIGHT_COMMAND_FAILED"
-    });
-  await assertNoGitOperation(root, runner, fsImpl);
-
-  const currentBranch = await requireSuccess(runner, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: root }, "Detached HEAD checkouts are not supported.");
-  const originUrl = await requireSuccess(runner, "git", ["remote", "get-url", "origin"], { cwd: root }, "An origin remote is required.");
-  const origin = parseGitHubRemote(originUrl);
-  await requireSuccess(runner, "gh", ["auth", "status", "--hostname", "github.com"], { cwd: root }, "Authenticate GitHub CLI for github.com first.");
-  const repositoryData = parseJson(await requireSuccess(
-    runner,
-    "gh",
-    ["api", "--hostname", "github.com", `repos/${origin.repository}`],
-    { cwd: root },
-    "Could not read the GitHub repository."
-  ), "GitHub repository query");
-  const repository = repositoryData.full_name;
-  if (typeof repository !== "string" || repository.toLowerCase() !== origin.repository.toLowerCase()) {
-    throw new InstallerError("The GitHub repository does not match origin.", {
-      code: "REPOSITORY_MISMATCH"
-    });
-  }
-  const ownerType = repositoryData.owner?.type;
-  if (!["User", "Organization"].includes(ownerType)) {
-    throw new InstallerError("GitHub returned an unsupported repository owner type.", { code: "PREFLIGHT_INVALID_RESPONSE" });
-  }
-  if (repositoryData.permissions?.admin !== true)
-    throw new InstallerError("Repository admin access is required.", {
-      code: "ADMIN_REQUIRED"
-    });
-  if (repositoryData.archived || repositoryData.disabled) throw new InstallerError("Archived or disabled repositories are not supported.", { code: "UNSUPPORTED_REPOSITORY" });
-  const actionsPermissions = parseJson(await requireSuccess(
-    runner,
-    "gh",
-    ["api", "--hostname", "github.com", `repos/${repository}/actions/permissions`],
-    { cwd: root },
-    "Could not read GitHub Actions permissions."
-  ), "GitHub Actions permissions query");
-  if (actionsPermissions.enabled !== true) throw new InstallerError("GitHub Actions must be enabled for this repository.", { code: "ACTIONS_DISABLED" });
-  const defaultBranch = repositoryData.default_branch;
-  if (typeof defaultBranch !== "string" || !defaultBranch || currentBranch !== defaultBranch) {
-    throw new InstallerError(`The checkout must be attached to the GitHub default branch${defaultBranch ? ` (${defaultBranch})` : ""}.`, { code: "WRONG_BRANCH" });
-  }
-
-  const status = await requireSuccess(runner, "git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root }, "Could not inspect Git status.");
-  if (status) throw new InstallerError("The Git checkout must be clean, including untracked files.", { code: "DIRTY_CHECKOUT" });
-  const headSha = await requireSuccess(runner, "git", ["rev-parse", "HEAD"], { cwd: root }, "Could not read HEAD.");
-  if (!FULL_SHA.test(headSha))
-    throw new InstallerError("Git returned an invalid HEAD commit.", {
-      code: "INVALID_HEAD"
-    });
-  const remoteDefaultSha = parseRemoteBranchSha(await requireSuccess(runner, "git", ["ls-remote", "origin", `refs/heads/${defaultBranch}`], { cwd: root }, "Could not read the remote default branch."), defaultBranch);
-  if (headSha !== remoteDefaultSha) throw new InstallerError("HEAD must exactly match the remote default branch before setup.", { code: "STALE_CHECKOUT" });
-
-  const viewerLogin = await requireSuccess(runner, "gh", ["api", "--hostname", "github.com", "user", "--jq", ".login"], { cwd: root }, "Could not identify the authenticated GitHub user.");
-  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(viewerLogin)) throw new InstallerError("GitHub returned an invalid authenticated login.", { code: "PREFLIGHT_INVALID_RESPONSE" });
-  const authorName = await runner.run("git", ["config", "--get", "user.name"], {
-    cwd: root
-  });
-  const authorEmail = await runner.run("git", ["config", "--get", "user.email"], { cwd: root });
-  if (authorName.status !== 0 || !authorName.stdout.trim() || authorEmail.status !== 0 || !authorEmail.stdout.trim()) {
-    throw new InstallerError("Configure Git user.name and user.email before setup.", { code: "GIT_IDENTITY_REQUIRED" });
-  }
+  await assertInstallerEnvironment({ runner, cwd, nodeVersion, interactive });
+  const { root, currentBranch, originUrl, origin } = await inspectLocalCheckout({ runner, cwd, fsImpl });
+  const { repository, ownerType, defaultBranch } = await inspectGitHubRepository({ runner, root, origin });
+  assertDefaultBranchCheckout(currentBranch, defaultBranch);
+  const { headSha, remoteDefaultSha } = await assertFreshCleanCheckout({ runner, root, defaultBranch });
+  const viewerLogin = await readAuthenticatedViewer(runner, root);
+  await assertGitIdentity({ runner, root });
 
   const installation = await inspectInstallationFiles(root, { fsImpl });
   const validationCandidate = await discoverRepositoryValidationCommand(root, { fsImpl });
