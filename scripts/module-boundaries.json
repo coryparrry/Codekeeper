@@ -33,10 +33,6 @@
       "maxLines": 1229,
       "maxBytes": 54594
     },
-    "packages/codekeeper/src/preflight.mjs": {
-      "maxLines": 1317,
-      "maxBytes": 55751
-    },
     "packages/codekeeper/src/tui.mjs": {
       "maxLines": 948,
       "maxBytes": 36271

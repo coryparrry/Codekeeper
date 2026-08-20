@@ -2,10 +2,30 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assertNodeVersion,
+  assertNoInstallationFiles,
+  assertNoSetupBranch,
+  discoverRepositoryValidationCommand,
+  doctorRepository,
+  inspectInstallationFiles,
+  inspectRepository,
   parseGitHubRemote,
+  parseReleaseManifest,
   parseRemoteBranchSha,
 } from "../src/preflight.mjs";
+import {
+  assertNoInstallationFiles as assertCollisionInstallationFiles,
+  assertNoSetupBranch as assertCollisionSetupBranch,
+} from "../src/preflight/collisions.mjs";
+import { doctorRepository as doctorFromDoctorModule } from "../src/preflight/doctor.mjs";
 import { assertNodeVersion as assertEnvironmentNodeVersion } from "../src/preflight/environment.mjs";
+import {
+  discoverRepositoryValidationCommand as discoverInstallationValidationCommand,
+  inspectInstallationFiles as inspectInstallationFromInstallation,
+  parseReleaseManifest as parseInstallationReleaseManifest,
+} from "../src/preflight/installation.mjs";
+import {
+  inspectRepository as inspectRepositoryFromIndex,
+} from "../src/preflight/index.mjs";
 import {
   parseGitHubRemote as parseRepositoryGitHubRemote,
   parseRemoteBranchSha as parseRepositoryRemoteBranchSha,
@@ -19,6 +39,16 @@ test("preflight facade re-exports extracted environment and repository helpers",
   assert.equal(assertNodeVersion, assertEnvironmentNodeVersion);
   assert.equal(parseGitHubRemote, parseRepositoryGitHubRemote);
   assert.equal(parseRemoteBranchSha, parseRepositoryRemoteBranchSha);
+});
+
+test("preflight facade re-exports extracted installation, collision, and doctor helpers", () => {
+  assert.equal(parseReleaseManifest, parseInstallationReleaseManifest);
+  assert.equal(discoverRepositoryValidationCommand, discoverInstallationValidationCommand);
+  assert.equal(inspectInstallationFiles, inspectInstallationFromInstallation);
+  assert.equal(assertNoInstallationFiles, assertCollisionInstallationFiles);
+  assert.equal(assertNoSetupBranch, assertCollisionSetupBranch);
+  assert.equal(doctorRepository, doctorFromDoctorModule);
+  assert.equal(inspectRepository, inspectRepositoryFromIndex);
 });
 
 test("extracted environment helper keeps Node 22 as the minimum runtime", () => {
