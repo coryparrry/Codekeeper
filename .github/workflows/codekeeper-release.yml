@@ -271,7 +271,8 @@ jobs:
               return value;
             };
             const receipt = normalizeReceipt(JSON.parse(readFileSync(process.env.RECEIPT, "utf8")));
-            if (receipt?.version !== process.env.EXPECTED_VERSION || receipt?.dist?.integrity !== process.env.EXPECTED_INTEGRITY) throw new Error("existing public npm release does not match the verified tarball");
+            const integrity = receipt["dist.integrity"] ?? receipt?.dist?.integrity;
+            if (receipt?.version !== process.env.EXPECTED_VERSION || integrity !== process.env.EXPECTED_INTEGRITY) throw new Error("existing public npm release does not match the verified tarball");
             '
             printf 'should_publish=false\n' >> "$GITHUB_OUTPUT"
             exit 0
@@ -318,7 +319,9 @@ jobs:
             return value;
           };
           const receipt = normalizeReceipt(JSON.parse(readFileSync(process.env.RECEIPT, "utf8")));
-          if (receipt.version !== process.env.EXPECTED_VERSION || receipt?.dist?.integrity !== process.env.EXPECTED_INTEGRITY || typeof receipt?.dist?.tarball !== "string" || !receipt.dist.tarball.startsWith("https://registry.npmjs.org/")) throw new Error("public npm registry receipt does not match the published release");
+          const integrity = receipt["dist.integrity"] ?? receipt?.dist?.integrity;
+          const tarball = receipt["dist.tarball"] ?? receipt?.dist?.tarball;
+          if (receipt.version !== process.env.EXPECTED_VERSION || integrity !== process.env.EXPECTED_INTEGRITY || typeof tarball !== "string" || !tarball.startsWith("https://registry.npmjs.org/")) throw new Error("public npm registry receipt does not match the published release");
           '
           download="$RUNNER_TEMP/codekeeper-registry-download"
           mkdir "$download"
