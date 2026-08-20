@@ -7,21 +7,26 @@ The file is the reviewable source of truth. Merging it does **not** change GitHu
 settings. An administrator must deliberately apply it after the pull request has
 merged.
 
-## Protected default branch
+## Protected delivery branches
 
-The `main` ruleset:
+The branch ruleset protects both `staging` and `main`. It:
 
 - requires changes to arrive through pull requests;
-- requires all four jobs from `Codekeeper checks`;
+- requires one approving review and dismisses that approval when new commits are pushed;
+- routes ownership through `CODEOWNERS` without making the pull-request author
+  the only eligible approver;
+- requires all package, runtime, acceptance, and promotion jobs from
+  `Codekeeper checks`;
+- permits ordinary `main` promotions only from `staging`;
 - requires review conversations to be resolved;
 - blocks branch deletion; and
 - blocks force pushes.
 
-Codekeeper is currently a solo-maintainer repository, so the checked-in contract
-does not require a second approval or a code-owner approval. `CODEOWNERS` still
-routes ownership and protects the governance files. Increase the approval count
-only after another trusted reviewer has write access, otherwise the repository
-owner can be locked out of normal maintenance.
+Contributors cannot approve their own pull requests. A feature therefore moves
+from its branch into `staging` only after maintainer approval. When the staged
+candidate is safe, a second pull request promotes `staging` to `main`. Release
+Please pull requests are the only other allowed `main` source and still require
+the same independent approval and checks.
 
 ## Immutable release tags
 

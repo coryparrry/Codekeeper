@@ -13,9 +13,7 @@
       "bypass_actors": [],
       "conditions": {
         "ref_name": {
-          "include": [
-            "refs/heads/main"
-          ],
+          "include": ["refs/heads/main", "refs/heads/staging"],
           "exclude": []
         }
       },
@@ -29,10 +27,10 @@
         {
           "type": "pull_request",
           "parameters": {
-            "dismiss_stale_reviews_on_push": false,
+            "dismiss_stale_reviews_on_push": true,
             "require_code_owner_review": false,
             "require_last_push_approval": false,
-            "required_approving_review_count": 0,
+            "required_approving_review_count": 1,
             "required_review_thread_resolution": true
           }
         },
@@ -53,6 +51,9 @@
               },
               {
                 "context": "maintainer-checks"
+              },
+              {
+                "context": "promotion-policy"
               }
             ]
           }
@@ -66,9 +67,7 @@
       "bypass_actors": [],
       "conditions": {
         "ref_name": {
-          "include": [
-            "refs/tags/codekeeper-v*"
-          ],
+          "include": ["refs/tags/codekeeper-v*"],
           "exclude": []
         }
       },
