@@ -19,15 +19,15 @@
     },
     {
       "path": "package-lock.json",
-      "sha256": "cb1e0b554ab67499006d07c710e9fe3f583cc09b2bff17735df624d0ee5bac0b"
+      "sha256": "9c84b5d7076e71a4d27f150dc22be48c07cf679c01733bd23353e444ceefcf16"
     },
     {
       "path": "package.json",
-      "sha256": "5f4e825967cf5fe6a81e1baafa8e4fd98d9017a688717d8d8b6eab1eabd6c14c"
+      "sha256": "54def6959f860ed1a7a7a71d3952a251141de00f53f6fa4358df00d17ded00fe"
     },
     {
       "path": "presets/catalogue.mjs",
-      "sha256": "bcc71060b4fb3281c4157760e84da530d98ff8b547bab28de9e661a3beb1059d"
+      "sha256": "7990b211a3c7bad3b4ba10154c10d1d7c1f81cdd1f5a3b687e210e6108bbc36e"
     },
     {
       "path": "scripts/verify-tooling-artifact.mjs",
@@ -42,8 +42,12 @@
       "sha256": "66be6585838af4a74f96056fb14b5ab86ca4840593854f421a98ea2d42289442"
     },
     {
+      "path": "src/lib/agents-runtime-core.mjs",
+      "sha256": "eff190d1211157872071850b0f1726e2abcd7ac55a50a7b6a236147f2769dbed"
+    },
+    {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "8589a35cd90cb250686cbc3c9f18a06d17760f089c82bb1245210b062f946e84"
+      "sha256": "bb02e954643eca42faa256d6a5e4f93ff984983e3f9e801dbfa02da658e275de"
     },
     {
       "path": "src/lib/commands.mjs",
@@ -95,7 +99,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "bf0b942cabeeddd22f394e0273a617ef7ba2ebbdabb2036a88e524e5e26d2bc3"
+      "sha256": "3c53b190a6e057d57545a319f8d697495985fa1166f64e8b220fe12cc47b906c"
     },
     {
       "path": "src/lib/process-supervisor.mjs",
@@ -116,6 +120,10 @@
     {
       "path": "src/lib/render.mjs",
       "sha256": "cba4791e6497777c6c9f8c91c902ebbcc57df5694dd84b8a04a979890eca207e"
+    },
+    {
+      "path": "src/lib/repository-context.mjs",
+      "sha256": "a2bf209043f80efd193751b7ff0941ceff91e1dcef19201c13ac78b7681ef43c"
     },
     {
       "path": "src/lib/review-feedback.mjs",

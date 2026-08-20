@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -19,6 +20,7 @@ import {
   coordinatorInstructions,
   enforceCoordinatorEvidenceBoundary,
   loadCoordinatorProfile,
+  loadTrustedRepositoryContext,
   modelSettingsFor,
   parseAgentOutput,
   reviewResultEscalation,
@@ -86,6 +88,7 @@ function validReview(overrides = {}) {
 }
 
 const trustedSourceSha = "a".repeat(40);
+const trustedHeadSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 
 async function profileFixture(mode, contents = `# ${mode} behavior\n`) {
   const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-profile-"));
@@ -263,7 +266,8 @@ test("workspace execution runs one Codex MCP session through the Agents SDK", as
   assert.equal(calls.tool.args.model, "gpt-5.6-luna");
   assert.equal(calls.tool.args.sandbox, "read-only");
   assert.deepEqual(calls.tool.args.config, { model_reasoning_effort: "max" });
-  assert.equal(calls.tool.args.prompt, "Inspect the issue against the checkout.");
+  assert.match(calls.tool.args.prompt, /REPOSITORY CONTEXT GATE/);
+  assert.match(calls.tool.args.prompt, /Inspect the issue against the checkout\./);
   assert.match(calls.tool.args["developer-instructions"], /The trusted runtime requires the final response/);
   assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), validIssue());
   assert.deepEqual(metadata, { completed: true, passes: 1, postReviewEscalated: false });
@@ -277,6 +281,49 @@ test("workspace execution runs one Codex MCP session through the Agents SDK", as
   assert.equal(workspaceMetadata.totalDurationMs, workspaceMetadata.passes[0].durationMs);
 });
 
+test("workspace execution injects trusted context without writing the frozen prompt", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-readonly-workspace-prompt-"));
+  context.after(async () => {
+    await chmod(path.join(directory, "workspace-prompt.md"), 0o600).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  });
+  const resultPath = path.join(directory, "workspace-result.json");
+  const originalPrompt = "Inspect the issue against the checkout.\n";
+  await Promise.all([
+    writeFile(path.join(directory, "workspace-prompt.md"), originalPrompt),
+    writeFile(path.join(directory, "schema.json"), JSON.stringify(providerCompatibleJsonSchema(issueSchema(config)))),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", baseSha: trustedHeadSha }))
+  ]);
+  await chmod(path.join(directory, "workspace-prompt.md"), 0o400);
+
+  let prompt;
+  class FakeMCPServerStdio {
+    async connect() {}
+    async close() {}
+    async listTools() { return [{ name: "codex" }]; }
+    async callToolResult(_name, args) {
+      prompt = args.prompt;
+      return { structuredContent: { content: JSON.stringify(validIssue()) }, content: [] };
+    }
+  }
+  const workspaceConfig = withoutTracing();
+  workspaceConfig.ai.agents.issue.workspace.enabled = true;
+  await runWorkspaceAgentFromBundle({
+    mode: "issue",
+    directory,
+    config: workspaceConfig,
+    resultPath,
+    apiKey: "workspace-secret",
+    environment: { CODEX_HOME: path.join(directory, "codex-home"), PATH: "/usr/bin" },
+    sdkLoader: async () => ({ MCPServerStdio: FakeMCPServerStdio }),
+    codexAuthenticator: async () => {}
+  });
+
+  assert.match(prompt, /REPOSITORY CONTEXT GATE/);
+  assert.match(prompt, /Inspect the issue against the checkout/);
+  assert.equal(await readFile(path.join(directory, "workspace-prompt.md"), "utf8"), originalPrompt);
+});
+
 test("workspace review keeps only normalized left-to-right diagrams without losing validated findings", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-workspace-review-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
@@ -287,6 +334,7 @@ test("workspace review keeps only normalized left-to-right diagrams without losi
     writeFile(path.join(directory, "context.json"), JSON.stringify({
       mode: "review",
       pullRequest: {
+        baseSha: trustedHeadSha,
         labels: ["security"],
         changedFiles: ["src/total.mjs"],
         changeSummary: { changedLines: 20, largestFileChangedLines: 20 }
@@ -372,6 +420,7 @@ test("a located Medium high-impact blocker triggers one focused Max pass in the 
     writeFile(path.join(directory, "context.json"), JSON.stringify({
       mode: "review",
       pullRequest: {
+        baseSha: trustedHeadSha,
         labels: [],
         changedFiles: ["src/feature.mjs"],
         changeSummary: { changedLines: 20, largestFileChangedLines: 20 }
@@ -445,20 +494,22 @@ test("a located Medium high-impact blocker triggers one focused Max pass in the 
   assert.match(calls[1].prompt, /src\/feature\.mjs/);
   assert.match(calls[1].prompt, /PRIOR MEDIUM RESULT/);
   assert.equal(JSON.parse(await readFile(resultPath, "utf8")).summary, maxReview.summary);
-  assert.deepEqual(JSON.parse(await readFile(path.join(directory, "workspace-runtime-metadata.json"), "utf8")), {
-    version: 1,
-    mode: "review",
-    passes: [
-      { tier: "configured", model: "gpt-5.6-luna", effort: "medium", durationMs: 25 },
-      { tier: "focused-max", model: "gpt-5.6-luna", effort: "max", durationMs: 25 }
-    ],
-    postReviewEscalation: {
-      reasons: ["blocking-finding:high"],
-      files: ["src/feature.mjs"],
-      findingCount: 1
-    },
-    totalDurationMs: 50
+  const workspaceMetadata = JSON.parse(
+    await readFile(path.join(directory, "workspace-runtime-metadata.json"), "utf8"),
+  );
+  assert.equal(workspaceMetadata.version, 1);
+  assert.equal(workspaceMetadata.mode, "review");
+  assert.deepEqual(workspaceMetadata.passes, [
+    { tier: "configured", model: "gpt-5.6-luna", effort: "medium", durationMs: 25 },
+    { tier: "focused-max", model: "gpt-5.6-luna", effort: "max", durationMs: 25 }
+  ]);
+  assert.deepEqual(workspaceMetadata.postReviewEscalation, {
+    reasons: ["blocking-finding:high"],
+    files: ["src/feature.mjs"],
+    findingCount: 1
   });
+  assert.equal(workspaceMetadata.totalDurationMs, 50);
+  assert.equal(workspaceMetadata.repositoryContext.ref, trustedHeadSha);
 });
 
 test("model settings retain provider-specific fields while adding supported reasoning effort", () => {
@@ -1659,7 +1710,7 @@ test("enabled issue workspaces require specialist evidence before provider const
   await Promise.all([
     writeFile(path.join(directory, "prompt.md"), "Classify the issue.\n"),
     writeFile(path.join(directory, "schema.json"), JSON.stringify(schema)),
-    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", agentProfile: metadata })),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", baseSha: trustedHeadSha, agentProfile: metadata })),
     writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), profile)
   ]);
 
@@ -1678,7 +1729,7 @@ test("enabled issue workspaces require specialist evidence before provider const
 
   await assert.rejects(
     runAgentFromBundle({ mode: "issue", directory, config: workspaceConfig, resultPath: path.join(directory, "result.json"), apiKey: "provider-secret", sdkLoader }),
-    /issue requires the configured workspace specialist result/
+    /issue triage requires repository workspace evidence/
   );
   assert.equal(providers, 0);
 
@@ -1687,15 +1738,24 @@ test("enabled issue workspaces require specialist evidence before provider const
   await writeFile(workspaceResultPath, JSON.stringify(validIssue()));
   await assert.rejects(
     runAgentFromBundle({ mode: "issue", directory, config: workspaceConfig, resultPath: path.join(directory, "result.json"), apiKey: "provider-secret", sdkLoader }),
-    /requires workspace runtime metadata with specialist evidence/
+    /Workspace runtime metadata is missing or invalid/
   );
   assert.equal(providers, 0);
+  const expectedRepositoryContext = loadTrustedRepositoryContext("issue", { mode: "issue", baseSha: trustedHeadSha });
   await writeFile(workspaceMetadataPath, JSON.stringify({
     version: 1,
     mode: "issue",
     passes: [{ tier: "configured", model: "gpt-5.6-sol", effort: "low", durationMs: 40 }],
     postReviewEscalation: null,
-    totalDurationMs: 40
+    totalDurationMs: 40,
+    repositoryContext: {
+      version: expectedRepositoryContext.version,
+      ref: expectedRepositoryContext.ref,
+      instructionFiles: expectedRepositoryContext.instructionFiles,
+      rootPath: expectedRepositoryContext.rootPath,
+      rootInstructionsSha256: expectedRepositoryContext.rootInstructionsSha256,
+      rootInstructionsBytes: expectedRepositoryContext.rootInstructionsBytes
+    }
   }));
   const workspaceMetadataResult = await runAgentFromBundle({
     mode: "issue",
@@ -1706,12 +1766,10 @@ test("enabled issue workspaces require specialist evidence before provider const
     sdkLoader
   });
   assert.equal(workspaceMetadataResult.workspaceSpecialistUsed, true);
+  assert.equal(workspaceMetadataResult.coordinatorSkipped, "workspace-authoritative");
   assert.equal(workspaceMetadataResult.workspace.totalDurationMs, 40);
-  assert.equal(
-    workspaceMetadataResult.totalModelDurationMs,
-    workspaceMetadataResult.durationMs + workspaceMetadataResult.workspace.totalDurationMs
-  );
-  assert.equal(providers, 1);
+  assert.equal(workspaceMetadataResult.totalModelDurationMs, 40);
+  assert.equal(providers, 0);
 
   await Promise.all([rm(workspaceResultPath), rm(workspaceMetadataPath)]);
 
@@ -1725,7 +1783,8 @@ test("enabled issue workspaces require specialist evidence before provider const
     sdkLoader
   });
   assert.equal(metadataResult.workspaceSpecialistUsed, false);
-  assert.equal(providers, 2);
+  assert.equal(metadataResult.coordinatorSkipped, "no-workspace");
+  assert.equal(providers, 0);
 });
 
 test("bundle execution rejects a tampered or wrong-mode frozen profile before provider construction", async (context) => {

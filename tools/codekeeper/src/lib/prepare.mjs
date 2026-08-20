@@ -570,6 +570,7 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
     ...runMetadata({ toolingSha, configSha256 }),
     agentProfile: agentProfile.metadata,
     runUrl: runUrl(repository),
+    baseSha: currentHead(),
     ownerCommandDispatch,
     issue: {
       number: issue.number,
