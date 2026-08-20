@@ -43,7 +43,7 @@ test("release publication is tag-gated, provenance-enabled, and bound to a prote
   );
   assert.match(
     source,
-    /actions\/attest-build-provenance@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4/,
+    /actions\/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4\.2\.2/,
   );
   assert.match(source, /node-version: 24\.19\.0/);
   assert.match(
