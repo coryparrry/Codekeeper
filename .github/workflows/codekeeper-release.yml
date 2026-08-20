@@ -208,7 +208,7 @@ jobs:
         run: |
           set -euo pipefail
           tarball="$RELEASE_ROOT/$EXPECTED_FILENAME"
-          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | base64)"
+          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
           test "$actual_integrity" = "$EXPECTED_INTEGRITY"
           stage="$RUNNER_TEMP/codekeeper-release-publish-input"
           mkdir "$stage"
@@ -306,7 +306,7 @@ jobs:
           mkdir "$download"
           npm pack --json --ignore-scripts --pack-destination "$download" "$EXPECTED_NAME@$EXPECTED_VERSION" > "$download/report.json"
           actual_tarball="$download/$EXPECTED_FILENAME"
-          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$actual_tarball" | base64)"
+          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$actual_tarball" | openssl base64 -A)"
           test "$actual_integrity" = "$EXPECTED_INTEGRITY"
           stage="$RUNNER_TEMP/codekeeper-registry-stage"
           mkdir "$stage"
