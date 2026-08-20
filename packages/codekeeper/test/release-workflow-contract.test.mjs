@@ -60,6 +60,39 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   const source = await repositoryFile(
     ".github/workflows/codekeeper-release.yml",
   );
+  const step = (start, end) => {
+    const startIndex = source.indexOf(start);
+    const endIndex = source.indexOf(end, startIndex);
+    assert.notEqual(startIndex, -1, `missing workflow step: ${start}`);
+    assert.notEqual(
+      endIndex,
+      -1,
+      `missing workflow step after ${start}: ${end}`,
+    );
+    return source.slice(startIndex, endIndex);
+  };
+  const verificationSteps = [
+    step(
+      "- name: Verify local package receipt",
+      "- name: Upload verified release tarball",
+    ),
+    step(
+      "- name: Reverify publish input",
+      "- name: Reconfirm remote release tag before registry mutation",
+    ),
+    step(
+      "- name: Re-fetch and verify public registry receipt",
+      "- name: Run fresh exact-version install canary",
+    ),
+  ];
+  for (const verificationStep of verificationSteps) {
+    assert.match(verificationStep, /release", "package-integrity\.json"/);
+    assert.match(verificationStep, /flag: "wx"/);
+    assert.match(verificationStep, /bin\/verify-package\.mjs/);
+    assert.match(verificationStep, /--expected-integrity/);
+  }
+  assert.match(verificationSteps[0], /CODEKEEPER_PACKAGE_VERIFIED/);
+  assert.doesNotMatch(verificationSteps[0], /JSON\.parse\(output\)/);
   assert.match(
     source,
     /node scripts\/pack-codekeeper-package\.mjs --destination/,
@@ -88,7 +121,10 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
     source,
     /RECEIPT="\$receipt" node --input-type=module -e '[\s\S]*const error = JSON\.parse\(readFileSync\(process\.env\.RECEIPT/,
   );
-  assert.doesNotMatch(source, /JSON\.parse\(readFileSync\(process\.env\.ERROR_REPORT/);
+  assert.doesNotMatch(
+    source,
+    /JSON\.parse\(readFileSync\(process\.env\.ERROR_REPORT/,
+  );
   assert.match(source, /should_publish=false/);
   assert.match(source, /should_publish=true/);
   assert.match(
