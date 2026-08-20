@@ -67,15 +67,43 @@
     },
     {
       "path": "src/lib/github.mjs",
-      "sha256": "c3c5f09aae357add4e5948d57644d687399790ecacaee146f78c0dcc2acc33de"
+      "sha256": "c451420a9c1d828f9d48378842ad67db278ce967a3e504671bff66b0b25bae22"
+    },
+    {
+      "path": "src/lib/github/client.mjs",
+      "sha256": "72856fbad7777795bd63e16d877c0b90b7b22f40c2bcdfcf8efc76b023a4c7f7"
+    },
+    {
+      "path": "src/lib/github/comments.mjs",
+      "sha256": "896cab0e2d446e6bb9bc16386ec5213526dfeb5b41a645e523e25cee8b8d65ac"
     },
     {
       "path": "src/lib/github/graphql.mjs",
       "sha256": "2b29192782dd8e4da2751f9502d4afbafcf1f88ad81a73e420cf6a5a542833eb"
     },
     {
+      "path": "src/lib/github/index.mjs",
+      "sha256": "7914badb02e647f46f68bbd7c29429729324b4cb63a3ec59dabda23504a3b4b0"
+    },
+    {
+      "path": "src/lib/github/issues.mjs",
+      "sha256": "198cb5d773a1374e8989c8d9dbda9577bd12aa4f1c9422eea60426151589d984"
+    },
+    {
+      "path": "src/lib/github/labels.mjs",
+      "sha256": "24b140630c1685695331a039872dc7e7c75c24032c436b555d16200b58b781c4"
+    },
+    {
+      "path": "src/lib/github/mutation-guard.mjs",
+      "sha256": "2923185a6e9031ee995285327d72e9b93b326871b9783d65d4b88ab292ad6f2e"
+    },
+    {
       "path": "src/lib/github/pagination.mjs",
       "sha256": "fb3985402d94744511366f863df7d526dcd7c5d3352109d8a3c2597eb05e6183"
+    },
+    {
+      "path": "src/lib/github/pulls.mjs",
+      "sha256": "709b5ce34f38cb691a85108db427130ae2816d3268f5f5d9edf2ca4595a0d2ef"
     },
     {
       "path": "src/lib/github/transport.mjs",

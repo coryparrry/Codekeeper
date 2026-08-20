@@ -4,7 +4,7 @@ import test from "node:test";
 
 const harness = await readFile(new URL("../src/harness.mjs", import.meta.url), "utf8");
 const publish = await readFile(new URL("../../tools/codekeeper/src/lib/publish.mjs", import.meta.url), "utf8");
-const github = await readFile(new URL("../../tools/codekeeper/src/lib/github.mjs", import.meta.url), "utf8");
+const github = await readFile(new URL("../../tools/codekeeper/src/lib/github/mutation-guard.mjs", import.meta.url), "utf8");
 
 function section(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);

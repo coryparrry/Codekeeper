@@ -5,7 +5,8 @@ import test from "node:test";
 const fixWorkflow = await readFile(new URL("../../../.github/workflows/codekeeper-fix.yml", import.meta.url), "utf8");
 const publishSource = await readFile(new URL("../src/lib/publish.mjs", import.meta.url), "utf8");
 const repairSource = await readFile(new URL("../src/lib/pr-repair.mjs", import.meta.url), "utf8");
-const githubSource = await readFile(new URL("../src/lib/github.mjs", import.meta.url), "utf8");
+const githubSource = await readFile(new URL("../src/lib/github/mutation-guard.mjs", import.meta.url), "utf8");
+const pullsSource = await readFile(new URL("../src/lib/github/pulls.mjs", import.meta.url), "utf8");
 
 function section(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -34,15 +35,15 @@ test("automatic review repair dispatch carries policy authorization", () => {
 
 test("conditional PR repair mutation retains the one-shot authorization boundary", () => {
   const beginRepair = section(githubSource, "  async beginPullRepairMutation", "\n  async beginBranchMutation");
-  const assertCurrent = section(githubSource, "  async assertPullMutationCurrent", "\n  assertPullMutationIdentity");
+  const assertCurrent = section(githubSource, "  async assertPullMutationCurrent", "\n  advancePullMutationState");
   assertContains(beginRepair, /repairEvidencePolicy/u, "repair mutation omits frozen policy authorization state");
   assertContains(assertCurrent, /automaticRepairMarker\(expected\.headSha\)/u, "repair mutation omits the current-head authorization marker");
   assertContains(repairSource, /beginPullRepairMutation/u, "PR repair does not enter the conditional mutation seam");
 });
 
 test("conditional review mutation rejects draft and paused pull requests", () => {
-  const assertCurrent = section(githubSource, "  async assertPullMutationCurrent", "\n  assertPullMutationIdentity");
-  const assertIdentity = section(githubSource, "  assertPullMutationIdentity", "\n  advancePullMutationState");
+  const assertCurrent = section(githubSource, "  async assertPullMutationCurrent", "\n  advancePullMutationState");
+  const assertIdentity = section(pullsSource, "  assertPullMutationIdentity", "\n  async getPull");
   assertContains(assertIdentity, /pull\.draft/u, "conditional review mutation omits draft state");
   assertContains(assertCurrent, /paused/u, "conditional review mutation omits the paused label");
   assertContains(publishSource, /beginPullMutation/u, "review publication does not enter the conditional mutation seam");
