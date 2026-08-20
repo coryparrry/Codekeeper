@@ -150,7 +150,7 @@ test("comment-triggered triage freezes the bounded live issue conversation after
     assert.equal(prepared.issue.conversation.includedComments, 2);
     assert.equal(prepared.issue.conversation.truncated, false);
     assert.equal(prepared.issue.previousTriage.missingInformation.length, 1);
-    assert.match(await readFile(path.join(fixture.root, "bundle", "prompt.md"), "utf8"), /bounded follow-up/);
+    assert.match(await readFile(path.join(fixture.root, "bundle", "workspace-prompt.md"), "utf8"), /bounded follow-up/);
   });
 });
 

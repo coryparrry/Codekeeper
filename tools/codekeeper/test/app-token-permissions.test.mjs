@@ -61,12 +61,17 @@ test("publication mints the privileged App token only after local verification",
     const publish = jobSection(source, mode === "review" ? "gate" : "publish");
     const validation = publish.indexOf("- name: Validate GitHub App permission inputs");
     const install = publish.indexOf("- name: Install exact Codekeeper runtime");
-    const artifact = publish.indexOf("- name: Download sealed");
+    const verification = publish.indexOf(
+      mode === "review" ? "- name: Seal review artifact without repository execution" : "- name: Download sealed",
+    );
     const token = publish.indexOf("- name: Create short-lived GitHub App token");
     const publication = publish.indexOf("- name: Publish sealed");
     assert.ok(validation !== -1 && validation < install, `${mode} validates permissions before runtime setup`);
     assert.ok(install !== -1 && install < token, `${mode} verifies and installs the runtime before minting`);
-    assert.ok(artifact !== -1 && artifact < token, `${mode} downloads its sealed artifact before minting`);
+    assert.ok(verification !== -1 && verification < token, `${mode} verifies its publication input before minting`);
+    if (mode === "review") {
+      assert.ok(install < verification, "review seals the restored candidate with the verified runtime before minting");
+    }
     assert.ok(token !== -1 && token < publication, `${mode} mints only immediately before publication`);
   }
 });

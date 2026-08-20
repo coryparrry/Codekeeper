@@ -227,7 +227,10 @@ test("review workflows admit stacked publication but keep forks, drafts, and mer
     new URL("../../../examples/workflows/codekeeper-review.yml.example", import.meta.url),
     "utf8",
   );
-  assert.match(reusable, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(
+    reusable,
+    /const sameRepository = event\.pull_request\?\.head\?\.repo\?\.full_name === repository\n\s+&& event\.pull_request\?\.base\?\.repo\?\.full_name === repository;/,
+  );
   assert.doesNotMatch(reusable, /github\.event\.pull_request\.base\.ref == github\.event\.repository\.default_branch/);
   assert.match(reusable, /Stacked pull request target \$BASE_REF is review-publication-only/);
   assert.match(reusable, /Fork pull requests are unsupported; manual review is required/);

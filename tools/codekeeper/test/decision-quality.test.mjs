@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readdir } from "node:fs/promises";
 import test from "node:test";
 import { getAgentRuntimeSettings } from "../src/lib/config.mjs";
 import { applyPolicyPreset, POLICY_PRESETS } from "../presets/catalogue.mjs";
@@ -29,7 +28,9 @@ test("mixed preset is a cloned view of the tracked starter and OpenAI preset onl
   assert.equal(openai.audit.repair.enabled, false);
   assert.equal(openai.issues.allowAiImplementation, false);
   assert.equal(openai.merge.enabled, false);
-  assert.equal(getAgentRuntimeSettings(openai, "issue").workspaceSandbox, "");
+  const issueRuntime = getAgentRuntimeSettings(openai, "issue");
+  assert.equal(issueRuntime.workspaceEnabled, true);
+  assert.equal(issueRuntime.workspaceSandbox, "read-only");
 });
 
 test("decision evaluation parses repeat defaults and only permits OpenAI fallback candidates for the OpenAI preset", () => {
@@ -216,9 +217,5 @@ test("semantic assertions fail closed and evaluation never reports provider keys
   assert.equal(summary.results[0].stage, "evidence-boundary");
   assert.equal(summary.results[0].pass, false);
   assert.doesNotMatch(reports.join("\n"), /provider-key-secret|provider-result-secret/);
-  assert.deepEqual((await readdir(new URL("../evals/", import.meta.url))).sort(), [
-    "decision-quality.mjs",
-    "live-review-suite.mjs",
-    "live-review-suite.test.mjs"
-  ]);
+  assert.deepEqual(Object.keys(summary.results[0]).sort(), ["attempt", "model", "pass", "preset", "repeat", "scenario", "stage"]);
 });
