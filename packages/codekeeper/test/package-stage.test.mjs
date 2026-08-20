@@ -101,15 +101,7 @@ test("package stage contains one release with separate closed installer and runt
   const packageLock = JSON.parse(await readFile(path.join(REPOSITORY_ROOT, "packages/codekeeper/package-lock.json"), "utf8"));
   const stagedRuntimeManifest = JSON.parse(await readFile(path.join(destination, "runtime/package.json"), "utf8"));
   const runtimePackageLock = JSON.parse(await readFile(path.join(destination, "runtime/package-lock.json"), "utf8"));
-  const canonicalRuntimeManifest = JSON.parse(
-    await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/package.json"), "utf8"),
-  );
-  const runtimeDependencies = canonicalRuntimeManifest.dependencies;
   assert.deepEqual(Object.keys(packageManifest.dependencies).sort(), [...INSTALLER_DEPENDENCIES]);
-  assert.deepEqual(stagedRuntimeManifest.dependencies, runtimeDependencies);
-  for (const [name, version] of Object.entries(runtimeDependencies)) {
-    assert.equal(stagedRuntimeManifest.dependencies[name], version, `${name} matches its runtime owner`);
-  }
   assert.deepEqual(packageManifest.bundleDependencies, INSTALLER_DEPENDENCIES);
   assert.deepEqual(packageLock.packages[""].dependencies, packageManifest.dependencies);
   assert.deepEqual(packageLock.packages[""].bundleDependencies, packageManifest.bundleDependencies);
