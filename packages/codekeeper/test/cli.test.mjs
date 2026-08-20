@@ -6,7 +6,7 @@ import { currentResumeCommand, parseCliArgs, runCli as runProductionCli, USAGE }
 import { createCommandRunner } from "../src/command-runner.mjs";
 import { buildInstallPlan, completionGuidance } from "../src/plan.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
-import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, result, temporaryDirectory, testPackageEnvironment, textSink } from "./helpers.mjs";
+import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, result, temporaryDirectory, testPackageEnvironment, textSink, VERSION } from "./helpers.mjs";
 
 function runCli(options = {}) {
   return runProductionCli({
@@ -260,11 +260,11 @@ test("the npm bootstrap fails closed when it launches the wrong package version"
   assert.match(errorOutput.toString(), /different Codekeeper version than requested/);
 });
 
-test("help, version, and rejected arguments perform no installer side effects", async () => {
+test("help, version, and rejected arguments avoid side effects", async () => {
   for (const [argv, expectedStatus, expected] of [
     [["--help"], 0, USAGE],
     [[], 0, USAGE],
-    [["--version"], 0, "0.2.0\n"],
+    [["--version"], 0, `${VERSION}\n`],
     [["init", "--non-interactive"], 2, "Unsupported command or option"]
   ]) {
     const output = textSink();
