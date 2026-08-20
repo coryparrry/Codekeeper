@@ -19,6 +19,9 @@ The branch ruleset protects both `staging` and `main`. It:
   `Codekeeper checks`;
 - permits ordinary `main` promotions only from `staging`;
 - requires review conversations to be resolved;
+- allows repository administrators to bypass pull-request rules only, so a
+  sole-maintainer repository is not permanently locked; direct pushes, tag
+  mutation, branch deletion, and force pushes are not bypassed;
 - blocks branch deletion; and
 - blocks force pushes.
 
@@ -26,7 +29,9 @@ Contributors cannot approve their own pull requests. A feature therefore moves
 from its branch into `staging` only after maintainer approval. When the staged
 candidate is safe, a second pull request promotes `staging` to `main`. Release
 Please pull requests are the only other allowed `main` source and still require
-the same independent approval and checks.
+the same independent approval and checks. While the repository has only one
+maintainer, that administrator can deliberately use the pull-request-only bypass
+after all checks pass; contributor roles cannot use it.
 
 ## Immutable release tags
 

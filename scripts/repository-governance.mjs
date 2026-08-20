@@ -101,11 +101,32 @@ export function validateGovernancePolicy(input) {
     targets.add(ruleset.target);
     if (ruleset.enforcement !== "active")
       fail(`${name}.enforcement must be active`);
-    if (
-      !Array.isArray(ruleset.bypass_actors) ||
-      ruleset.bypass_actors.length !== 0
-    ) {
-      fail(`${name}.bypass_actors must remain empty`);
+    if (!Array.isArray(ruleset.bypass_actors)) {
+      fail(`${name}.bypass_actors must be an array`);
+    }
+    if (ruleset.target === "branch") {
+      if (ruleset.bypass_actors.length !== 1) {
+        fail(
+          `${name}.bypass_actors must contain only the repository admin role`,
+        );
+      }
+      const [actor] = ruleset.bypass_actors;
+      exactObject(actor, `${name}.bypass_actors[0]`, [
+        "actor_type",
+        "actor_id",
+        "bypass_mode",
+      ]);
+      if (
+        actor.actor_type !== "RepositoryRole" ||
+        actor.actor_id !== 5 ||
+        actor.bypass_mode !== "pull_request"
+      ) {
+        fail(
+          `${name}.bypass_actors may only allow repository admins to bypass pull-request rules`,
+        );
+      }
+    } else if (ruleset.bypass_actors.length !== 0) {
+      fail(`${name}.bypass_actors must remain empty for release tags`);
     }
     exactObject(ruleset.conditions, `${name}.conditions`, ["ref_name"]);
     exactObject(ruleset.conditions.ref_name, `${name}.conditions.ref_name`, [
