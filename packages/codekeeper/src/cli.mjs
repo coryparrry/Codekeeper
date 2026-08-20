@@ -7,7 +7,7 @@ import { appRegistrationUrl, buildInstallPlan, collectAppAnswers, collectAutomat
 import { installPlan } from "./install.mjs";
 import { InstallerError, formatInstallerError } from "./errors.mjs";
 import { MODES, PACKAGE_NAME, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
-import { normalizePackageRelease, RELEASE_VERSION } from "./package-release.mjs";
+import { isReleaseVersion, normalizePackageRelease } from "./package-release.mjs";
 import { formatCommand } from "./shell-command.mjs";
 import { runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate } from "./updater.mjs";
 import { verifyCodekeeperReadiness } from "./verify.mjs";
@@ -44,10 +44,10 @@ export function parseCliArgs(argv) {
   }
   if (argv.length === 1 && argv[0] === "update") return Object.freeze({ command: "update" });
   if (argv.length === 2 && argv[0] === "update" && argv[1] === "--check") return Object.freeze({ command: "update", check: true });
-  if (argv.length === 3 && argv[0] === "update" && argv[1] === "--to" && RELEASE_VERSION.test(argv[2])) {
+  if (argv.length === 3 && argv[0] === "update" && argv[1] === "--to" && isReleaseVersion(argv[2])) {
     return Object.freeze({ command: "update", targetVersion: argv[2] });
   }
-  if (argv.length === 3 && argv[0] === "rollback" && argv[1] === "--to" && RELEASE_VERSION.test(argv[2])) {
+  if (argv.length === 3 && argv[0] === "rollback" && argv[1] === "--to" && isReleaseVersion(argv[2])) {
     return Object.freeze({ command: "rollback", targetVersion: argv[2] });
   }
   if (argv.length === 1 && argv[0] === "doctor") return Object.freeze({ command: "doctor", json: false });
