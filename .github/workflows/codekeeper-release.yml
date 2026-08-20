@@ -338,16 +338,22 @@ jobs:
           test -f "$TARBALL"
           sidecar="$TARBALL.sha512"
           sha512sum "$TARBALL" > "$sidecar"
+          notes="$RUNNER_TEMP/codekeeper-github-release-notes.md"
+          RELEASE_VERSION="$RELEASE_VERSION" SOURCE_COMMIT="$SOURCE_COMMIT" node --input-type=module -e '
+          const version = process.env.RELEASE_VERSION;
+          const source = process.env.SOURCE_COMMIT;
+          process.stdout.write(`Codekeeper ${version} is a verified release of the self-hosted GitHub maintainer.\n\n## Install\n\n\`\`\`bash\nnpx @coryparry/codekeeper@${version} init\n\`\`\`\n\nAfter merging the generated setup pull request, verify the installation with:\n\n\`\`\`bash\nnpx @coryparry/codekeeper@${version} verify\n\`\`\`\n\n## Release integrity\n\n- Verified package source: \`${source}\`\n- The npm package is published with provenance.\n- The verified tarball and its SHA-512 receipt are attached to this release.\n`);
+          ' > "$notes"
           release="$RUNNER_TEMP/codekeeper-github-release.json"
           release_error="$RUNNER_TEMP/codekeeper-github-release-error.txt"
           if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$release" 2> "$release_error"; then
             # JavaScript template literals are intentionally passed verbatim.
             # shellcheck disable=SC2016
-            RELEASE="$release" RELEASE_TAG="$RELEASE_TAG" RELEASE_VERSION="$RELEASE_VERSION" SOURCE_COMMIT="$SOURCE_COMMIT" node --input-type=module -e '
+            EXPECTED_BODY_FILE="$notes" RELEASE="$release" RELEASE_TAG="$RELEASE_TAG" RELEASE_VERSION="$RELEASE_VERSION" node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const release = JSON.parse(readFileSync(process.env.RELEASE, "utf8"));
             const expectedTitle = `Codekeeper ${process.env.RELEASE_VERSION}`;
-            const expectedBody = `Verified package source: ${process.env.SOURCE_COMMIT}`;
+            const expectedBody = readFileSync(process.env.EXPECTED_BODY_FILE, "utf8");
             if (release?.tag_name !== process.env.RELEASE_TAG || release?.name !== expectedTitle || release?.body !== expectedBody || release?.draft !== false || release?.prerelease !== false) throw new Error("existing GitHub release metadata does not match the verified release");
             '
           else
@@ -355,7 +361,7 @@ jobs:
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Codekeeper $RELEASE_VERSION" \
-              --notes "Verified package source: $SOURCE_COMMIT" \
+              --notes-file "$notes" \
               --verify-tag
           fi
           gh release upload "$RELEASE_TAG" "$TARBALL" "$sidecar" \

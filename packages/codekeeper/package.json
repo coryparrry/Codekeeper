@@ -1,7 +1,7 @@
 {
   "name": "@coryparry/codekeeper",
   "version": "0.2.0",
-  "description": "Complete CLI, TUI, runtime, and workflow release package for Codekeeper",
+  "description": "Self-hosted AI maintainer for GitHub pull requests, issues, audits, and verified repairs",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/coryparrry/Codekeeper.git"
@@ -44,13 +44,16 @@
     "check": "npm run prepare:runtime-test && node ../../scripts/sync-policy-validator.mjs --check && node ../../scripts/sync-mirrored-helpers.mjs --check && bash -c 'for file in bin/*.mjs src/*.mjs src/preflight/*.mjs src/plan/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && npm run coverage"
   },
   "keywords": [
+    "ai-agent",
+    "ai-code-review",
+    "cli",
+    "developer-tools",
+    "github",
     "github-actions",
+    "github-app",
     "pull-request-review",
     "issue-triage",
     "repository-automation",
-    "ai-code-review",
-    "github",
-    "automation",
     "codekeeper"
   ],
   "license": "Apache-2.0",
