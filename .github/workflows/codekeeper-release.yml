@@ -53,6 +53,16 @@ jobs:
             exit 1
           }
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+      - name: Confirm public provenance source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          visibility="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.visibility')"
+          test "$visibility" = "public" || {
+            echo "npm provenance requires a public source repository; current visibility: $visibility" >&2
+            exit 1
+          }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ steps.release.outputs.tag }}

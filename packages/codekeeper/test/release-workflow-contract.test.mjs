@@ -13,6 +13,12 @@ test("release publication is tag-gated, provenance-enabled, and bound to a prote
   assert.match(source, /push:\n    tags:\n      - "codekeeper-v\*"/);
   assert.match(source, /workflow_dispatch:\n    inputs:\n      tag:/);
   assert.match(source, /permissions:\n  contents: read/);
+  assert.match(source, /Confirm public provenance source/);
+  assert.match(
+    source,
+    /visibility="\$\(gh api "repos\/\$GITHUB_REPOSITORY" --jq '\.visibility'\)"/,
+  );
+  assert.match(source, /test "\$visibility" = "public"/);
   assert.match(source, /environment: npm/);
   assert.match(source, /artifact-metadata: write/);
   assert.match(source, /attestations: write/);

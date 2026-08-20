@@ -57,3 +57,5 @@ Retain one evidence index containing:
 
 Until all nine items are recorded against one exact commit, Codekeeper remains
 an unpublished source evaluation and the npm workflow must not be triggered.
+The release workflow also verifies that the source repository is public before
+building because npm provenance is not available for private repositories.

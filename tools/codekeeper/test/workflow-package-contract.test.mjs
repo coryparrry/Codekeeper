@@ -534,19 +534,38 @@ test("package acquisition validates tarball SRI before deriving package provenan
   );
 });
 
-test("workflow and caller surfaces contain no Treebar or Cory-specific identity", async () => {
+test("workflow and caller surfaces contain no deployment-local identity", async () => {
   const workflowFiles = await readdir(workflowDirectory);
-  const workflowText = await Promise.all(
+  const workflows = await Promise.all(
     workflowFiles
       .filter((name) => name.endsWith(".yml"))
-      .map((name) => repositoryFile(`.github/workflows/${name}`)),
+      .map(async (name) => ({
+        name,
+        source: await repositoryFile(`.github/workflows/${name}`),
+      })),
   );
   const callerText = await Promise.all(
     modes.map((mode) =>
       repositoryFile(`examples/workflows/codekeeper-${mode}.yml.example`),
     ),
   );
-  for (const source of [...workflowText, ...callerText]) {
+  const releaseWorkflow = workflows.find(
+    ({ name }) => name === "codekeeper-release.yml",
+  );
+  assert.ok(releaseWorkflow);
+  assert.equal(
+    releaseWorkflow.source.match(/@coryparry\/codekeeper/g)?.length,
+    2,
+    "the release workflow may use the exact public npm package identity only for install commands",
+  );
+  releaseWorkflow.source = releaseWorkflow.source.replaceAll(
+    "@coryparry/codekeeper",
+    "@PACKAGE_SCOPE/codekeeper",
+  );
+  for (const source of [
+    ...workflows.map((workflow) => workflow.source),
+    ...callerText,
+  ]) {
     assert.doesNotMatch(source, /treebar|coryparr?y/i);
   }
 });
