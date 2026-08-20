@@ -361,10 +361,10 @@ test("openai preset changes only issue-triage model policy from the mixed preset
   assert.equal(openaiIssue.provider, "openai");
   assert.equal(openaiIssue.model, "gpt-5.6-terra");
   assert.equal(openaiIssue.effort, "medium");
-  assert.equal(openaiIssue.workspace.enabled, false);
+  assert.equal(openaiIssue.workspace.enabled, true);
   assert.equal(openaiIssue.workspace.allowWrites, false);
   assert.deepEqual(openaiIssue.workspace, {
-    enabled: false,
+    enabled: true,
     allowWrites: false,
     model: "gpt-5.6-terra",
     effort: "medium"
