@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256 } from "../src/assets.mjs";
 import { createCommandRunner } from "../src/command-runner.mjs";
-import { configureRepositorySettings, createSetupCommit, pushAndOpenSetupPullRequest, remoteSetupRecovery, SECRET_UPLOAD_TIMEOUT_MS } from "../src/install.mjs";
+import { configureRepositorySettings, createSetupCommit, openSetupPullRequest, pushSetupCommit, remoteSetupRecovery, SECRET_UPLOAD_TIMEOUT_MS } from "../src/install.mjs";
 import { buildInstallPlan } from "../src/plan.mjs";
 import {
   assertInstallerCode,
@@ -71,6 +71,11 @@ function simplePlan(root, originalHead, fileContents = [
       body: "Setup only. Cory's approval is still required."
     }
   };
+}
+
+async function pushThenOpenSetupPullRequest(plan, commit, dependencies = {}) {
+  await pushSetupCommit(plan, commit, dependencies);
+  return openSetupPullRequest(plan, commit, dependencies);
 }
 
 async function committedRepository(t) {
@@ -293,7 +298,7 @@ test("push uses the verified full SHA and verifies the remote branch both before
     if (call.command === "gh" && call.args[0] === "pr") return result("https://github.com/acme/widget/pull/42\n");
     throw new Error(`Unexpected publication call: ${call.command} ${call.args.join(" ")}`);
   });
-  const url = await pushAndOpenSetupPullRequest(plan, COMMIT_SHA, {
+  const url = await pushThenOpenSetupPullRequest(plan, COMMIT_SHA, {
     runner,
     platform: "linux",
     onProgress(event) {
@@ -324,7 +329,7 @@ test("publication refuses invalid SHA, push failure, remote mismatch, PR failure
   await t.test("invalid SHA", async () => {
     const runner = createRecordingRunner(() => result());
     await assert.rejects(
-      pushAndOpenSetupPullRequest(plan, "HEAD", { runner }),
+      pushThenOpenSetupPullRequest(plan, "HEAD", { runner }),
       assertInstallerCode(assert, "COMMIT_SHA_INVALID")
     );
     assert.deepEqual(runner.calls, []);
@@ -332,7 +337,7 @@ test("publication refuses invalid SHA, push failure, remote mismatch, PR failure
   await t.test("push failure", async () => {
     const runner = createRecordingRunner(() => result("", { status: 1 }));
     await assert.rejects(
-      pushAndOpenSetupPullRequest(plan, COMMIT_SHA, {
+      pushThenOpenSetupPullRequest(plan, COMMIT_SHA, {
         runner,
         platform: "linux"
       }),
@@ -345,7 +350,7 @@ test("publication refuses invalid SHA, push failure, remote mismatch, PR failure
       ? result(`${HEAD_SHA}\trefs/heads/codekeeper/setup\n`)
       : result());
     await assert.rejects(
-      pushAndOpenSetupPullRequest(plan, COMMIT_SHA, { runner }),
+      pushThenOpenSetupPullRequest(plan, COMMIT_SHA, { runner }),
       assertInstallerCode(assert, "REMOTE_COMMIT_MISMATCH")
     );
     assert.equal(runner.calls.some((call) => call.command === "gh"), false);
@@ -357,7 +362,7 @@ test("publication refuses invalid SHA, push failure, remote mismatch, PR failure
       return result();
     });
     await assert.rejects(
-      pushAndOpenSetupPullRequest(plan, COMMIT_SHA, {
+      pushThenOpenSetupPullRequest(plan, COMMIT_SHA, {
         runner,
         platform: "win32"
       }),
@@ -376,7 +381,7 @@ test("publication refuses invalid SHA, push failure, remote mismatch, PR failure
       return result();
     });
     await assert.rejects(
-      pushAndOpenSetupPullRequest(plan, COMMIT_SHA, { runner }),
+      pushThenOpenSetupPullRequest(plan, COMMIT_SHA, { runner }),
       (error) => error.code === "REMOTE_COMMIT_MISMATCH" && error.resume.includes("gh' 'pr' 'view")
     );
   });

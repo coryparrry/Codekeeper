@@ -758,25 +758,6 @@ export async function openSetupPullRequest(plan, commit, {
   }
 }
 
-// Kept for callers that used the original one-shot publication API. New code
-// should call the two phases separately so settings can be applied between a
-// verified push and pull-request creation.
-export async function pushAndOpenSetupPullRequest(plan, commit, dependencies = {}) {
-  const tracker = trackerFor(plan, dependencies.receiptTracker ?? null);
-  try {
-    await pushSetupCommit(plan, commit, {
-      ...dependencies,
-      receiptTracker: tracker
-    });
-    return await openSetupPullRequest(plan, commit, {
-      ...dependencies,
-      receiptTracker: tracker
-    });
-  } catch (error) {
-    throw attachReceipt(error, tracker);
-  }
-}
-
 export async function installPlan(plan, dependencies = {}) {
   const tracker = createReceiptTracker(plan);
   try {

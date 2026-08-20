@@ -295,8 +295,6 @@ export async function resolveNpmRelease({
   return Object.freeze({ npmCli, ...receipt });
 }
 
-export const resolvePackageRelease = resolveNpmRelease;
-
 async function runVerifiedCommand(
   command,
   {
