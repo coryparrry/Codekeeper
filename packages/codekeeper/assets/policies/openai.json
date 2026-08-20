@@ -94,7 +94,7 @@
           }
         },
         "workspace": {
-          "enabled": false,
+          "enabled": true,
           "allowWrites": false,
           "model": "gpt-5.6-terra",
           "effort": "medium"

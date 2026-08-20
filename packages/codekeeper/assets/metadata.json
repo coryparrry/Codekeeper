@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "repository": "coryparrry/Codekeeper",
-    "commit": "2baccf969f76a3dc89dc40d3b758431da04fb402"
+    "commit": "05d90a886852493bab56b4a6aeec054461f6f749"
   },
   "assets": {
     "agents/pr-reviewer.md": {
@@ -26,13 +26,13 @@
       "sourcePath": "tools/codekeeper/agents/fixer.md"
     },
     "policies/mixed.json": {
-      "sha256": "6413d55ec310783a91b5f445eee45619a87af24e0c5fde44533687c6db1a512c",
-      "bytes": 11533,
+      "sha256": "df3af636ef9920e820a69438f85bf845ed44bfc4150316445af16a8042b00fff",
+      "bytes": 11532,
       "sourcePath": ".github/codekeeper.json"
     },
     "policies/openai.json": {
-      "sha256": "23b9c98f3ff310867eca637711a09d9fd9c094cc818f5e86c00cd7dfa0dee0eb",
-      "bytes": 11370,
+      "sha256": "2ed472b264db46d7ce2015ac0ff396c2dc207d2c790f9be69da5d3cc2c1b02ff",
+      "bytes": 11369,
       "sourcePath": ".github/codekeeper.json#preset=openai"
     },
     "repository/README.md": {
@@ -46,8 +46,8 @@
       "sourcePath": "examples/workflows/codekeeper-assistant.yml.example"
     },
     "workflows/review.yml": {
-      "sha256": "927e45044e369297b7096d8572ae66dbc2163a772aa856f477e0c310506f80e0",
-      "bytes": 4752,
+      "sha256": "0815331f82ecb7c3567fd109b2af4771d2f0a3a9cf0b0d8fdc47941a990b3bc1",
+      "bytes": 3145,
       "sourcePath": "examples/workflows/codekeeper-review.yml.example"
     },
     "workflows/maintain.yml": {
@@ -78,8 +78,8 @@
       "packagePath": "release/workflows/codekeeper-assistant.yml"
     },
     "runtime-workflows/review.yml": {
-      "sha256": "d05e2c4a7d076b034880cb239c0f2416605e0a51cd95affc5d8b0792019032aa",
-      "bytes": 31952,
+      "sha256": "4d82df06279921e7f6be17c9dc59ec8e1ce77c5e803195eb33cb54a46631cd33",
+      "bytes": 33329,
       "sourcePath": ".github/workflows/codekeeper-review.yml",
       "packagePath": "release/workflows/codekeeper-review.yml"
     },
@@ -104,13 +104,13 @@
   },
   "provenance": {
     "presetCatalogue": {
-      "sha256": "bcc71060b4fb3281c4157760e84da530d98ff8b547bab28de9e661a3beb1059d",
-      "bytes": 1710,
+      "sha256": "7990b211a3c7bad3b4ba10154c10d1d7c1f81cdd1f5a3b687e210e6108bbc36e",
+      "bytes": 1709,
       "sourcePath": "tools/codekeeper/presets/catalogue.mjs"
     },
     "toolingManifest": {
-      "sha256": "70a6318d14b94dec73d2176842ec7a518c48e3c2c0d943cefad458d92e963026",
-      "bytes": 4779,
+      "sha256": "39e1ff10cad2c1e3f53d0da42df4914fdfcfaa889250bd356009ffd546fbb39a",
+      "bytes": 7874,
       "sourcePath": "tools/codekeeper/tooling-manifest.json"
     }
   }
