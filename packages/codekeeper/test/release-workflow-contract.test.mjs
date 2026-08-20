@@ -150,9 +150,16 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
     /npm view "\$EXPECTED_NAME@\$EXPECTED_VERSION" version dist\.integrity --json > "\$receipt" 2> "\$error_report"/,
   );
   assert.match(source, /receipt\?\.version !== process\.env\.EXPECTED_VERSION/);
+  assert.equal(
+    source.match(
+      /receipt\["dist\.integrity"\] \?\? receipt\?\.dist\?\.integrity/g,
+    )?.length,
+    2,
+    "both registry receipt checks must accept npm 12 flat dist fields",
+  );
   assert.match(
     source,
-    /receipt\?\.dist\?\.integrity !== process\.env\.EXPECTED_INTEGRITY/,
+    /receipt\["dist\.tarball"\] \?\? receipt\?\.dist\?\.tarball/,
   );
   assert.match(source, /error\?\.error\?\.code !== "E404"/);
   assert.match(
