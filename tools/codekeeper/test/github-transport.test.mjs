@@ -496,3 +496,8 @@ test("REST requests preserve non-JSON error bodies and truncate nothing from Git
     return true;
   });
 });
+
+test("GraphQL follows the configured GitHub API host", () => {
+  assert.equal(resolveGraphqlUrl("https://api.github.com"), "https://api.github.com/graphql");
+  assert.equal(resolveGraphqlUrl("https://github.example/api/v3"), "https://github.example/api/graphql");
+});

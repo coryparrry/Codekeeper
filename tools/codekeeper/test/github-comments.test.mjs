@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GitHubClient } from "../src/lib/github.mjs";
+import { GitHubClient, isOwnedMarkerComment } from "../src/lib/github.mjs";
+
+const identity = { login: "codekeeper[bot]", id: "123456" };
 
 function client(transport = {}) {
   return new GitHubClient({ token: "token", repository: "owner/repository", transport });
@@ -67,4 +69,17 @@ test("retiring feedback updates only App-owned top-level and inline markers", as
     "https://api.github.com/repos/owner/repository/pulls/comments/21"
   ]);
   assert.ok(patches.every(({ body }) => JSON.parse(body).body === `No longer current.\n${marker}`));
+});
+
+test("sticky marker comments ignore human and unrelated-bot spoofing", () => {
+  const marker = "<!-- codekeeper:review -->";
+  const trusted = {
+    body: `Trusted review\n${marker}`,
+    user: { login: identity.login, id: Number(identity.id), type: "Bot" }
+  };
+  assert.equal(isOwnedMarkerComment(trusted, marker, identity), true);
+  assert.equal(isOwnedMarkerComment({ ...trusted, user: { login: "person", id: 123456, type: "User" } }, marker, identity), false);
+  assert.equal(isOwnedMarkerComment({ ...trusted, user: { login: "other-app[bot]", id: 123456, type: "Bot" } }, marker, identity), false);
+  assert.equal(isOwnedMarkerComment({ ...trusted, user: { ...trusted.user, id: 999 } }, marker, identity), false);
+  assert.equal(isOwnedMarkerComment({ ...trusted, body: `${trusted.body}\nuntrusted suffix` }, marker, identity), false);
 });

@@ -54,3 +54,22 @@ test("disableAutoMerge sends the pull request node id as the GraphQL variable", 
   assert.match(requestBody.query, /disablePullRequestAutoMerge/);
   assert.deepEqual(requestBody.variables, { pullRequestId: "PR_7" });
 });
+
+test("branch tips normalize GitHub branch data and treat a missing branch as absent", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      if (String(url).endsWith("/branches/existing")) {
+        return new Response(JSON.stringify({
+          commit: { sha: "head", commit: { tree: { sha: "tree" } }, parents: [{ sha: "base" }] }
+        }));
+      }
+      return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+    };
+    const github = new GitHubClient({ token: "token", repository: "owner/repository" });
+    assert.deepEqual(await github.getBranchTip("existing"), { headSha: "head", treeSha: "tree", parentShas: ["base"] });
+    assert.equal(await github.getBranchTip("missing"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
