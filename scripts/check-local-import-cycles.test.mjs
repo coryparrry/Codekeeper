@@ -148,6 +148,18 @@ test("commented imports are not edges", () => {
   );
 });
 
+test("import-looking strings, templates, and regular expressions are not edges", () => {
+  assert.deepEqual(
+    localImportSpecifiers([
+      "const stringExample = 'import \\\"./string-example.mjs\\\";';",
+      "const templateExample = `export { value } from './template-example.mjs';`;",
+      "const pattern = /import\\s+\\\"\\.\\/regex-example\\.mjs\\\"/;",
+      "export { GitHubClient } from './github/index.mjs';"
+    ].join("\n")),
+    ["./github/index.mjs"],
+  );
+});
+
 test("missing facade files fail closed", async (context) => {
   const root = await fixture({
     "scripts/module-boundaries.json": `${JSON.stringify(

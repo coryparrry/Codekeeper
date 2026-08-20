@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parse } from "acorn";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,8 +11,6 @@ import {
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 const FACADE_KEYS = "domain,facade";
-const FROM_SPECIFIER = /(?:^|[;\n])\s*(?:import|export)\s+(?:type\s+)?(?:[\w*{}\s,]*\sfrom\s+)?["'](\.[^"']+)["']/g;
-const DYNAMIC_SPECIFIER = /\bimport\s*\(\s*["'](\.[^"']+)["']\s*\)/g;
 
 export const COMPATIBILITY_FACADES = Object.freeze([
   Object.freeze({
@@ -52,59 +51,40 @@ function safeRelativePath(value, label) {
   return value;
 }
 
-export function stripSourceComments(source) {
-  let output = "";
-  for (let index = 0; index < source.length; ) {
-    const current = source[index];
-    const next = source[index + 1];
-    if (current === "/" && next === "/") {
-      index += 2;
-      while (index < source.length && source[index] !== "\n") index += 1;
-      continue;
-    }
-    if (current === "/" && next === "*") {
-      index += 2;
-      while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
-        if (source[index] === "\n") output += "\n";
-        index += 1;
-      }
-      index = Math.min(index + 2, source.length);
-      continue;
-    }
-    if (current === "'" || current === "\"" || current === "`") {
-      const quote = current;
-      output += current;
-      index += 1;
-      while (index < source.length) {
-        const character = source[index];
-        output += character;
-        index += 1;
-        if (character === "\\") {
-          if (index < source.length) {
-            output += source[index];
-            index += 1;
-          }
-          continue;
-        }
-        if (character === quote) break;
-      }
-      continue;
-    }
-    output += current;
-    index += 1;
+function walkSyntax(node, visit) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) walkSyntax(item, visit);
+    return;
   }
-  return output;
+  visit(node);
+  for (const [key, value] of Object.entries(node)) {
+    if (key !== "loc" && key !== "range" && key !== "start" && key !== "end") {
+      walkSyntax(value, visit);
+    }
+  }
+}
+
+function localSpecifier(node) {
+  return node?.type === "Literal" && typeof node.value === "string" && node.value.startsWith(".")
+    ? node.value
+    : null;
 }
 
 export function localImportSpecifiers(source) {
-  const code = stripSourceComments(source);
-  const specifiers = [];
-  for (const pattern of [FROM_SPECIFIER, DYNAMIC_SPECIFIER]) {
-    pattern.lastIndex = 0;
-    for (const match of code.matchAll(pattern)) {
-      if (match[1]) specifiers.push(match[1]);
-    }
+  let syntax;
+  try {
+    syntax = parse(source, { ecmaVersion: "latest", sourceType: "module" });
+  } catch (error) {
+    fail(`could not parse module syntax: ${error.message}`);
   }
+  const specifiers = [];
+  walkSyntax(syntax, (node) => {
+    if (["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration", "ImportExpression"].includes(node.type)) {
+      const specifier = localSpecifier(node.source);
+      if (specifier) specifiers.push(specifier);
+    }
+  });
   return specifiers;
 }
 

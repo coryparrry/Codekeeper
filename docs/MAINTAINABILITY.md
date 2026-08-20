@@ -107,13 +107,15 @@ pull-request rendering re-exported from `plan/index.mjs`.
 | `plan/update.mjs` | Existing-installation editable settings and release-update decisions |
 | `plan/index.mjs` | `buildInstallPlan` composition and public re-exports |
 
-### Remaining monolith
+### Agent runtime boundary
 
-`tools/codekeeper/src/lib/agents-runtime.mjs` still owns provider selection,
-tracing, cleanup, workspace execution, and coordinator execution. The planned
-split was not landed. Its public names remain `runAgentFromBundle`,
-`runWorkspaceAgentFromBundle`, `configureOpenAITracing`,
-`isProviderCleanupTimeout`, and `providerCompatibleJsonSchema`.
+`tools/codekeeper/src/lib/agents-runtime.mjs` is now a compatibility facade.
+`agents-runtime-provider.mjs` owns provider selection, tracing, cleanup, and
+provider-specific execution; `agents-runtime-core.mjs` owns frozen-bundle
+workspace execution and coordinator orchestration. The public facade continues
+to expose `runAgentFromBundle`, `runWorkspaceAgentFromBundle`,
+`configureOpenAITracing`, `isProviderCleanupTimeout`, and
+`providerCompatibleJsonSchema`.
 
 ## Original monolith sizes
 
@@ -123,7 +125,9 @@ Measured on the pre-split tree versus the current facades.
 |---|---:|---:|
 | `tools/codekeeper/src/lib/github.mjs` | 1,502 / 61,928 | 6 / 133 |
 | `tools/codekeeper/src/lib/publish.mjs` | 1,448 / 63,585 | 122 / 4,344 |
-| `tools/codekeeper/src/lib/agents-runtime.mjs` | 1,143 / 49,648 | 1,143 / 49,648 |
+| `tools/codekeeper/src/lib/agents-runtime.mjs` | 1,143 / 49,648 | 119 / 6,118 |
+| `tools/codekeeper/src/lib/agents-runtime-provider.mjs` | — | 746 / 32,617 |
+| `tools/codekeeper/src/lib/agents-runtime-core.mjs` | — | 426 / 18,258 |
 | `packages/codekeeper/src/preflight.mjs` | 1,472 / 63,835 | 12 / 290 |
 | `packages/codekeeper/src/plan.mjs` | 1,229 / 54,594 | 23 / 507 |
 
@@ -142,9 +146,7 @@ These ceilings were measured on this tree. They are not targets to grow into.
 | `packages/codekeeper/test/assets-plan.test.mjs` | 1,589 | 64,635 |
 | `packages/codekeeper/test/cli.test.mjs` | 1,471 | 54,700 |
 | `packages/codekeeper/test/tui.test.mjs` | 1,462 | 59,021 |
-| `tools/codekeeper/src/lib/agents-runtime.mjs` | 1,143 | 49,648 |
 | `tools/codekeeper/src/lib/git.mjs` | 884 | 32,028 |
-| `tools/codekeeper/test/agents-runtime.test.mjs` | 1,768 | 67,890 |
 | `tools/codekeeper/test/commands.test.mjs` | 1,163 | 35,565 |
 | `tools/codekeeper/test/integration.test.mjs` | 1,558 | 67,318 |
 | `tools/codekeeper/test/publish.test.mjs` | 1,740 | 73,858 |
