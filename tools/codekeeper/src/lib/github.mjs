@@ -2,102 +2,29 @@ import { automaticRepairMarker, sha256 } from "./markers.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
 import { completeReviewFeedback } from "./review-feedback.mjs";
 import { isCodekeeperOwnedLabel } from "./label-ownership.mjs";
+import {
+  graphql as executeGitHubGraphql,
+  paginateGraphqlConnection,
+  resolveGraphqlUrl,
+} from "./github/graphql.mjs";
+import {
+  listIssueCommentWindow as fetchIssueCommentWindow,
+  paginate as paginateGitHub,
+} from "./github/pagination.mjs";
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_RETRY_ATTEMPTS,
+  ISSUE_MUTATION_INTERNAL,
+  PULL_MUTATION_COMPENSATION,
+  fetchWithRetry as fetchGitHubWithRetry,
+  positiveFiniteNumber,
+  request as executeGitHubRequest,
+  retryAttempts,
+  retryDelay as githubRetryDelay,
+  sleep,
+} from "./github/transport.mjs";
 
-const API_VERSION = "2022-11-28";
-const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
-const DEFAULT_RETRY_ATTEMPTS = 2;
-const MAX_RETRY_ATTEMPTS = 2;
-const MAX_RETRY_DELAY_MS = 5_000;
-const MAX_PAGINATION_PAGES = 1_000;
-const RECENT_ISSUE_COMMENT_PAGE_BUDGET = 3;
-const RETRYABLE_STATUS = new Set([408, 429]);
-const TRANSIENT_GRAPHQL_ERROR_TYPES = new Set(["INTERNAL", "INTERNAL_ERROR", "RATE_LIMITED", "SERVICE_UNAVAILABLE"]);
-const PULL_MUTATION_COMPENSATION = Symbol("pull-mutation-compensation");
-const ISSUE_MUTATION_INTERNAL = Symbol("issue-mutation-internal");
-
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function positiveFiniteNumber(value, fallback) {
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function retryAttempts(value, fallback) {
-  return Number.isSafeInteger(value) && value >= 0
-    ? Math.min(value, MAX_RETRY_ATTEMPTS)
-    : fallback;
-}
-
-function retryAfterMilliseconds(value, now) {
-  if (!value) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
-  const date = Date.parse(value);
-  return Number.isFinite(date) ? Math.max(0, date - now()) : null;
-}
-
-function rateLimitResetMilliseconds(value, now) {
-  if (!value) return null;
-  const seconds = Number(value);
-  return Number.isFinite(seconds) ? Math.max(0, seconds * 1_000 - now()) : null;
-}
-
-function isRateLimited(response) {
-  return response.status === 403 && (
-    response.headers.has("retry-after") || response.headers.get("x-ratelimit-remaining") === "0"
-  );
-}
-
-function isRetryableResponse(response) {
-  return RETRYABLE_STATUS.has(response.status) || response.status >= 500 || isRateLimited(response);
-}
-
-function cappedDelay(milliseconds) {
-  return Math.min(Math.max(0, milliseconds), MAX_RETRY_DELAY_MS);
-}
-
-function isTransientFailure(error, signal) {
-  return signal.aborted || error instanceof TypeError;
-}
-
-function awaitWithSignal(promise, signal) {
-  return new Promise((resolve, reject) => {
-    const abort = () => finish(reject, signal.reason ?? new Error("GitHub request aborted"));
-    const finish = (settle, value) => {
-      signal.removeEventListener("abort", abort);
-      settle(value);
-    };
-    if (signal.aborted) return abort();
-    signal.addEventListener("abort", abort, { once: true });
-    Promise.resolve(promise).then(
-      (value) => finish(resolve, value),
-      (error) => finish(reject, error)
-    );
-  });
-}
-
-function isRetryableGraphqlPayload(payload) {
-  return payload?.errors?.some((error) =>
-    TRANSIENT_GRAPHQL_ERROR_TYPES.has(String(error?.type ?? error?.extensions?.code ?? "").toUpperCase())
-  );
-}
-
-function isRetrySafeMethod(method) {
-  return ["GET", "HEAD"].includes(String(method).toUpperCase());
-}
-
-function isGraphqlMutation(query) {
-  return /^\s*mutation\b/i.test(String(query));
-}
-
-function isAmbiguousGraphqlMutationPayload(payload) {
-  const hasData = payload?.data !== null && payload?.data !== undefined;
-  const hasExecutionPath = payload?.errors?.some((error) =>
-    Array.isArray(error?.path) && error.path.length > 0
-  );
-  return hasData || hasExecutionPath;
-}
+export { resolveGraphqlUrl };
 
 function labelNames(subject) {
   return [...new Set((subject?.labels ?? []).map((label) =>
@@ -211,27 +138,6 @@ export function isOwnedMarkerComment(comment, marker, authorIdentity) {
 
 export function isAmbiguousGitHubMutationError(error) {
   return error?.githubMutationOutcome === "ambiguous";
-}
-
-export function resolveGraphqlUrl(apiUrl, configuredUrl = process.env.GITHUB_GRAPHQL_URL ?? "") {
-  if (configuredUrl) return new URL(configuredUrl).toString().replace(/\/$/, "");
-  const rest = new URL(apiUrl);
-  if (rest.origin === "https://api.github.com" && rest.pathname === "/") {
-    return "https://api.github.com/graphql";
-  }
-  if (/\/api\/v3\/?$/.test(rest.pathname)) {
-    return `${rest.origin}/api/graphql`;
-  }
-  throw new Error("GITHUB_GRAPHQL_URL is required when GITHUB_API_URL is not github.com or a GHES /api/v3 endpoint");
-}
-
-function parseLinkHeader(value) {
-  const links = {};
-  for (const part of String(value ?? "").split(",")) {
-    const match = part.match(/<([^>]+)>;\s*rel="([^"]+)"/);
-    if (match) links[match[2]] = match[1];
-  }
-  return links;
 }
 
 export class GitHubClient {
@@ -805,136 +711,19 @@ export class GitHubClient {
   }
 
   retryDelay(response, attempt) {
-    const retryAfter = retryAfterMilliseconds(response.headers.get("retry-after"), this.now);
-    if (retryAfter !== null) return cappedDelay(retryAfter);
-    const reset = rateLimitResetMilliseconds(response.headers.get("x-ratelimit-reset"), this.now);
-    if (reset !== null) return cappedDelay(reset);
-    return cappedDelay(500 * 2 ** attempt);
+    return githubRetryDelay(this, response, attempt);
   }
 
-  async fetchWithRetry(url, options, { retries = this.retryAttempts, consume, retryPayload = () => false } = {}) {
-    const retryBudget = retryAttempts(retries, this.retryAttempts);
-    for (let attempt = 0; attempt <= retryBudget; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(new Error(`GitHub request timed out after ${this.requestTimeoutMs}ms`)),
-        this.requestTimeoutMs
-      );
-      let delay = null;
-      try {
-        const response = await this.fetch(url, { ...options, signal: controller.signal });
-        if (isRetryableResponse(response) && attempt < retryBudget) {
-          delay = this.retryDelay(response, attempt);
-        } else {
-          const value = await consume(response, controller.signal);
-          if (!retryPayload(value) || attempt === retryBudget) return value;
-          delay = this.retryDelay(response, attempt);
-        }
-      } catch (error) {
-        if (!isTransientFailure(error, controller.signal) || attempt === retryBudget) throw error;
-        delay = cappedDelay(500 * 2 ** attempt);
-      } finally {
-        clearTimeout(timeout);
-      }
-      await this.sleep(delay);
-    }
-    throw new Error("GitHub retry budget exhausted");
+  async fetchWithRetry(url, options, extras) {
+    return fetchGitHubWithRetry(this, url, options, extras);
   }
 
-  async request(method, endpoint, { body, headers = {}, retries, retryPayload, guardToken } = {}) {
-    const normalizedMethod = String(method).toUpperCase();
-    if (!isRetrySafeMethod(normalizedMethod) &&
-        guardToken !== PULL_MUTATION_COMPENSATION && guardToken !== ISSUE_MUTATION_INTERNAL) {
-      await this.assertMutationCurrent();
-    }
-    const url = endpoint.startsWith("http") ? endpoint : `${this.apiUrl}${endpoint}`;
-    const retryBudget = retries ?? (isRetrySafeMethod(normalizedMethod) ? this.retryAttempts : 0);
-    let requestResult;
-    try {
-      requestResult = await this.fetchWithRetry(url, {
-        method,
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${this.token}`,
-          "X-GitHub-Api-Version": API_VERSION,
-          "User-Agent": "codekeeper",
-          "Content-Type": "application/json",
-          ...headers
-        },
-        body: body === undefined ? undefined : JSON.stringify(body)
-      }, {
-        retries: retryBudget,
-        retryPayload,
-        consume: async (response, signal) => {
-          const text = await awaitWithSignal(response.text(), signal);
-          let payload = null;
-          if (text) {
-            try {
-              payload = JSON.parse(text);
-            } catch {
-              payload = text;
-            }
-          }
-          return { response, text, payload };
-        }
-      });
-    } catch (error) {
-      if (!isRetrySafeMethod(normalizedMethod) && error && typeof error === "object") {
-        error.githubMutationOutcome = "ambiguous";
-      }
-      throw error;
-    }
-    const { response, text, payload } = requestResult;
-    if (!response.ok) {
-      const message = typeof payload === "object" && payload?.message ? payload.message : text || response.statusText;
-      const error = new Error(`GitHub ${method} ${endpoint} failed (${response.status}): ${message}`);
-      error.status = response.status;
-      error.payload = payload;
-      throw error;
-    }
-    this.advancePullMutationState(normalizedMethod, endpoint, body);
-    return { data: payload, headers: response.headers, status: response.status };
+  async request(method, endpoint, options) {
+    return executeGitHubRequest(this, method, endpoint, options);
   }
 
-  async paginate(endpoint, { limit = Number.POSITIVE_INFINITY, predicate = () => true } = {}) {
-    if (!(limit === Number.POSITIVE_INFINITY || (Number.isSafeInteger(limit) && limit > 0))) {
-      throw new Error("Pagination limit must be a positive integer");
-    }
-    const results = [];
-    let url = endpoint.includes("?") ? `${endpoint}&per_page=100` : `${endpoint}?per_page=100`;
-    const visited = new Set();
-    const apiBase = new URL(`${this.apiUrl}/`);
-    let pages = 0;
-    while (url && results.length < limit) {
-      const resolved = url.startsWith("/")
-        ? new URL(`${this.apiUrl}${url}`)
-        : new URL(url, apiBase);
-      if (
-        resolved.origin !== apiBase.origin ||
-        !resolved.pathname.startsWith(apiBase.pathname)
-      ) {
-        throw new Error("GitHub pagination returned an untrusted next URL");
-      }
-      const normalized = resolved.toString();
-      if (visited.has(normalized)) {
-        throw new Error("GitHub pagination returned a repeated next URL");
-      }
-      if (pages >= MAX_PAGINATION_PAGES) {
-        throw new Error(`GitHub pagination exceeded ${MAX_PAGINATION_PAGES} pages`);
-      }
-      visited.add(normalized);
-      pages += 1;
-      const response = await this.request("GET", url);
-      if (!Array.isArray(response.data)) throw new Error(`Expected array from ${url}`);
-      for (const item of response.data) {
-        if (!predicate(item)) continue;
-        results.push(item);
-        if (results.length === limit) break;
-      }
-      const links = parseLinkHeader(response.headers.get("link"));
-      url = links.next ?? "";
-    }
-    return results;
+  async paginate(endpoint, options) {
+    return paginateGitHub(this, endpoint, options);
   }
 
   repoPath(suffix) {
@@ -1013,24 +802,19 @@ export class GitHubClient {
         }
       }
     `;
-    const threads = [];
-    let after = null;
-    while (threads.length < limit) {
-      const data = await this.graphql(query, { owner: this.owner, repo: this.repo, number, after });
-      const connection = data?.repository?.pullRequest?.reviewThreads;
-      if (!connection || !Array.isArray(connection.nodes)) throw new Error(`PR #${number} has invalid review-thread metadata`);
-      for (const thread of connection.nodes) {
-        if (thread.comments?.pageInfo?.hasNextPage) throw new Error(`PR #${number} has a review thread with more than 100 comments`);
-        threads.push(thread);
-        if (threads.length === limit) break;
+    return paginateGraphqlConnection(this, {
+      query,
+      variables: { owner: this.owner, repo: this.repo, number },
+      limit,
+      getConnection: (data) => data?.repository?.pullRequest?.reviewThreads,
+      invalidError: `PR #${number} has invalid review-thread metadata`,
+      truncatedError: `PR #${number} has more than ${limit} review threads`,
+      inspectNode(thread) {
+        if (thread.comments?.pageInfo?.hasNextPage) {
+          throw new Error(`PR #${number} has a review thread with more than 100 comments`);
+        }
       }
-      if (!connection.pageInfo?.hasNextPage) return threads;
-      if (threads.length === limit || !connection.pageInfo.endCursor) {
-        throw new Error(`PR #${number} has more than ${limit} review threads`);
-      }
-      after = connection.pageInfo.endCursor;
-    }
-    return threads;
+    });
   }
 
   async listIssueComments(number) {
@@ -1038,77 +822,7 @@ export class GitHubClient {
   }
 
   async listIssueCommentWindow(number, triggerCommentId, limit) {
-    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 100) {
-      throw new Error("Recent issue comment limit must be between 1 and 100");
-    }
-    if (!Number.isSafeInteger(number) || number <= 0) {
-      throw new Error("Issue number must be a positive integer");
-    }
-    if (!/^[1-9][0-9]*$/.test(String(triggerCommentId ?? ""))) {
-      throw new Error("Triggering issue comment ID must be a positive integer");
-    }
-
-    // GitHub's per-issue comments endpoint is always chronological and does
-    // not support sort or direction. Inspect the oldest page for delayed
-    // events, then the final page and its predecessor for current events.
-    const apiBase = new URL(`${this.apiUrl}/`);
-    const firstUrl = this.repoPath(`/issues/${number}/comments?per_page=${limit}&page=1`);
-    const seen = new Set();
-    const comments = [];
-    let requests = 0;
-
-    const resolveTrustedPage = (url) => {
-      const resolved = url.startsWith("/")
-        ? new URL(`${this.apiUrl}${url}`)
-        : new URL(url, apiBase);
-      if (resolved.origin !== apiBase.origin || !resolved.pathname.startsWith(apiBase.pathname)) {
-        throw new Error("GitHub issue-comment pagination returned an untrusted URL");
-      }
-      return resolved.toString();
-    };
-
-    const fetchPage = async (url) => {
-      const resolved = resolveTrustedPage(url);
-      if (seen.has(resolved)) throw new Error("GitHub issue-comment pagination returned a repeated URL");
-      if (requests >= RECENT_ISSUE_COMMENT_PAGE_BUDGET) {
-        throw new Error(`GitHub issue-comment pagination exceeded ${RECENT_ISSUE_COMMENT_PAGE_BUDGET} pages`);
-      }
-      seen.add(resolved);
-      requests += 1;
-      const response = await this.request("GET", url);
-      if (!Array.isArray(response.data)) throw new Error(`Expected array from ${url}`);
-      return { comments: response.data, links: parseLinkHeader(response.headers.get("link")), resolved };
-    };
-
-    const first = await fetchPage(firstUrl);
-    comments.push(...first.comments);
-    const firstHasTrigger = first.comments.some((comment) => String(comment?.id ?? "") === String(triggerCommentId));
-    if (firstHasTrigger) {
-      return { comments, truncatedBefore: false, truncatedAfter: Boolean(first.links.next) };
-    }
-
-    const last = first.links.last;
-    if (!last || resolveTrustedPage(last) === first.resolved) {
-      return { comments, truncatedBefore: false, truncatedAfter: false, triggerIncluded: false };
-    }
-    const finalPage = await fetchPage(last);
-    const tailComments = [...finalPage.comments];
-    let previous = finalPage.links.prev ?? "";
-    if (previous && resolveTrustedPage(previous) !== first.resolved && requests < RECENT_ISSUE_COMMENT_PAGE_BUDGET) {
-      const previousPage = await fetchPage(previous);
-      tailComments.push(...previousPage.comments);
-      previous = previousPage.links.prev ?? "";
-    }
-    const triggerIncluded = tailComments.some((comment) => String(comment?.id ?? "") === String(triggerCommentId));
-    const tailTouchesFirst = Boolean(previous && resolveTrustedPage(previous) === first.resolved);
-    return {
-      comments: triggerIncluded
-        ? tailTouchesFirst ? [...comments, ...tailComments] : tailComments
-        : [...comments, ...tailComments],
-      truncatedBefore: triggerIncluded && !tailTouchesFirst,
-      truncatedAfter: false,
-      triggerIncluded
-    };
+    return fetchIssueCommentWindow(this, number, triggerCommentId, limit);
   }
 
   async listOpenPulls(limit = Number.POSITIVE_INFINITY) {
@@ -1457,46 +1171,7 @@ export class GitHubClient {
     return this.graphql(query, { threadId });
   }
 
-  async graphql(query, variables = {}) {
-    const mutation = isGraphqlMutation(query);
-    if (mutation) await this.assertMutationCurrent();
-    const retries = mutation ? 0 : this.retryAttempts;
-    let requestResult;
-    try {
-      requestResult = await this.fetchWithRetry(this.graphqlUrl, {
-        method: "POST",
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${this.token}`,
-          "User-Agent": "codekeeper",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ query, variables })
-      }, {
-        retries,
-        consume: async (response, signal) => ({
-          response,
-          payload: await awaitWithSignal(response.json(), signal)
-        }),
-        retryPayload: ({ payload }) => isRetryableGraphqlPayload(payload)
-      });
-    } catch (error) {
-      if (mutation && error && typeof error === "object") {
-        error.githubMutationOutcome = "ambiguous";
-      }
-      throw error;
-    }
-    const { response, payload } = requestResult;
-    if (!response.ok || payload.errors?.length) {
-      const message = payload.errors?.map((error) => error.message).join("; ") || response.statusText;
-      const error = new Error(`GitHub GraphQL failed: ${message}`);
-      error.status = response.status;
-      error.payload = payload;
-      if (mutation && isAmbiguousGraphqlMutationPayload(payload)) {
-        error.githubMutationOutcome = "ambiguous";
-      }
-      throw error;
-    }
-    return payload.data;
+  async graphql(query, variables) {
+    return executeGitHubGraphql(this, query, variables);
   }
 }

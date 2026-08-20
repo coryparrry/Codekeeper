@@ -35,7 +35,7 @@ These ceilings were measured on this tree. They are not targets to grow into.
 | `packages/codekeeper/test/tui.test.mjs` | 1,462 | 59,021 |
 | `tools/codekeeper/src/lib/agents-runtime.mjs` | 1,143 | 49,648 |
 | `tools/codekeeper/src/lib/git.mjs` | 884 | 32,028 |
-| `tools/codekeeper/src/lib/github.mjs` | 1,502 | 61,928 |
+| `tools/codekeeper/src/lib/github.mjs` | 1,177 | 48,406 |
 | `tools/codekeeper/src/lib/publish.mjs` | 1,448 | 63,585 |
 | `tools/codekeeper/test/agents-runtime.test.mjs` | 1,768 | 67,890 |
 | `tools/codekeeper/test/commands.test.mjs` | 1,163 | 35,565 |

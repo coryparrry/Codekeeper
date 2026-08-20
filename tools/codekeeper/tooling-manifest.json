@@ -23,7 +23,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "54def6959f860ed1a7a7a71d3952a251141de00f53f6fa4358df00d17ded00fe"
+      "sha256": "a1c313416c93cd2b73d336f2bffd242f1e2a7b8db31521ea8e23d2c3022969f6"
     },
     {
       "path": "presets/catalogue.mjs",
@@ -67,7 +67,19 @@
     },
     {
       "path": "src/lib/github.mjs",
-      "sha256": "f6701e54d24fdb71fdd5ee2f77434777f741963e997fdb7663079b61e60bb0c2"
+      "sha256": "c3c5f09aae357add4e5948d57644d687399790ecacaee146f78c0dcc2acc33de"
+    },
+    {
+      "path": "src/lib/github/graphql.mjs",
+      "sha256": "2b29192782dd8e4da2751f9502d4afbafcf1f88ad81a73e420cf6a5a542833eb"
+    },
+    {
+      "path": "src/lib/github/pagination.mjs",
+      "sha256": "fb3985402d94744511366f863df7d526dcd7c5d3352109d8a3c2597eb05e6183"
+    },
+    {
+      "path": "src/lib/github/transport.mjs",
+      "sha256": "b047bb6b9072a7e101ca2759c53d89f937655f400122e217e9810d28ac2a29f5"
     },
     {
       "path": "src/lib/glob.mjs",
