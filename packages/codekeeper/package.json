@@ -1,7 +1,7 @@
 {
   "name": "@coryparry/codekeeper",
   "version": "0.2.0",
-  "description": "Self-hosted AI maintainer for GitHub pull requests, issues, audits, and verified repairs",
+  "description": "Repository-owned AI maintainer for GitHub Actions, with pull request review, issue triage, audits, and verified repairs",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/coryparrry/Codekeeper.git"
