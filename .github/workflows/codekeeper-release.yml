@@ -342,7 +342,7 @@ jobs:
           RELEASE_VERSION="$RELEASE_VERSION" SOURCE_COMMIT="$SOURCE_COMMIT" node --input-type=module -e '
           const version = process.env.RELEASE_VERSION;
           const source = process.env.SOURCE_COMMIT;
-          process.stdout.write(`Codekeeper ${version} is a verified release of the self-hosted GitHub maintainer.\n\n## Install\n\n\`\`\`bash\nnpx @coryparry/codekeeper@${version} init\n\`\`\`\n\nAfter merging the generated setup pull request, verify the installation with:\n\n\`\`\`bash\nnpx @coryparry/codekeeper@${version} verify\n\`\`\`\n\n## Release integrity\n\n- Verified package source: \`${source}\`\n- The npm package is published with provenance.\n- The verified tarball and its SHA-512 receipt are attached to this release.\n`);
+          process.stdout.write(`Codekeeper ${version} is a verified release of the repository-owned AI maintainer that runs in GitHub Actions.\n\n## Install\n\n\`\`\`bash\nnpx @coryparry/codekeeper@${version} init\n\`\`\`\n\nAfter merging the generated setup pull request, verify the installation with:\n\n\`\`\`bash\nnpx @coryparry/codekeeper@${version} verify\n\`\`\`\n\n## Release integrity\n\n- Verified package source: \`${source}\`\n- The npm package is published with provenance.\n- The verified tarball and its SHA-512 receipt are attached to this release.\n`);
           ' > "$notes"
           release="$RUNNER_TEMP/codekeeper-github-release.json"
           release_error="$RUNNER_TEMP/codekeeper-github-release-error.txt"

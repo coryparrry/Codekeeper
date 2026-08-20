@@ -120,7 +120,10 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   assert.match(source, /release\?\.tag_name !== process\.env\.RELEASE_TAG/);
   assert.match(source, /release\?\.name !== expectedTitle/);
   assert.match(source, /release\?\.body !== expectedBody/);
-  assert.match(source, /Codekeeper \$\{version\} is a verified release/);
+  assert.match(
+    source,
+    /Codekeeper \$\{version\} is a verified release of the repository-owned AI maintainer that runs in GitHub Actions/,
+  );
   assert.match(source, /npx @coryparry\/codekeeper@\$\{version\} init/);
   assert.match(source, /npx @coryparry\/codekeeper@\$\{version\} verify/);
   assert.match(source, /The npm package is published with provenance/);
