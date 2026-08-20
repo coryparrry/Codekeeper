@@ -83,6 +83,7 @@ jobs:
           node --input-type=module -e '
           import { readFileSync, writeFileSync } from "node:fs";
           const pack = JSON.parse(readFileSync(process.env.PACK_REPORT, "utf8"));
+          if (!pack || typeof pack.name !== "string" || typeof pack.version !== "string" || typeof pack.filename !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(pack.integrity ?? "")) throw new Error("invalid normalized npm pack receipt");
           const evidence = {
             version: 1,
             publicationPerformed: false,

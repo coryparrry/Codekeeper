@@ -6,7 +6,7 @@ import { EventEmitter } from "node:events";
 import { access, cp, mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { normalizeNpmPackReport, packCodekeeperPackage, verifyReleaseAuthority } from "../../../scripts/pack-codekeeper-package.mjs";
+import { formatNpmPackReport, normalizeNpmPackReport, packCodekeeperPackage, verifyReleaseAuthority } from "../../../scripts/pack-codekeeper-package.mjs";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
 import { PACKAGE_NAME } from "../src/package-identity.mjs";
 import { git, PACKAGE_ROOT, PINNED_COMMIT, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
@@ -47,6 +47,7 @@ test("normalizes object- and single-element array-shaped npm pack reports", () =
   assert.deepEqual(normalizeNpmPackReport(JSON.stringify(report)), report);
   assert.deepEqual(normalizeNpmPackReport(JSON.stringify({ codekeeper: report })), report);
   assert.deepEqual(normalizeNpmPackReport(JSON.stringify([report])), report);
+  assert.equal(formatNpmPackReport(report), `${JSON.stringify(report)}\n`);
 });
 
 test("rejects invalid and multiple npm pack reports", () => {
