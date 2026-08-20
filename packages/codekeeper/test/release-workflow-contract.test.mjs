@@ -203,7 +203,7 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
     /npm install --ignore-scripts --no-audit --no-fund "\$EXPECTED_NAME@\$EXPECTED_VERSION"/,
   );
   assert.match(source, /\.\/node_modules\/\.bin\/codekeeper --help/);
-  assert.match(source, /Create immutable-tag GitHub release/);
+  assert.match(source, /Finalize immutable-tag GitHub release/);
   assert.match(source, /contents: write/);
   assert.match(source, /GH_TOKEN: \$\{\{ github\.token \}\}/);
   assert.match(source, /sha512sum "\$TARBALL" > "\$sidecar"/);
@@ -212,8 +212,12 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
     /gh api "repos\/\$GITHUB_REPOSITORY\/releases\/tags\/\$RELEASE_TAG"/,
   );
   assert.match(source, /release\?\.tag_name !== process\.env\.RELEASE_TAG/);
-  assert.match(source, /release\?\.name !== expectedTitle/);
-  assert.match(source, /release\?\.body !== expectedBody/);
+  assert.match(
+    source,
+    /\[releasePleaseTitle, finalizedTitle\]\.includes\(release\?\.name\)/,
+  );
+  assert.match(source, /typeof release\?\.body !== "string"/);
+  assert.match(source, /release\.body\.length === 0/);
   assert.match(
     source,
     /Codekeeper \$\{version\} is a verified release of the repository-owned AI maintainer that runs in GitHub Actions/,
@@ -229,6 +233,7 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
     /grep -Fx 'gh: Not Found \(HTTP 404\)' "\$release_error"/,
   );
   assert.match(source, /gh release create "\$RELEASE_TAG" \\/);
+  assert.match(source, /gh release edit "\$RELEASE_TAG" \\/);
   assert.match(
     source,
     /gh release upload "\$RELEASE_TAG" "\$TARBALL" "\$sidecar" \\/,
@@ -248,16 +253,50 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   assert.match(source, /needs\.build\.outputs\.tag/);
 });
 
-test("unpublished readiness rejects an incomplete normalized pack receipt", async () => {
+test("Release Please prepares reviewed Codekeeper releases for the hardened publisher", async () => {
+  const [workflow, config, manifest, checks] = await Promise.all([
+    repositoryFile(".github/workflows/codekeeper-release-please.yml"),
+    repositoryFile("release-please-config.json"),
+    repositoryFile(".release-please-manifest.json"),
+    repositoryFile(".github/workflows/codekeeper-self-test.yml"),
+  ]);
+  assert.match(workflow, /push:\n    branches:\n      - main/);
+  assert.match(
+    workflow,
+    /googleapis\/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5\.0\.0/,
+  );
+  assert.match(workflow, /token: \$\{\{ secrets\.RELEASE_PLEASE_TOKEN \}\}/);
+  assert.match(workflow, /target-branch: main/);
+  const parsedConfig = JSON.parse(config);
+  const packageConfig = parsedConfig.packages["packages/codekeeper"];
+  assert.equal(packageConfig["release-type"], "node");
+  assert.equal(packageConfig.component, "codekeeper");
+  assert.equal(packageConfig["tag-separator"], "-");
+  assert.equal(packageConfig["changelog-path"], "/CHANGELOG.md");
+  assert.deepEqual(JSON.parse(manifest), { "packages/codekeeper": "0.2.0" });
+  assert.match(checks, /name: promotion-policy/);
+  assert.match(checks, /"\$HEAD_REF" == "staging"/);
+  assert.match(checks, /"\$HEAD_REF" == release-please--branches--main\*/);
+});
+
+test("staging readiness rejects an incomplete normalized pack receipt", async () => {
   const source = await repositoryFile(
     ".github/workflows/codekeeper-release-readiness.yml",
   );
+  assert.match(source, /push:\n    branches:\n      - staging/);
+  assert.match(source, /environment: staging/);
   assert.match(
     source,
     /node scripts\/pack-codekeeper-package\.mjs --destination "\$RELEASE_ROOT" > "\$RUNNER_TEMP\/codekeeper-pack-report\.json"/,
   );
-  assert.match(source, /const pack = JSON\.parse\(readFileSync\(process\.env\.PACK_REPORT/);
-  assert.match(source, /throw new Error\("invalid normalized npm pack receipt"\)/);
+  assert.match(
+    source,
+    /const pack = JSON\.parse\(readFileSync\(process\.env\.PACK_REPORT/,
+  );
+  assert.match(
+    source,
+    /throw new Error\("invalid normalized npm pack receipt"\)/,
+  );
   for (const field of ["name", "version", "filename", "integrity"]) {
     assert.match(source, new RegExp(`${field}: pack\\.${field}`));
   }
