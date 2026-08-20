@@ -93,6 +93,16 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
       "- name: Run fresh exact-version install canary",
     ),
   ];
+  const receiptSteps = [
+    step(
+      "- name: Determine npm publication state",
+      "- name: Publish exact verified tarball with npm provenance",
+    ),
+    step(
+      "- name: Re-fetch and verify public registry receipt",
+      "- name: Run fresh exact-version install canary",
+    ),
+  ];
   for (const verificationStep of verificationSteps) {
     assert.match(verificationStep, /release", "package-integrity\.json"/);
     assert.match(verificationStep, /flag: "wx"/);
@@ -101,6 +111,26 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   }
   assert.match(verificationSteps[0], /CODEKEEPER_PACKAGE_VERIFIED/);
   assert.doesNotMatch(verificationSteps[0], /JSON\.parse\(output\)/);
+  for (const receiptStep of receiptSteps) {
+    assert.match(
+      receiptStep,
+      /const isReceiptObject = \(value\) => value !== null && typeof value === "object" && !Array\.isArray\(value\);/,
+    );
+    assert.match(receiptStep, /if \(Array\.isArray\(value\)\)/);
+    assert.match(
+      receiptStep,
+      /value\.length !== 1 \|\| !isReceiptObject\(value\[0\]\)/,
+    );
+    assert.match(receiptStep, /return value\[0\];/);
+    assert.match(
+      receiptStep,
+      /if \(!isReceiptObject\(value\)\) throw new Error\("npm registry receipt has an invalid shape"\);/,
+    );
+    assert.match(
+      receiptStep,
+      /const receipt = normalizeReceipt\(JSON\.parse\(readFileSync\(process\.env\.RECEIPT, "utf8"\)\)\);/,
+    );
+  }
   assert.match(
     source,
     /node scripts\/pack-codekeeper-package\.mjs --destination/,
