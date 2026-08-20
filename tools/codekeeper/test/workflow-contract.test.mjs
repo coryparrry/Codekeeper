@@ -11,20 +11,37 @@ import {
   workflow,
 } from "./workflow-test-helpers.mjs";
 
+const stagedModes = modes.filter((mode) => mode !== "review");
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test("workflow owner-command lists stay synchronized with the canonical definition", async () => {
   await execFileAsync(
     process.execPath,
     ["tools/codekeeper/scripts/sync-owner-command-lists.mjs", "--check"],
     { cwd: repositoryRoot },
   );
-  const expected = `contains(fromJSON('${JSON.stringify(
+
+  const expectedCondition = `contains(fromJSON('${JSON.stringify(
     OWNER_COMMANDS.map((command) => `/codekeeper ${command}`),
-  )}'), github.event.comment.body))`;
-  const source = await workflow("review");
-  assert.match(
-    source,
-    new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  )}'), github.event.comment.body)`;
+  const expectedActions = `const actions = ${JSON.stringify(OWNER_COMMANDS)};`;
+  const reviewCaller = await repositoryFile(
+    "examples/workflows/codekeeper-review.yml.example",
   );
+  const packagedReviewCaller = await repositoryFile(
+    "packages/codekeeper/assets/workflows/review.yml",
+  );
+  const reviewRuntime = await workflow("review");
+
+  assert.match(
+    reviewCaller,
+    new RegExp(escapeRegExp(expectedCondition)),
+  );
+  assert.equal(packagedReviewCaller, reviewCaller);
+  assert.match(reviewRuntime, new RegExp(escapeRegExp(expectedActions)));
 });
 
 test("issue comment routing keeps one balanced GitHub expression", async () => {
@@ -45,8 +62,8 @@ test("issue comment routing keeps one balanced GitHub expression", async () => {
   assert.equal(depth, 0, "issue workspace expression has balanced parentheses");
 });
 
-test("every mode isolates untrusted candidate creation, tokenless sealing, and App publication", async () => {
-  for (const mode of modes) {
+test("staged modes isolate untrusted candidate creation, tokenless sealing, and App publication", async () => {
+  for (const mode of stagedModes) {
     const source = await workflow(mode);
     const repairMode = mode === "maintain" || mode === "fix";
     const effectiveMode =
@@ -58,15 +75,8 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
       repairMode ? "verify" : "seal",
     );
     const verify = repairMode ? jobSection(source, "verify", "seal") : null;
-    const seal = jobSection(
-      source,
-      "seal",
-      mode === "review" ? "gate" : "publish",
-    );
-    const publish =
-      mode === "review"
-        ? jobSection(source, "gate")
-        : jobSection(source, "publish");
+    const seal = jobSection(source, "seal", mode === "review" ? "gate" : "publish");
+    const publish = jobSection(source, "publish");
 
     assert.match(workspace, /codekeeper-bundle/);
     assert.match(workspace, /codekeeper-config\.json/);
@@ -165,10 +175,7 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     }
 
     if (verify) {
-      assert.match(
-        verify,
-        new RegExp(`verify-${mode === "maintain" ? "audit" : mode}`),
-      );
+      assert.match(verify, new RegExp(`verify-${effectiveMode}`));
       assert.match(verify, /expected-candidate-sha/);
       assert.match(verify, /without OpenAI or App credentials/);
       assert.doesNotMatch(
@@ -181,12 +188,7 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
 
     assert.match(seal, /codekeeper-candidate/);
     assert.match(seal, /codekeeper-artifact/);
-    assert.match(
-      seal,
-      new RegExp(
-        `seal-${mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode}`,
-      ),
-    );
+    assert.match(seal, new RegExp(`seal-${effectiveMode}`));
     assert.match(
       seal,
       /manifest_sha256: \$\{\{ steps\.seal\.outputs\.manifest_sha256 \}\}/,
@@ -195,9 +197,18 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.doesNotMatch(seal, /openai\/codex-action@|create-github-app-token/);
 
     assert.match(publish, /create-github-app-token/);
-    assert.match(publish, /permission-contents: \$\{\{ inputs\.app_contents_permission \}\}/);
-    assert.match(publish, /permission-issues: \$\{\{ inputs\.app_issues_permission \}\}/);
-    assert.match(publish, /permission-pull-requests: \$\{\{ inputs\.app_pull_requests_permission \}\}/);
+    assert.match(
+      publish,
+      /permission-contents: \$\{\{ inputs\.app_contents_permission \}\}/,
+    );
+    assert.match(
+      publish,
+      /permission-issues: \$\{\{ inputs\.app_issues_permission \}\}/,
+    );
+    assert.match(
+      publish,
+      /permission-pull-requests: \$\{\{ inputs\.app_pull_requests_permission \}\}/,
+    );
     assert.match(publish, /CODEKEEPER_AUTOMATION_BOT_LOGIN/);
     assert.match(publish, /CODEKEEPER_AUTOMATION_BOT_ID/);
     assert.match(publish, /steps\.app-token\.outputs\.app-slug/);
@@ -205,16 +216,6 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
     assert.match(publish, /\$GITHUB_API_URL\/users\/\$\{APP_SLUG\}\[bot\]/);
     assert.doesNotMatch(publish, /\$GITHUB_API_URL\/user(?:["']|\))/);
     assert.match(publish, /codekeeper-artifact/);
-    if (mode === "review") {
-      assert.match(
-        publish,
-        /node codekeeper-runtime\/src\/cli\.mjs publish-review/,
-      );
-      assert.doesNotMatch(
-        publish,
-        /node tools\/codekeeper\/src\/cli\.mjs publish-review/,
-      );
-    }
     if (mode === "issues") {
       assert.match(
         publish,
@@ -268,7 +269,7 @@ test("every mode isolates untrusted candidate creation, tokenless sealing, and A
 });
 
 test("workflow handoff artifacts survive failed-job reruns and producers replace full reruns", async () => {
-  for (const mode of modes) {
+  for (const mode of stagedModes) {
     const source = await workflow(mode);
     const artifactPrefix = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}`;
     const workspaceArtifactName = `${artifactPrefix}-workspace-\${{ github.run_id }}`;
@@ -339,7 +340,6 @@ test("issue preparation can read pull requests in every caller and job that invo
     caller,
     /permissions:\n\s+contents: read\n\s+issues: read\n\s+pull-requests: read/,
   );
-
   for (const section of [
     jobSection(source, "workspace", "analyze"),
     jobSection(source, "analyze", "seal"),
@@ -491,9 +491,7 @@ test("merged review gate executes the same fail-closed publication contract", as
       () => runGate(overrides),
       (error) =>
         error.code === 1 &&
-        /Codekeeper did not seal a current review\./.test(
-          error.stdout,
-        ),
+        /Codekeeper did not seal a current review\./.test(error.stdout),
     );
   }
   for (const disposition of ["", "unexpected"]) {
@@ -551,7 +549,7 @@ test("merged review gate executes the same fail-closed publication contract", as
   );
 });
 
-test("review uses a PR-native fail-closed gate instead of a reusable commit status", async () => {
+test("review uses a direct caller and a two-runner PR-native fail-closed gate", async () => {
   const source = await workflow("review");
   const publisher = await repositoryFile(
     "tools/codekeeper/src/lib/publish.mjs",
@@ -559,13 +557,15 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   const caller = await repositoryFile(
     "examples/workflows/codekeeper-review.yml.example",
   );
+  const analyze = jobSection(source, "analyze", "gate");
   const gate = jobSection(source, "gate");
+
   assert.match(
     source,
     /cancel-in-progress: \$\{\{ github\.actor != inputs\.automation_bot_login \}\}/,
   );
   assert.match(gate, /name: Codekeeper review gate/);
-  assert.match(gate, /if: always\(\)/);
+  assert.match(gate, /if: always\(\) && needs\.analyze\.outputs\.route != 'false'/);
   assert.match(gate, /timeout-minutes: 15/);
   assert.match(gate, /fails closed/);
   assert.match(gate, /exit 1/);
@@ -588,30 +588,41 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
     source,
     /owner_command:\n\s+description:[^\n]*\n\s+required: false\n\s+default: false\n\s+type: boolean/,
   );
+  assert.match(analyze, /AUTO_REVIEW: \$\{\{ inputs\.auto_review \}\}/);
   assert.match(
-    jobSection(source, "workspace", "analyze"),
-    /inputs\.auto_review/,
+    analyze,
+    /FEEDBACK_TRIAGE: \$\{\{ inputs\.feedback_triage \}\}/,
+  );
+  assert.match(analyze, /OWNER_COMMAND: \$\{\{ inputs\.owner_command \}\}/);
+  assert.match(
+    analyze,
+    /const dispatch = eventName === "repository_dispatch"[\s\S]*event\.action === "codekeeper_review"[\s\S]*actor === automationBot/,
   );
   assert.match(
-    jobSection(source, "workspace", "analyze"),
-    /github\.event_name == 'repository_dispatch'[\s\S]*github\.event\.action == 'codekeeper_review'[\s\S]*github\.actor == inputs\.automation_bot_login/,
+    analyze,
+    /const automatic = process\.env\.AUTO_REVIEW === "true" && eventName === "pull_request_target"/,
   );
   assert.match(
-    jobSection(source, "workspace", "analyze"),
-    /feedback_triage &&\s+inputs\.automation_bot_login != '' &&\s+github\.actor != inputs\.automation_bot_login/,
+    analyze,
+    /const feedback = process\.env\.FEEDBACK_TRIAGE === "true"[\s\S]*actor !== automationBot[\s\S]*feedbackEvent/,
+  );
+  assert.match(
+    analyze,
+    /const execute = process\.env\.ENABLED === "true" && route && eligible/,
+  );
+  assert.ok(
+    analyze.indexOf("Detect Codekeeper review intent") <
+      analyze.indexOf("Check out trusted default-branch configuration"),
   );
   assert.match(
     publisher,
     /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*authorization_mode: "policy"/,
   );
-  assert.doesNotMatch(
-    jobSection(source, "workspace", "analyze"),
-    /inputs\.auto_review &&\s*\(\(github\.event_name/,
-  );
+  assert.doesNotMatch(analyze, /^\s+if: >-/m);
   assert.match(gate, /IS_COMMAND_REVIEW/);
   assert.match(
     gate,
-    /IS_OWNER_COMMAND_REVIEW: \$\{\{ inputs\.owner_command \}\}/,
+    /IS_OWNER_COMMAND_REVIEW: \$\{\{ needs\.analyze\.outputs\.owner_command \}\}/,
   );
   assert.match(
     gate,
@@ -619,12 +630,10 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   );
   const expectedOwnerCommandCondition = `contains(fromJSON('${JSON.stringify(
     OWNER_COMMANDS.map((command) => `/codekeeper ${command}`),
-  )}'), github.event.comment.body))`;
+  )}'), github.event.comment.body)`;
   assert.match(
-    jobSection(source, "workspace", "analyze"),
-    new RegExp(
-      expectedOwnerCommandCondition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-    ),
+    caller,
+    new RegExp(escapeRegExp(expectedOwnerCommandCondition)),
   );
   assert.match(
     gate,
@@ -632,41 +641,13 @@ test("review uses a PR-native fail-closed gate instead of a reusable commit stat
   );
   assert.match(caller, /auto_review: true/);
   assert.match(caller, /feedback_triage: true/);
-  assert.match(caller, /const mentioned = mentionBot && new RegExp\(`/);
+  assert.doesNotMatch(caller, /^  intent:/m);
+  assert.doesNotMatch(caller, /needs\.intent|^\s+runs-on:/m);
   assert.match(
     caller,
-    /const feedbackEvent = eventName === "pull_request_review" \|\| eventName === "pull_request_review_comment";/,
+    /review:\n[\s\S]*?uses: \.\/\.github\/workflows\/codekeeper-runtime-review\.yml/,
   );
-  assert.match(
-    caller,
-    /const automationReply = feedbackEvent && automationBot && author === automationBot;/,
-  );
-  assert.match(
-    caller,
-    /const route = \(!feedbackEvent \|\| Boolean\(automationBot\)\) && !commandIntent && !automationReply && !botMention;/,
-  );
-  assert.match(
-    caller,
-    /appendFileSync\(process\.env\.GITHUB_OUTPUT, `owner_command=\$\{commandIntent\}\\nroute=\$\{route\}\\n`\)/,
-  );
-  assert.match(
-    caller,
-    /owner_command: \$\{\{ needs\.intent\.outputs\.owner_command == 'true' \}\}/,
-  );
-  assert.match(caller, /intent:\n\s+name: Detect Codekeeper review feedback/);
-  assert.match(
-    caller,
-    /const commandIntent = eventName === "pull_request_review_comment" && trustedAssociation && \(slash \|\| mentioned\)/,
-  );
-  assert.doesNotMatch(caller, /bootstrap:|needs\.bootstrap/);
-  assert.match(
-    caller,
-    /review:\n\s+needs: intent\n\s+if: needs\.intent\.outputs\.route == 'true'/,
-  );
-  assert.match(
-    source,
-    /!\(github\.event_name == 'pull_request_review_comment'[\s\S]*github\.event\.comment\.user\.login == inputs\.automation_bot_login\)/,
-  );
+  assert.match(caller, /Deterministic no-op feedback is filtered without allocating a runner/);
   assert.doesNotMatch(
     source,
     /publish-review-status|on:\n\s+pull_request_target|state="success"/,
@@ -857,7 +838,7 @@ test("documentation uses the live feedback input and owner-authorized defer cont
   assert.match(configuration, /`feedback_triage` defaults to `true`/);
   assert.doesNotMatch(configuration, /auto_review_feedback/);
   assert.match(install, /owner-authorized deferral/i);
-  assert.doesNotMatch(install, /asks the assistant to verify the claim/);
+  assert.doesNotMatch(install, /asks the assistant to verify the claim/i);
 });
 
 test("Fixer repository dispatches retain their target and explicit policy authorization", async () => {
@@ -897,14 +878,14 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
     await repositoryFile("tools/codekeeper/package-lock.json"),
   );
   assert.deepEqual(packageJson.dependencies, {
-    "@openai/agents": "0.15.0",
+    "@openai/agents": "0.16.0",
     "@openai/codex": "0.147.0",
     zod: "4.4.3",
   });
   assert.equal(packageLock.lockfileVersion, 3);
   assert.equal(
     packageLock.packages[""].dependencies["@openai/agents"],
-    "0.15.0",
+    "0.16.0",
   );
   assert.equal(
     packageLock.packages[""].dependencies["@openai/codex"],
@@ -912,7 +893,7 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
   );
   assert.equal(packageLock.packages[""].dependencies.zod, "4.4.3");
 
-  for (const mode of modes) {
+  for (const mode of stagedModes) {
     const source = await workflow(mode);
     const caller = await repositoryFile(
       `examples/workflows/codekeeper-${mode}.yml.example`,
@@ -997,7 +978,7 @@ test("review tracing uses the OpenAI exporter without alternate exporter credent
   const caller = await repositoryFile(
     "examples/workflows/codekeeper-review.yml.example",
   );
-  const analyze = jobSection(source, "analyze", "seal");
+  const analyze = jobSection(source, "analyze", "gate");
 
   assert.doesNotMatch(source, /trace_exporter/i);
   assert.doesNotMatch(analyze, /trace_exporter/i);
