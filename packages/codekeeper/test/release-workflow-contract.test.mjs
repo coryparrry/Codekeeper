@@ -53,6 +53,10 @@ test("release publication is tag-gated, provenance-enabled, and bound to a prote
   assert.match(source, /persist-credentials: false/);
   assert.match(source, /git status --porcelain=v1 --untracked-files=all/);
   assert.match(source, /npm run check/);
+  assert.match(
+    source,
+    /env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL npm run check/,
+  );
   assert.match(source, /working-directory: tools\/codekeeper/);
   assert.match(source, /working-directory: packages\/codekeeper/);
 });
