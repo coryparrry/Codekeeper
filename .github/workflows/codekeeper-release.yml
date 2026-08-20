@@ -125,7 +125,7 @@ jobs:
           # shellcheck disable=SC2016
           RELEASE_ROOT="$RELEASE_ROOT" PACK_REPORT="$PACK_REPORT" EXPECTED_SOURCE_COMMIT="$(git rev-parse HEAD)" node --input-type=module -e '
           import { createHash } from "node:crypto";
-          import { lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+          import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
           import { tmpdir } from "node:os";
           import { basename, join } from "node:path";
           import { execFileSync } from "node:child_process";
@@ -141,11 +141,13 @@ jobs:
           const root = mkdtempSync(join(tmpdir(), "codekeeper-release-verify-"));
           try {
             execFileSync("tar", ["-xzf", tarball, "--strip-components=1", "-C", root], { stdio: "inherit" });
-            const output = execFileSync(process.execPath, ["bin/verify-package.mjs", "--root", root, "--expected-name", expectedName, "--expected-version", report.version, "--expected-source-commit", process.env.EXPECTED_SOURCE_COMMIT], { cwd: root, encoding: "utf8" });
-            const verified = JSON.parse(output);
-            const manifest = readFileSync(join(root, "release", "manifest.json"));
-            const manifestSha256 = createHash("sha256").update(manifest).digest("hex");
-            process.stdout.write(`name=${expectedName}\nfilename=${report.filename}\nintegrity=${integrity}\nversion=${verified.package.version}\nsource_commit=${verified.source.commit}\nmanifest_sha256=${manifestSha256}\n`);
+            const manifestBytes = readFileSync(join(root, "release", "manifest.json"));
+            const manifestSha256 = createHash("sha256").update(manifestBytes).digest("hex");
+            const manifest = JSON.parse(manifestBytes.toString("utf8"));
+            writeFileSync(join(root, "release", "package-integrity.json"), `${JSON.stringify({ version: 1, algorithm: "sha512", integrity }, null, 2)}\n`, { flag: "wx" });
+            const verificationOutput = execFileSync(process.execPath, ["bin/verify-package.mjs", "--root", root, "--expected-name", expectedName, "--expected-version", report.version, "--expected-integrity", integrity, "--expected-manifest-sha256", manifestSha256, "--expected-source-commit", process.env.EXPECTED_SOURCE_COMMIT], { cwd: root, encoding: "utf8" });
+            if (!verificationOutput.startsWith("CODEKEEPER_PACKAGE_VERIFIED ")) throw new Error("packaged verifier returned an unexpected receipt");
+            process.stdout.write(`name=${expectedName}\nfilename=${report.filename}\nintegrity=${integrity}\nversion=${manifest.package.version}\nsource_commit=${manifest.source.commit}\nmanifest_sha256=${manifestSha256}\n`);
           } finally {
             rmSync(root, { recursive: true, force: true });
           }
@@ -205,10 +207,17 @@ jobs:
           stage="$RUNNER_TEMP/codekeeper-release-publish-input"
           mkdir "$stage"
           tar -xzf "$tarball" --strip-components=1 -C "$stage"
+          STAGE="$stage" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
+          import { writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          if (!/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(process.env.EXPECTED_INTEGRITY)) throw new Error("invalid expected package integrity");
+          writeFileSync(join(process.env.STAGE, "release", "package-integrity.json"), `${JSON.stringify({ version: 1, algorithm: "sha512", integrity: process.env.EXPECTED_INTEGRITY }, null, 2)}\n`, { flag: "wx" });
+          '
           node "$stage/bin/verify-package.mjs" \
             --root "$stage" \
             --expected-name "$EXPECTED_NAME" \
             --expected-version "$EXPECTED_VERSION" \
+            --expected-integrity "$EXPECTED_INTEGRITY" \
             --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
             --expected-source-commit "$EXPECTED_SOURCE_COMMIT"
       - name: Reconfirm remote release tag before registry mutation
@@ -295,6 +304,12 @@ jobs:
           stage="$RUNNER_TEMP/codekeeper-registry-stage"
           mkdir "$stage"
           tar -xzf "$actual_tarball" --strip-components=1 -C "$stage"
+          STAGE="$stage" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
+          import { writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          if (!/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(process.env.EXPECTED_INTEGRITY)) throw new Error("invalid expected package integrity");
+          writeFileSync(join(process.env.STAGE, "release", "package-integrity.json"), `${JSON.stringify({ version: 1, algorithm: "sha512", integrity: process.env.EXPECTED_INTEGRITY }, null, 2)}\n`, { flag: "wx" });
+          '
           node "$stage/bin/verify-package.mjs" \
             --root "$stage" \
             --expected-name "$EXPECTED_NAME" \
