@@ -74,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e "$RELEASE_ROOT"
-          node scripts/pack-codekeeper-package.mjs --destination "$RELEASE_ROOT" > "$RUNNER_TEMP/codekeeper-pack-report.json"
+          node scripts/pack-codekeeper-package.mjs --candidate --destination "$RELEASE_ROOT" > "$RUNNER_TEMP/codekeeper-pack-report.json"
       - name: Record bounded readiness evidence
         env:
           PACK_REPORT: ${{ runner.temp }}/codekeeper-pack-report.json
