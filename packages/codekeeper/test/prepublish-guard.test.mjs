@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { buildCodekeeperPackageStage } from "../../../scripts/build-codekeeper-package.mjs";
-import { git, PACKAGE_ROOT, PACKAGE_VERSION, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
+import { git, PACKAGE_ROOT, REPOSITORY_ROOT, temporaryDirectory, VERSION } from "./helpers.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -38,7 +38,7 @@ test("publication guard accepts a closed generated package stage", async (t) => 
   const stage = await buildStage(t);
   const result = await runGuard(stage);
   const stdout = String(result.stdout);
-  assert.ok(stdout.includes(PACKAGE_VERSION));
+  assert.ok(stdout.includes(VERSION));
   assert.match(stdout, /from [0-9a-f]{40}/);
 });
 
