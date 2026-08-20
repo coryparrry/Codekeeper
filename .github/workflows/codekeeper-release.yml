@@ -75,6 +75,12 @@ jobs:
           set -euo pipefail
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
           git tag --points-at HEAD "$RELEASE_TAG" | grep -Fx "$RELEASE_TAG"
+      - name: Freeze release authority checkpoint
+        run: |
+          set -euo pipefail
+          git show-ref --verify --quiet refs/remotes/origin/main
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          git update-ref refs/remotes/origin/main HEAD
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.19.0

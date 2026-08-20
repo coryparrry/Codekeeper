@@ -52,6 +52,10 @@ test("release publication is tag-gated, provenance-enabled, and bound to a prote
   );
   assert.match(source, /persist-credentials: false/);
   assert.match(source, /git status --porcelain=v1 --untracked-files=all/);
+  assert.match(
+    source,
+    /git merge-base --is-ancestor HEAD refs\/remotes\/origin\/main\n          git update-ref refs\/remotes\/origin\/main HEAD/,
+  );
   assert.match(source, /npm run check/);
   assert.match(
     source,
