@@ -261,7 +261,16 @@ jobs:
           if (( status == 0 )); then
             RECEIPT="$receipt" EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
             import { readFileSync } from "node:fs";
-            const receipt = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
+            const isReceiptObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+            const normalizeReceipt = (value) => {
+              if (Array.isArray(value)) {
+                if (value.length !== 1 || !isReceiptObject(value[0])) throw new Error("npm registry receipt has an invalid shape");
+                return value[0];
+              }
+              if (!isReceiptObject(value)) throw new Error("npm registry receipt has an invalid shape");
+              return value;
+            };
+            const receipt = normalizeReceipt(JSON.parse(readFileSync(process.env.RECEIPT, "utf8")));
             if (receipt?.version !== process.env.EXPECTED_VERSION || receipt?.dist?.integrity !== process.env.EXPECTED_INTEGRITY) throw new Error("existing public npm release does not match the verified tarball");
             '
             printf 'should_publish=false\n' >> "$GITHUB_OUTPUT"
@@ -299,7 +308,16 @@ jobs:
           npm view "$EXPECTED_NAME@$EXPECTED_VERSION" version dist.integrity dist.tarball --json > "$receipt"
           RECEIPT="$receipt" EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
           import { readFileSync } from "node:fs";
-          const receipt = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
+          const isReceiptObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+          const normalizeReceipt = (value) => {
+            if (Array.isArray(value)) {
+              if (value.length !== 1 || !isReceiptObject(value[0])) throw new Error("npm registry receipt has an invalid shape");
+              return value[0];
+            }
+            if (!isReceiptObject(value)) throw new Error("npm registry receipt has an invalid shape");
+            return value;
+          };
+          const receipt = normalizeReceipt(JSON.parse(readFileSync(process.env.RECEIPT, "utf8")));
           if (receipt.version !== process.env.EXPECTED_VERSION || receipt?.dist?.integrity !== process.env.EXPECTED_INTEGRITY || typeof receipt?.dist?.tarball !== "string" || !receipt.dist.tarball.startsWith("https://registry.npmjs.org/")) throw new Error("public npm registry receipt does not match the published release");
           '
           download="$RUNNER_TEMP/codekeeper-registry-download"
