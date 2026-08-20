@@ -160,7 +160,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Attest verified release tarball
-        uses: actions/attest-build-provenance@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/codekeeper-release/${{ steps.receipt.outputs.filename }}
 
