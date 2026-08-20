@@ -19,7 +19,13 @@ function policy() {
         name: "main",
         target: "branch",
         enforcement: "active",
-        bypass_actors: [],
+        bypass_actors: [
+          {
+            actor_type: "RepositoryRole",
+            actor_id: 5,
+            bypass_mode: "pull_request",
+          },
+        ],
         conditions: {
           ref_name: {
             include: ["refs/heads/main", "refs/heads/staging"],
@@ -71,14 +77,21 @@ test("governance requires explicit non-automatic branch and tag rules", () => {
   );
 
   const bypass = policy();
-  bypass.rulesets[0].bypass_actors.push({
-    actor_type: "RepositoryRole",
-    actor_id: 5,
-    bypass_mode: "always",
-  });
+  bypass.rulesets[0].bypass_actors[0].bypass_mode = "always";
   assert.throws(
     () => validateGovernancePolicy(bypass),
-    /bypass_actors must remain empty/,
+    /only allow repository admins to bypass pull-request rules/,
+  );
+
+  const tagBypass = policy();
+  tagBypass.rulesets[1].bypass_actors.push({
+    actor_type: "RepositoryRole",
+    actor_id: 5,
+    bypass_mode: "pull_request",
+  });
+  assert.throws(
+    () => validateGovernancePolicy(tagBypass),
+    /must remain empty for release tags/,
   );
 
   const protectedBranches = policy().rulesets[0].conditions.ref_name.include;
@@ -130,7 +143,6 @@ test("reconciliation ignores GitHub default fields and key order", () => {
     name: "main",
     target: "branch",
     enforcement: "active",
-    bypass_actors: [],
     conditions: {
       ref_name: {
         exclude: [],
@@ -161,7 +173,14 @@ test("reconciliation ignores GitHub default fields and key order", () => {
         },
       },
     ],
-    current_user_can_bypass: "never",
+    bypass_actors: [
+      {
+        actor_type: "RepositoryRole",
+        actor_id: 5,
+        bypass_mode: "pull_request",
+      },
+    ],
+    current_user_can_bypass: "pull_requests_only",
   };
   const githubTags = {
     id: 21006878,
