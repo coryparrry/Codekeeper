@@ -19,10 +19,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Check out the repository with the release token
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          persist-credentials: true
       - name: Open or update the reviewed release pull request
+        id: release-please
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           target-branch: main
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - name: Check out the fixed same-repository release pull request
+        if: steps.release-please.outputs.pr != ''
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            '+refs/heads/release-please--branches--main--components--codekeeper:refs/remotes/origin/release-please--branches--main--components--codekeeper'
+          git switch --create release-please--branches--main--components--codekeeper \
+            --track refs/remotes/origin/release-please--branches--main--components--codekeeper
+          test "$(git branch --show-current)" = release-please--branches--main--components--codekeeper
+      - name: Refresh the exact tracked source manifest
+        if: steps.release-please.outputs.pr != ''
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          node scripts/refresh-release-manifest.mjs
+      - name: Verify release pull request branch remains the only changed ref
+        if: steps.release-please.outputs.pr != ''
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = release-please--branches--main--components--codekeeper
+          test "$(git status --porcelain=v1 --untracked-files=all)" = ""
+          git push origin HEAD:refs/heads/release-please--branches--main--components--codekeeper
