@@ -101,7 +101,7 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify runtime checks
         working-directory: tools/codekeeper
-        run: npm run check
+        run: env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL npm run check
       - name: Install installer checks
         working-directory: packages/codekeeper
         run: npm ci --ignore-scripts --no-audit --no-fund
