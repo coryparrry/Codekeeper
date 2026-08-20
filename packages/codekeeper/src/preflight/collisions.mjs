@@ -14,7 +14,7 @@ import {
   assertManagedArtifacts,
   isInstalledCodekeeperWorkflow,
   parseReleaseManifest
-} from "./installation.mjs";
+} from "./managed-files.mjs";
 
 const GITHUB_WORKFLOW_REFERENCE = /(?:\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-|codekeeper@[0-9]|\.\/\.github\/workflows\/codekeeper-)/i;
 

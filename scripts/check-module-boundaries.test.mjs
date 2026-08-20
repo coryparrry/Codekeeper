@@ -46,7 +46,7 @@ async function fixture(files) {
 test("valid current tree satisfies recorded module boundaries", async () => {
   const result = await checkRepositoryModuleBoundaries();
   assert.equal(result.valid, true);
-  assert.equal(result.legacyModules, 13);
+  assert.equal(result.legacyModules, 11);
   assert.ok(result.modulesChecked > result.legacyModules);
 });
 
@@ -149,6 +149,19 @@ test("missing legacy modules fail closed", () => {
   assert.throws(
     () => evaluateModuleBoundaries({ config: config(), files: validFiles.slice(1) }),
     /legacy module is missing: src\/legacy\.mjs/,
+  );
+});
+
+test("completed legacy exemptions must be removed", () => {
+  assert.throws(
+    () =>
+      evaluateModuleBoundaries({
+        config: config(),
+        files: validFiles.map((file) =>
+          file.path === "src/legacy.mjs" ? { ...file, bytes: 20000, lines: 500 } : file,
+        ),
+      }),
+    /src\/legacy\.mjs is within the normal 800-line\/40000-byte limit; remove its legacy exemption/,
   );
 });
 

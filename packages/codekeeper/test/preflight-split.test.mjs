@@ -23,6 +23,7 @@ import {
   inspectInstallationFiles as inspectInstallationFromInstallation,
   parseReleaseManifest as parseInstallationReleaseManifest,
 } from "../src/preflight/installation.mjs";
+import { parseReleaseManifest as parseManagedReleaseManifest } from "../src/preflight/managed-files.mjs";
 import {
   inspectRepository as inspectRepositoryFromIndex,
 } from "../src/preflight/index.mjs";
@@ -43,6 +44,7 @@ test("preflight facade re-exports extracted environment and repository helpers",
 
 test("preflight facade re-exports extracted installation, collision, and doctor helpers", () => {
   assert.equal(parseReleaseManifest, parseInstallationReleaseManifest);
+  assert.equal(parseReleaseManifest, parseManagedReleaseManifest);
   assert.equal(discoverRepositoryValidationCommand, discoverInstallationValidationCommand);
   assert.equal(inspectInstallationFiles, inspectInstallationFromInstallation);
   assert.equal(assertNoInstallationFiles, assertCollisionInstallationFiles);

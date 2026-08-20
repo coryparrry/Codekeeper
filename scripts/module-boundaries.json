@@ -26,8 +26,8 @@
       "maxBytes": 83761
     },
     "packages/codekeeper/src/install.mjs": {
-      "maxLines": 831,
-      "maxBytes": 33400
+      "maxLines": 812,
+      "maxBytes": 32748
     },
     "packages/codekeeper/src/tui.mjs": {
       "maxLines": 948,
@@ -45,17 +45,9 @@
       "maxLines": 1462,
       "maxBytes": 59021
     },
-    "tools/codekeeper/src/lib/agents-runtime.mjs": {
-      "maxLines": 1143,
-      "maxBytes": 49648
-    },
     "tools/codekeeper/src/lib/git.mjs": {
       "maxLines": 884,
       "maxBytes": 32028
-    },
-    "tools/codekeeper/test/agents-runtime.test.mjs": {
-      "maxLines": 1768,
-      "maxBytes": 67890
     },
     "tools/codekeeper/test/commands.test.mjs": {
       "maxLines": 1163,

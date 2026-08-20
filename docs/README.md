@@ -7,7 +7,7 @@
 | [Repository governance](REPOSITORY_GOVERNANCE.md) | How-to | Review and deliberately apply branch and immutable-tag rules. |
 | [Configuration](CONFIGURATION.md) | Reference | Configure policy, workflows, providers, and capabilities. |
 | [Architecture](ARCHITECTURE.md) | Explanation | Understand the runtime trust pipeline. |
-| [Maintainability](MAINTAINABILITY.md) | Explanation | Keep oversized modules and tests from growing while staged splits land. |
+| [Maintainability](MAINTAINABILITY.md) | Explanation | Keep compatibility facades, domain modules, and remaining oversized files within reviewed limits. |
 | [Authority, data, and cost](authority-data-cost.md) | Explanation | Decide what Codekeeper may change, send, and consume. |
 | [Evaluations](EVALUATIONS.md) | Reference | Understand the evaluation method and evidence boundary. |
 | [Validation](../VALIDATION.md) | How-to | Validate source and release inputs. |
