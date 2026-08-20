@@ -287,8 +287,12 @@ test("staging readiness rejects an incomplete normalized pack receipt", async ()
   assert.match(source, /environment: staging/);
   assert.match(
     source,
-    /node scripts\/pack-codekeeper-package\.mjs --destination "\$RELEASE_ROOT" > "\$RUNNER_TEMP\/codekeeper-pack-report\.json"/,
+    /node scripts\/pack-codekeeper-package\.mjs --candidate --destination "\$RELEASE_ROOT" > "\$RUNNER_TEMP\/codekeeper-pack-report\.json"/,
   );
+  const publisher = await repositoryFile(
+    ".github/workflows/codekeeper-release.yml",
+  );
+  assert.doesNotMatch(publisher, /pack-codekeeper-package\.mjs --candidate/);
   assert.match(
     source,
     /const pack = JSON\.parse\(readFileSync\(process\.env\.PACK_REPORT/,
