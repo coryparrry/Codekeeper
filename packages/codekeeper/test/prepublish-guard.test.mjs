@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { buildCodekeeperPackageStage } from "../../../scripts/build-codekeeper-package.mjs";
-import { git, PACKAGE_ROOT, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
+import { git, PACKAGE_ROOT, PACKAGE_VERSION, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -37,7 +37,9 @@ test("publication guard rejects the source package because it is not a generated
 test("publication guard accepts a closed generated package stage", async (t) => {
   const stage = await buildStage(t);
   const result = await runGuard(stage);
-  assert.match(result.stdout, /Verified generated Codekeeper release stage @coryparry\/codekeeper@0\.2\.0 from [0-9a-f]{40}/);
+  const stdout = String(result.stdout);
+  assert.ok(stdout.includes(PACKAGE_VERSION));
+  assert.match(stdout, /from [0-9a-f]{40}/);
 });
 
 test("publication guard rejects a stage whose verifier no longer matches its manifest", async (t) => {

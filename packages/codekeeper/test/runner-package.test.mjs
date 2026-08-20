@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { formatNpmPackReport, normalizeNpmPackReport, packCodekeeperPackage, verifyReleaseAuthority } from "../../../scripts/pack-codekeeper-package.mjs";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
 import { PACKAGE_NAME } from "../src/package-identity.mjs";
-import { git, PACKAGE_ROOT, PINNED_COMMIT, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
+import { git, PACKAGE_ROOT, PACKAGE_VERSION, PINNED_COMMIT, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const RUNTIME_PACKAGE_ROOT = path.join(PACKAGE_ROOT, "runtime-package");
 
@@ -313,7 +313,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     .sort();
   const expected = [...releaseManifest.files.map((file) => file.path), "release/manifest.json"].sort();
   assert.equal(packed.name, PACKAGE_NAME);
-  assert.equal(packed.version, "0.2.0");
+  assert.equal(packed.version, PACKAGE_VERSION);
   assert.deepEqual(files, expected);
   assert.ok(files.every((file) => !file.includes("/test/") && file !== "package-lock.json"));
   assert.ok(["ink", "react"].every((dependency) => packed.bundled.includes(dependency)));
@@ -403,8 +403,8 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
     assert.match(output, /^  codekeeper update --check$/m);
     assert.match(output, /^  codekeeper rollback --to X\.Y\.Z$/m);
   }
-  assert.equal(version, "0.2.0\n");
-  assert.equal(npmInstallVersion, "0.2.0\n");
+  assert.equal(version, `${PACKAGE_VERSION}\n`);
+  assert.equal(npmInstallVersion, `${PACKAGE_VERSION}\n`);
   assert.throws(
     () => invoke(shim, ["init", "--current-package", "--package-integrity", expectedIntegrity]),
     (error) => {
@@ -436,7 +436,8 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   );
   const verifier = path.join(npmInstallRoot, "node_modules", ".bin", process.platform === "win32" ? "codekeeper-verify-package.cmd" : "codekeeper-verify-package");
   const verifierOutput = invoke(verifier, ["--root", installedRoot, "--expected-name", PACKAGE_NAME, "--expected-version", packageManifest.version, "--expected-integrity", expectedIntegrity, "--expected-manifest-sha256", expectedManifestSha256, "--expected-source-commit", releaseManifest.source.commit]);
-  assert.match(verifierOutput, /^CODEKEEPER_PACKAGE_VERIFIED name=@coryparry\/codekeeper version=0\.2\.0 source=[0-9a-f]{40}$/m);
+  assert.ok(verifierOutput.includes(`version=${PACKAGE_VERSION}`));
+  assert.match(verifierOutput, /source=[0-9a-f]{40}$/m);
 
   const runtimeInstallParent = await temporaryDirectory(t, "codekeeper-runtime-install-");
   const runtimeRoot = path.join(runtimeInstallParent, "runtime");

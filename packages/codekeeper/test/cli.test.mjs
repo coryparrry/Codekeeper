@@ -6,7 +6,7 @@ import { currentResumeCommand, parseCliArgs, runCli as runProductionCli, USAGE }
 import { createCommandRunner } from "../src/command-runner.mjs";
 import { buildInstallPlan, completionGuidance } from "../src/plan.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
-import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, result, temporaryDirectory, testPackageEnvironment, textSink } from "./helpers.mjs";
+import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, PACKAGE_VERSION, result, temporaryDirectory, testPackageEnvironment, textSink } from "./helpers.mjs";
 
 function runCli(options = {}) {
   return runProductionCli({
@@ -264,7 +264,7 @@ test("help, version, and rejected arguments perform no installer side effects", 
   for (const [argv, expectedStatus, expected] of [
     [["--help"], 0, USAGE],
     [[], 0, USAGE],
-    [["--version"], 0, "0.2.0\n"],
+    [["--version"], 0, `${PACKAGE_VERSION}\n`],
     [["init", "--non-interactive"], 2, "Unsupported command or option"]
   ]) {
     const output = textSink();

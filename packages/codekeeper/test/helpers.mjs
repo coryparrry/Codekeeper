@@ -11,7 +11,7 @@ export const REPOSITORY_ROOT = path.resolve(PACKAGE_ROOT, "../..");
 export const PINNED_COMMIT = "87b4f9813c1a16dee6cbca020181cc72af5e21d5";
 export const HEAD_SHA = "a".repeat(40);
 export const TEST_PACKAGE_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
-const PACKAGE_VERSION = JSON.parse(
+export const PACKAGE_VERSION = JSON.parse(
   readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"),
 ).version;
 export const TEST_PACKAGE_RELEASE = Object.freeze({
