@@ -1,25 +1,27 @@
-# Unpublished release readiness
+# Staging and release delivery
 
-Codekeeper is intentionally **not published to npm yet**. This document defines
-the proof required before public installation guidance or a production release
-is enabled. Completing a local pack or this workflow does not publish anything.
+Codekeeper releases move through a protected staging branch, a protected main
+branch, a reviewed Release Please pull request, and the existing verified npm
+publisher. Building a staging candidate does not publish anything.
 
 ## Current boundary
 
-- Source evaluation uses the verified local-tarball process in
-  [INSTALL.md](../INSTALL.md).
-- `npx @coryparry/codekeeper ...` is future public-release syntax, not a currently proven
-  installation route.
-- The publication workflow remains dormant until a reviewed
-  `codekeeper-vX.Y.Z` tag is deliberately created.
+- Feature pull requests target `staging` and require approval and all checks.
+- Every push to `staging` builds a complete candidate and retains its evidence.
+- A reviewed `staging` to `main` pull request is the production promotion.
+- Release Please opens a second reviewed pull request that updates the package
+  version, lockfiles, release manifest, and changelog.
+- Merging that release pull request creates `codekeeper-vX.Y.Z` and a GitHub
+  Release. The tag starts the npm publisher.
 - Repository rules and release tags must be applied and checked separately as
   described in [Repository governance](REPOSITORY_GOVERNANCE.md).
 
-## Produce an unpublished candidate
+## Produce a staged candidate
 
-Run **Codekeeper unpublished release readiness** manually with an exact branch,
-tag, or commit. It performs the repository, runtime, installer, and acceptance
-checks, packs the exact candidate outside the checkout, and uploads:
+Push an approved change to `staging`, or run **Stage Codekeeper release
+candidate** manually with an exact branch, tag, or commit. It performs the
+repository, runtime, installer, and acceptance checks, packs the exact candidate
+outside the checkout, and uploads:
 
 - the candidate npm tarball;
 - its npm-generated integrity receipt; and
@@ -55,7 +57,14 @@ Retain one evidence index containing:
 8. dependency, secret, license, and archive scans; and
 9. explicit maintainer approval to publish and change public documentation.
 
-Until all nine items are recorded against one exact commit, Codekeeper remains
-an unpublished source evaluation and the npm workflow must not be triggered.
-The release workflow also verifies that the source repository is public before
-building because npm provenance is not available for private repositories.
+The npm workflow must run only for the immutable tag created from an approved
+Release Please pull request. It verifies that the source repository is public
+before building because npm provenance is not available for private repositories.
+
+## Release Please token
+
+`RELEASE_PLEASE_TOKEN` must be a fine-grained personal access token or GitHub App
+token with Contents and Pull requests write access to this repository. A separate
+token is required because pull requests created with the workflow's default
+`GITHUB_TOKEN` do not start the required pull-request checks. Store only the token
+as an Actions secret; never commit it.

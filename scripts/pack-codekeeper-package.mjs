@@ -346,18 +346,29 @@ export async function packCodekeeperPackage({
   }
 }
 
-function destinationArgument(args) {
-  if (args.length !== 2 || args[0] !== "--destination" || !args[1]) {
+function commandArguments(args) {
+  const candidate = args[0] === "--candidate";
+  const destinationArgs = candidate ? args.slice(1) : args;
+  if (
+    destinationArgs.length !== 2 ||
+    destinationArgs[0] !== "--destination" ||
+    !destinationArgs[1]
+  ) {
     fail(
-      "usage: node scripts/pack-codekeeper-package.mjs --destination DIRECTORY",
+      "usage: node scripts/pack-codekeeper-package.mjs [--candidate] --destination DIRECTORY",
     );
   }
-  return path.resolve(args[1]);
+  return {
+    candidate,
+    destination: path.resolve(destinationArgs[1]),
+  };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {
+  const { candidate, destination } = commandArguments(process.argv.slice(2));
   packCodekeeperPackage({
-    destination: destinationArgument(process.argv.slice(2)),
+    destination,
+    requireClean: !candidate,
   })
     .then(({ report }) => process.stdout.write(formatNpmPackReport(report)))
     .catch((error) => {

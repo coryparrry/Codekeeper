@@ -19,10 +19,16 @@ function policy() {
         name: "main",
         target: "branch",
         enforcement: "active",
-        bypass_actors: [],
+        bypass_actors: [
+          {
+            actor_type: "RepositoryRole",
+            actor_id: 5,
+            bypass_mode: "pull_request",
+          },
+        ],
         conditions: {
           ref_name: {
-            include: ["refs/heads/main"],
+            include: ["refs/heads/main", "refs/heads/staging"],
             exclude: [],
           },
         },
@@ -30,7 +36,15 @@ function policy() {
           {
             type: "pull_request",
             parameters: {
-              required_approving_review_count: 0,
+              dismiss_stale_reviews_on_push: true,
+              require_code_owner_review: false,
+              required_approving_review_count: 1,
+            },
+          },
+          {
+            type: "required_status_checks",
+            parameters: {
+              required_status_checks: [{ context: "promotion-policy" }],
             },
           },
         ],
@@ -57,15 +71,52 @@ test("governance requires explicit non-automatic branch and tag rules", () => {
 
   const automatic = policy();
   automatic.activation.automatic = true;
-  assert.throws(() => validateGovernancePolicy(automatic), /automatic activation must remain false/);
+  assert.throws(
+    () => validateGovernancePolicy(automatic),
+    /automatic activation must remain false/,
+  );
 
   const bypass = policy();
-  bypass.rulesets[0].bypass_actors.push({
+  bypass.rulesets[0].bypass_actors[0].bypass_mode = "always";
+  assert.throws(
+    () => validateGovernancePolicy(bypass),
+    /only allow repository admins to bypass pull-request rules/,
+  );
+
+  const tagBypass = policy();
+  tagBypass.rulesets[1].bypass_actors.push({
     actor_type: "RepositoryRole",
     actor_id: 5,
-    bypass_mode: "always",
+    bypass_mode: "pull_request",
   });
-  assert.throws(() => validateGovernancePolicy(bypass), /bypass_actors must remain empty/);
+  assert.throws(
+    () => validateGovernancePolicy(tagBypass),
+    /must remain empty for release tags/,
+  );
+
+  const protectedBranches = policy().rulesets[0].conditions.ref_name.include;
+  assert.deepEqual(protectedBranches, [
+    "refs/heads/main",
+    "refs/heads/staging",
+  ]);
+  assert.equal(
+    policy().rulesets[0].rules[0].parameters.required_approving_review_count,
+    1,
+  );
+
+  const noApproval = policy();
+  noApproval.rulesets[0].rules[0].parameters.required_approving_review_count = 0;
+  assert.throws(
+    () => validateGovernancePolicy(noApproval),
+    /at least one approval/,
+  );
+
+  const noStaging = policy();
+  noStaging.rulesets[0].conditions.ref_name.include = ["refs/heads/main"];
+  assert.throws(
+    () => validateGovernancePolicy(noStaging),
+    /refs\/heads\/staging/,
+  );
 });
 
 test("reconciliation creates, updates, and preserves matching rulesets", () => {
@@ -92,24 +143,44 @@ test("reconciliation ignores GitHub default fields and key order", () => {
     name: "main",
     target: "branch",
     enforcement: "active",
-    bypass_actors: [],
     conditions: {
       ref_name: {
         exclude: [],
-        include: ["refs/heads/main"],
+        include: ["refs/heads/main", "refs/heads/staging"],
       },
     },
     rules: [
       {
         type: "pull_request",
         parameters: {
-          required_approving_review_count: 0,
+          dismiss_stale_reviews_on_push: true,
+          require_code_owner_review: false,
+          required_approving_review_count: 1,
           required_reviewers: [],
           allowed_merge_methods: ["merge", "squash", "rebase"],
         },
       },
+      {
+        type: "required_status_checks",
+        parameters: {
+          required_status_checks: [
+            {
+              context: "promotion-policy",
+              integration_id: 15368,
+            },
+          ],
+          strict_required_status_checks_policy: true,
+        },
+      },
     ],
-    current_user_can_bypass: "never",
+    bypass_actors: [
+      {
+        actor_type: "RepositoryRole",
+        actor_id: 5,
+        bypass_mode: "pull_request",
+      },
+    ],
+    current_user_can_bypass: "pull_requests_only",
   };
   const githubTags = {
     id: 21006878,
@@ -127,7 +198,9 @@ test("reconciliation ignores GitHub default fields and key order", () => {
   };
 
   assert.deepEqual(
-    reconciliationPlan(desired, [githubTags, githubMain]).map((item) => item.action),
+    reconciliationPlan(desired, [githubTags, githubMain]).map(
+      (item) => item.action,
+    ),
     ["unchanged", "unchanged"],
   );
 });
