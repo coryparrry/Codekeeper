@@ -23,7 +23,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "a1c313416c93cd2b73d336f2bffd242f1e2a7b8db31521ea8e23d2c3022969f6"
+      "sha256": "a7ea892baaf2173e4603a313b4a66bd25c0bc29eaca9da312bb670a702ec592a"
     },
     {
       "path": "presets/catalogue.mjs",
@@ -155,7 +155,23 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "d45f1ac42aad46e4a28d2a9c0661121f7bed0b21c462c535be76a923e3a895a1"
+      "sha256": "55ef38d4af23782abe33b6bb87d1ab39f08630ef0d6f2508ac227b9bd05fdf4d"
+    },
+    {
+      "path": "src/lib/publish/artifacts.mjs",
+      "sha256": "87bc5e34097f9e954bd5f2a4a27d864ce51c18a6a99eb9ba2e4c687f565fbcff"
+    },
+    {
+      "path": "src/lib/publish/common.mjs",
+      "sha256": "09db211108eedb44783e23fae754592a47f04cc0e3d1173ba8b2444ba69dd9b3"
+    },
+    {
+      "path": "src/lib/publish/issue.mjs",
+      "sha256": "7f03c30c2083af2cdf8a6ad310b97b82ef28a2c8e827a3d187ba8c7a7f1c1069"
+    },
+    {
+      "path": "src/lib/publish/review.mjs",
+      "sha256": "913d3bf0341ebe5080484beb7a918d560e892f1591706b20d0ed93418941bc2f"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",

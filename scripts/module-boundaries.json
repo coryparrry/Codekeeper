@@ -61,10 +61,6 @@
       "maxLines": 884,
       "maxBytes": 32028
     },
-    "tools/codekeeper/src/lib/publish.mjs": {
-      "maxLines": 1448,
-      "maxBytes": 63585
-    },
     "tools/codekeeper/test/agents-runtime.test.mjs": {
       "maxLines": 1768,
       "maxBytes": 67890
@@ -78,8 +74,8 @@
       "maxBytes": 67318
     },
     "tools/codekeeper/test/publish.test.mjs": {
-      "maxLines": 3288,
-      "maxBytes": 146076
+      "maxLines": 3069,
+      "maxBytes": 134794
     },
     "tools/codekeeper/test/workflow-contract.test.mjs": {
       "maxLines": 1042,
