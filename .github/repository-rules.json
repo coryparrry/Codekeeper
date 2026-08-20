@@ -19,7 +19,7 @@
       ],
       "conditions": {
         "ref_name": {
-          "include": ["refs/heads/main", "refs/heads/staging"],
+          "include": ["refs/heads/main"],
           "exclude": []
         }
       },
@@ -57,9 +57,6 @@
               },
               {
                 "context": "maintainer-checks"
-              },
-              {
-                "context": "promotion-policy"
               }
             ]
           }

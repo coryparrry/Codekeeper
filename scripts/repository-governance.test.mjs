@@ -28,7 +28,7 @@ function policy() {
         ],
         conditions: {
           ref_name: {
-            include: ["refs/heads/main", "refs/heads/staging"],
+            include: ["refs/heads/main"],
             exclude: [],
           },
         },
@@ -44,7 +44,12 @@ function policy() {
           {
             type: "required_status_checks",
             parameters: {
-              required_status_checks: [{ context: "promotion-policy" }],
+              required_status_checks: [
+                { context: "acceptance-harness-checks" },
+                { context: "installer-checks (22.23.2)" },
+                { context: "installer-checks (24.19.0)" },
+                { context: "maintainer-checks" },
+              ],
             },
           },
         ],
@@ -95,10 +100,7 @@ test("governance requires explicit non-automatic branch and tag rules", () => {
   );
 
   const protectedBranches = policy().rulesets[0].conditions.ref_name.include;
-  assert.deepEqual(protectedBranches, [
-    "refs/heads/main",
-    "refs/heads/staging",
-  ]);
+  assert.deepEqual(protectedBranches, ["refs/heads/main"]);
   assert.equal(
     policy().rulesets[0].rules[0].parameters.required_approving_review_count,
     1,
@@ -111,11 +113,13 @@ test("governance requires explicit non-automatic branch and tag rules", () => {
     /at least one approval/,
   );
 
-  const noStaging = policy();
-  noStaging.rulesets[0].conditions.ref_name.include = ["refs/heads/main"];
+  const extraBranch = policy();
+  extraBranch.rulesets[0].conditions.ref_name.include.push(
+    "refs/heads/develop",
+  );
   assert.throws(
-    () => validateGovernancePolicy(noStaging),
-    /refs\/heads\/staging/,
+    () => validateGovernancePolicy(extraBranch),
+    /protect only refs\/heads\/main/,
   );
 });
 
@@ -146,7 +150,7 @@ test("reconciliation ignores GitHub default fields and key order", () => {
     conditions: {
       ref_name: {
         exclude: [],
-        include: ["refs/heads/main", "refs/heads/staging"],
+        include: ["refs/heads/main"],
       },
     },
     rules: [
@@ -165,7 +169,19 @@ test("reconciliation ignores GitHub default fields and key order", () => {
         parameters: {
           required_status_checks: [
             {
-              context: "promotion-policy",
+              context: "acceptance-harness-checks",
+              integration_id: 15368,
+            },
+            {
+              context: "installer-checks (22.23.2)",
+              integration_id: 15368,
+            },
+            {
+              context: "installer-checks (24.19.0)",
+              integration_id: 15368,
+            },
+            {
+              context: "maintainer-checks",
               integration_id: 15368,
             },
           ],

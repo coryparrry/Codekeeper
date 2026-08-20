@@ -288,34 +288,6 @@ test("Release Please prepares reviewed Codekeeper releases for the hardened publ
     /release-please--branches--main--components--codekeeper/,
   );
   assert.match(workflow, /scripts\/refresh-release-manifest\.mjs/);
-  assert.match(checks, /name: promotion-policy/);
-  assert.match(checks, /"\$HEAD_REF" == "staging"/);
-  assert.match(checks, /"\$HEAD_REF" == release-please--branches--main\*/);
-});
-
-test("staging readiness rejects an incomplete normalized pack receipt", async () => {
-  const source = await repositoryFile(
-    ".github/workflows/codekeeper-release-readiness.yml",
-  );
-  assert.match(source, /push:\n    branches:\n      - staging/);
-  assert.match(source, /environment: staging/);
-  assert.match(
-    source,
-    /node scripts\/pack-codekeeper-package\.mjs --candidate --destination "\$RELEASE_ROOT" > "\$RUNNER_TEMP\/codekeeper-pack-report\.json"/,
-  );
-  const publisher = await repositoryFile(
-    ".github/workflows/codekeeper-release.yml",
-  );
-  assert.doesNotMatch(publisher, /pack-codekeeper-package\.mjs --candidate/);
-  assert.match(
-    source,
-    /const pack = JSON\.parse\(readFileSync\(process\.env\.PACK_REPORT/,
-  );
-  assert.match(
-    source,
-    /throw new Error\("invalid normalized npm pack receipt"\)/,
-  );
-  for (const field of ["name", "version", "filename", "integrity"]) {
-    assert.match(source, new RegExp(`${field}: pack\\.${field}`));
-  }
+  assert.doesNotMatch(checks, /promotion-policy/);
+  assert.doesNotMatch(checks, /staging/);
 });
