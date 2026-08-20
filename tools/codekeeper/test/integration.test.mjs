@@ -951,11 +951,11 @@ test("issue preparation reduces repository history to five deterministic duplica
     assert.equal(context.duplicateCandidates.length, 5);
     assert.equal(context.duplicateCandidates[0].number, 11);
     assert.ok(context.duplicateCandidates.every((candidate) => candidate.kind === "issue"));
-    assert.ok(context.duplicateCandidates.every((candidate) => candidate.number !== 50 && candidate.number !== 999 && candidate.number !== 21));
+    assert.ok(context.duplicateCandidates.every(({ number }) => ![50, 999, 21].includes(number)));
     assert.deepEqual(context.relatedPullRequests.map((candidate) => candidate.number), [21]);
-    const workspacePrompt = await readFile(path.join(directory, "workspace-prompt.md"), "utf8");
-    assert.doesNotMatch(workspacePrompt, /OMITTED DISTRACTOR/);
-    assert.match(workspacePrompt, /Pull requests are related context only and must never be returned as duplicateOf/);
+    const prompt = await readFile(path.join(directory, "workspace-prompt.md"), "utf8");
+    assert.doesNotMatch(prompt, /OMITTED DISTRACTOR/);
+    assert.match(prompt, /Pull requests are related context only and must never be returned as duplicateOf/);
     writeRuntimeMetadataFixture(directory, "issue");
     const resultPath = path.join(directory, "agent-result.json");
     const duplicateResult = {
