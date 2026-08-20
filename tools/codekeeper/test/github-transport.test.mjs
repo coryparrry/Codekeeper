@@ -450,16 +450,16 @@ test("GitHub stops retrying after the capped budget", async () => {
 });
 
 test("GraphQL follows GitHub.com and GHES API origins and requires a configured URL otherwise", () => {
-  assert.equal(resolveGraphqlUrl("https://api.github.com"), "https://api.github.com/graphql");
-  assert.equal(resolveGraphqlUrl("https://api.github.com/"), "https://api.github.com/graphql");
-  assert.equal(resolveGraphqlUrl("https://github.example/api/v3"), "https://github.example/api/graphql");
-  assert.equal(resolveGraphqlUrl("https://github.example/api/v3/"), "https://github.example/api/graphql");
+  assert.equal(resolveGraphqlUrl("https://api.github.com", ""), "https://api.github.com/graphql");
+  assert.equal(resolveGraphqlUrl("https://api.github.com/", ""), "https://api.github.com/graphql");
+  assert.equal(resolveGraphqlUrl("https://github.example/api/v3", ""), "https://github.example/api/graphql");
+  assert.equal(resolveGraphqlUrl("https://github.example/api/v3/", ""), "https://github.example/api/graphql");
   assert.equal(
     resolveGraphqlUrl("https://github.example/api", "https://github.example/api/graphql/"),
     "https://github.example/api/graphql"
   );
   assert.throws(
-    () => resolveGraphqlUrl("https://github.example/api"),
+    () => resolveGraphqlUrl("https://github.example/api", ""),
     /GITHUB_GRAPHQL_URL is required when GITHUB_API_URL is not github.com or a GHES \/api\/v3 endpoint/
   );
 });
@@ -498,6 +498,6 @@ test("REST requests preserve non-JSON error bodies and truncate nothing from Git
 });
 
 test("GraphQL follows the configured GitHub API host", () => {
-  assert.equal(resolveGraphqlUrl("https://api.github.com"), "https://api.github.com/graphql");
-  assert.equal(resolveGraphqlUrl("https://github.example/api/v3"), "https://github.example/api/graphql");
+  assert.equal(resolveGraphqlUrl("https://api.github.com", ""), "https://api.github.com/graphql");
+  assert.equal(resolveGraphqlUrl("https://github.example/api/v3", ""), "https://github.example/api/graphql");
 });
