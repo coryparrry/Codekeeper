@@ -135,6 +135,10 @@ function normalizeNpmPackReportValue(report) {
   return report;
 }
 
+export function formatNpmPackReport(report) {
+  return `${JSON.stringify(normalizeNpmPackReportValue(report))}\n`;
+}
+
 async function requirePackDestination(
   destination,
   repositoryRoot,
@@ -355,7 +359,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {
   packCodekeeperPackage({
     destination: destinationArgument(process.argv.slice(2)),
   })
-    .then(({ output }) => process.stdout.write(output))
+    .then(({ report }) => process.stdout.write(formatNpmPackReport(report)))
     .catch((error) => {
       process.stderr.write(`${error.message}\n`);
       process.exitCode = 1;

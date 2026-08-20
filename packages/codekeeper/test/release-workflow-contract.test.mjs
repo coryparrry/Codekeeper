@@ -195,3 +195,18 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   assert.match(source, /--verify-tag/);
   assert.match(source, /needs\.build\.outputs\.tag/);
 });
+
+test("unpublished readiness rejects an incomplete normalized pack receipt", async () => {
+  const source = await repositoryFile(
+    ".github/workflows/codekeeper-release-readiness.yml",
+  );
+  assert.match(
+    source,
+    /node scripts\/pack-codekeeper-package\.mjs --destination "\$RELEASE_ROOT" > "\$RUNNER_TEMP\/codekeeper-pack-report\.json"/,
+  );
+  assert.match(source, /const pack = JSON\.parse\(readFileSync\(process\.env\.PACK_REPORT/);
+  assert.match(source, /throw new Error\("invalid normalized npm pack receipt"\)/);
+  for (const field of ["name", "version", "filename", "integrity"]) {
+    assert.match(source, new RegExp(`${field}: pack\\.${field}`));
+  }
+});
