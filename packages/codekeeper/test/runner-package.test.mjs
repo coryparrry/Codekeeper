@@ -30,6 +30,15 @@ async function pathExists(filePath) {
   }
 }
 
+async function readOptionalFile(filePath) {
+  try {
+    return await readFile(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 test("normalizes object- and single-element array-shaped npm pack reports", () => {
   const report = {
     filename: "codekeeper-0.2.0.tgz",
@@ -264,6 +273,12 @@ test("command runner bounds captured output and requireSuccess rejects failure, 
 });
 
 test("one npm tarball installs a lightweight CLI then its copied runtime graph entirely offline", async (t) => {
+  const repositoryDeviceId = path.join(REPOSITORY_ROOT, ".local", "state", "gh", "device-id");
+  const packageDeviceId = path.join(PACKAGE_ROOT, ".local", "state", "gh", "device-id");
+  const deviceIdsBefore = await Promise.all([
+    readOptionalFile(repositoryDeviceId),
+    readOptionalFile(packageDeviceId)
+  ]);
   const npmCache = await temporaryDirectory(t, "codekeeper-npm-cache-");
   const packDestination = await temporaryDirectory(t, "codekeeper-pack-");
   const npmInstallRoot = await temporaryDirectory(t, "codekeeper-npm-install-");
@@ -349,10 +364,15 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   assert.deepEqual(installedPackage.bin, expectedBins);
   assert.deepEqual(installedPackage.dependencies, packageManifest.dependencies);
   assert.deepEqual([...new Set(installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? [])], [PINNED_COMMIT]);
+  const testHome = path.join(npmInstallRoot, "home");
   const shimEnvironment = Object.fromEntries(
     Object.entries({
       PATH: process.env.PATH,
-      SystemRoot: process.env.SystemRoot
+      HOME: testHome,
+      USERPROFILE: testHome,
+      SystemRoot: process.env.SystemRoot,
+      XDG_CONFIG_HOME: path.join(testHome, ".config"),
+      GH_CONFIG_DIR: path.join(testHome, ".config", "gh")
     }).filter(([, value]) => typeof value === "string")
   );
   const invoke = (command, args) =>
@@ -360,11 +380,13 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
       ? execFileSync("cmd.exe", ["/d", "/s", "/c", command, ...args], {
           encoding: "utf8",
           env: shimEnvironment,
+          cwd: npmInstallRoot,
           timeout: 10_000
         })
       : execFileSync(command, args, {
           encoding: "utf8",
           env: shimEnvironment,
+          cwd: npmInstallRoot,
           timeout: 10_000
         });
   const help = invoke(shim, ["--help"]);
@@ -449,6 +471,11 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   const installedAgentProfiles = await import(pathToFileURL(path.join(runtimeRoot, "src", "lib", "agent-profiles.mjs")).href);
   assert.equal(await realpath(installedRuntimePaths.CODEX_BIN), await realpath(path.join(runtimeRoot, "node_modules", "@openai", "codex", "bin", "codex.js")));
   assert.ok(await pathExists(path.join(runtimeRoot, "node_modules", "@openai", "agents")));
+  assert.deepEqual(
+    await Promise.all([readOptionalFile(repositoryDeviceId), readOptionalFile(packageDeviceId)]),
+    deviceIdsBefore,
+    "the offline installed-CLI canary must not write GitHub CLI state into the source checkout"
+  );
   const packagedProfile = await installedAgentProfiles.loadTrustedAgentProfile({
     mode: "review",
     source: installedAgentProfiles.AGENT_PROFILE_SOURCES.package,
