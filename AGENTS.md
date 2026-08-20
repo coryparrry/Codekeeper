@@ -30,6 +30,17 @@ Follow the repository’s Conventional Commit history: `fix(review): ...`, `feat
 Never commit or paste provider keys, GitHub App PEMs, tokens, or live traces. Report vulnerabilities through GitHub private vulnerability reporting.
 Release and source pins must be full, reviewed commits reachable from the repository default branch and containing the intended runtime; ancestry alone is insufficient, so verify the exact checkpoint before publication.
 
+### Generated hashes and source pins
+
+Treat hashes, manifests, and source pins as dependent outputs, never as values to guess or update early.
+
+1. Finish the source change first. If runtime payload files changed, run `node tools/codekeeper/scripts/generate-tooling-manifest.mjs --write`, then its `--check` form, before committing the source change.
+2. Run the affected tests and commit all source and generated-file changes except the root manifest. Do not modify tracked files after starting the root-manifest step.
+3. From that clean commit, run `node scripts/refresh-release-manifest.mjs`. It computes and commits only `MANIFEST.sha256`; never hand-edit that file. If any tracked file changes afterward, repeat this final step.
+4. Verify the final clean commit with `bash scripts/release-source.sh --verify` and report the exact commit SHA that passed.
+
+Never pin a future, unmerged, or self-referential commit. When installer provenance must advance, merge the runtime change first, fetch `origin/main`, inspect the exact merged commit, and update every source-pin copy in a follow-up PR. Run `node scripts/sync-policy-validator.mjs --write` when its pinned runtime inputs change, then rerun the manifest sequence above. A commit being an ancestor of `main` is not enough: confirm it contains the intended runtime and generated assets. Do not advance a runtime/source pin merely because a package version or release commit changed.
+
 ## Generic Product Boundary
 
 Keep this repository generic and adopter-safe. Do not commit organization-specific runner labels, billing settings, repository names, fixture credentials, user identities, or other deployment-local values to product workflows, examples, policies, or tests. Put concrete CI runner choices in repository or organization settings behind a generic variable with a portable default. Put live acceptance-only configuration in the private acceptance repository. Any exception requires explicit product-level justification and a contract test proving it is not personal configuration.
