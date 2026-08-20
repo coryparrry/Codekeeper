@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -20,6 +20,7 @@ import {
   coordinatorInstructions,
   enforceCoordinatorEvidenceBoundary,
   loadCoordinatorProfile,
+  loadTrustedRepositoryContext,
   modelSettingsFor,
   parseAgentOutput,
   reviewResultEscalation,
@@ -278,6 +279,49 @@ test("workspace execution runs one Codex MCP session through the Agents SDK", as
   assert.equal(workspaceMetadata.passes[0].tier, "configured");
   assert.equal(workspaceMetadata.postReviewEscalation, null);
   assert.equal(workspaceMetadata.totalDurationMs, workspaceMetadata.passes[0].durationMs);
+});
+
+test("workspace execution injects trusted context without writing the frozen prompt", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-readonly-workspace-prompt-"));
+  context.after(async () => {
+    await chmod(path.join(directory, "workspace-prompt.md"), 0o600).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  });
+  const resultPath = path.join(directory, "workspace-result.json");
+  const originalPrompt = "Inspect the issue against the checkout.\n";
+  await Promise.all([
+    writeFile(path.join(directory, "workspace-prompt.md"), originalPrompt),
+    writeFile(path.join(directory, "schema.json"), JSON.stringify(providerCompatibleJsonSchema(issueSchema(config)))),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", baseSha: trustedHeadSha }))
+  ]);
+  await chmod(path.join(directory, "workspace-prompt.md"), 0o400);
+
+  let prompt;
+  class FakeMCPServerStdio {
+    async connect() {}
+    async close() {}
+    async listTools() { return [{ name: "codex" }]; }
+    async callToolResult(_name, args) {
+      prompt = args.prompt;
+      return { structuredContent: { content: JSON.stringify(validIssue()) }, content: [] };
+    }
+  }
+  const workspaceConfig = withoutTracing();
+  workspaceConfig.ai.agents.issue.workspace.enabled = true;
+  await runWorkspaceAgentFromBundle({
+    mode: "issue",
+    directory,
+    config: workspaceConfig,
+    resultPath,
+    apiKey: "workspace-secret",
+    environment: { CODEX_HOME: path.join(directory, "codex-home"), PATH: "/usr/bin" },
+    sdkLoader: async () => ({ MCPServerStdio: FakeMCPServerStdio }),
+    codexAuthenticator: async () => {}
+  });
+
+  assert.match(prompt, /REPOSITORY CONTEXT GATE/);
+  assert.match(prompt, /Inspect the issue against the checkout/);
+  assert.equal(await readFile(path.join(directory, "workspace-prompt.md"), "utf8"), originalPrompt);
 });
 
 test("workspace review keeps only normalized left-to-right diagrams without losing validated findings", async (context) => {
@@ -1666,7 +1710,7 @@ test("enabled issue workspaces require specialist evidence before provider const
   await Promise.all([
     writeFile(path.join(directory, "prompt.md"), "Classify the issue.\n"),
     writeFile(path.join(directory, "schema.json"), JSON.stringify(schema)),
-    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", agentProfile: metadata })),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", baseSha: trustedHeadSha, agentProfile: metadata })),
     writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), profile)
   ]);
 
@@ -1694,16 +1738,24 @@ test("enabled issue workspaces require specialist evidence before provider const
   await writeFile(workspaceResultPath, JSON.stringify(validIssue()));
   await assert.rejects(
     runAgentFromBundle({ mode: "issue", directory, config: workspaceConfig, resultPath: path.join(directory, "result.json"), apiKey: "provider-secret", sdkLoader }),
-    /requires trusted repository context metadata/
+    /Workspace runtime metadata is missing or invalid/
   );
   assert.equal(providers, 0);
+  const expectedRepositoryContext = loadTrustedRepositoryContext("issue", { mode: "issue", baseSha: trustedHeadSha });
   await writeFile(workspaceMetadataPath, JSON.stringify({
     version: 1,
     mode: "issue",
     passes: [{ tier: "configured", model: "gpt-5.6-sol", effort: "low", durationMs: 40 }],
     postReviewEscalation: null,
     totalDurationMs: 40,
-    repositoryContext: { version: 1, ref: trustedSourceSha, instructionFiles: ["AGENTS.md"] }
+    repositoryContext: {
+      version: expectedRepositoryContext.version,
+      ref: expectedRepositoryContext.ref,
+      instructionFiles: expectedRepositoryContext.instructionFiles,
+      rootPath: expectedRepositoryContext.rootPath,
+      rootInstructionsSha256: expectedRepositoryContext.rootInstructionsSha256,
+      rootInstructionsBytes: expectedRepositoryContext.rootInstructionsBytes
+    }
   }));
   const workspaceMetadataResult = await runAgentFromBundle({
     mode: "issue",

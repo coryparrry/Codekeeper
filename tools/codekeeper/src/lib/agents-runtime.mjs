@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { loadFrozenAgentProfile } from "./agent-profiles.mjs";
 import * as core from "./agents-runtime-core.mjs";
@@ -18,24 +18,39 @@ export async function runWorkspaceAgentFromBundle(options) {
   if (context?.mode !== mode) throw new Error(`Frozen context mode is ${context?.mode ?? "missing"}; expected ${mode}`);
   const repositoryContext = loadTrustedRepositoryContext(mode, context, { cwd: process.cwd() });
   const gatedPrompt = `${repositoryContextGate(mode, context, repositoryContext)}\n\n${originalPrompt}`;
-  await writeFile(promptPath, gatedPrompt);
-  try {
-    const result = await core.runWorkspaceAgentFromBundle(options);
-    const metadataPath = path.join(path.dirname(resultPath), "workspace-runtime-metadata.json");
-    const metadata = await readJson(metadataPath);
-    metadata.repositoryContext = {
-      version: repositoryContext.version,
-      ref: repositoryContext.ref,
-      instructionFiles: repositoryContext.instructionFiles,
-      rootPath: repositoryContext.rootPath,
-      rootInstructionsSha256: repositoryContext.rootInstructionsSha256,
-      rootInstructionsBytes: repositoryContext.rootInstructionsBytes
-    };
-    await writeJson(metadataPath, metadata);
-    return result;
-  } finally {
-    await writeFile(promptPath, originalPrompt);
+  const result = await core.runWorkspaceAgentFromBundle({ ...options, workspacePrompt: gatedPrompt });
+  const metadataPath = path.join(path.dirname(resultPath), "workspace-runtime-metadata.json");
+  const metadata = await readJson(metadataPath);
+  metadata.repositoryContext = repositoryContextMetadata(repositoryContext);
+  await writeJson(metadataPath, metadata);
+  return result;
+}
+
+function repositoryContextMetadata(repositoryContext) {
+  return {
+    version: repositoryContext.version,
+    ref: repositoryContext.ref,
+    instructionFiles: repositoryContext.instructionFiles,
+    rootPath: repositoryContext.rootPath,
+    rootInstructionsSha256: repositoryContext.rootInstructionsSha256,
+    rootInstructionsBytes: repositoryContext.rootInstructionsBytes
+  };
+}
+
+function validateRepositoryContextMetadata(metadata, expected) {
+  const expectedMetadata = repositoryContextMetadata(expected);
+  if (!metadata || typeof metadata !== "object"
+    || metadata.version !== expectedMetadata.version
+    || metadata.ref !== expectedMetadata.ref
+    || metadata.rootPath !== expectedMetadata.rootPath
+    || metadata.rootInstructionsSha256 !== expectedMetadata.rootInstructionsSha256
+    || metadata.rootInstructionsBytes !== expectedMetadata.rootInstructionsBytes
+    || !Array.isArray(metadata.instructionFiles)
+    || metadata.instructionFiles.length !== expectedMetadata.instructionFiles.length
+    || metadata.instructionFiles.some((file, index) => file !== expectedMetadata.instructionFiles[index])) {
+    throw new Error("Workspace repository context metadata does not match the frozen trusted context");
   }
+  return expectedMetadata;
 }
 
 function noWorkspaceIssueResult() {
@@ -77,9 +92,14 @@ export async function runAgentFromBundle(options) {
     return metadata;
   }
 
-  if (!workspaceMetadata?.repositoryContext?.ref) throw new Error("Codekeeper issue triage requires trusted repository context metadata");
+  if (!settings.workspaceEnabled) {
+    throw new Error("Codekeeper issue triage received workspace evidence while the specialist is disabled");
+  }
+  const trustedRepositoryContext = loadTrustedRepositoryContext("issue", context, { cwd: process.cwd() });
+  const validatedWorkspaceMetadata = core.validateWorkspaceRuntimeMetadata(workspaceMetadata, "issue", config, context);
+  validateRepositoryContextMetadata(validatedWorkspaceMetadata.repositoryContext, trustedRepositoryContext);
   const output = validateIssueResult(specialistResult, config);
-  const totalModelDurationMs = Number(workspaceMetadata.totalDurationMs ?? 0);
+  const totalModelDurationMs = validatedWorkspaceMetadata.totalDurationMs;
   const metadata = {
     mode: "issue",
     provider: "workspace",
@@ -91,7 +111,7 @@ export async function runAgentFromBundle(options) {
     maxTurns: 0,
     durationMs: 0,
     totalModelDurationMs,
-    workspace: workspaceMetadata
+    workspace: validatedWorkspaceMetadata
   };
   await writeJson(resultPath, output);
   await writeJson(path.join(directory, "runtime-metadata.json"), metadata);

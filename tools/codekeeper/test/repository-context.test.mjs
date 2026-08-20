@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -26,6 +27,8 @@ const issueResult = Object.freeze({
   decision: { required: false, question: "", rationale: "", options: [] },
   comment: "The issue is bounded after inspecting the repository."
 });
+
+const trustedHeadSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 
 function issueConfig() {
   return {
@@ -160,7 +163,7 @@ async function issueBundle(directory, { workspaceEnabled = false, specialist = n
   await Promise.all([
     writeFile(path.join(directory, "prompt.md"), "Classify the issue.\n"),
     writeFile(path.join(directory, "schema.json"), JSON.stringify(schema)),
-    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", agentProfile: metadata })),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", baseSha: trustedHeadSha, agentProfile: metadata })),
     writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), profile)
   ]);
   if (specialist) {
@@ -182,10 +185,18 @@ async function issueBundle(directory, { workspaceEnabled = false, specialist = n
 test("issue workspace evidence becomes authoritative without a second model turn", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-authoritative-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  const expectedRepositoryContext = loadTrustedRepositoryContext("issue", { mode: "issue", baseSha: trustedHeadSha });
   const config = await issueBundle(directory, {
     workspaceEnabled: true,
     specialist: issueResult,
-    repositoryContext: { version: 1, ref: "d".repeat(40), instructionFiles: ["AGENTS.md"] }
+    repositoryContext: {
+      version: expectedRepositoryContext.version,
+      ref: expectedRepositoryContext.ref,
+      instructionFiles: expectedRepositoryContext.instructionFiles,
+      rootPath: expectedRepositoryContext.rootPath,
+      rootInstructionsSha256: expectedRepositoryContext.rootInstructionsSha256,
+      rootInstructionsBytes: expectedRepositoryContext.rootInstructionsBytes
+    }
   });
   let providers = 0;
   const result = await runAgentFromBundle({
@@ -205,6 +216,47 @@ test("issue workspace evidence becomes authoritative without a second model turn
   assert.equal(result.workspaceSpecialistUsed, true);
   assert.equal(result.maxTurns, 0);
   assert.equal(providers, 0);
+});
+
+test("issue triage rejects altered workspace metadata before accepting authoritative evidence", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-metadata-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const expectedRepositoryContext = loadTrustedRepositoryContext("issue", { mode: "issue", baseSha: trustedHeadSha });
+  const repositoryContext = {
+    version: expectedRepositoryContext.version,
+    ref: expectedRepositoryContext.ref,
+    instructionFiles: expectedRepositoryContext.instructionFiles,
+    rootPath: expectedRepositoryContext.rootPath,
+    rootInstructionsSha256: expectedRepositoryContext.rootInstructionsSha256,
+    rootInstructionsBytes: expectedRepositoryContext.rootInstructionsBytes
+  };
+  const config = await issueBundle(directory, { workspaceEnabled: true, specialist: issueResult, repositoryContext });
+  const metadataPath = path.join(directory, "workspace-runtime-metadata.json");
+  const original = JSON.parse(await readFile(metadataPath, "utf8"));
+  const disabledConfig = structuredClone(config);
+  disabledConfig.ai.agents.issue.workspace.enabled = false;
+  await assert.rejects(
+    runAgentFromBundle({ mode: "issue", directory, config: disabledConfig, resultPath: path.join(directory, "result.json") }),
+    /workspace evidence while the specialist is disabled/
+  );
+  const cases = [
+    { name: "wrong commit", mutate: (metadata) => { metadata.repositoryContext.ref = "f".repeat(40); } },
+    { name: "invalid commit", mutate: (metadata) => { metadata.repositoryContext.ref = "not-a-commit"; } },
+    { name: "wrong mode", mutate: (metadata) => { metadata.mode = "review"; } },
+    { name: "wrong model", mutate: (metadata) => { metadata.passes[0].model = "other-model"; } },
+    { name: "invalid duration", mutate: (metadata) => { metadata.passes[0].durationMs = -1; } },
+    { name: "altered instructions", mutate: (metadata) => { metadata.repositoryContext.rootInstructionsSha256 = "0".repeat(64); } }
+  ];
+  for (const { name, mutate } of cases) {
+    const metadata = structuredClone(original);
+    mutate(metadata);
+    await writeFile(metadataPath, JSON.stringify(metadata));
+    await assert.rejects(
+      runAgentFromBundle({ mode: "issue", directory, config, resultPath: path.join(directory, "result.json") }),
+      /Workspace (runtime|repository context) metadata/,
+      name
+    );
+  }
 });
 
 test("issue triage fails safely instead of suggesting work without repository context", async (t) => {

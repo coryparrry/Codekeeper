@@ -806,7 +806,7 @@ PRIOR MEDIUM RESULT:
 ${JSON.stringify(mediumResult)}`;
 }
 
-function validatedWorkspaceRuntimeMetadata(metadata, mode, config, context) {
+export function validateWorkspaceRuntimeMetadata(metadata, mode, config, context) {
   if (!metadata || metadata.version !== 1 || metadata.mode !== mode || !Array.isArray(metadata.passes)) {
     throw new Error("Workspace runtime metadata is missing or invalid");
   }
@@ -869,6 +869,7 @@ export async function runWorkspaceAgentFromBundle({
   directory,
   config,
   resultPath,
+  workspacePrompt,
   apiKey = process.env.CODEKEEPER_WORKSPACE_API_KEY,
   environment = process.env,
   sdkLoader = () => import("@openai/agents"),
@@ -884,8 +885,11 @@ export async function runWorkspaceAgentFromBundle({
   const promptPath = path.join(directory, "workspace-prompt.md");
   const schemaPath = path.join(directory, "schema.json");
   const contextPath = path.join(directory, "context.json");
+  if (workspacePrompt !== undefined && typeof workspacePrompt !== "string") {
+    throw new Error("Workspace prompt override must be a string");
+  }
   const [prompt, schema, context] = await Promise.all([
-    readFile(promptPath, "utf8"),
+    workspacePrompt === undefined ? readFile(promptPath, "utf8") : Promise.resolve(workspacePrompt),
     readJson(schemaPath),
     readJson(contextPath)
   ]);
@@ -1134,7 +1138,7 @@ export async function runAgentFromBundle({
     context
   });
   if (workspaceMetadata !== null) {
-    result.metadata.workspace = validatedWorkspaceRuntimeMetadata(workspaceMetadata, mode, config, context);
+    result.metadata.workspace = validateWorkspaceRuntimeMetadata(workspaceMetadata, mode, config, context);
     result.metadata.totalModelDurationMs = result.metadata.durationMs + result.metadata.workspace.totalDurationMs;
   }
   await writeJson(resultPath, result.output);
