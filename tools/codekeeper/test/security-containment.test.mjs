@@ -324,7 +324,7 @@ test("sealing rejects a forged security-labelled repair before artifact creation
   );
   const contextValue = {
     mode: "audit",
-    repository: "owner/repository",
+    repository: process.env.GITHUB_REPOSITORY ?? "owner/repository",
     configSha256,
     baseSha: "b".repeat(40),
     repairAuthorized: true,
@@ -409,7 +409,7 @@ test("publication rejects a forged sealed credential-bearing audit before GitHub
   await writeFile(profilePath, agentProfile);
   const contextValue = {
     mode: "audit",
-    repository: "owner/repository",
+    repository: process.env.GITHUB_REPOSITORY ?? "owner/repository",
     configSha256,
     baseSha: "b".repeat(40),
     runUrl: "https://example.test/run",
