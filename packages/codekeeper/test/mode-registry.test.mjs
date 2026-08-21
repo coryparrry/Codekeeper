@@ -7,14 +7,13 @@ import {
   AGENT_PROFILES,
   COMMAND_MODE_MAP,
   MODE_IDS,
-  MODE_PLAN_KEYS,
   MODE_REGISTRY,
   MODES,
   RUNTIME_WORKFLOW_IDS,
   RUNTIME_WORKFLOWS,
-  resolveModePlan,
   validateModeRegistry,
 } from "../src/mode-registry.mjs";
+import { MODE_PLAN_KEYS, resolveModePlan } from "../src/mode-plan.mjs";
 
 const registryRecords = () =>
   Object.values(MODE_REGISTRY).map((mode) => structuredClone(mode));

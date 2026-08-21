@@ -2,7 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { resolveModePlan } from "../src/mode-registry.mjs";
+import { resolveModePlan } from "../src/mode-plan.mjs";
 
 function usage() {
   return [

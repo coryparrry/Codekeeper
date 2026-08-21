@@ -10,7 +10,7 @@ import {
   SETUP_PR_TITLE
 } from "../constants.mjs";
 import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS } from "../mode-registry.mjs";
-export { resolveModePlan } from "../mode-registry.mjs";
+export { resolveModePlan } from "../mode-plan.mjs";
 import { InstallerError } from "../errors.mjs";
 import { normalizeProfileSettings, validateEditableSettings } from "../settings.mjs";
 import {
