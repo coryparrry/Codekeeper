@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.1...codekeeper-v0.3.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **installer:** defer private App proof to workflow ([#249](https://github.com/coryparrry/Codekeeper/issues/249)) ([5fd178c](https://github.com/coryparrry/Codekeeper/commit/5fd178c742249b0dc7d645f13048de27b3bf5e8b))
+
 ## [0.3.1](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.0...codekeeper-v0.3.1) (2026-08-21)
 
 
