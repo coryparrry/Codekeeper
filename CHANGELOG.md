@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.4](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.3...codekeeper-v0.3.4) (2026-08-21)
+
+
+### Bug Fixes
+
+* **installer:** keep assistant workflow run names parseable ([39c683d](https://github.com/coryparrry/Codekeeper/commit/39c683d96e6a018a74595cd3be386c30bca3ac7a))
+* **installer:** quote assistant workflow run name ([57615a3](https://github.com/coryparrry/Codekeeper/commit/57615a3a165339f0ac6e7eb3fc5834bb202ec6c3))
+* **release:** accept reviewed merge checkpoints ([6e339ca](https://github.com/coryparrry/Codekeeper/commit/6e339ca82252ce8ab7965a41df2bf37aa529b8d2))
+* **release:** accept reviewed merge checkpoints ([dcd87a2](https://github.com/coryparrry/Codekeeper/commit/dcd87a2af390608b3404dbbf8914b31f78c675a3))
+* **release:** advance assistant source checkpoint ([72b535e](https://github.com/coryparrry/Codekeeper/commit/72b535e46d247dbc571ad14e262435ff4cd399b7))
+* **release:** advance assistant source checkpoint ([727182d](https://github.com/coryparrry/Codekeeper/commit/727182d5840254f8bdd2704e0c458fcac783dee5))
+
 ## [0.3.3](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.2...codekeeper-v0.3.3) (2026-08-21)
 
 
