@@ -234,10 +234,9 @@ test("GitHub App registration is explicitly not-provable without a read-only ada
   );
   const app = check(report, "github-app");
   assert.equal(app.status, "not-provable");
-  assert.equal(app.required, false);
   assert.match(app.remediation, /registration proof adapter/);
-  assert.equal(check(report, "app-credentials").status, "pass");
-  assert.equal(report.ready, true);
+  assert.equal(check(report, "app-credentials").status, "skipped");
+  assert.equal(report.ready, false);
 });
 
 test("readiness distinguishes configured state from stored private-key proof", async () => {
@@ -286,6 +285,18 @@ test("readiness distinguishes configured state from stored private-key proof", a
   assert.equal(check(privateRegistration, "github-app").required, false);
   assert.equal(check(privateRegistration, "app-credentials").status, "pass");
   assert.equal(privateRegistration.ready, true);
+
+  const definitiveMismatch = await verifyCodekeeperReadiness(
+    baseOptions({
+      inspectApp: async () => ({ status: "mismatch", reason: "permissions" }),
+      verifyPackage: async () => true,
+      verifyAppCredentials: async () => true
+    })
+  );
+  assert.equal(check(definitiveMismatch, "github-app").status, "fail");
+  assert.equal(check(definitiveMismatch, "github-app").required, true);
+  assert.equal(check(definitiveMismatch, "app-credentials").status, "skipped");
+  assert.equal(definitiveMismatch.ready, false);
 });
 
 test("controlled checks stay skipped unless explicitly requested and supplied", async () => {

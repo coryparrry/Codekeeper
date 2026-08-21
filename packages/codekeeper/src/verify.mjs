@@ -313,7 +313,6 @@ export async function verifyCodekeeperReadiness({
         detail: "Installed configuration could not be read.",
         remediation:
           "Repair the installed files before checking the GitHub App registration.",
-        required: false,
       }),
     );
     checks.push(
@@ -409,21 +408,23 @@ export async function verifyCodekeeperReadiness({
               detail:
                 "The configured App identity, events, and registration permissions match the installed policy.",
               remediation: "None.",
-              required: false,
             }),
           );
         } else {
+          const unavailable = proof?.reason === "registration-unavailable";
           checks.push(
             frozenCheck({
               id: "github-app",
               label: "GitHub App registration",
-              status: "not-provable",
+              status: unavailable ? "not-provable" : "fail",
               boundary: "github-read",
-              detail:
-                "The supplied App proof did not establish the required registration identity, events, and permissions.",
-              remediation:
-                "Update the GitHub App registration to the exact required identity, events, and permissions.",
-              required: false,
+              detail: unavailable
+                ? "The private GitHub App registration cannot be inspected with the GitHub CLI token."
+                : "The configured App registration does not have the exact required identity, events, and permissions.",
+              remediation: unavailable
+                ? "Use the no-mutation credential probe below to prove App identity, installation, repository access, and required permissions."
+                : "Update the GitHub App registration to the exact required identity, events, and permissions.",
+              required: !unavailable,
             }),
           );
         }
@@ -436,7 +437,6 @@ export async function verifyCodekeeperReadiness({
             boundary: "github-read",
             detail: "No read-only GitHub App registration proof adapter was supplied.",
             remediation: "Run verification with the GitHub App registration proof adapter.",
-            required: false,
           })
         );
       }
@@ -451,7 +451,6 @@ export async function verifyCodekeeperReadiness({
             "The GitHub App registration proof could not be read with this token.",
           remediation:
             "Grant read access to the public GitHub App registration, then verify again.",
-          required: false,
         }),
       );
     }
