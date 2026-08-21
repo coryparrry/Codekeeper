@@ -12,6 +12,7 @@ function usage() {
     "  --mode <mode|auto>                         Requested package mode",
     "  --event <event-name>                        Trusted event name",
     "  --command <command>                        Validated owner command",
+    "  --surface <issue|pull-request|review-thread> Trusted owner-command surface",
     "  --target-number <number>                   Issue or pull request number",
     "  --dry-run                                  Disable live publication",
     "  --candidate-requires-validation <boolean>  Set validated candidate context",
@@ -64,6 +65,13 @@ export function parseResolverArgs(args) {
           "JSON input options cannot be combined with field options.",
         );
       context.event.command = takeValue(args, index, "--command");
+      index += 1;
+    } else if (argument === "--surface") {
+      if (inputSource)
+        throw new TypeError(
+          "JSON input options cannot be combined with field options.",
+        );
+      context.event.surface = takeValue(args, index, "--surface");
       index += 1;
     } else if (argument === "--target-number") {
       if (inputSource)

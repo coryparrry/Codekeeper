@@ -43,7 +43,10 @@ test("the registry contains the existing package modes and derived compatibility
   );
   assert.deepEqual(RUNTIME_WORKFLOW_IDS, ["assistant", ...MODE_IDS]);
   assert.equal(AGENT_PROFILES.fixer.asset, "agents/fixer.md");
-  assert.equal(COMMAND_MODE_MAP.implement, "fix");
+  assert.equal(COMMAND_MODE_MAP.implement.issue, "fix");
+  assert.equal(COMMAND_MODE_MAP.review.issue, "issues");
+  assert.equal(COMMAND_MODE_MAP.review["pull-request"], "review");
+  assert.equal(COMMAND_MODE_MAP.defer["review-thread"], "issues");
   assert.equal(validateModeRegistry(MODE_REGISTRY), true);
 });
 
@@ -93,6 +96,20 @@ test("registry validation closes IDs, nested keys, routes, and dynamic rules", (
   const extraStage = registryRecords();
   extraStage[0].stages.extra = "never";
   assert.throws(() => validateModeRegistry(extraStage), /invalid key set/);
+
+  const duplicateCommandSurface = registryRecords();
+  duplicateCommandSurface[0].supportedCommands[0].surfaces.push("issue");
+  assert.throws(
+    () => validateModeRegistry(duplicateCommandSurface),
+    /duplicate command routing/,
+  );
+
+  const extraCommandRouteKey = registryRecords();
+  extraCommandRouteKey[0].supportedCommands.extra = true;
+  assert.throws(
+    () => validateModeRegistry(extraCommandRouteKey),
+    /invalid command routing/,
+  );
 
   const badPermissionRule = registryRecords();
   badPermissionRule[0].rules.permissionEscalations[0].permissions.contents =
@@ -177,10 +194,10 @@ test("registry validation rejects invalid permissions, unsafe topology, and miss
 
 test("registry validation rejects command routes to unknown modes and cancellation of mutation runs", () => {
   const unknownCommandTarget = registryRecords();
-  unknownCommandTarget[3].supportedCommands.fix = "unknown";
+  unknownCommandTarget[3].supportedCommands[0].surfaces = ["unknown"];
   assert.throws(
     () => validateModeRegistry(unknownCommandTarget),
-    /targets an unknown mode/,
+    /invalid command routing/,
   );
 
   const cancellingFix = registryRecords();
@@ -217,7 +234,7 @@ test("registry validation rejects command routes to unknown modes and cancellati
   );
 
   const reservedCommand = registryRecords();
-  reservedCommand[0].supportedCommands.constructor = "review";
+  reservedCommand[0].supportedCommands[0].command = "constructor";
   assert.throws(
     () => validateModeRegistry(reservedCommand),
     /reserved command name/,
@@ -230,6 +247,7 @@ test("resolved plans are closed, frozen, deterministic, and reject event authori
     event: {
       eventName: "issue_comment",
       command: "implement",
+      surface: "issue",
       targetNumber: "197",
     },
     policy: { candidateRequiresValidation: true },
@@ -252,6 +270,7 @@ test("resolved plans are closed, frozen, deterministic, and reject event authori
         event: {
           eventName: "issue_comment",
           command: "implement",
+          surface: "issue",
           appPermissions: { contents: "read" },
         },
         policy: {},
@@ -262,7 +281,11 @@ test("resolved plans are closed, frozen, deterministic, and reject event authori
     () =>
       resolveModePlan({
         requestedMode: "fix",
-        event: { eventName: "issue_comment", command: "implement" },
+        event: {
+          eventName: "issue_comment",
+          command: "implement",
+          surface: "issue",
+        },
         policy: { stages: { validation: "never" } },
       }),
     /unknown properties/,
@@ -274,6 +297,7 @@ test("resolved plans are closed, frozen, deterministic, and reject event authori
       event: {
         eventName: "issue_comment",
         command: "implement",
+        surface: "issue",
         targetNumber: 197,
       },
       policy: { candidateRequiresValidation: true },
@@ -320,6 +344,7 @@ test("auto resolution uses unambiguous event and command routes", () => {
       event: {
         eventName: "issue_comment",
         command: "implement",
+        surface: "issue",
         targetNumber: 9,
       },
     }).resolvedMode,
@@ -329,7 +354,11 @@ test("auto resolution uses unambiguous event and command routes", () => {
     () =>
       resolveModePlan({
         requestedMode: "auto",
-        event: { eventName: "issue_comment", command: "unknown" },
+        event: {
+          eventName: "issue_comment",
+          command: "unknown",
+          surface: "issue",
+        },
       }),
     /Auto mode requires|Unknown mode command/,
   );
@@ -337,7 +366,11 @@ test("auto resolution uses unambiguous event and command routes", () => {
     () =>
       resolveModePlan({
         requestedMode: "review",
-        event: { eventName: "issue_comment", command: "implement" },
+        event: {
+          eventName: "issue_comment",
+          command: "implement",
+          surface: "issue",
+        },
       }),
     /does not target mode review/,
   );
@@ -385,7 +418,11 @@ test("auto resolution uses unambiguous event and command routes", () => {
     () =>
       resolveModePlan({
         requestedMode: "auto",
-        event: { eventName: "issue_comment", command: "constructor" },
+        event: {
+          eventName: "issue_comment",
+          command: "constructor",
+          surface: "issue",
+        },
       }),
     /Unknown mode command/,
   );
@@ -393,7 +430,11 @@ test("auto resolution uses unambiguous event and command routes", () => {
     () =>
       resolveModePlan({
         requestedMode: "auto",
-        event: { eventName: "issue_comment", command: "toString" },
+        event: {
+          eventName: "issue_comment",
+          command: "toString",
+          surface: "issue",
+        },
       }),
     /Unknown mode command/,
   );
@@ -405,13 +446,16 @@ test("auto resolution uses unambiguous event and command routes", () => {
       }),
     /unknown properties/,
   );
-  assert.throws(
-    () =>
-      resolveModePlan({
-        requestedMode: "auto",
-        event: { eventName: "pull_request", command: "triage" },
-      }),
-    /ambiguous event route/,
+  assert.equal(
+    resolveModePlan({
+      requestedMode: "auto",
+      event: {
+        eventName: "pull_request",
+        command: "triage",
+        surface: "pull-request",
+      },
+    }).resolvedMode,
+    "review",
   );
   const parsedProto = JSON.parse(
     '{"requestedMode":"review","event":{"eventName":"pull_request","__proto__":{}},"policy":{}}',
@@ -519,6 +563,147 @@ test("target numbers accept only canonical positive decimal values", () => {
   }
 });
 
+test("owner command routes preserve every surface and alias", () => {
+  const expected = {
+    review: {
+      issue: "issues",
+      "pull-request": "review",
+      "review-thread": "review",
+    },
+    triage: {
+      issue: "issues",
+      "pull-request": "review",
+      "review-thread": "review",
+    },
+    rerun: { "pull-request": "review", "review-thread": "review" },
+    implement: { issue: "fix" },
+    repair: { "pull-request": "fix", "review-thread": "fix" },
+    fix: { "pull-request": "fix", "review-thread": "fix" },
+    defer: { "review-thread": "issues" },
+    help: {
+      issue: "issues",
+      "pull-request": "review",
+      "review-thread": "review",
+    },
+    status: {
+      issue: "issues",
+      "pull-request": "review",
+      "review-thread": "review",
+    },
+    pause: {
+      issue: "issues",
+      "pull-request": "review",
+      "review-thread": "review",
+    },
+    stop: {
+      issue: "issues",
+      "pull-request": "review",
+      "review-thread": "review",
+    },
+  };
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(COMMAND_MODE_MAP).map(([command, surfaces]) => [
+        command,
+        { ...surfaces },
+      ]),
+    ),
+    expected,
+  );
+  for (const [command, surfaces] of Object.entries(expected)) {
+    for (const [surface, mode] of Object.entries(surfaces)) {
+      const eventName =
+        surface === "issue"
+          ? "issues"
+          : surface === "pull-request"
+            ? "pull_request"
+            : "pull_request_review_comment";
+      assert.equal(
+        resolveModePlan({
+          requestedMode: "auto",
+          event: { eventName, command, surface },
+        }).resolvedMode,
+        mode,
+        `${command} on ${surface}`,
+      );
+    }
+  }
+  assert.throws(
+    () =>
+      resolveModePlan({
+        requestedMode: "auto",
+        event: {
+          eventName: "issues",
+          command: "repair",
+          surface: "issue",
+        },
+      }),
+    /unavailable on surface issue/,
+  );
+  assert.throws(
+    () =>
+      resolveModePlan({
+        requestedMode: "auto",
+        event: { eventName: "issues", command: "review" },
+      }),
+    /require a valid event surface/,
+  );
+  assert.throws(
+    () =>
+      resolveModePlan({
+        requestedMode: "auto",
+        event: {
+          eventName: "issues",
+          command: "review",
+          surface: "comment",
+        },
+      }),
+    /require a valid event surface/,
+  );
+  assert.throws(
+    () =>
+      resolveModePlan({
+        requestedMode: "auto",
+        event: { eventName: "issues", surface: "issue" },
+      }),
+    /requires an owner command/,
+  );
+});
+
+test("registry permission rules drive dynamic mode plans", () => {
+  const reviewDefault = resolveModePlan({
+    requestedMode: "review",
+    event: { eventName: "pull_request" },
+  });
+  const reviewRepair = resolveModePlan({
+    requestedMode: "review",
+    event: { eventName: "pull_request" },
+    policy: { review: { autoRepair: true } },
+  });
+  assert.equal(reviewDefault.appPermissions.contents, "read");
+  assert.equal(reviewRepair.appPermissions.contents, "write");
+  const maintainDefault = resolveModePlan({
+    requestedMode: "maintain",
+    event: { eventName: "schedule" },
+  });
+  const maintainRepair = resolveModePlan({
+    requestedMode: "maintain",
+    event: { eventName: "schedule" },
+    policy: { audit: { repair: { enabled: true } } },
+  });
+  assert.equal(maintainDefault.appPermissions.contents, "read");
+  assert.equal(maintainRepair.appPermissions.contents, "write");
+  assert.throws(
+    () =>
+      resolveModePlan({
+        requestedMode: "review",
+        event: { eventName: "pull_request" },
+        policy: { review: { autoRepair: true, unexpected: true } },
+      }),
+    /invalid key set/,
+  );
+});
+
 test("the direct resolver CLI accepts JSON input or standalone field flags", () => {
   const cli = fileURLToPath(
     new URL("../bin/resolve-mode-plan.mjs", import.meta.url),
@@ -533,6 +718,7 @@ test("the direct resolver CLI accepts JSON input or standalone field flags", () 
         event: {
           eventName: "issue_comment",
           command: "implement",
+          surface: "issue",
           targetNumber: 12,
         },
         policy: {},
@@ -582,6 +768,8 @@ test("the direct resolver CLI accepts JSON input or standalone field flags", () 
       "issue_comment",
       "--command",
       "implement",
+      "--surface",
+      "issue",
       "--target-number",
       "12",
     ],

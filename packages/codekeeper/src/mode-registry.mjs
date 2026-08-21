@@ -12,6 +12,10 @@ import {
   STAGE_KEYS,
   WORKSPACE_KEYS,
 } from "./mode-registry-schema.mjs";
+import {
+  buildCommandModeLookup,
+  validateCommandRoutes,
+} from "./mode-command-routes.mjs";
 
 const PERMISSION_KEYS = Object.freeze(["contents", "issues", "pullRequests"]);
 const PERMISSION_VALUES = new Set(["read", "write"]);
@@ -26,7 +30,6 @@ const WORKSPACE_ACCESS_VALUES = new Set(["none", "read", "write"]);
 const ISOLATION_VALUES = new Set(["none", "unprivileged-user"]);
 const CONCURRENCY_SCOPES = new Set(["repository", "repository-target"]);
 const CANONICAL_MODE_IDS = new Set(["review", "maintain", "issues", "fix"]);
-const COMMAND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const POLICY_PATH_SEGMENT_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
 const EVENT_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const SUPPORTED_EVENT_NAMES = new Set([
@@ -38,17 +41,6 @@ const SUPPORTED_EVENT_NAMES = new Set([
   "schedule",
   "workflow_dispatch",
   "repository_dispatch",
-]);
-const RESERVED_COMMAND_NAMES = new Set([
-  "__proto__",
-  "constructor",
-  "prototype",
-  "toString",
-  "valueOf",
-  "hasOwnProperty",
-  "isPrototypeOf",
-  "propertyIsEnumerable",
-  "toLocaleString",
 ]);
 const SAFE_PATH = /^[A-Za-z0-9._/-]+$/;
 const CALLER_TARGET = /^\.github\/workflows\/codekeeper-[a-z0-9-]+\.yml$/;
@@ -123,14 +115,43 @@ const RAW_MODES = [
       ],
       defaultRoute: "review",
       routes: [],
-      commandOverrideTargets: [],
+      commandOverrideTargets: ["issues", "fix"],
     },
     manual: true,
     concurrency: {
       scope: "repository-target",
       cancelAutomaticSupersededRuns: true,
     },
-    supportedCommands: { review: "review", rerun: "review" },
+    supportedCommands: [
+      {
+        command: "review",
+        surfaces: ["pull-request", "review-thread"],
+      },
+      {
+        command: "triage",
+        surfaces: ["pull-request", "review-thread"],
+      },
+      {
+        command: "rerun",
+        surfaces: ["pull-request", "review-thread"],
+      },
+      {
+        command: "help",
+        surfaces: ["pull-request", "review-thread"],
+      },
+      {
+        command: "status",
+        surfaces: ["pull-request", "review-thread"],
+      },
+      {
+        command: "pause",
+        surfaces: ["pull-request", "review-thread"],
+      },
+      {
+        command: "stop",
+        surfaces: ["pull-request", "review-thread"],
+      },
+    ],
     requiredGate: true,
     trigger: "same-repository pull request",
     target: ".github/workflows/codekeeper-review.yml",
@@ -190,7 +211,7 @@ const RAW_MODES = [
     },
     manual: true,
     concurrency: { scope: "repository", cancelAutomaticSupersededRuns: false },
-    supportedCommands: {},
+    supportedCommands: [],
     requiredGate: false,
     trigger: "schedule or manual run",
     target: ".github/workflows/codekeeper-maintain.yml",
@@ -245,7 +266,15 @@ const RAW_MODES = [
       scope: "repository-target",
       cancelAutomaticSupersededRuns: true,
     },
-    supportedCommands: { triage: "issues" },
+    supportedCommands: [
+      { command: "review", surfaces: ["issue"] },
+      { command: "triage", surfaces: ["issue"] },
+      { command: "defer", surfaces: ["review-thread"] },
+      { command: "help", surfaces: ["issue"] },
+      { command: "status", surfaces: ["issue"] },
+      { command: "pause", surfaces: ["issue"] },
+      { command: "stop", surfaces: ["issue"] },
+    ],
     requiredGate: false,
     trigger: "issue or issue comment",
     target: ".github/workflows/codekeeper-issues.yml",
@@ -308,7 +337,11 @@ const RAW_MODES = [
       scope: "repository-target",
       cancelAutomaticSupersededRuns: false,
     },
-    supportedCommands: { implement: "fix", repair: "fix", fix: "fix" },
+    supportedCommands: [
+      { command: "implement", surfaces: ["issue"] },
+      { command: "repair", surfaces: ["pull-request", "review-thread"] },
+      { command: "fix", surfaces: ["pull-request", "review-thread"] },
+    ],
     requiredGate: false,
     trigger: "ready issue, owner command, or manual run",
     target: ".github/workflows/codekeeper-fix.yml",
@@ -366,7 +399,7 @@ export function validateModeRegistry(
     throw new TypeError("Mode registry keys must equal their mode IDs.");
   }
   const ids = new Set();
-  const commands = new Set();
+  const commandSurfaces = new Set();
   for (const mode of records) {
     if (
       !mode ||
@@ -509,42 +542,7 @@ export function validateModeRegistry(
         `Mode ${mode.id} cannot automatically cancel mutation-authorized runs.`,
       );
     }
-    const commandRoutes = mode.supportedCommands;
-    if (
-      !commandRoutes ||
-      typeof commandRoutes !== "object" ||
-      Array.isArray(commandRoutes)
-    ) {
-      throw new TypeError(`Mode ${mode.id} has invalid command routing.`);
-    }
-    assertPlainObject(commandRoutes, `Mode ${mode.id} command routing`);
-    const supportedCommands = Array.isArray(commandRoutes)
-      ? commandRoutes.map((command) => [command, mode.id])
-      : commandRoutes &&
-          typeof commandRoutes === "object" &&
-          !Array.isArray(commandRoutes)
-        ? Object.entries(commandRoutes)
-        : null;
-    if (
-      !supportedCommands ||
-      supportedCommands.some(([command]) => !COMMAND_PATTERN.test(command))
-    ) {
-      throw new TypeError(`Mode ${mode.id} has invalid command routing.`);
-    }
-    for (const [command, target] of supportedCommands) {
-      if (RESERVED_COMMAND_NAMES.has(command)) {
-        throw new TypeError(`Mode ${mode.id} uses a reserved command name.`);
-      }
-      if (target !== mode.id)
-        throw new TypeError(
-          `Command ${command} targets an unknown mode: ${target}`,
-        );
-      if (commands.has(command))
-        throw new TypeError(
-          `Mode registry contains duplicate command routing: ${command}`,
-        );
-      commands.add(command);
-    }
+    validateCommandRoutes(mode.supportedCommands, mode.id, commandSurfaces);
     if (
       typeof mode.label !== "string" ||
       !mode.label.trim() ||
@@ -681,10 +679,6 @@ export function validateModeRegistry(
 validateModeRegistry();
 
 function freezeMode(mode) {
-  const commandRoutes = mode.supportedCommands;
-  const supportedCommands = Array.isArray(commandRoutes)
-    ? Object.fromEntries(commandRoutes.map((command) => [command, mode.id]))
-    : Object.fromEntries(Object.entries(commandRoutes));
   return deepFreeze({
     ...mode,
     workspace: { ...mode.workspace },
@@ -699,7 +693,10 @@ function freezeMode(mode) {
       })),
     },
     concurrency: { ...mode.concurrency },
-    supportedCommands,
+    supportedCommands: mode.supportedCommands.map((route) => ({
+      ...route,
+      surfaces: [...route.surfaces],
+    })),
     caller: { ...mode.caller },
     rules: {
       ...mode.rules,
@@ -721,13 +718,18 @@ export const MODE_REGISTRY = MODES;
 export const POLICY_AGENT_TO_MODE = Object.freeze(
   Object.fromEntries(MODE_IDS.map((id) => [MODES[id].policyAgent, id])),
 );
-const COMMAND_MODE_LOOKUP = Object.create(null);
-for (const id of MODE_IDS) {
-  for (const [command, target] of Object.entries(MODES[id].supportedCommands)) {
-    COMMAND_MODE_LOOKUP[command] = target;
-  }
+export const COMMAND_MODE_MAP = deepFreeze(
+  buildCommandModeLookup(Object.values(MODES)),
+);
+export function commandModeForSurface(command, surface) {
+  if (!Object.hasOwn(COMMAND_MODE_MAP, command)) return null;
+  const routes = COMMAND_MODE_MAP[command];
+  return Object.hasOwn(routes, surface) ? routes[surface] : null;
 }
-export const COMMAND_MODE_MAP = deepFreeze(COMMAND_MODE_LOOKUP);
+
+export function commandExists(command) {
+  return Object.hasOwn(COMMAND_MODE_MAP, command);
+}
 export const AGENT_PROFILE_IDS = Object.freeze(
   Object.keys(AGENT_PROFILE_DEFINITIONS),
 );

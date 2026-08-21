@@ -1,9 +1,15 @@
 import {
-  COMMAND_MODE_MAP,
+  commandExists,
+  commandModeForSurface,
   MODES,
   modeForId,
   POLICY_AGENT_TO_MODE,
 } from "./mode-registry.mjs";
+import {
+  assertExactKeys,
+  COMMAND_SURFACE_VALUES,
+} from "./mode-registry-schema.mjs";
+import { resolveModeAppPermissions } from "./mode-permissions.mjs";
 
 const COMMAND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const EVENT_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
@@ -26,6 +32,7 @@ const ISSUE_EVENTS = new Set(["issues", "issue_comment"]);
 const EVENT_CONTEXT_KEYS = new Set([
   "eventName",
   "command",
+  "surface",
   "action",
   "targetNumber",
   "dryRun",
@@ -35,7 +42,12 @@ const POLICY_CONTEXT_KEYS = new Set([
   "publicationEnabled",
   "dryRun",
   "readyLabelFix",
+  "review",
+  "audit",
 ]);
+const REVIEW_POLICY_KEYS = new Set(["autoRepair"]);
+const AUDIT_POLICY_KEYS = new Set(["repair"]);
+const REPAIR_POLICY_KEYS = new Set(["enabled"]);
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function deepFreeze(value) {
@@ -44,10 +56,6 @@ function deepFreeze(value) {
   Object.freeze(value);
   for (const child of Object.values(value)) deepFreeze(child);
   return value;
-}
-
-function copy(value) {
-  return Array.isArray(value) ? [...value] : { ...value };
 }
 
 function assertPlainObject(value, label) {
@@ -120,6 +128,18 @@ function validateEventContext(event) {
     .toLowerCase();
   if (command && !COMMAND_PATTERN.test(command))
     throw new TypeError("Mode-plan command is invalid.");
+  const surface = event.surface;
+  if (
+    command &&
+    (typeof surface !== "string" || !COMMAND_SURFACE_VALUES.has(surface))
+  ) {
+    throw new TypeError(
+      "Mode-plan owner commands require a valid event surface.",
+    );
+  }
+  if (!command && surface !== undefined) {
+    throw new TypeError("Mode-plan event surface requires an owner command.");
+  }
   const trigger = triggerForEvent(eventName, command);
   const action = optionalString(event.action, "Mode-plan event action")
     .trim()
@@ -130,6 +150,7 @@ function validateEventContext(event) {
   return Object.freeze({
     eventName,
     command,
+    surface,
     action,
     trigger,
     targetNumber: validTargetNumber(event.targetNumber),
@@ -162,11 +183,44 @@ function validatePolicyContext(policy) {
   ) {
     throw new TypeError("Mode-plan ready-label fix policy must be boolean.");
   }
+  if (policy.review !== undefined) {
+    assertExactKeys(
+      policy.review,
+      REVIEW_POLICY_KEYS,
+      "Mode-plan review policy",
+    );
+    if (typeof policy.review.autoRepair !== "boolean") {
+      throw new TypeError(
+        "Mode-plan review auto-repair policy must be boolean.",
+      );
+    }
+  }
+  if (policy.audit !== undefined) {
+    assertExactKeys(policy.audit, AUDIT_POLICY_KEYS, "Mode-plan audit policy");
+    assertExactKeys(
+      policy.audit.repair,
+      REPAIR_POLICY_KEYS,
+      "Mode-plan audit repair policy",
+    );
+    if (typeof policy.audit.repair.enabled !== "boolean") {
+      throw new TypeError("Mode-plan audit repair policy must be boolean.");
+    }
+  }
   return Object.freeze({
     candidateRequiresValidation: policy.candidateRequiresValidation,
     publicationEnabled: policy.publicationEnabled,
     dryRun: policy.dryRun === true,
     readyLabelFix: policy.readyLabelFix === true,
+    review:
+      policy.review === undefined
+        ? undefined
+        : Object.freeze({ autoRepair: policy.review.autoRepair }),
+    audit:
+      policy.audit === undefined
+        ? undefined
+        : Object.freeze({
+            repair: Object.freeze({ enabled: policy.audit.repair.enabled }),
+          }),
   });
 }
 
@@ -216,10 +270,15 @@ function defaultRoutes(event) {
 
 function commandMode(event) {
   if (event.command) {
-    if (!Object.hasOwn(COMMAND_MODE_MAP, event.command)) {
+    if (!commandExists(event.command)) {
       throw new TypeError(`Unknown mode command: ${event.command}`);
     }
-    const resolved = COMMAND_MODE_MAP[event.command];
+    const resolved = commandModeForSurface(event.command, event.surface);
+    if (!resolved) {
+      throw new TypeError(
+        `Command ${event.command} is unavailable on surface ${event.surface}.`,
+      );
+    }
     const defaults = defaultRoutes(event);
     if (
       defaults.length === 1 &&
@@ -255,10 +314,7 @@ function automaticMode(event, policy) {
 
 function modeAuthorizesEvent(mode, event, policy) {
   if (event.command)
-    return (
-      Object.hasOwn(COMMAND_MODE_MAP, event.command) &&
-      COMMAND_MODE_MAP[event.command] === mode.id
-    );
+    return commandModeForSurface(event.command, event.surface) === mode.id;
   if (event.eventName === "workflow_dispatch") return mode.manual === true;
   const routes = matchingRoutes(event, policy);
   if (routes.length > 1) {
@@ -299,16 +355,22 @@ export function resolveModePlan(input = {}) {
         ? POLICY_AGENT_TO_MODE[normalizedRequestedMode]
         : normalizedRequestedMode;
   const mode = MODES[resolvedMode];
+  if (eventContext.command && !commandExists(eventContext.command)) {
+    throw new TypeError(`Unknown mode command: ${eventContext.command}`);
+  }
   if (
     eventContext.command &&
-    !Object.hasOwn(COMMAND_MODE_MAP, eventContext.command)
+    !commandModeForSurface(eventContext.command, eventContext.surface)
   ) {
-    throw new TypeError(`Unknown mode command: ${eventContext.command}`);
+    throw new TypeError(
+      `Command ${eventContext.command} is unavailable on surface ${eventContext.surface}.`,
+    );
   }
   if (
     normalizedRequestedMode !== "auto" &&
     eventContext.command &&
-    COMMAND_MODE_MAP[eventContext.command] !== resolvedMode
+    commandModeForSurface(eventContext.command, eventContext.surface) !==
+      resolvedMode
   ) {
     throw new TypeError(
       `Command ${eventContext.command} does not target mode ${resolvedMode}.`,
@@ -341,7 +403,7 @@ export function resolveModePlan(input = {}) {
     publicationRequired,
     requiredGate: mode.requiredGate,
     publicationAdapter: mode.publicationAdapter,
-    appPermissions: copy(mode.appPermissions),
+    appPermissions: resolveModeAppPermissions(mode, policyContext),
   });
 }
 

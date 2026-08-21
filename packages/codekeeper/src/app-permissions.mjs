@@ -1,5 +1,6 @@
 import { InstallerError } from "./errors.mjs";
 import { MODE_REGISTRY, modeForId } from "./mode-registry.mjs";
+import { resolveModeAppPermissions } from "./mode-permissions.mjs";
 
 export const APP_PERMISSION_VALUES = Object.freeze(["read", "write"]);
 
@@ -23,37 +24,12 @@ function capabilitySet(capabilities) {
   );
 }
 
-function policyValue(policy, path) {
-  let current = policy;
-  for (const segment of path) {
-    if (
-      !current ||
-      typeof current !== "object" ||
-      !Object.hasOwn(current, segment)
-    ) {
-      return undefined;
-    }
-    current = current[segment];
-  }
-  return current;
-}
-
 export function workflowAppPermissions(mode, policy = null) {
   const normalizedMode = modeForId(mode)?.id;
   const defaults = normalizedMode ? WORKFLOW_DEFAULTS[normalizedMode] : null;
   if (!defaults) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   if (!policy) return defaults;
-  const definition = MODE_REGISTRY[normalizedMode];
-  for (const rule of definition.rules.permissionEscalations) {
-    if (policyValue(policy, rule.policyPath) === rule.value) {
-      return permissions(
-        rule.permissions.contents,
-        rule.permissions.issues,
-        rule.permissions.pullRequests,
-      );
-    }
-  }
-  return defaults;
+  return resolveModeAppPermissions(MODE_REGISTRY[normalizedMode], policy);
 }
 
 export function assistantAppPermissions(modes, policy = null) {

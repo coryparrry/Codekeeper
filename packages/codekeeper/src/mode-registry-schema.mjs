@@ -45,6 +45,12 @@ export const PERMISSION_RULE_KEYS = new Set([
   "value",
   "permissions",
 ]);
+export const SUPPORTED_COMMAND_KEYS = new Set(["command", "surfaces"]);
+export const COMMAND_SURFACE_VALUES = new Set([
+  "issue",
+  "pull-request",
+  "review-thread",
+]);
 export const CALLER_KEYS = new Set(["target", "asset"]);
 export const RUNTIME_KEYS = new Set([
   "target",
