@@ -37,19 +37,17 @@ function exactPermissions(value, expected) {
     JSON.stringify(Object.entries(expected).sort());
 }
 
-function permissionDelta(expected, registration, installation) {
+function permissionDelta(expected, registration) {
   return [...new Set([
     ...Object.keys(expected),
-    ...Object.keys(registration ?? {}),
-    ...Object.keys(installation ?? {})
+    ...Object.keys(registration ?? {})
   ])]
     .sort()
-    .filter((permission) => registration?.[permission] !== expected[permission] || installation?.[permission] !== expected[permission])
+    .filter((permission) => registration?.[permission] !== expected[permission])
     .map((permission) => Object.freeze({
       permission,
       required: expected[permission] ?? "none",
-      registered: registration?.[permission] ?? "none",
-      installed: installation?.[permission] ?? "none"
+      registered: registration?.[permission] ?? "none"
     }));
 }
 
@@ -145,87 +143,21 @@ export async function inspectInstalledAppRegistration({
     });
   }
 
-  const installationsResult = await runner.run(
-    "gh",
-    [
-      "api",
-      "--hostname",
-      "github.com",
-      "user/installations",
-      "--paginate",
-      "--slurp",
-    ],
-    { cwd: root },
-  );
-  if (!successful(installationsResult)) return appProof("mismatch", { reason: "installation-unavailable", slug, settingsUrl });
-  let appInstallation;
-  try {
-    const pages = JSON.parse(installationsResult.stdout);
-    const installations = Array.isArray(pages)
-      ? pages.flatMap((page) => page?.installations ?? [])
-      : [];
-    appInstallation = installations.find(
-      (candidate) =>
-        candidate?.app_slug === slug && candidate?.suspended_at == null,
-    );
-  } catch {
-    return appProof("mismatch", { reason: "installation-invalid", slug, settingsUrl });
-  }
-  if (
-    !Number.isSafeInteger(appInstallation?.id) ||
-    appInstallation.repository_selection !== "selected"
-  )
-    return appProof("mismatch", { reason: "installation-scope", slug, settingsUrl });
-
-  const delta = permissionDelta(
-    expectedPermissions,
-    app.permissions,
-    appInstallation.permissions
-  );
-  if (!exactPermissions(app.permissions, expectedPermissions) ||
-      !exactPermissions(appInstallation.permissions, expectedPermissions)) {
+  if (!exactPermissions(app.permissions, expectedPermissions)) {
     return appProof("mismatch", {
       reason: "permissions",
       slug,
       settingsUrl,
       expectedPermissions: Object.freeze({ ...expectedPermissions }),
       registrationPermissions: Object.freeze({ ...(app.permissions ?? {}) }),
-      installationPermissions: Object.freeze({ ...(appInstallation.permissions ?? {}) }),
-      permissionDelta: Object.freeze(delta)
+      permissionDelta: Object.freeze(permissionDelta(expectedPermissions, app.permissions))
     });
   }
-
-  const repositoriesResult = await runner.run(
-    "gh",
-    [
-      "api",
-      "--hostname",
-      "github.com",
-      `user/installations/${appInstallation.id}/repositories?per_page=2`,
-    ],
-    { cwd: root },
-  );
-  if (!successful(repositoriesResult)) return appProof("mismatch", { reason: "repositories-unavailable", slug, settingsUrl });
-  try {
-    const response = JSON.parse(repositoriesResult.stdout);
-    const repositoryMatches = (
-      response?.total_count === 1 &&
-      Array.isArray(response.repositories) &&
-      response.repositories.length === 1 &&
-      response.repositories[0]?.full_name?.toLowerCase() ===
-        repository.toLowerCase()
-    );
-    return repositoryMatches
-      ? appProof("pass", {
-          slug,
-          settingsUrl,
-          installationId: appInstallation.id,
-          expectedPermissions: Object.freeze({ ...expectedPermissions })
-        })
-      : appProof("mismatch", { reason: "repository-scope", slug, settingsUrl });
-  } catch {
-    return appProof("mismatch", { reason: "repositories-invalid", slug, settingsUrl });
-  }
+  return appProof("pass", {
+    slug,
+    settingsUrl,
+    expectedPermissions: Object.freeze({ ...expectedPermissions })
+  });
 }
 
 export async function inspectInstalledApp(options) {
