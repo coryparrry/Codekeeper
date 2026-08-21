@@ -23,6 +23,7 @@ const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const DEFAULT_BRANCH = "main";
 const PRODUCTION_SOURCE_PATHS = Object.freeze([
   "tools/codekeeper",
+  "examples/workflows/codekeeper-assistant.yml.example",
   ".github/workflows/codekeeper-assistant.yml",
   ".github/workflows/codekeeper-fix.yml",
   ".github/workflows/codekeeper-issues.yml",
@@ -99,9 +100,16 @@ export function verifyReleaseAuthority(
     "--",
     ...PRODUCTION_SOURCE_PATHS,
   ]);
-  if (pinnedSourceCommit !== latestProductionCheckpoint) {
+  try {
+    git(repositoryRoot, [
+      "merge-base",
+      "--is-ancestor",
+      latestProductionCheckpoint,
+      pinnedSourceCommit,
+    ]);
+  } catch {
     fail(
-      "the installer source pin does not match the latest production checkpoint on the fetched default branch",
+      "the installer source pin does not contain the latest production checkpoint on the fetched default branch",
     );
   }
   return { defaultBranchRef, latestProductionCheckpoint, releaseCommit };
