@@ -253,6 +253,77 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   assert.match(source, /needs\.build\.outputs\.tag/);
 });
 
+test("publication requires a credential-free exact-candidate lifecycle gate", async () => {
+  const source = await repositoryFile(
+    ".github/workflows/codekeeper-release.yml",
+  );
+  const candidateStart = source.indexOf("  candidate-lifecycle:\n");
+  const publishStart = source.indexOf("  publish:\n", candidateStart);
+  assert.notEqual(candidateStart, -1, "candidate lifecycle job is required");
+  assert.notEqual(publishStart, -1, "publish must follow candidate lifecycle");
+  const candidate = source.slice(candidateStart, publishStart);
+  const publish = source.slice(publishStart);
+
+  assert.match(candidate, /needs: build/);
+  assert.match(candidate, /node-version: 24\.19\.0/);
+  assert.match(
+    candidate,
+    /name: codekeeper-release-\$\{\{ needs\.build\.outputs\.version \}\}-\$\{\{ github\.sha \}\}/,
+  );
+  for (const output of [
+    "filename",
+    "integrity",
+    "manifest_sha256",
+    "name",
+    "source_commit",
+    "version",
+  ]) {
+    assert.match(candidate, new RegExp(`needs\\.build\\.outputs\\.${output}`));
+  }
+  assert.match(candidate, /node scripts\/verify-release-candidate\.mjs/);
+  assert.match(candidate, /--expected-filename "\$EXPECTED_FILENAME"/);
+  assert.match(candidate, /--expected-integrity "\$EXPECTED_INTEGRITY"/);
+  assert.match(
+    candidate,
+    /--expected-manifest-sha256 "\$EXPECTED_MANIFEST_SHA256"/,
+  );
+  assert.match(
+    candidate,
+    /--expected-source-commit "\$EXPECTED_SOURCE_COMMIT"/,
+  );
+  assert.doesNotMatch(candidate, /environment: npm/);
+  assert.doesNotMatch(candidate, /id-token:/);
+  assert.doesNotMatch(candidate, /^    permissions:/m);
+  assert.doesNotMatch(candidate, /secrets\.|NPM_TOKEN|NODE_AUTH_TOKEN/i);
+  assert.match(publish, /needs: \[build, candidate-lifecycle\]/);
+  assert.match(publish, /environment: npm/);
+});
+
+test("pull-request CI runs the same candidate lifecycle on both supported Node lines", async () => {
+  const source = await repositoryFile(
+    ".github/workflows/codekeeper-self-test.yml",
+  );
+  const start = source.indexOf("  installer-checks:\n");
+  const end = source.indexOf("  acceptance-harness-checks:\n", start);
+  assert.notEqual(start, -1, "installer and release candidate PR job is required");
+  assert.notEqual(end, -1, "release candidate PR job must be bounded");
+  const candidate = source.slice(start, end);
+
+  assert.match(candidate, /node-version: \[22\.23\.2, 24\.19\.0\]/);
+  assert.match(candidate, /node-version: \$\{\{ matrix\.node-version \}\}/);
+  assert.match(
+    candidate,
+    /node scripts\/pack-codekeeper-package\.mjs \\\n+            --candidate \\\n+            --destination "\$CANDIDATE_ROOT" > "\$PACK_REPORT"/,
+  );
+  assert.match(candidate, /node scripts\/verify-release-candidate\.mjs/);
+  assert.match(candidate, /--pack-report "\$PACK_REPORT"/);
+  assert.match(candidate, /--tarball-directory "\$CANDIDATE_ROOT"/);
+  assert.match(candidate, /--expected-source-commit "\$\(git rev-parse HEAD\)"/);
+  assert.doesNotMatch(candidate, /environment: npm/);
+  assert.doesNotMatch(candidate, /id-token:/);
+  assert.doesNotMatch(candidate, /secrets\.|NPM_TOKEN|NODE_AUTH_TOKEN/i);
+});
+
 test("Release Please prepares reviewed Codekeeper releases for the hardened publisher", async () => {
   const [workflow, config, manifest, checks, packageManifest] =
     await Promise.all([

@@ -11,7 +11,7 @@
     "governance:check": "node scripts/repository-governance.mjs --validate && node --test scripts/repository-governance.test.mjs",
     "architecture:check": "node scripts/check-module-boundaries.mjs && node scripts/check-local-import-cycles.mjs && node --test scripts/check-module-boundaries.test.mjs scripts/check-local-import-cycles.test.mjs",
     "helpers:check": "node scripts/sync-mirrored-helpers.mjs --check && node --test scripts/sync-mirrored-helpers.test.mjs",
-    "release:tag:check": "node --test scripts/release-tag-integrity.test.mjs scripts/refresh-release-manifest.test.mjs",
+    "release:tag:check": "node --test scripts/release-tag-integrity.test.mjs scripts/refresh-release-manifest.test.mjs scripts/verify-release-candidate.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
