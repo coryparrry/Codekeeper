@@ -450,7 +450,7 @@ test("auto resolution uses unambiguous event and command routes", () => {
     resolveModePlan({
       requestedMode: "auto",
       event: {
-        eventName: "pull_request",
+        eventName: "issue_comment",
         command: "triage",
         surface: "pull-request",
       },
@@ -613,11 +613,9 @@ test("owner command routes preserve every surface and alias", () => {
   for (const [command, surfaces] of Object.entries(expected)) {
     for (const [surface, mode] of Object.entries(surfaces)) {
       const eventName =
-        surface === "issue"
-          ? "issues"
-          : surface === "pull-request"
-            ? "pull_request"
-            : "pull_request_review_comment";
+        surface === "review-thread"
+          ? "pull_request_review_comment"
+          : "issue_comment";
       assert.equal(
         resolveModePlan({
           requestedMode: "auto",
@@ -638,7 +636,7 @@ test("owner command routes preserve every surface and alias", () => {
           surface: "issue",
         },
       }),
-    /unavailable on surface issue/,
+    /not valid for event/,
   );
   assert.throws(
     () =>
@@ -668,18 +666,10 @@ test("owner command routes preserve every surface and alias", () => {
       }),
     /requires an owner command/,
   );
-  assert.equal(
-    resolveModePlan({
-      requestedMode: "auto",
-      event: {
-        eventName: "pull_request_review",
-        command: "review",
-        surface: "pull-request",
-      },
-    }).resolvedMode,
-    "review",
-  );
   for (const eventName of [
+    "issues",
+    "pull_request",
+    "pull_request_review",
     "schedule",
     "workflow_dispatch",
     "repository_dispatch",
@@ -694,8 +684,9 @@ test("owner command routes preserve every surface and alias", () => {
     );
   }
   for (const [eventName, surface] of [
-    ["issues", "pull-request"],
-    ["pull_request", "issue"],
+    ["issues", "issue"],
+    ["pull_request", "pull-request"],
+    ["pull_request_review", "pull-request"],
     ["pull_request_review_comment", "pull-request"],
   ]) {
     assert.throws(

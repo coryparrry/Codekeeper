@@ -30,10 +30,10 @@ const PULL_REQUEST_EVENTS = new Set([
 ]);
 const ISSUE_EVENTS = new Set(["issues", "issue_comment"]);
 const OWNER_COMMAND_SURFACES_BY_EVENT = Object.freeze({
-  issues: new Set(["issue"]),
-  issue_comment: new Set(["issue", "pull-request", "review-thread"]),
-  pull_request: new Set(["pull-request"]),
-  pull_request_review: new Set(["pull-request"]),
+  issues: new Set(),
+  issue_comment: new Set(["issue", "pull-request"]),
+  pull_request: new Set(),
+  pull_request_review: new Set(),
   pull_request_review_comment: new Set(["review-thread"]),
   schedule: new Set(),
   workflow_dispatch: new Set(),

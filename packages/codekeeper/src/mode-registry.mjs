@@ -259,7 +259,7 @@ const RAW_MODES = [
       triggers: ["issues", "issue_comment"],
       defaultRoute: "issues",
       routes: [],
-      commandOverrideTargets: ["fix"],
+      commandOverrideTargets: ["review", "fix"],
     },
     manual: true,
     concurrency: {
