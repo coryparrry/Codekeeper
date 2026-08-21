@@ -56,12 +56,9 @@ import {
 } from "./helpers.mjs";
 
 const CHECKPOINT_PATHS = Object.freeze({
-  "agents/fixer.md": "tools/codekeeper/agents/fixer.md",
-  "agents/issue-triager.md": "tools/codekeeper/agents/issue-triager.md",
-  "agents/pr-reviewer.md": "tools/codekeeper/agents/pr-reviewer.md",
-  "agents/repository-auditor.md": "tools/codekeeper/agents/repository-auditor.md",
   "policies/mixed.json": ".github/codekeeper.json",
-  "policies/openai.json": ".github/codekeeper.json#preset=openai"
+  "policies/openai.json": ".github/codekeeper.json#preset=openai",
+  "workflows/assistant.yml": "examples/workflows/codekeeper-assistant.yml.example"
 });
 
 const CHECKPOINT_PROVENANCE_PATHS = Object.freeze({
@@ -114,7 +111,7 @@ test("the bundled asset inventory and metadata match their canonical source byte
   for (const key of ASSET_KEYS) {
     const record = bundle.metadata.assets[key];
     const contents = bundle.contents[key];
-    const checkpointPath = CHECKPOINT_PATHS[key];
+    const checkpointPath = key.startsWith("agents/") ? `tools/codekeeper/${key}` : CHECKPOINT_PATHS[key];
     if (checkpointPath) assert.equal(record.sourcePath, checkpointPath, `${key} source path`);
     const [sourcePath, preset] = (checkpointPath ?? record.sourcePath).split("#preset=");
     const baseSource = checkpointPath
