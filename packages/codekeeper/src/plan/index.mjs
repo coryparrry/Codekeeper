@@ -1,17 +1,16 @@
 import { registrationAppPermissions } from "../app-permissions.mjs";
 import {
-  AGENT_PROFILE_IDS,
-  AGENT_PROFILES,
   BOT_LOGIN_VARIABLE,
   CLIENT_ID_VARIABLE,
   ENABLED_VARIABLE,
-  MODE_IDS,
   MODEL_PROVIDER_SECRETS,
   SECRET_PURPOSES,
   SETUP_BRANCH,
   SETUP_COMMIT_MESSAGE,
   SETUP_PR_TITLE
 } from "../constants.mjs";
+import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODE_IDS } from "../mode-registry.mjs";
+export { resolveModePlan } from "../mode-registry.mjs";
 import { InstallerError } from "../errors.mjs";
 import { normalizeProfileSettings, validateEditableSettings } from "../settings.mjs";
 import {

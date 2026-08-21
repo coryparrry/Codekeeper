@@ -1,4 +1,5 @@
 import { InstallerError } from "./errors.mjs";
+import { MODE_REGISTRY, modeForId } from "./mode-registry.mjs";
 
 export const APP_PERMISSION_VALUES = Object.freeze(["read", "write"]);
 
@@ -6,13 +7,11 @@ function permissions(contents, issues, pullRequests) {
   return Object.freeze({ contents, issues, pullRequests });
 }
 
-const WORKFLOW_DEFAULTS = Object.freeze({
-  assistant: permissions("write", "write", "write"),
-  review: permissions("read", "write", "write"),
-  maintain: permissions("read", "write", "read"),
-  issues: permissions("read", "write", "read"),
-  fix: permissions("write", "write", "write")
-});
+const WORKFLOW_DEFAULTS = Object.freeze(Object.fromEntries(Object.entries(MODE_REGISTRY).map(([mode, definition]) => [mode, permissions(
+  definition.appPermissions.contents,
+  definition.appPermissions.issues,
+  definition.appPermissions.pullRequests
+)])));
 
 function capabilitySet(capabilities) {
   return new Set(
@@ -25,20 +24,21 @@ function capabilitySet(capabilities) {
 }
 
 export function workflowAppPermissions(mode, policy = null) {
-  const defaults = WORKFLOW_DEFAULTS[mode];
+  const normalizedMode = modeForId(mode)?.id;
+  const defaults = normalizedMode ? WORKFLOW_DEFAULTS[normalizedMode] : null;
   if (!defaults) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   if (!policy) return defaults;
-  if (mode === "review" && policy.review?.autoRepair === true) {
+  if (normalizedMode === "review" && policy.review?.autoRepair === true) {
     return permissions("write", "write", "write");
   }
-  if (mode === "maintain" && policy.audit?.repair?.enabled === true) {
+  if (normalizedMode === "maintain" && policy.audit?.repair?.enabled === true) {
     return permissions("write", "write", "write");
   }
   return defaults;
 }
 
 export function assistantAppPermissions(modes, policy = null) {
-  const selected = new Set(modes);
+  const selected = new Set(modes.map((mode) => modeForId(mode)?.id ?? mode));
   const ownerRequests = policy?.automation?.ownerRequests ?? true;
   if (ownerRequests !== true) return permissions("read", "read", "read");
   const dispatchable = ["review", "issues", "fix"].some((mode) => selected.has(mode));
