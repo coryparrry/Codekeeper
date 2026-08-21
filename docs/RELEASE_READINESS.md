@@ -63,8 +63,11 @@ approval. The npm workflow verifies that the source repository is public before
 building because npm provenance is not available for private repositories.
 
 The candidate lifecycle is pre-publication evidence, not live adopter evidence.
-After npm publication, retain the public registry receipt and exact-version
-install canary from the publisher. Separately run `codekeeper verify` in an
+After npm publication, the publisher retries public `npm view`, `npm pack`, and
+the exact-version install canary while the registry still reports a missing
+release (`E404`, `ETARGET`, or "No matching version found"). Other lookup
+errors and mismatched receipts fail closed. Retain that public registry receipt
+and canary from the publisher. Separately run `codekeeper verify` in an
 installed adopter repository to prove the real GitHub App identity, selected
 repository installation, stored private key, and correlated no-mutation App
 credential workflow. Live App/adopter acceptance cannot be replaced by the
