@@ -4,6 +4,7 @@
 | --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
 | [Installation](../INSTALL.md)                       | How-to      | Evaluate a local package and prove an installation.                                               |
 | [Reviewed release delivery](RELEASE_READINESS.md)   | How-to      | Promote reviewed changes through main, Release Please, and the protected npm publisher.           |
+| [Agent change and release safety](AGENT_RELEASE_SAFETY.md) | How-to | Map breaking points and verify every source, package, workflow, and live-release boundary before publication. |
 | [Repository governance](REPOSITORY_GOVERNANCE.md)   | How-to      | Review and deliberately apply branch and immutable-tag rules.                                     |
 | [Configuration](CONFIGURATION.md)                   | Reference   | Configure policy, workflows, providers, and capabilities.                                         |
 | [Architecture](ARCHITECTURE.md)                     | Explanation | Understand the runtime trust pipeline.                                                            |
