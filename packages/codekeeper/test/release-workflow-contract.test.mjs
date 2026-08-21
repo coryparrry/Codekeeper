@@ -268,6 +268,14 @@ test("publication requires a credential-free exact-candidate lifecycle gate", as
   assert.match(candidate, /node-version: 24\.19\.0/);
   assert.match(
     candidate,
+    /ref: \$\{\{ github\.event_name == 'workflow_dispatch' && github\.sha \|\| github\.ref \}\}/,
+  );
+  assert.doesNotMatch(
+    candidate,
+    /ref: \$\{\{ needs\.build\.outputs\.source_commit \}\}/,
+  );
+  assert.match(
+    candidate,
     /name: codekeeper-release-\$\{\{ needs\.build\.outputs\.version \}\}-\$\{\{ github\.sha \}\}/,
   );
   for (const output of [
