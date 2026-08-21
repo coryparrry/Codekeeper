@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.0](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.2.0...codekeeper-v0.3.0) (2026-08-21)
+
+
+### Features
+
+* **release:** promote protected staging delivery ([#235](https://github.com/coryparrry/Codekeeper/issues/235)) ([87b4f98](https://github.com/coryparrry/Codekeeper/commit/87b4f9813c1a16dee6cbca020181cc72af5e21d5))
+
+
+### Bug Fixes
+
+* **installer:** preserve complete npm pack reports ([#246](https://github.com/coryparrry/Codekeeper/issues/246)) ([9e1b6df](https://github.com/coryparrry/Codekeeper/commit/9e1b6dfbced901ff75d8e4a1f70b120a03920e7c))
+* **release:** accept flat npm receipt fields ([f5c4962](https://github.com/coryparrry/Codekeeper/commit/f5c4962a539a77088fdd2f4c8e78fca6a7347887))
+* **release:** derive assertions from package version ([8d62cbd](https://github.com/coryparrry/Codekeeper/commit/8d62cbd3251d47ed2e4e3c679c7ede0b5dff8a13))
+* **release:** derive installer assertions from package version ([aacf5a1](https://github.com/coryparrry/Codekeeper/commit/aacf5a1a9bf55c6ff22204b800a1b0f566f8283f))
+* **release:** emit single-line package integrity ([cd952ff](https://github.com/coryparrry/Codekeeper/commit/cd952ffe92b34dacf366023a04839b7337a5fd4f))
+* **release:** freeze tagged authority checkpoint ([20dceb8](https://github.com/coryparrry/Codekeeper/commit/20dceb810aaf83e3f9cde9778c96a4845f0e6a5b))
+* **release:** isolate runtime checks from OIDC ([f27f84e](https://github.com/coryparrry/Codekeeper/commit/f27f84e963d67cc03c8b5430c5f1d112555611d2))
+* **release:** normalize npm registry receipts ([ccfffe4](https://github.com/coryparrry/Codekeeper/commit/ccfffe43c0764bb14c547c5fedae9b6d94f9df02))
+* **release:** promote reviewed source checkpoint ([#239](https://github.com/coryparrry/Codekeeper/issues/239)) ([055c081](https://github.com/coryparrry/Codekeeper/commit/055c08102899d1510f13f83e11f70333d7a46b3c))
+* **release:** refresh source manifest in release PRs ([df87f55](https://github.com/coryparrry/Codekeeper/commit/df87f55bb6cbfcb15ca1d3d16ea4a7b8377a0bb9))
+* **release:** repair provenance action pin ([45931c1](https://github.com/coryparrry/Codekeeper/commit/45931c19478b050258ffe64d53345a6719bf5dcf))
+* **test:** keep version contract within module ceiling ([6f16bf0](https://github.com/coryparrry/Codekeeper/commit/6f16bf0ed89cedb56d85155997f7a9f8dd282196))
+
+## Changelog
+
 All notable released changes will be recorded here.
 
 ## Unreleased
