@@ -31,6 +31,14 @@ Never commit or paste provider keys, GitHub App PEMs, tokens, or live traces. Re
 Before editing runtime, installer, workflow, packaging, generated, or release paths, follow [docs/AGENT_RELEASE_SAFETY.md](docs/AGENT_RELEASE_SAFETY.md). It is the agent-facing impact map and boundary-specific verification contract.
 Release and source pins must be full, reviewed commits reachable from the repository default branch and containing the intended runtime; ancestry alone is insufficient, so verify the exact checkpoint before publication.
 
+### Release evidence and verification
+
+- A check proves only the boundary it exercises. Source tests do not prove generated assets, packaged files, workflows, live GitHub settings, npm publication, or an adopter installation.
+- Before editing, record the branch, commit, and working-tree state. Trace each changed source through every generated, copied, packaged, installed, and executed consumer identified by the release-safety impact map.
+- Bind evidence to the exact state tested. If `HEAD`, dependencies, generated output, package contents, or relevant external state changes, rerun the affected verification.
+- Run verification appropriate to every touched surface, synchronize derived outputs only after source changes are complete, and never hand-edit generated manifests or hashes.
+- Treat unavailable credentials, runners, billing, networks, or services as evidence gaps—not product passes or failures. Report exact commands, results, commit SHA, and any live boundaries that remain unverified.
+
 ### Generated hashes and source pins
 
 Treat hashes, manifests, and source pins as dependent outputs, never as values to guess or update early.
