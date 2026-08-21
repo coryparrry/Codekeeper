@@ -346,45 +346,65 @@ jobs:
           : > "$NPM_CONFIG_USERCONFIG"
           receipt="$RUNNER_TEMP/codekeeper-registry-receipt.json"
           error_report="$RUNNER_TEMP/codekeeper-registry-error.txt"
+          download="$RUNNER_TEMP/codekeeper-registry-download"
           max_attempts=6
           retry_delay_seconds=2
-          # npm may accept a publish before the version is visible to every registry read path.
-          for (( attempt = 1; attempt <= max_attempts; attempt++ )); do
-            if npm view "$EXPECTED_NAME@$EXPECTED_VERSION" version dist.integrity dist.tarball --json > "$receipt" 2> "$error_report"; then
-              break
-            fi
-            RECEIPT="$receipt" node --input-type=module -e '
+          require_retryable_missing_release() {
+            NPM_STDOUT="$1" NPM_STDERR="$2" node --input-type=module -e '
             import { readFileSync } from "node:fs";
-            const error = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
-            if (error?.error?.code !== "E404") throw new Error("npm lookup failed without a confirmed E404");
+            const stdout = readFileSync(process.env.NPM_STDOUT, "utf8");
+            const stderr = readFileSync(process.env.NPM_STDERR, "utf8");
+            const retryable = new Set(["E404", "ETARGET"]);
+            let code;
+            try {
+              code = JSON.parse(stdout)?.error?.code;
+            } catch {
+              code = undefined;
+            }
+            if (!retryable.has(code)) {
+              code = `${stdout}\n${stderr}`.match(/\bnpm error code (E[A-Z0-9]+)\b/)?.[1];
+            }
+            if (!retryable.has(code) && !/No matching version found/i.test(`${stdout}\n${stderr}`)) {
+              throw new Error("npm lookup failed without a confirmed missing public release");
+            }
             '
+          }
+          # npm may accept a publish before view, pack, and install all agree the version exists.
+          for (( attempt = 1; attempt <= max_attempts; attempt++ )); do
+            rm -rf "$download"
+            mkdir "$download"
+            if npm view "$EXPECTED_NAME@$EXPECTED_VERSION" version dist.integrity dist.tarball --json > "$receipt" 2> "$error_report"; then
+              RECEIPT="$receipt" EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const isReceiptObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+              const normalizeReceipt = (value) => {
+                if (Array.isArray(value)) {
+                  if (value.length !== 1 || !isReceiptObject(value[0])) throw new Error("npm registry receipt has an invalid shape");
+                  return value[0];
+                }
+                if (!isReceiptObject(value)) throw new Error("npm registry receipt has an invalid shape");
+                return value;
+              };
+              const receipt = normalizeReceipt(JSON.parse(readFileSync(process.env.RECEIPT, "utf8")));
+              const integrity = receipt["dist.integrity"] ?? receipt?.dist?.integrity;
+              const tarball = receipt["dist.tarball"] ?? receipt?.dist?.tarball;
+              if (receipt.version !== process.env.EXPECTED_VERSION || integrity !== process.env.EXPECTED_INTEGRITY || typeof tarball !== "string" || !tarball.startsWith("https://registry.npmjs.org/")) throw new Error("public npm registry receipt does not match the published release");
+              '
+              if npm pack --json --ignore-scripts --pack-destination "$download" "$EXPECTED_NAME@$EXPECTED_VERSION" > "$download/report.json" 2> "$error_report"; then
+                break
+              fi
+              require_retryable_missing_release "$download/report.json" "$error_report"
+            else
+              require_retryable_missing_release "$receipt" "$error_report"
+            fi
             if (( attempt == max_attempts )); then
               cat "$error_report" >&2
               exit 1
             fi
-            echo "Public npm receipt is not visible yet; retrying in ${retry_delay_seconds}s (attempt ${attempt}/${max_attempts})." >&2
+            echo "Public npm release is not visible to registry reads yet; retrying in ${retry_delay_seconds}s (attempt ${attempt}/${max_attempts})." >&2
             sleep "$retry_delay_seconds"
             retry_delay_seconds=$((retry_delay_seconds * 2))
           done
-          RECEIPT="$receipt" EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
-          import { readFileSync } from "node:fs";
-          const isReceiptObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-          const normalizeReceipt = (value) => {
-            if (Array.isArray(value)) {
-              if (value.length !== 1 || !isReceiptObject(value[0])) throw new Error("npm registry receipt has an invalid shape");
-              return value[0];
-            }
-            if (!isReceiptObject(value)) throw new Error("npm registry receipt has an invalid shape");
-            return value;
-          };
-          const receipt = normalizeReceipt(JSON.parse(readFileSync(process.env.RECEIPT, "utf8")));
-          const integrity = receipt["dist.integrity"] ?? receipt?.dist?.integrity;
-          const tarball = receipt["dist.tarball"] ?? receipt?.dist?.tarball;
-          if (receipt.version !== process.env.EXPECTED_VERSION || integrity !== process.env.EXPECTED_INTEGRITY || typeof tarball !== "string" || !tarball.startsWith("https://registry.npmjs.org/")) throw new Error("public npm registry receipt does not match the published release");
-          '
-          download="$RUNNER_TEMP/codekeeper-registry-download"
-          mkdir "$download"
-          npm pack --json --ignore-scripts --pack-destination "$download" "$EXPECTED_NAME@$EXPECTED_VERSION" > "$download/report.json"
           actual_tarball="$download/$EXPECTED_FILENAME"
           actual_integrity="sha512-$(openssl dgst -sha512 -binary "$actual_tarball" | openssl base64 -A)"
           test "$actual_integrity" = "$EXPECTED_INTEGRITY"
@@ -419,10 +439,47 @@ jobs:
           set -euo pipefail
           : > "$NPM_CONFIG_USERCONFIG"
           canary="$RUNNER_TEMP/codekeeper-release-canary"
-          mkdir "$canary"
+          error_report="$RUNNER_TEMP/codekeeper-canary-error.txt"
+          stdout_report="$RUNNER_TEMP/codekeeper-canary-stdout.txt"
+          max_attempts=6
+          retry_delay_seconds=2
+          require_retryable_missing_release() {
+            NPM_STDOUT="$1" NPM_STDERR="$2" node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const stdout = readFileSync(process.env.NPM_STDOUT, "utf8");
+            const stderr = readFileSync(process.env.NPM_STDERR, "utf8");
+            const retryable = new Set(["E404", "ETARGET"]);
+            let code;
+            try {
+              code = JSON.parse(stdout)?.error?.code;
+            } catch {
+              code = undefined;
+            }
+            if (!retryable.has(code)) {
+              code = `${stdout}\n${stderr}`.match(/\bnpm error code (E[A-Z0-9]+)\b/)?.[1];
+            }
+            if (!retryable.has(code) && !/No matching version found/i.test(`${stdout}\n${stderr}`)) {
+              throw new Error("npm lookup failed without a confirmed missing public release");
+            }
+            '
+          }
+          for (( attempt = 1; attempt <= max_attempts; attempt++ )); do
+            rm -rf "$canary"
+            mkdir "$canary"
+            if ( cd "$canary" && npm install --ignore-scripts --no-audit --no-fund "$EXPECTED_NAME@$EXPECTED_VERSION" > "$stdout_report" 2> "$error_report" ); then
+              break
+            fi
+            require_retryable_missing_release "$stdout_report" "$error_report"
+            if (( attempt == max_attempts )); then
+              cat "$error_report" >&2
+              exit 1
+            fi
+            echo "Public npm release is not visible to registry reads yet; retrying in ${retry_delay_seconds}s (attempt ${attempt}/${max_attempts})." >&2
+            sleep "$retry_delay_seconds"
+            retry_delay_seconds=$((retry_delay_seconds * 2))
+          done
           (
             cd "$canary"
-            npm install --ignore-scripts --no-audit --no-fund "$EXPECTED_NAME@$EXPECTED_VERSION"
             # shellcheck disable=SC2016
             installed_version="$(EXPECTED_NAME="$EXPECTED_NAME" node --input-type=module -e 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url); process.stdout.write(require(`${process.env.EXPECTED_NAME}/package.json`).version)')"
             test "$installed_version" = "$EXPECTED_VERSION"

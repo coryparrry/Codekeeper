@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 const repositoryRoot = new URL("../../../", import.meta.url);
@@ -197,6 +200,66 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   );
   assert.match(source, /if \(\( attempt == max_attempts \)\); then/);
   assert.match(source, /npm pack --json --ignore-scripts --pack-destination/);
+  const classifiers = [
+    ...source.matchAll(
+      /require_retryable_missing_release\(\) \{[\s\S]*?\n          \}/g,
+    ),
+  ].map((match) => match[0]);
+  assert.equal(
+    classifiers.length,
+    2,
+    "receipt fetch and install canary must share one missing-release classifier",
+  );
+  assert.equal(classifiers[0], classifiers[1]);
+  const receiptStep = step(
+    "- name: Re-fetch and verify public registry receipt",
+    "- name: Run fresh exact-version install canary",
+  );
+  const receiptLoopStart = receiptStep.indexOf(
+    "for (( attempt = 1; attempt <= max_attempts; attempt++ )); do",
+  );
+  const receiptLoopEnd = receiptStep.indexOf(
+    "\n          done\n",
+    receiptLoopStart,
+  );
+  assert.notEqual(receiptLoopStart, -1, "public receipt retry loop is required");
+  assert.notEqual(receiptLoopEnd, -1, "public receipt retry loop must terminate");
+  const receiptLoop = receiptStep.slice(receiptLoopStart, receiptLoopEnd);
+  assert.match(
+    receiptLoop,
+    /npm view "\$EXPECTED_NAME@\$EXPECTED_VERSION" version dist\.integrity dist\.tarball --json/,
+  );
+  assert.match(
+    receiptLoop,
+    /npm pack --json --ignore-scripts --pack-destination "\$download"/,
+  );
+  assert.match(receiptLoop, /rm -rf "\$download"/);
+  assert.match(receiptStep, /new Set\(\["E404", "ETARGET"\]\)/);
+  assert.match(receiptStep, /No matching version found/);
+  assert.doesNotMatch(
+    receiptStep.slice(receiptLoopEnd),
+    /npm pack --json --ignore-scripts --pack-destination/,
+  );
+  const canaryStep = step(
+    "- name: Run fresh exact-version install canary",
+    "- name: Reconfirm remote release tag before GitHub Release mutation",
+  );
+  const canaryLoopStart = canaryStep.indexOf(
+    "for (( attempt = 1; attempt <= max_attempts; attempt++ )); do",
+  );
+  const canaryLoopEnd = canaryStep.indexOf(
+    "\n          done\n",
+    canaryLoopStart,
+  );
+  assert.notEqual(canaryLoopStart, -1, "install canary retry loop is required");
+  assert.notEqual(canaryLoopEnd, -1, "install canary retry loop must terminate");
+  const canaryLoop = canaryStep.slice(canaryLoopStart, canaryLoopEnd);
+  assert.match(
+    canaryLoop,
+    /npm install --ignore-scripts --no-audit --no-fund "\$EXPECTED_NAME@\$EXPECTED_VERSION"/,
+  );
+  assert.match(canaryLoop, /rm -rf "\$canary"/);
+  assert.match(canaryStep, /new Set\(\["E404", "ETARGET"\]\)/);
   assert.equal(
     source.match(
       /actual_integrity="sha512-\$\(openssl dgst -sha512 -binary "\$(?:tarball|actual_tarball)" \| openssl base64 -A\)"/g,
@@ -263,6 +326,56 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
   assert.match(source, /cmp -s "\$sidecar" "\$download\/\$sidecar_name"/);
   assert.match(source, /--verify-tag/);
   assert.match(source, /needs\.build\.outputs\.tag/);
+});
+
+test("missing-release classifier retries E404 and ETARGET diagnostics only", async (t) => {
+  const source = await repositoryFile(
+    ".github/workflows/codekeeper-release.yml",
+  );
+  const match = source.match(
+    /NPM_STDOUT="\$1" NPM_STDERR="\$2" node --input-type=module -e '\n            ([\s\S]*?)\n            '/,
+  );
+  assert.ok(match, "missing-release classifier source is required");
+  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-npm-retry-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const stdoutPath = path.join(root, "stdout.txt");
+  const stderrPath = path.join(root, "stderr.txt");
+  const classify = async (stdout, stderr) => {
+    await writeFile(stdoutPath, stdout);
+    await writeFile(stderrPath, stderr);
+    return spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", match[1]],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          NPM_STDOUT: stdoutPath,
+          NPM_STDERR: stderrPath,
+        },
+      },
+    );
+  };
+
+  for (const [stdout, stderr] of [
+    ['{"error":{"code":"E404"}}\n', ""],
+    ['{"error":{"code":"ETARGET"}}\n', ""],
+    ["", "npm error code ETARGET\nnpm error notarget No matching version found for @example/pkg@1.0.0.\n"],
+    ["", "npm error notarget No matching version found for @example/pkg@1.0.0.\n"],
+  ]) {
+    const result = await classify(stdout, stderr);
+    assert.equal(result.status, 0, result.stderr);
+  }
+
+  const rejected = await classify(
+    '{"error":{"code":"E401"}}\n',
+    "npm error code E401\n",
+  );
+  assert.notEqual(rejected.status, 0);
+  assert.match(
+    rejected.stderr,
+    /without a confirmed missing public release/,
+  );
 });
 
 test("publication requires a credential-free exact-candidate lifecycle gate", async () => {

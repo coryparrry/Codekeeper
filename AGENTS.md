@@ -28,6 +28,7 @@ Follow the repository’s Conventional Commit history: `fix(review): ...`, `feat
 ## Security & Agent Workflow
 
 Never commit or paste provider keys, GitHub App PEMs, tokens, or live traces. Report vulnerabilities through GitHub private vulnerability reporting.
+Before editing runtime, installer, workflow, packaging, generated, or release paths, follow [docs/AGENT_RELEASE_SAFETY.md](docs/AGENT_RELEASE_SAFETY.md). It is the agent-facing impact map and boundary-specific verification contract.
 Release and source pins must be full, reviewed commits reachable from the repository default branch and containing the intended runtime; ancestry alone is insufficient, so verify the exact checkpoint before publication.
 
 ### Generated hashes and source pins

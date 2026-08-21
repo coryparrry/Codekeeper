@@ -1,5 +1,9 @@
 # Validation
 
+For agent edits, classify the touched paths and run the boundary-specific gates in
+[docs/AGENT_RELEASE_SAFETY.md](docs/AGENT_RELEASE_SAFETY.md) before treating this
+checklist as complete.
+
 Run these checks before publishing a source release or changing reusable workflows:
 
 ```bash
