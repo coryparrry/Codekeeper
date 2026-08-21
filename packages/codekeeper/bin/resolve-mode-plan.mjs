@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolveModePlan } from "../src/mode-plan.mjs";
 
@@ -117,7 +118,9 @@ export function parseResolverArgs(args) {
 async function loadContext(parsed) {
   if (!parsed.input) return parsed;
   const source = parsed.input.path
-    ? await readFile(parsed.input.path, "utf8")
+    ? parsed.input.path === "-"
+      ? readFileSync(0, "utf8")
+      : await readFile(parsed.input.path, "utf8")
     : parsed.input.json;
   const value = JSON.parse(source);
   if (!value || typeof value !== "object" || Array.isArray(value)) {

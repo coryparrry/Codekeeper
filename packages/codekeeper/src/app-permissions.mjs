@@ -23,16 +23,35 @@ function capabilitySet(capabilities) {
   );
 }
 
+function policyValue(policy, path) {
+  let current = policy;
+  for (const segment of path) {
+    if (
+      !current ||
+      typeof current !== "object" ||
+      !Object.hasOwn(current, segment)
+    ) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current;
+}
+
 export function workflowAppPermissions(mode, policy = null) {
   const normalizedMode = modeForId(mode)?.id;
   const defaults = normalizedMode ? WORKFLOW_DEFAULTS[normalizedMode] : null;
   if (!defaults) throw new InstallerError(`Unknown mode: ${mode}`, { code: "PLAN_INVALID" });
   if (!policy) return defaults;
-  if (normalizedMode === "review" && policy.review?.autoRepair === true) {
-    return permissions("write", "write", "write");
-  }
-  if (normalizedMode === "maintain" && policy.audit?.repair?.enabled === true) {
-    return permissions("write", "write", "write");
+  const definition = MODE_REGISTRY[normalizedMode];
+  for (const rule of definition.rules.permissionEscalations) {
+    if (policyValue(policy, rule.policyPath) === rule.value) {
+      return permissions(
+        rule.permissions.contents,
+        rule.permissions.issues,
+        rule.permissions.pullRequests,
+      );
+    }
   }
   return defaults;
 }
@@ -41,7 +60,9 @@ export function assistantAppPermissions(modes, policy = null) {
   const selected = new Set(modes.map((mode) => modeForId(mode)?.id ?? mode));
   const ownerRequests = policy?.automation?.ownerRequests ?? true;
   if (ownerRequests !== true) return permissions("read", "read", "read");
-  const dispatchable = ["review", "issues", "fix"].some((mode) => selected.has(mode));
+  const dispatchable = [...selected].some(
+    (mode) => MODE_REGISTRY[mode]?.rules.assistantDispatch === true,
+  );
   return permissions(dispatchable ? "write" : "read", "write", "write");
 }
 

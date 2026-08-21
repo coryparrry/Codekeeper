@@ -102,8 +102,8 @@ export const REPOSITORY_ARTIFACTS = Object.freeze(
     ASSISTANT_ARTIFACT,
     ...MODE_IDS.map((mode) => ({
       id: `repository.workflow.${mode}`,
-      target: MODE_REGISTRY[mode].target,
-      asset: MODE_REGISTRY[mode].asset,
+      target: MODE_REGISTRY[mode].caller.target,
+      asset: MODE_REGISTRY[mode].caller.asset,
       ownership: "release",
       activation: { kind: "mode", id: mode },
       renderer: "mode-workflow",

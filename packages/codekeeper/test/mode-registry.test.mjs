@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -30,7 +33,10 @@ test("the registry contains the existing package modes and derived compatibility
   assert.equal(MODES.maintain.policyAgent, "audit");
   assert.equal(MODES.issues.policyAgent, "issue");
   assert.equal(MODES.fix.agentProfile, "fixer");
-  assert.equal(MODES.review.target, ".github/workflows/codekeeper-review.yml");
+  assert.equal(
+    MODES.review.caller.target,
+    ".github/workflows/codekeeper-review.yml",
+  );
   assert.equal(
     RUNTIME_WORKFLOWS.fix.target,
     ".github/workflows/codekeeper-runtime-fix.yml",
@@ -52,6 +58,62 @@ test("registry validation rejects duplicate IDs and unknown profiles", () => {
   assert.throws(
     () => validateModeRegistry(unknownProfile),
     /unknown agent profile/,
+  );
+});
+
+test("registry validation closes IDs, nested keys, routes, and dynamic rules", () => {
+  const keyMismatch = Object.fromEntries(
+    registryRecords().map((mode) => [mode.id, mode]),
+  );
+  keyMismatch.review.id = "maintain";
+  assert.throws(() => validateModeRegistry(keyMismatch), /keys must equal/);
+
+  const extraModeKey = registryRecords();
+  extraModeKey[0].unexpected = true;
+  assert.throws(() => validateModeRegistry(extraModeKey), /invalid key set/);
+
+  const invalidCompute = registryRecords();
+  invalidCompute[0].stages.compute = "yes";
+  assert.throws(() => validateModeRegistry(invalidCompute), /stage topology/);
+
+  const duplicateTriggers = registryRecords();
+  duplicateTriggers[0].automatic.triggers.push("pull_request");
+  assert.throws(
+    () => validateModeRegistry(duplicateTriggers),
+    /automatic trigger policy/,
+  );
+
+  const disabledTriggers = registryRecords();
+  disabledTriggers[0].automatic.enabled = false;
+  assert.throws(
+    () => validateModeRegistry(disabledTriggers),
+    /automatic trigger policy/,
+  );
+
+  const extraStage = registryRecords();
+  extraStage[0].stages.extra = "never";
+  assert.throws(() => validateModeRegistry(extraStage), /invalid key set/);
+
+  const badPermissionRule = registryRecords();
+  badPermissionRule[0].rules.permissionEscalations[0].permissions.contents =
+    "admin";
+  assert.throws(
+    () => validateModeRegistry(badPermissionRule),
+    /permission rule has invalid App permissions/,
+  );
+
+  const badAssistantRule = registryRecords();
+  badAssistantRule[0].rules.assistantDispatch = "yes";
+  assert.throws(
+    () => validateModeRegistry(badAssistantRule),
+    /assistant dispatch rule/,
+  );
+
+  const adapterPolicyMismatch = registryRecords();
+  adapterPolicyMismatch[1].publicationAdapter = "review";
+  assert.throws(
+    () => validateModeRegistry(adapterPolicyMismatch),
+    /unknown or incorrect publication adapter/,
   );
 });
 
@@ -89,13 +151,6 @@ test("registry validation rejects invalid permissions, unsafe topology, and miss
   assert.throws(
     () => validateModeRegistry(bogusAdapter),
     /unknown or incorrect publication adapter/,
-  );
-
-  const divergentValidation = registryRecords();
-  divergentValidation[3].candidateValidation = "never";
-  assert.throws(
-    () => validateModeRegistry(divergentValidation),
-    /candidate validation diverges/,
   );
 
   const badScope = registryRecords();
@@ -148,23 +203,17 @@ test("registry validation rejects command routes to unknown modes and cancellati
 
   const missingArtifact = registryRecords();
   delete missingArtifact[0].runtime.asset;
-  assert.throws(
-    () => validateModeRegistry(missingArtifact),
-    /runtime artifact references/,
-  );
+  assert.throws(() => validateModeRegistry(missingArtifact), /invalid key set/);
 
   const missingGate = registryRecords();
   delete missingGate[0].requiredGate;
-  assert.throws(
-    () => validateModeRegistry(missingGate),
-    /gate or manual trigger flags/,
-  );
+  assert.throws(() => validateModeRegistry(missingGate), /invalid key set/);
 
   const missingCommandMap = registryRecords();
   delete missingCommandMap[0].supportedCommands;
   assert.throws(
     () => validateModeRegistry(missingCommandMap),
-    /invalid command routing/,
+    /invalid key set/,
   );
 
   const reservedCommand = registryRecords();
@@ -261,6 +310,13 @@ test("auto resolution uses unambiguous event and command routes", () => {
   assert.equal(
     resolveModePlan({
       requestedMode: "auto",
+      event: { eventName: "repository_dispatch" },
+    }).resolvedMode,
+    "fix",
+  );
+  assert.equal(
+    resolveModePlan({
+      requestedMode: "auto",
       event: {
         eventName: "issue_comment",
         command: "implement",
@@ -292,6 +348,38 @@ test("auto resolution uses unambiguous event and command routes", () => {
         event: { eventName: "workflow_dispatch" },
       }),
     /unambiguous validated mode route/,
+  );
+  assert.equal(
+    resolveModePlan({
+      requestedMode: "maintain",
+      event: { eventName: "workflow_dispatch" },
+    }).resolvedMode,
+    "maintain",
+  );
+  assert.throws(
+    () =>
+      resolveModePlan({
+        requestedMode: "review",
+        event: { eventName: "issues" },
+      }),
+    /not authorized for event/,
+  );
+  assert.throws(
+    () =>
+      resolveModePlan({
+        requestedMode: "maintain",
+        event: { eventName: "pull_request" },
+      }),
+    /not authorized for event/,
+  );
+  assert.throws(
+    () =>
+      resolveModePlan({
+        requestedMode: "issues",
+        event: { eventName: "issues" },
+        policy: { readyLabelFix: true },
+      }),
+    /not authorized for event/,
   );
   assert.throws(
     () =>
@@ -368,6 +456,69 @@ test("auto resolution uses unambiguous event and command routes", () => {
   );
 });
 
+test("target numbers accept only canonical positive decimal values", () => {
+  for (const value of [
+    "0",
+    "01",
+    " 1",
+    "1 ",
+    "+1",
+    "1e2",
+    "1.0",
+    "9007199254740992",
+    "",
+    0,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+    Infinity,
+    null,
+  ]) {
+    assert.throws(
+      () =>
+        resolveModePlan({
+          requestedMode: "review",
+          event: { eventName: "pull_request", targetNumber: value },
+        }),
+      /canonical positive decimal|positive safe integer/,
+    );
+  }
+  assert.equal(
+    resolveModePlan({
+      requestedMode: "review",
+      event: { eventName: "pull_request", targetNumber: "197" },
+    }).targetNumber,
+    197,
+  );
+  assert.equal(
+    resolveModePlan({
+      requestedMode: "review",
+      event: { eventName: "pull_request", targetNumber: 197 },
+    }).targetNumber,
+    197,
+  );
+  assert.equal(
+    resolveModePlan({
+      requestedMode: "review",
+      event: {
+        eventName: "pull_request",
+        targetNumber: Number.MAX_SAFE_INTEGER.toString(),
+      },
+    }).targetNumber,
+    Number.MAX_SAFE_INTEGER,
+  );
+  for (const alias of ["number", "issueNumber", "pullRequestNumber"]) {
+    assert.throws(
+      () =>
+        resolveModePlan({
+          requestedMode: "review",
+          event: { eventName: "pull_request", [alias]: 197 },
+        }),
+      /unknown properties/,
+    );
+  }
+});
+
 test("the direct resolver CLI accepts JSON input or standalone field flags", () => {
   const cli = fileURLToPath(
     new URL("../bin/resolve-mode-plan.mjs", import.meta.url),
@@ -392,6 +543,35 @@ test("the direct resolver CLI accepts JSON input or standalone field flags", () 
   assert.equal(valid.status, 0, valid.stderr);
   assert.equal(JSON.parse(valid.stdout).resolvedMode, "fix");
 
+  const stdin = spawnSync(process.execPath, [cli, "--input", "-"], {
+    input: JSON.stringify({
+      requestedMode: "auto",
+      event: { eventName: "repository_dispatch" },
+      policy: {},
+    }),
+    encoding: "utf8",
+  });
+  assert.equal(stdin.status, 0, stdin.stderr);
+  assert.equal(JSON.parse(stdin.stdout).resolvedMode, "fix");
+
+  const directory = mkdtempSync(join(tmpdir(), "codekeeper-mode-plan-"));
+  const inputPath = join(directory, "context.json");
+  writeFileSync(
+    inputPath,
+    JSON.stringify({
+      requestedMode: "auto",
+      event: { eventName: "schedule" },
+      policy: {},
+    }),
+    "utf8",
+  );
+  const file = spawnSync(process.execPath, [cli, "--input", inputPath], {
+    encoding: "utf8",
+  });
+  assert.equal(file.status, 0, file.stderr);
+  assert.equal(JSON.parse(file.stdout).resolvedMode, "maintain");
+  rmSync(directory, { recursive: true, force: true });
+
   const flags = spawnSync(
     process.execPath,
     [
@@ -409,6 +589,21 @@ test("the direct resolver CLI accepts JSON input or standalone field flags", () 
   );
   assert.equal(flags.status, 0, flags.stderr);
   assert.equal(JSON.parse(flags.stdout).resolvedMode, "fix");
+
+  const conflictingSources = spawnSync(
+    process.execPath,
+    [cli, "--json", JSON.stringify({}), "--mode", "review"],
+    { encoding: "utf8" },
+  );
+  assert.equal(conflictingSources.status, 1);
+  assert.match(conflictingSources.stderr, /JSON input options/);
+
+  const malformed = spawnSync(process.execPath, [cli, "--json", "{"], {
+    encoding: "utf8",
+  });
+  assert.equal(malformed.status, 1);
+  assert.match(malformed.stderr, /JSON|Unexpected/);
+  assert.doesNotMatch(malformed.stderr, / at file:|node_modules/);
 
   const invalid = spawnSync(process.execPath, [cli], { encoding: "utf8" });
   assert.equal(invalid.status, 1);

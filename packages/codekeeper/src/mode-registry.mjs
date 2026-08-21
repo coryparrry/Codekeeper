@@ -1,3 +1,18 @@
+import {
+  assertExactKeys,
+  assertPlainObject,
+  AUTOMATIC_KEYS,
+  CALLER_KEYS,
+  CONCURRENCY_KEYS,
+  MODE_KEYS,
+  PERMISSION_RULE_KEYS,
+  ROUTE_KEYS,
+  RULES_KEYS,
+  RUNTIME_KEYS,
+  STAGE_KEYS,
+  WORKSPACE_KEYS,
+} from "./mode-registry-schema.mjs";
+
 const PERMISSION_KEYS = Object.freeze(["contents", "issues", "pullRequests"]);
 const PERMISSION_VALUES = new Set(["read", "write"]);
 const POLICY_AGENTS = new Set(["review", "audit", "issue", "fix"]);
@@ -10,15 +25,20 @@ const STAGE_PUBLICATION_VALUES = new Set(["never", "always", "when-live"]);
 const WORKSPACE_ACCESS_VALUES = new Set(["none", "read", "write"]);
 const ISOLATION_VALUES = new Set(["none", "unprivileged-user"]);
 const CONCURRENCY_SCOPES = new Set(["repository", "repository-target"]);
-const PUBLICATION_ADAPTERS = Object.freeze({
-  review: "review",
-  maintain: "audit",
-  issues: "issue",
-  fix: "fix",
-});
-const CANONICAL_MODE_IDS = new Set(Object.keys(PUBLICATION_ADAPTERS));
+const CANONICAL_MODE_IDS = new Set(["review", "maintain", "issues", "fix"]);
 const COMMAND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+const POLICY_PATH_SEGMENT_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
 const EVENT_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const SUPPORTED_EVENT_NAMES = new Set([
+  "pull_request",
+  "pull_request_review",
+  "pull_request_review_comment",
+  "issues",
+  "issue_comment",
+  "schedule",
+  "workflow_dispatch",
+  "repository_dispatch",
+]);
 const RESERVED_COMMAND_NAMES = new Set([
   "__proto__",
   "constructor",
@@ -37,23 +57,11 @@ const RUNTIME_TARGET =
   /^\.github\/workflows\/codekeeper-runtime-[a-z0-9-]+\.yml$/;
 const RUNTIME_ASSET = /^runtime-workflows\/[a-z0-9-]+\.yml$/;
 const RUNTIME_PACKAGE = /^release\/workflows\/codekeeper-[a-z0-9-]+\.yml$/;
-
 function deepFreeze(value) {
   if (!value || typeof value !== "object" || Object.isFrozen(value))
     return value;
   Object.freeze(value);
   for (const child of Object.values(value)) deepFreeze(child);
-  return value;
-}
-
-function assertPlainObject(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a plain object.`);
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new TypeError(`${label} must use a plain object prototype.`);
-  }
   return value;
 }
 
@@ -100,7 +108,6 @@ const RAW_MODES = [
       isolation: "unprivileged-user",
     },
     stages: { compute: true, validation: "never", publication: "always" },
-    candidateValidation: "never",
     publicationAdapter: "review",
     appPermissions: {
       contents: "read",
@@ -114,6 +121,9 @@ const RAW_MODES = [
         "pull_request_review",
         "pull_request_review_comment",
       ],
+      defaultRoute: "review",
+      routes: [],
+      commandOverrideTargets: [],
     },
     manual: true,
     concurrency: {
@@ -125,11 +135,29 @@ const RAW_MODES = [
     trigger: "same-repository pull request",
     target: ".github/workflows/codekeeper-review.yml",
     asset: "workflows/review.yml",
+    caller: {
+      target: ".github/workflows/codekeeper-review.yml",
+      asset: "workflows/review.yml",
+    },
     runtime: {
       target: ".github/workflows/codekeeper-runtime-review.yml",
       asset: "runtime-workflows/review.yml",
       sourcePath: ".github/workflows/codekeeper-review.yml",
       packagePath: "release/workflows/codekeeper-review.yml",
+    },
+    rules: {
+      permissionEscalations: [
+        {
+          policyPath: ["review", "autoRepair"],
+          value: true,
+          permissions: {
+            contents: "write",
+            issues: "write",
+            pullRequests: "write",
+          },
+        },
+      ],
+      assistantDispatch: true,
     },
   },
   {
@@ -151,10 +179,15 @@ const RAW_MODES = [
       validation: "when-candidate-requires-validation",
       publication: "when-live",
     },
-    candidateValidation: "when-candidate-requires-validation",
     publicationAdapter: "audit",
     appPermissions: { contents: "read", issues: "write", pullRequests: "read" },
-    automatic: { enabled: true, triggers: ["schedule"] },
+    automatic: {
+      enabled: true,
+      triggers: ["schedule"],
+      defaultRoute: "maintain",
+      routes: [],
+      commandOverrideTargets: [],
+    },
     manual: true,
     concurrency: { scope: "repository", cancelAutomaticSupersededRuns: false },
     supportedCommands: {},
@@ -162,11 +195,29 @@ const RAW_MODES = [
     trigger: "schedule or manual run",
     target: ".github/workflows/codekeeper-maintain.yml",
     asset: "workflows/maintain.yml",
+    caller: {
+      target: ".github/workflows/codekeeper-maintain.yml",
+      asset: "workflows/maintain.yml",
+    },
     runtime: {
       target: ".github/workflows/codekeeper-runtime-maintain.yml",
       asset: "runtime-workflows/maintain.yml",
       sourcePath: ".github/workflows/codekeeper-maintain.yml",
       packagePath: "release/workflows/codekeeper-maintain.yml",
+    },
+    rules: {
+      permissionEscalations: [
+        {
+          policyPath: ["audit", "repair", "enabled"],
+          value: true,
+          permissions: {
+            contents: "write",
+            issues: "write",
+            pullRequests: "write",
+          },
+        },
+      ],
+      assistantDispatch: false,
     },
   },
   {
@@ -180,10 +231,15 @@ const RAW_MODES = [
     workspaceProvider: null,
     workspace: { enabled: false, access: "none", isolation: "none" },
     stages: { compute: true, validation: "never", publication: "always" },
-    candidateValidation: "never",
     publicationAdapter: "issue",
     appPermissions: { contents: "read", issues: "write", pullRequests: "read" },
-    automatic: { enabled: true, triggers: ["issues", "issue_comment"] },
+    automatic: {
+      enabled: true,
+      triggers: ["issues", "issue_comment"],
+      defaultRoute: "issues",
+      routes: [],
+      commandOverrideTargets: ["fix"],
+    },
     manual: true,
     concurrency: {
       scope: "repository-target",
@@ -194,11 +250,19 @@ const RAW_MODES = [
     trigger: "issue or issue comment",
     target: ".github/workflows/codekeeper-issues.yml",
     asset: "workflows/issues.yml",
+    caller: {
+      target: ".github/workflows/codekeeper-issues.yml",
+      asset: "workflows/issues.yml",
+    },
     runtime: {
       target: ".github/workflows/codekeeper-runtime-issues.yml",
       asset: "runtime-workflows/issues.yml",
       sourcePath: ".github/workflows/codekeeper-issues.yml",
       packagePath: "release/workflows/codekeeper-issues.yml",
+    },
+    rules: {
+      permissionEscalations: [],
+      assistantDispatch: true,
     },
   },
   {
@@ -220,7 +284,6 @@ const RAW_MODES = [
       validation: "when-candidate-requires-validation",
       publication: "when-live",
     },
-    candidateValidation: "when-candidate-requires-validation",
     publicationAdapter: "fix",
     appPermissions: {
       contents: "write",
@@ -229,7 +292,16 @@ const RAW_MODES = [
     },
     automatic: {
       enabled: true,
-      triggers: ["issues", "issue_comment", "repository_dispatch"],
+      triggers: ["repository_dispatch"],
+      defaultRoute: "fix",
+      routes: [
+        {
+          event: "issues",
+          policyPath: ["readyLabelFix"],
+          value: true,
+        },
+      ],
+      commandOverrideTargets: [],
     },
     manual: true,
     concurrency: {
@@ -241,11 +313,19 @@ const RAW_MODES = [
     trigger: "ready issue, owner command, or manual run",
     target: ".github/workflows/codekeeper-fix.yml",
     asset: "workflows/fix.yml",
+    caller: {
+      target: ".github/workflows/codekeeper-fix.yml",
+      asset: "workflows/fix.yml",
+    },
     runtime: {
       target: ".github/workflows/codekeeper-runtime-fix.yml",
       asset: "runtime-workflows/fix.yml",
       sourcePath: ".github/workflows/codekeeper-fix.yml",
       packagePath: "release/workflows/codekeeper-fix.yml",
+    },
+    rules: {
+      permissionEscalations: [],
+      assistantDispatch: true,
     },
   },
 ];
@@ -268,11 +348,22 @@ export function validateModeRegistry(
   registry = RAW_MODES,
   { profiles = AGENT_PROFILE_DEFINITIONS } = {},
 ) {
-  const records = Array.isArray(registry)
-    ? registry
-    : Object.values(assertPlainObject(registry, "Mode registry"));
+  const registryEntries = Array.isArray(registry)
+    ? null
+    : Object.entries(assertPlainObject(registry, "Mode registry"));
+  const records = registryEntries
+    ? registryEntries.map(([, mode]) => mode)
+    : registry;
   if (!Array.isArray(records) || records.length === 0) {
     throw new TypeError("Mode registry must contain at least one mode.");
+  }
+  if (
+    registryEntries &&
+    registryEntries.some(
+      ([key, mode]) => !mode || typeof mode.id !== "string" || key !== mode.id,
+    )
+  ) {
+    throw new TypeError("Mode registry keys must equal their mode IDs.");
   }
   const ids = new Set();
   const commands = new Set();
@@ -302,6 +393,7 @@ export function validateModeRegistry(
   }
   for (const mode of records) {
     assertPlainObject(mode, "Mode registry mode record");
+    assertExactKeys(mode, MODE_KEYS, `Mode ${mode.id} record`);
     if (
       typeof mode.id !== "string" ||
       !/^[a-z][a-z0-9-]{0,31}$/.test(mode.id)
@@ -316,6 +408,25 @@ export function validateModeRegistry(
       throw new TypeError(
         `Mode ${mode.id} references an unknown agent profile.`,
       );
+    assertExactKeys(
+      mode.workspace,
+      WORKSPACE_KEYS,
+      `Mode ${mode.id} workspace`,
+    );
+    assertExactKeys(mode.stages, STAGE_KEYS, `Mode ${mode.id} stages`);
+    assertExactKeys(
+      mode.automatic,
+      AUTOMATIC_KEYS,
+      `Mode ${mode.id} automatic trigger policy`,
+    );
+    assertExactKeys(
+      mode.concurrency,
+      CONCURRENCY_KEYS,
+      `Mode ${mode.id} concurrency policy`,
+    );
+    assertExactKeys(mode.caller, CALLER_KEYS, `Mode ${mode.id} caller`);
+    assertExactKeys(mode.runtime, RUNTIME_KEYS, `Mode ${mode.id} runtime`);
+    assertExactKeys(mode.rules, RULES_KEYS, `Mode ${mode.id} dynamic rules`);
     assertPlainObject(mode.workspace, `Mode ${mode.id} workspace`);
     assertPlainObject(mode.stages, `Mode ${mode.id} stages`);
     assertPlainObject(mode.appPermissions, `Mode ${mode.id} App permissions`);
@@ -349,7 +460,7 @@ export function validateModeRegistry(
       );
     }
     if (
-      !mode.stages?.compute ||
+      mode.stages.compute !== true ||
       !STAGE_VALIDATION_VALUES.has(mode.stages.validation) ||
       !STAGE_PUBLICATION_VALUES.has(mode.stages.publication)
     ) {
@@ -363,11 +474,6 @@ export function validateModeRegistry(
         `Mode ${mode.id} is write-capable but has no validation stage.`,
       );
     }
-    if (mode.candidateValidation !== mode.stages.validation) {
-      throw new TypeError(
-        `Mode ${mode.id} candidate validation diverges from its validation stage.`,
-      );
-    }
     if (mode.requiredGate === true && mode.stages.publication === "never") {
       throw new TypeError(
         `Mode ${mode.id} requires a gate without a publication stage.`,
@@ -379,10 +485,7 @@ export function validateModeRegistry(
     ) {
       throw new TypeError(`Mode ${mode.id} has publication but no adapter.`);
     }
-    if (
-      !Object.hasOwn(PUBLICATION_ADAPTERS, mode.id) ||
-      PUBLICATION_ADAPTERS[mode.id] !== mode.publicationAdapter
-    ) {
+    if (mode.publicationAdapter !== mode.policyAgent) {
       throw new TypeError(
         `Mode ${mode.id} has an unknown or incorrect publication adapter.`,
       );
@@ -465,25 +568,72 @@ export function validateModeRegistry(
       );
     }
     if (
-      !mode.automatic ||
       typeof mode.automatic.enabled !== "boolean" ||
       !Array.isArray(mode.automatic.triggers) ||
-      mode.automatic.triggers.length === 0 ||
       mode.automatic.triggers.some(
-        (trigger) => !EVENT_NAME_PATTERN.test(trigger),
+        (trigger) =>
+          typeof trigger !== "string" || !EVENT_NAME_PATTERN.test(trigger),
+      ) ||
+      new Set(mode.automatic.triggers).size !==
+        mode.automatic.triggers.length ||
+      (mode.automatic.enabled && mode.automatic.triggers.length === 0) ||
+      (!mode.automatic.enabled && mode.automatic.triggers.length !== 0) ||
+      (mode.automatic.enabled && mode.automatic.defaultRoute !== mode.id) ||
+      (!mode.automatic.enabled && mode.automatic.defaultRoute !== null) ||
+      !Array.isArray(mode.automatic.routes) ||
+      !Array.isArray(mode.automatic.commandOverrideTargets) ||
+      mode.automatic.commandOverrideTargets.some(
+        (target) => !CANONICAL_MODE_IDS.has(target),
       )
     ) {
       throw new TypeError(
         `Mode ${mode.id} has invalid automatic trigger policy.`,
       );
     }
-    if (
-      typeof mode.candidateValidation !== "string" ||
-      !STAGE_VALIDATION_VALUES.has(mode.candidateValidation)
-    ) {
+    for (const route of mode.automatic.routes) {
+      assertExactKeys(route, ROUTE_KEYS, `Mode ${mode.id} automatic route`);
+      if (
+        typeof route.event !== "string" ||
+        !SUPPORTED_EVENT_NAMES.has(route.event) ||
+        !Array.isArray(route.policyPath) ||
+        route.policyPath.length === 0 ||
+        route.policyPath.some(
+          (segment) =>
+            typeof segment !== "string" ||
+            !POLICY_PATH_SEGMENT_PATTERN.test(segment),
+        ) ||
+        typeof route.value !== "boolean"
+      ) {
+        throw new TypeError(`Mode ${mode.id} has invalid automatic route.`);
+      }
+    }
+    if (!Array.isArray(mode.rules.permissionEscalations)) {
+      throw new TypeError(`Mode ${mode.id} has invalid permission rules.`);
+    }
+    if (typeof mode.rules.assistantDispatch !== "boolean") {
       throw new TypeError(
-        `Mode ${mode.id} has invalid candidate validation policy.`,
+        `Mode ${mode.id} has invalid assistant dispatch rule.`,
       );
+    }
+    for (const rule of mode.rules.permissionEscalations) {
+      assertExactKeys(
+        rule,
+        PERMISSION_RULE_KEYS,
+        `Mode ${mode.id} permission rule`,
+      );
+      if (
+        !Array.isArray(rule.policyPath) ||
+        rule.policyPath.length === 0 ||
+        rule.policyPath.some(
+          (segment) =>
+            typeof segment !== "string" ||
+            !POLICY_PATH_SEGMENT_PATTERN.test(segment),
+        ) ||
+        typeof rule.value !== "boolean"
+      ) {
+        throw new TypeError(`Mode ${mode.id} has invalid permission rule.`);
+      }
+      assertPermissionMap(rule.permissions, `Mode ${mode.id} permission rule`);
     }
     if (
       !mode.runtime ||
@@ -498,6 +648,8 @@ export function validateModeRegistry(
       !RUNTIME_ASSET.test(mode.runtime.asset) ||
       !SAFE_PATH.test(mode.runtime.sourcePath) ||
       !RUNTIME_PACKAGE.test(mode.runtime.packagePath) ||
+      mode.caller.target !== mode.target ||
+      mode.caller.asset !== mode.asset ||
       mode.runtime.sourcePath !== mode.target ||
       mode.target !== `.github/workflows/codekeeper-${mode.id}.yml` ||
       mode.asset !== `workflows/${mode.id}.yml` ||
@@ -529,7 +681,7 @@ export function validateModeRegistry(
 validateModeRegistry();
 
 function freezeMode(mode) {
-  const commandRoutes = mode.supportedCommands ?? mode.commands ?? [];
+  const commandRoutes = mode.supportedCommands;
   const supportedCommands = Array.isArray(commandRoutes)
     ? Object.fromEntries(commandRoutes.map((command) => [command, mode.id]))
     : Object.fromEntries(Object.entries(commandRoutes));
@@ -538,11 +690,25 @@ function freezeMode(mode) {
     workspace: { ...mode.workspace },
     stages: { ...mode.stages },
     appPermissions: { ...mode.appPermissions },
-    automatic: { ...mode.automatic, triggers: [...mode.automatic.triggers] },
+    automatic: {
+      ...mode.automatic,
+      triggers: [...mode.automatic.triggers],
+      routes: mode.automatic.routes.map((route) => ({
+        ...route,
+        policyPath: [...route.policyPath],
+      })),
+    },
     concurrency: { ...mode.concurrency },
     supportedCommands,
-    commands: Object.keys(supportedCommands),
-    caller: { target: mode.target, asset: mode.asset },
+    caller: { ...mode.caller },
+    rules: {
+      ...mode.rules,
+      permissionEscalations: mode.rules.permissionEscalations.map((rule) => ({
+        ...rule,
+        policyPath: [...rule.policyPath],
+        permissions: { ...rule.permissions },
+      })),
+    },
     runtime: { ...mode.runtime },
   });
 }

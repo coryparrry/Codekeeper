@@ -28,9 +28,6 @@ const EVENT_CONTEXT_KEYS = new Set([
   "command",
   "action",
   "targetNumber",
-  "number",
-  "issueNumber",
-  "pullRequestNumber",
   "dryRun",
 ]);
 const POLICY_CONTEXT_KEYS = new Set([
@@ -40,7 +37,6 @@ const POLICY_CONTEXT_KEYS = new Set([
   "readyLabelFix",
 ]);
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-const MAX_TARGET_NUMBER = 2_147_483_647;
 
 function deepFreeze(value) {
   if (!value || typeof value !== "object" || Object.isFrozen(value))
@@ -78,19 +74,22 @@ function rejectUnknownKeys(value, allowed, label) {
 }
 
 function validTargetNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value !== "number" && typeof value !== "string") {
+  if (value === undefined) return null;
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new TypeError(
+        "Mode-plan target number must be a positive safe integer.",
+      );
+    }
+    return value;
+  }
+  if (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value)) {
     throw new TypeError(
-      "Mode-plan target number must be a number or numeric string.",
+      "Mode-plan target number must be a canonical positive decimal.",
     );
   }
-  const number =
-    typeof value === "number" ? value : Number(String(value).trim());
-  if (
-    !Number.isSafeInteger(number) ||
-    number < 1 ||
-    number > MAX_TARGET_NUMBER
-  ) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 1) {
     throw new TypeError(
       "Mode-plan target number must be a positive safe integer.",
     );
@@ -133,12 +132,7 @@ function validateEventContext(event) {
     command,
     action,
     trigger,
-    targetNumber: validTargetNumber(
-      event.targetNumber ??
-        event.number ??
-        event.issueNumber ??
-        event.pullRequestNumber,
-    ),
+    targetNumber: validTargetNumber(event.targetNumber),
     dryRun: event.dryRun === true,
   });
 }
@@ -186,32 +180,93 @@ function triggerForEvent(eventName, command) {
   throw new TypeError(`Unsupported automatic event: ${eventName}`);
 }
 
-function automaticMode(event, policy) {
+function policyValue(policy, path) {
+  let current = policy;
+  for (const segment of path) {
+    if (
+      !current ||
+      typeof current !== "object" ||
+      !Object.hasOwn(current, segment)
+    ) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current;
+}
+
+function matchingRoutes(event, policy) {
+  return Object.values(MODES).filter((mode) =>
+    mode.automatic.routes.some(
+      (route) =>
+        route.event === event.eventName &&
+        policyValue(policy, route.policyPath) === route.value,
+    ),
+  );
+}
+
+function defaultRoutes(event) {
+  return Object.values(MODES).filter(
+    (mode) =>
+      mode.automatic.enabled &&
+      mode.automatic.triggers.includes(event.eventName) &&
+      mode.automatic.defaultRoute === mode.id,
+  );
+}
+
+function commandMode(event) {
   if (event.command) {
     if (!Object.hasOwn(COMMAND_MODE_MAP, event.command)) {
       throw new TypeError(`Unknown mode command: ${event.command}`);
     }
-    const commandMode = COMMAND_MODE_MAP[event.command];
+    const resolved = COMMAND_MODE_MAP[event.command];
+    const defaults = defaultRoutes(event);
     if (
-      (PULL_REQUEST_EVENTS.has(event.eventName) && commandMode !== "review") ||
-      (ISSUE_EVENTS.has(event.eventName) && commandMode === "review")
+      defaults.length === 1 &&
+      defaults[0].id !== resolved &&
+      !defaults[0].automatic.commandOverrideTargets.includes(resolved)
     ) {
       throw new TypeError(
         `Command ${event.command} has an ambiguous event route.`,
       );
     }
-    return commandMode;
+    return resolved;
   }
-  if (policy.readyLabelFix === true) {
-    if (ISSUE_EVENTS.has(event.eventName)) return "fix";
-    throw new TypeError("Ready-label fix routing requires an issue event.");
+  return null;
+}
+
+function automaticMode(event, policy) {
+  const routedCommand = commandMode(event);
+  if (routedCommand) return routedCommand;
+  const routes = matchingRoutes(event, policy);
+  if (routes.length > 1) {
+    throw new TypeError("Auto mode has ambiguous registry event routes.");
   }
-  if (PULL_REQUEST_EVENTS.has(event.eventName)) return "review";
-  if (event.eventName === "schedule") return "maintain";
-  if (ISSUE_EVENTS.has(event.eventName)) return "issues";
+  if (routes.length === 1) return routes[0].id;
+  const defaults = defaultRoutes(event);
+  if (defaults.length > 1) {
+    throw new TypeError("Auto mode has ambiguous registry default routes.");
+  }
+  if (defaults.length === 1) return defaults[0].id;
   throw new TypeError(
     "Auto mode requires an unambiguous validated mode route.",
   );
+}
+
+function modeAuthorizesEvent(mode, event, policy) {
+  if (event.command)
+    return (
+      Object.hasOwn(COMMAND_MODE_MAP, event.command) &&
+      COMMAND_MODE_MAP[event.command] === mode.id
+    );
+  if (event.eventName === "workflow_dispatch") return mode.manual === true;
+  const routes = matchingRoutes(event, policy);
+  if (routes.length > 1) {
+    throw new TypeError("Mode-plan event has ambiguous registry routes.");
+  }
+  if (routes.length === 1) return routes[0].id === mode.id;
+  const defaults = defaultRoutes(event);
+  return defaults.length === 1 && defaults[0].id === mode.id;
 }
 
 function normalizeRequestedMode(requestedMode) {
@@ -257,6 +312,11 @@ export function resolveModePlan(input = {}) {
   ) {
     throw new TypeError(
       `Command ${eventContext.command} does not target mode ${resolvedMode}.`,
+    );
+  }
+  if (!modeAuthorizesEvent(mode, eventContext, policyContext)) {
+    throw new TypeError(
+      `Mode ${resolvedMode} is not authorized for event ${eventContext.eventName}.`,
     );
   }
   const validationRequired =
