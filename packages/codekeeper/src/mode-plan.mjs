@@ -29,6 +29,16 @@ const PULL_REQUEST_EVENTS = new Set([
   "pull_request_review_comment",
 ]);
 const ISSUE_EVENTS = new Set(["issues", "issue_comment"]);
+const OWNER_COMMAND_SURFACES_BY_EVENT = Object.freeze({
+  issues: new Set(["issue"]),
+  issue_comment: new Set(["issue", "pull-request", "review-thread"]),
+  pull_request: new Set(["pull-request"]),
+  pull_request_review: new Set(["pull-request"]),
+  pull_request_review_comment: new Set(["review-thread"]),
+  schedule: new Set(),
+  workflow_dispatch: new Set(),
+  repository_dispatch: new Set(),
+});
 const EVENT_CONTEXT_KEYS = new Set([
   "eventName",
   "command",
@@ -135,6 +145,11 @@ function validateEventContext(event) {
   ) {
     throw new TypeError(
       "Mode-plan owner commands require a valid event surface.",
+    );
+  }
+  if (command && !OWNER_COMMAND_SURFACES_BY_EVENT[eventName].has(surface)) {
+    throw new TypeError(
+      `Mode-plan owner command surface ${surface} is not valid for event ${eventName}.`,
     );
   }
   if (!command && surface !== undefined) {

@@ -668,6 +668,45 @@ test("owner command routes preserve every surface and alias", () => {
       }),
     /requires an owner command/,
   );
+  assert.equal(
+    resolveModePlan({
+      requestedMode: "auto",
+      event: {
+        eventName: "pull_request_review",
+        command: "review",
+        surface: "pull-request",
+      },
+    }).resolvedMode,
+    "review",
+  );
+  for (const eventName of [
+    "schedule",
+    "workflow_dispatch",
+    "repository_dispatch",
+  ]) {
+    assert.throws(
+      () =>
+        resolveModePlan({
+          requestedMode: "auto",
+          event: { eventName, command: "review", surface: "pull-request" },
+        }),
+      /not valid for event/,
+    );
+  }
+  for (const [eventName, surface] of [
+    ["issues", "pull-request"],
+    ["pull_request", "issue"],
+    ["pull_request_review_comment", "pull-request"],
+  ]) {
+    assert.throws(
+      () =>
+        resolveModePlan({
+          requestedMode: "auto",
+          event: { eventName, command: "review", surface },
+        }),
+      /not valid for event/,
+    );
+  }
 });
 
 test("registry permission rules drive dynamic mode plans", () => {
