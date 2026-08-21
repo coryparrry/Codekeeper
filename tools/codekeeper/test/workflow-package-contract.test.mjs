@@ -460,6 +460,27 @@ test("review closes its temporary workspace user before coordinator credentials 
   assert.doesNotMatch(caller, /blacksmith/i);
 });
 
+test("review grants its isolated user read-only traversal to the installed runtime", async () => {
+  const source = await workflow("review");
+  const analyze = jobSection(source, "analyze", "gate");
+  const isolate = analyze.slice(
+    analyze.indexOf("Isolate the workspace specialist from later credentials"),
+    analyze.indexOf("Review with isolated Codex through the Agents SDK"),
+  );
+
+  assert.match(isolate, /chmod a\+x,go-w "\$GITHUB_WORKSPACE"/);
+  assert.match(
+    isolate,
+    /chmod -R a\+rX,go-w "\$REPOSITORY_PATH" "\$BUNDLE" "\$TOOLING_PATH"/,
+  );
+  assert.match(isolate, /chmod a\+r,go-w "\$CONFIG"/);
+  assert.match(
+    isolate,
+    /sudo --user "\$WORKSPACE_USER" -- test -r "\$TOOLING_PATH\/codekeeper-runtime\/src\/cli\.mjs"/,
+  );
+  assert.doesNotMatch(isolate, /chmod -R a\+rX,go-w "\$GITHUB_WORKSPACE"/);
+});
+
 test("package acquisition validates tarball SRI before deriving package provenance", async () => {
   const source = await repositoryFile(
     ".github/codekeeper/actions/acquire-package/action.yml",
