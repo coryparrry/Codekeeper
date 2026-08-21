@@ -73,11 +73,7 @@ function appRunner({
     metadata: "read",
     pull_requests: "write",
   },
-  installationPermissions = permissions,
   events = [],
-  repositorySelection = "selected",
-  suspendedAt = null,
-  repositories = [REPOSITORY],
 } = {}) {
   return createRecordingRunner(({ command, args }) => {
     const key = `${command} ${args.join(" ")}`;
@@ -92,44 +88,11 @@ function appRunner({
         JSON.stringify({ client_id: clientId, permissions, events, owner: { login: "acme", type: "Organization" } }),
       );
     }
-    if (
-      key ===
-      "gh api --hostname github.com user/installations --paginate --slurp"
-    ) {
-      return result(
-        JSON.stringify([
-          {
-            installations: [
-              {
-                id: 42,
-                app_slug: "codekeeper-acme",
-                repository_selection: repositorySelection,
-                suspended_at: suspendedAt,
-                permissions: installationPermissions,
-              },
-            ],
-          },
-        ]),
-      );
-    }
-    if (
-      key ===
-      "gh api --hostname github.com user/installations/42/repositories?per_page=2"
-    ) {
-      return result(
-        JSON.stringify({
-          total_count: repositories.length,
-          repositories: repositories.map((fullName) => ({
-            full_name: fullName,
-          })),
-        }),
-      );
-    }
     throw new Error(`Unexpected command: ${key}`);
   });
 }
 
-test("App proof requires the exact identity, permission set, and one selected repository", async () => {
+test("App proof requires the exact public registration without querying user installations", async () => {
   const runner = appRunner();
   assert.equal(
     await inspectInstalledApp({ runner, root: ROOT, repository: REPOSITORY }),
@@ -137,6 +100,10 @@ test("App proof requires the exact identity, permission set, and one selected re
   );
   assert.equal(
     runner.calls.some((call) => call.args.includes("secret")),
+    false,
+  );
+  assert.equal(
+    runner.calls.some((call) => call.args.includes("user/installations")),
     false,
   );
 });
@@ -226,10 +193,10 @@ test("App proof rejects extra permissions, subscribed events, and a mismatched c
   }
 });
 
-test("App proof rejects stale or excessive installed permissions and reports the exact delta", async () => {
+test("App proof rejects stale registration permissions and reports the exact delta", async () => {
   const stale = await inspectInstalledAppRegistration({
     runner: appRunner({
-      installationPermissions: {
+      permissions: {
         contents: "read",
         issues: "write",
         metadata: "read",
@@ -245,23 +212,8 @@ test("App proof rejects stale or excessive installed permissions and reports the
   assert.deepEqual(stale.permissionDelta, [{
     permission: "contents",
     required: "write",
-    registered: "write",
-    installed: "read"
+    registered: "read"
   }]);
-
-  assert.equal(await inspectInstalledApp({
-    runner: appRunner({
-      installationPermissions: {
-        contents: "write",
-        issues: "write",
-        metadata: "read",
-        pull_requests: "write",
-        actions: "read"
-      }
-    }),
-    root: ROOT,
-    repository: REPOSITORY
-  }), false);
 });
 
 const VERIFICATION_ID = "123e4567-e89b-12d3-a456-426614174000";
@@ -346,25 +298,6 @@ test("controlled maintenance rejects ambiguous dispatches and skipped model jobs
     ),
     false,
   );
-});
-
-test("App proof rejects broad, suspended, and multi-repository installations", async () => {
-  const variants = [
-    { repositorySelection: "all" },
-    { suspendedAt: "2026-08-17T00:00:00Z" },
-    { repositories: [REPOSITORY, "acme/another"] },
-    { repositories: ["acme/another"] },
-  ];
-  for (const variant of variants) {
-    assert.equal(
-      await inspectInstalledApp({
-        runner: appRunner(variant),
-        root: ROOT,
-        repository: REPOSITORY,
-      }),
-      false,
-    );
-  }
 });
 
 function credentialRunner({ matchingIds = [201], jobs = [{ name: "Codekeeper App credential verification", conclusion: "success" }] } = {}) {

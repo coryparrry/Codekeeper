@@ -228,14 +228,16 @@ test("package acquisition uses the injected exact receipt verifier and controls 
   assert.equal(fail.ready, false);
 });
 
-test("GitHub App proof is explicitly not-provable when only token-visible installations are available", async () => {
+test("GitHub App registration is explicitly not-provable without a read-only adapter", async () => {
   const report = await verifyCodekeeperReadiness(
     baseOptions({ verifyPackage: async () => true }),
   );
   const app = check(report, "github-app");
   assert.equal(app.status, "not-provable");
-  assert.match(app.remediation, /After merge/);
-  assert.equal(report.ready, false);
+  assert.equal(app.required, false);
+  assert.match(app.remediation, /registration proof adapter/);
+  assert.equal(check(report, "app-credentials").status, "pass");
+  assert.equal(report.ready, true);
 });
 
 test("readiness distinguishes configured state from stored private-key proof", async () => {
@@ -272,6 +274,18 @@ test("readiness distinguishes configured state from stored private-key proof", a
   assert.equal(verified.configurationReady, true);
   assert.equal(verified.operationallyVerified, true);
   assert.equal(check(verified, "app-credentials").status, "pass");
+
+  const privateRegistration = await verifyCodekeeperReadiness(
+    baseOptions({
+      inspectApp: async () => ({ status: "mismatch", reason: "registration-unavailable" }),
+      verifyPackage: async () => true,
+      verifyAppCredentials: async () => true
+    })
+  );
+  assert.equal(check(privateRegistration, "github-app").status, "not-provable");
+  assert.equal(check(privateRegistration, "github-app").required, false);
+  assert.equal(check(privateRegistration, "app-credentials").status, "pass");
+  assert.equal(privateRegistration.ready, true);
 });
 
 test("controlled checks stay skipped unless explicitly requested and supplied", async () => {

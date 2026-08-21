@@ -307,12 +307,13 @@ export async function verifyCodekeeperReadiness({
     checks.push(
       frozenCheck({
         id: "github-app",
-        label: "GitHub App",
+        label: "GitHub App registration",
         status: "skipped",
         boundary: "github-read",
         detail: "Installed configuration could not be read.",
         remediation:
-          "Repair the installed files before checking the GitHub App.",
+          "Repair the installed files before checking the GitHub App registration.",
+        required: false,
       }),
     );
     checks.push(
@@ -402,25 +403,27 @@ export async function verifyCodekeeperReadiness({
           checks.push(
             frozenCheck({
               id: "github-app",
-              label: "GitHub App",
+              label: "GitHub App registration",
               status: "pass",
               boundary: "github-read",
               detail:
-                "The supplied read-only App proof matches the installed configuration.",
+                "The configured App identity, events, and registration permissions match the installed policy.",
               remediation: "None.",
+              required: false,
             }),
           );
         } else {
           checks.push(
             frozenCheck({
               id: "github-app",
-              label: "GitHub App",
+              label: "GitHub App registration",
               status: "not-provable",
               boundary: "github-read",
               detail:
-                "The supplied App proof did not establish the installed App and required permissions.",
+                "The supplied App proof did not establish the required registration identity, events, and permissions.",
               remediation:
-                "After merge, verify the installed GitHub App, installation scope, and permissions in GitHub settings.",
+                "Update the GitHub App registration to the exact required identity, events, and permissions.",
+              required: false,
             }),
           );
         }
@@ -428,11 +431,12 @@ export async function verifyCodekeeperReadiness({
         checks.push(
           frozenCheck({
             id: "github-app",
-            label: "GitHub App",
+            label: "GitHub App registration",
             status: "not-provable",
             boundary: "github-read",
-            detail: "No read-only GitHub App proof adapter was supplied.",
-            remediation: "After merge, verify the installed GitHub App, installation scope, and permissions in GitHub settings."
+            detail: "No read-only GitHub App registration proof adapter was supplied.",
+            remediation: "Run verification with the GitHub App registration proof adapter.",
+            required: false,
           })
         );
       }
@@ -440,13 +444,14 @@ export async function verifyCodekeeperReadiness({
       checks.push(
         frozenCheck({
           id: "github-app",
-          label: "GitHub App",
+          label: "GitHub App registration",
           status: "not-provable",
           boundary: "github-read",
           detail:
-            "The GitHub App installation proof could not be read with this token.",
+            "The GitHub App registration proof could not be read with this token.",
           remediation:
-            "After merge, verify the installed GitHub App, installation scope, and permissions in GitHub settings.",
+            "Grant read access to the public GitHub App registration, then verify again.",
+          required: false,
         }),
       );
     }

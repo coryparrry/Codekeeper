@@ -223,17 +223,22 @@ async function reconcileExistingApp({ inspectAppRegistration, runner, snapshot, 
   });
   let proof = await inspect();
   if (proof?.status === "pass") return;
+  if (proof?.reason === "registration-unavailable") {
+    output.write("\nGitHub App registration is private and cannot be inspected with the GitHub CLI token.\n");
+    output.write("  The post-merge no-mutation credential probe will prove App identity, installation, repository access, and required permissions.\n");
+    return;
+  }
 
   output.write("\nGitHub App permission update required\n");
   if (Array.isArray(proof?.permissionDelta) && proof.permissionDelta.length > 0) {
     for (const item of proof.permissionDelta) {
-      output.write(`  ${item.permission}: registered ${item.registered}; installed ${item.installed}; required ${item.required}\n`);
+      output.write(`  ${item.permission}: registered ${item.registered}; required ${item.required}\n`);
     }
   } else {
-    output.write("  The configured App identity, installation, repository scope, or permission state could not be proven.\n");
+    output.write("  The configured App identity or registration permissions could not be proven.\n");
   }
   if (proof?.settingsUrl) {
-    output.write(`  Update the App registration, then approve the installation permission change:\n  ${proof.settingsUrl}\n`);
+    output.write(`  Update the App registration permissions:\n  ${proof.settingsUrl}\n`);
     try {
       await openUrl(proof.settingsUrl);
     } catch {
@@ -241,23 +246,23 @@ async function reconcileExistingApp({ inspectAppRegistration, runner, snapshot, 
     }
   }
   const ready = await prompt.confirm({
-    message: "Have you updated the App permissions and approved them for this repository?",
+    message: "Have you updated the App registration permissions?",
     defaultValue: false
   });
   if (!ready) {
-    throw new InstallerError("Update and approve the GitHub App permissions before continuing this Codekeeper update.", {
+    throw new InstallerError("Update the GitHub App registration permissions before continuing this Codekeeper update.", {
       code: "APP_PERMISSIONS_MISMATCH",
       resume: resumeCommand
     });
   }
   proof = await inspect();
   if (proof?.status !== "pass") {
-    throw new InstallerError("The GitHub App registration and installed permissions still do not exactly match this update.", {
+    throw new InstallerError("The GitHub App registration permissions still do not exactly match this update.", {
       code: "APP_PERMISSIONS_MISMATCH",
       resume: resumeCommand
     });
   }
-  output.write("  GitHub App registration and installed permissions now match this update.\n");
+  output.write("  GitHub App registration permissions now match this update.\n");
 }
 
 export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd(), input = stdin, output = stdout, errorOutput = stderr, runner = createCommandRunner(), prompt = null, interactive = input.isTTY === true && output.isTTY === true, environment = process.env, platform = process.platform, openUrl = null, loadAssets = loadVerifiedAssets, inspect = inspectRepository, inspectAppRegistration = inspectInstalledAppRegistration, doctor = doctorRepository, showDoctor = true, verifyReadiness = verifyCodekeeperReadiness, verifyAppCredentials = runAppCredentialProbe, resumeCommand = null, launchLatestUpdate = runLatestUpdate, launchVersionedUpdate = runVersionedUpdate, launchRollback = runRollback, checkUpdate = runUpdateCheck } = {}) {
