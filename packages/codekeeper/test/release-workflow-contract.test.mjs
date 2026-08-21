@@ -184,6 +184,18 @@ test("release workflow only publishes a locally reverified tarball and rechecks 
     source,
     /npm view "\$EXPECTED_NAME@\$EXPECTED_VERSION" version dist\.integrity dist\.tarball --json/,
   );
+  assert.match(source, /max_attempts=6/);
+  assert.match(source, /retry_delay_seconds=2/);
+  assert.match(
+    source,
+    /for \(\( attempt = 1; attempt <= max_attempts; attempt\+\+ \)\); do/,
+  );
+  assert.match(source, /sleep "\$retry_delay_seconds"/);
+  assert.match(
+    source,
+    /retry_delay_seconds=\$\(\(retry_delay_seconds \* 2\)\)/,
+  );
+  assert.match(source, /if \(\( attempt == max_attempts \)\); then/);
   assert.match(source, /npm pack --json --ignore-scripts --pack-destination/);
   assert.equal(
     source.match(

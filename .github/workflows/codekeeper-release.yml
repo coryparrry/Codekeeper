@@ -306,7 +306,27 @@ jobs:
           set -euo pipefail
           : > "$NPM_CONFIG_USERCONFIG"
           receipt="$RUNNER_TEMP/codekeeper-registry-receipt.json"
-          npm view "$EXPECTED_NAME@$EXPECTED_VERSION" version dist.integrity dist.tarball --json > "$receipt"
+          error_report="$RUNNER_TEMP/codekeeper-registry-error.txt"
+          max_attempts=6
+          retry_delay_seconds=2
+          # npm may accept a publish before the version is visible to every registry read path.
+          for (( attempt = 1; attempt <= max_attempts; attempt++ )); do
+            if npm view "$EXPECTED_NAME@$EXPECTED_VERSION" version dist.integrity dist.tarball --json > "$receipt" 2> "$error_report"; then
+              break
+            fi
+            RECEIPT="$receipt" node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const error = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
+            if (error?.error?.code !== "E404") throw new Error("npm lookup failed without a confirmed E404");
+            '
+            if (( attempt == max_attempts )); then
+              cat "$error_report" >&2
+              exit 1
+            fi
+            echo "Public npm receipt is not visible yet; retrying in ${retry_delay_seconds}s (attempt ${attempt}/${max_attempts})." >&2
+            sleep "$retry_delay_seconds"
+            retry_delay_seconds=$((retry_delay_seconds * 2))
+          done
           RECEIPT="$receipt" EXPECTED_VERSION="$EXPECTED_VERSION" EXPECTED_INTEGRITY="$EXPECTED_INTEGRITY" node --input-type=module -e '
           import { readFileSync } from "node:fs";
           const isReceiptObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
