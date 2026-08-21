@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.5](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.4...codekeeper-v0.3.5) (2026-08-21)
+
+
+### Bug Fixes
+
+* **review:** grant isolated runtime read access ([5488765](https://github.com/coryparrry/Codekeeper/commit/5488765c3f44cc1e3b76dd7ec979bf70a658a3f5))
+* **review:** grant isolated runtime read access ([bdd3f39](https://github.com/coryparrry/Codekeeper/commit/bdd3f392c90ec1f05a7059009031bda1e658a506))
+
 ## [0.3.4](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.3...codekeeper-v0.3.4) (2026-08-21)
 
 
