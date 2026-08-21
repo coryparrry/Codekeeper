@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { access, cp, mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, open, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { formatNpmPackReport, normalizeNpmPackReport, packCodekeeperPackage, verifyReleaseAuthority } from "../../../scripts/pack-codekeeper-package.mjs";
@@ -271,6 +271,27 @@ test("command runner bounds captured output and requireSuccess rejects failure, 
     ),
     (error) => error.code === "COMMAND_TIMEOUT"
   );
+});
+
+test("command runner redirects complete stdout to an explicit descriptor while bounding stderr", async (t) => {
+  const root = await temporaryDirectory(t, "codekeeper-runner-output-");
+  const reportPath = path.join(root, "report.json");
+  const report = await open(reportPath, "wx", 0o600);
+  let commandResult;
+  try {
+    commandResult = await createCommandRunner().run(
+      process.execPath,
+      ["-e", "process.stdout.write('x'.repeat(140000));process.stderr.write('warning')"],
+      { stdoutFd: report.fd }
+    );
+  } finally {
+    await report.close();
+  }
+  assert.equal(commandResult.status, 0);
+  assert.equal(commandResult.stdout, "");
+  assert.equal(commandResult.stderr, "warning");
+  assert.equal(commandResult.truncated, false);
+  assert.equal((await readFile(reportPath)).byteLength, 140000);
 });
 
 test("one npm tarball installs a lightweight CLI then its copied runtime graph entirely offline", async (t) => {

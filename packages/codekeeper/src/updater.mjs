@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { closeSync, constants as fsConstants, openSync } from "node:fs";
 import { access, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,10 @@ import { RELEASE_VERSION, validSha512Integrity } from "./package-release.mjs";
 import { parseReleaseManifest } from "./preflight.mjs";
 
 const NPM_TIMEOUT_MS = 5 * 60 * 1000;
+// npm pack reports can contain one entry per packed file. Keep this limit
+// separate from the command runner's bounded diagnostic output so a valid
+// report cannot be mistaken for a failed command.
+const NPM_PACK_REPORT_LIMIT_BYTES = 4 * 1024 * 1024;
 const NPM_ENV_NAMES = new Set(["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "NPM_CONFIG_CACHE", "NPM_CONFIG_USERCONFIG", "NPM_CONFIG_REGISTRY", "NPM_CONFIG_PROXY", "NPM_CONFIG_HTTPS_PROXY", "NPM_CONFIG_CAFILE", "NPM_CONFIG_STRICT_SSL", "npm_config_cache", "npm_config_userconfig", "npm_config_registry", "npm_config_proxy", "npm_config_https_proxy", "npm_config_cafile", "npm_config_strict_ssl"]);
 const DEFAULT_FILE_SYSTEM = Object.freeze({
   access,
@@ -169,6 +174,10 @@ function releaseReceipt(source, requestedVersion) {
   } catch {
     failReleaseResolution("npm returned invalid Codekeeper release metadata.");
   }
+  if (Array.isArray(metadata)) {
+    if (metadata.length !== 1) failReleaseResolution("npm returned invalid Codekeeper release metadata.");
+    [metadata] = metadata;
+  }
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
     failReleaseResolution("npm returned invalid Codekeeper release metadata.");
   }
@@ -204,14 +213,47 @@ function normalizeNpmPackReport(report) {
   return report[keys[0]];
 }
 
-export async function verifyDownloadedTarball({ downloadRoot, reportSource, receipt, fsImpl = DEFAULT_FILE_SYSTEM }) {
+function parseNpmPackReport(reportSource) {
   let report;
   try {
     report = JSON.parse(reportSource);
   } catch {
     failReleaseResolution("npm pack returned an invalid report.");
   }
-  const entry = normalizeNpmPackReport(report);
+  return normalizeNpmPackReport(report);
+}
+
+function compactNpmPackReport(reportSource) {
+  const entry = parseNpmPackReport(reportSource);
+  if (
+    !entry
+    || typeof entry.name !== "string"
+    || typeof entry.version !== "string"
+    || typeof entry.integrity !== "string"
+    || typeof entry.filename !== "string"
+    || path.basename(entry.filename) !== entry.filename
+    || !entry.filename.endsWith(".tgz")
+  ) {
+    failReleaseResolution("npm pack returned an invalid report.");
+  }
+  return JSON.stringify({
+    name: entry.name,
+    version: entry.version,
+    integrity: entry.integrity,
+    filename: entry.filename
+  });
+}
+
+async function readNpmPackReport(reportPath, fsImpl) {
+  const metadata = await fsImpl.lstat(reportPath);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > NPM_PACK_REPORT_LIMIT_BYTES) {
+    failReleaseResolution("npm pack returned an invalid or oversized report.");
+  }
+  return compactNpmPackReport(await fsImpl.readFile(reportPath, "utf8"));
+}
+
+export async function verifyDownloadedTarball({ downloadRoot, reportSource, receipt, fsImpl = DEFAULT_FILE_SYSTEM }) {
+  const entry = parseNpmPackReport(reportSource);
   if (entry?.name !== PACKAGE_NAME || entry.version !== receipt.version || entry.integrity !== receipt.integrity || typeof entry.filename !== "string" || path.basename(entry.filename) !== entry.filename || !entry.filename.endsWith(".tgz")) {
     failReleaseResolution("npm pack did not return the exact Codekeeper release.");
   }
@@ -236,14 +278,25 @@ export async function stageVerifiedPackage({ cwd, environment, platform, receipt
   try {
     const downloadRoot = path.join(root, "download");
     const installRoot = path.join(root, "install");
+    const reportPath = path.join(root, "npm-pack.json");
     await fsImpl.mkdir(downloadRoot, { recursive: true });
     await fsImpl.mkdir(installRoot, { recursive: true });
-    const packResult = await runner.run("node", [npmCli, "pack", "--json", "--ignore-scripts", "--pack-destination", downloadRoot, `${PACKAGE_NAME}@${receipt.version}`], {
-      cwd,
-      env: updateEnvironment(environment, platform, receipt.version, receipt.integrity),
-      timeoutMs: NPM_TIMEOUT_MS
-    });
-    const reportSource = requireCommandSuccess(packResult, "Could not download the exact Codekeeper release from npm.");
+    const reportFd = openSync(reportPath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+    let packResult;
+    try {
+      packResult = await runner.run("node", [npmCli, "pack", "--json", "--ignore-scripts", "--pack-destination", downloadRoot, `${PACKAGE_NAME}@${receipt.version}`], {
+        cwd,
+        env: updateEnvironment(environment, platform, receipt.version, receipt.integrity),
+        stdoutFd: reportFd,
+        timeoutMs: NPM_TIMEOUT_MS
+      });
+    } finally {
+      closeSync(reportFd);
+    }
+    if (!packResult || packResult.status !== 0 || packResult.timedOut || packResult.truncated || typeof packResult.stderr !== "string") {
+      throw new InstallerError("Could not download the exact Codekeeper release from npm.", { code: "UPDATE_BOOTSTRAP_FAILED" });
+    }
+    const reportSource = await readNpmPackReport(reportPath, fsImpl);
     const tarball = await verifyDownloadedTarball({
       downloadRoot,
       reportSource,
