@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.0...codekeeper-v0.3.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **installer:** verify package and runtime source separately ([#247](https://github.com/coryparrry/Codekeeper/issues/247)) ([19c69f5](https://github.com/coryparrry/Codekeeper/commit/19c69f5c42bbdd1186a6f6c151514e374cc487d0))
+
 ## [0.3.0](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.2.0...codekeeper-v0.3.0) (2026-08-21)
 
 
