@@ -3,12 +3,12 @@ import {
   AGENT_PROFILES,
   ASSISTANT_WORKFLOW,
   MODE_IDS,
-  MODES,
   PACKAGE_ACQUIRE_ACTION,
   POLICY_TARGET,
   RELEASE_MANIFEST_TARGET,
   RUNTIME_WORKFLOWS,
 } from "./constants.mjs";
+import { MODE_REGISTRY } from "./mode-registry.mjs";
 
 const ARTIFACT_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const ASSET_PATH =
@@ -102,14 +102,14 @@ export const REPOSITORY_ARTIFACTS = Object.freeze(
     ASSISTANT_ARTIFACT,
     ...MODE_IDS.map((mode) => ({
       id: `repository.workflow.${mode}`,
-      target: MODES[mode].target,
-      asset: MODES[mode].asset,
+      target: MODE_REGISTRY[mode].caller.target,
+      asset: MODE_REGISTRY[mode].caller.asset,
       ownership: "release",
       activation: { kind: "mode", id: mode },
       renderer: "mode-workflow",
       validation: "caller",
       callerMode: mode,
-      purpose: MODES[mode].label,
+      purpose: MODE_REGISTRY[mode].label,
     })),
     PACKAGE_ACTION_ARTIFACT,
     {
@@ -124,8 +124,8 @@ export const REPOSITORY_ARTIFACTS = Object.freeze(
     },
     ...MODE_IDS.map((mode) => ({
       id: `repository.workflow.runtime.${mode}`,
-      target: RUNTIME_WORKFLOWS[mode].target,
-      asset: RUNTIME_WORKFLOWS[mode].asset,
+      target: MODE_REGISTRY[mode].runtime.target,
+      asset: MODE_REGISTRY[mode].runtime.asset,
       ownership: "release",
       activation: { kind: "mode", id: mode },
       renderer: "copy",

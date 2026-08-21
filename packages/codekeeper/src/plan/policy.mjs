@@ -1,9 +1,9 @@
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
-  MODES,
   PRESET_IDS
 } from "../constants.mjs";
+import { MODE_REGISTRY } from "../mode-registry.mjs";
 import { InstallerError } from "../errors.mjs";
 import { upgradePolicy } from "../policy.mjs";
 import { createEditableSettings } from "../settings.mjs";
@@ -99,7 +99,7 @@ export function applyPolicyCapabilities(inputPolicy, capabilities, tracing) {
 
 export function applyModelSettings(inputPolicy, models) {
   for (const [mode, selection] of Object.entries(models)) {
-    const agent = inputPolicy.ai.agents[MODES[mode]?.policyAgent ?? mode];
+    const agent = inputPolicy.ai.agents[MODE_REGISTRY[mode]?.policyAgent ?? mode];
     agent.provider = selection.provider;
     agent.model = selection.model;
     agent.effort = selection.effort;

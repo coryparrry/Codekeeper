@@ -18,6 +18,7 @@ export {
   normalizeOwnerLogins,
   requiredSecretNames,
   requiresAutomationBotLogin,
+  resolveModePlan,
   setupPullRequestBody,
   workflowMap
 } from "./plan/index.mjs";

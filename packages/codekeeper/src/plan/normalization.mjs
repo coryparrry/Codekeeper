@@ -1,5 +1,5 @@
 import path from "node:path";
-import { MODE_IDS } from "../constants.mjs";
+import { MODE_IDS } from "../mode-registry.mjs";
 import { InstallerError } from "../errors.mjs";
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;

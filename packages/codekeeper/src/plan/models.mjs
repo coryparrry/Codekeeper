@@ -2,11 +2,11 @@ import {
   ALL_MODEL_OPTIONS,
   APP_SECRET,
   MODEL_PROVIDER_SECRETS,
-  MODES,
   OPENAI_SECRET,
   RECOMMENDED_PRESET,
   TRACE_SECRET
 } from "../constants.mjs";
+import { MODE_REGISTRY } from "../mode-registry.mjs";
 import { InstallerError } from "../errors.mjs";
 import { upgradePolicy } from "../policy.mjs";
 import { normalizeModes } from "./normalization.mjs";
@@ -14,9 +14,9 @@ import { normalizeModes } from "./normalization.mjs";
 export function modelAssignments(modes) {
   return normalizeModes(modes).map((mode) => ({
     key: mode,
-    agent: MODES[mode].policyAgent,
-    label: MODES[mode].agentLabel,
-    workflow: MODES[mode].label
+    agent: MODE_REGISTRY[mode].policyAgent,
+    label: MODE_REGISTRY[mode].agentLabel,
+    workflow: MODE_REGISTRY[mode].label
   }));
 }
 
@@ -25,9 +25,9 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
   const names = [];
   const providers = new Set(modelAssignments(selected).map(({ key, agent }) => models?.[key]?.provider ?? policy?.ai?.agents?.[agent]?.provider ?? (preset === "mixed" && key === "issues" ? "deepseek" : "openai")));
   for (const mode of selected) {
-    const agent = policy?.ai?.agents?.[MODES[mode].policyAgent];
-    if (MODES[mode].workspaceProvider && (!policy || agent?.workspace?.enabled === true)) {
-      providers.add(MODES[mode].workspaceProvider);
+    const agent = policy?.ai?.agents?.[MODE_REGISTRY[mode].policyAgent];
+    if (MODE_REGISTRY[mode].workspaceProvider && (!policy || agent?.workspace?.enabled === true)) {
+      providers.add(MODE_REGISTRY[mode].workspaceProvider);
     }
   }
   for (const [provider, secret] of Object.entries(MODEL_PROVIDER_SECRETS)) {
@@ -42,8 +42,8 @@ export function requiredSecretNames({ modes, models, preset = RECOMMENDED_PRESET
 export function existingSecretNames(installation) {
   const providers = new Set(modelAssignments(installation.modes).map(({ agent }) => installation.policy.ai.agents[agent].provider));
   for (const mode of installation.modes) {
-    const agent = installation.policy.ai.agents[MODES[mode].policyAgent];
-    if (agent.workspace?.enabled && MODES[mode].workspaceProvider) providers.add(MODES[mode].workspaceProvider);
+    const agent = installation.policy.ai.agents[MODE_REGISTRY[mode].policyAgent];
+    if (agent.workspace?.enabled && MODE_REGISTRY[mode].workspaceProvider) providers.add(MODE_REGISTRY[mode].workspaceProvider);
   }
   return new Set([
     ...Object.entries(MODEL_PROVIDER_SECRETS)
@@ -99,7 +99,7 @@ export function modelSummary(modes, effectivePolicy) {
   return Object.freeze(
     Object.fromEntries(
       modes.map((mode) => {
-        const agent = effectivePolicy.ai.agents[MODES[mode].policyAgent];
+        const agent = effectivePolicy.ai.agents[MODE_REGISTRY[mode].policyAgent];
         return [
           mode,
           Object.freeze({
@@ -109,7 +109,7 @@ export function modelSummary(modes, effectivePolicy) {
               effort: agent.effort
             }),
             workspace: Object.freeze({
-              provider: MODES[mode].workspaceProvider,
+              provider: MODE_REGISTRY[mode].workspaceProvider,
               enabled: agent.workspace?.enabled === true,
               model: agent.workspace?.model ?? "",
               effort: agent.workspace?.effort ?? "none",

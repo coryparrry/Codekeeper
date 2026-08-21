@@ -3,67 +3,30 @@ export {
   PACKAGE_SOURCE_REPOSITORY as SOURCE_REPOSITORY,
   PACKAGE_VERSION,
 } from "./package-identity.mjs";
+import {
+  MODE_IDS,
+  RUNTIME_WORKFLOW_IDS,
+  RUNTIME_WORKFLOWS,
+} from "./mode-registry.mjs";
+export {
+  AGENT_PROFILE_DEFINITIONS,
+  AGENT_PROFILE_IDS,
+  AGENT_PROFILES,
+  ASSISTANT_WORKFLOW,
+  COMMAND_MODE_MAP,
+  MODE_IDS,
+  MODE_REGISTRY,
+  MODES,
+  POLICY_AGENT_TO_MODE,
+  RUNTIME_WORKFLOW_IDS,
+  RUNTIME_WORKFLOWS,
+} from "./mode-registry.mjs";
 export const MINIMUM_NODE_MAJOR = 22;
 export const SOURCE_COMMIT = "e33e4ad6475940a8dc095e9dc2dae14a921ac05b";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
 
-export const MODES = Object.freeze({
-  review: Object.freeze({
-    id: "review",
-    label: "Pull request review",
-    agentLabel: "Pull request reviewer",
-    description: "Reviews pull requests from this repository. Adds comments, labels, and a blocking result.",
-    policyAgent: "review",
-    workspaceProvider: "openai",
-    target: ".github/workflows/codekeeper-review.yml",
-    asset: "workflows/review.yml",
-    trigger: "same-repository pull request"
-  }),
-  maintain: Object.freeze({
-    id: "maintain",
-    label: "Repository maintenance",
-    agentLabel: "Repository auditor",
-    description: "Runs repository audits manually or on a schedule. Live runs can repair the repository when repair is on.",
-    policyAgent: "audit",
-    workspaceProvider: "openai",
-    target: ".github/workflows/codekeeper-maintain.yml",
-    asset: "workflows/maintain.yml",
-    trigger: "schedule or manual run"
-  }),
-  issues: Object.freeze({
-    id: "issues",
-    label: "Issue triage",
-    agentLabel: "Issue triager",
-    description: "Adds labels and comments to issues. Automatic duplicate closure stays off.",
-    policyAgent: "issue",
-    workspaceProvider: null,
-    target: ".github/workflows/codekeeper-issues.yml",
-    asset: "workflows/issues.yml",
-    trigger: "issue or issue comment"
-  }),
-  fix: Object.freeze({
-    id: "fix",
-    label: "Issue implementation and pull request repair",
-    agentLabel: "Fixer",
-    description: "Validates and implements ready issues or pull request repairs in one workspace pass.",
-    policyAgent: "fix",
-    workspaceProvider: "openai",
-    target: ".github/workflows/codekeeper-fix.yml",
-    asset: "workflows/fix.yml",
-    trigger: "ready issue, owner command, or manual run"
-  })
-});
-
-export const MODE_IDS = Object.freeze(Object.keys(MODES));
-export const ASSISTANT_WORKFLOW = Object.freeze({
-  id: "assistant",
-  label: "Repository assistant",
-  target: ".github/workflows/codekeeper-assistant.yml",
-  asset: "workflows/assistant.yml",
-  description: "Routes configured-owner requests to the installed role workflows."
-});
 export const PACKAGE_ACQUIRE_ACTION = Object.freeze({
   id: "acquire-package",
   label: "Package acquisition action",
@@ -73,50 +36,10 @@ export const PACKAGE_ACQUIRE_ACTION = Object.freeze({
   packagePath: "release/actions/acquire-package/action.yml",
   description: "Downloads and verifies the exact Codekeeper npm release inside each isolated runtime job."
 });
-export const RUNTIME_WORKFLOWS = Object.freeze(Object.fromEntries([
-  ["assistant", "Repository assistant"],
-  ...MODE_IDS.map((mode) => [mode, MODES[mode].label])
-].map(([id, label]) => [id, Object.freeze({
-  id,
-  label: `${label} runtime`,
-  target: `.github/workflows/codekeeper-runtime-${id}.yml`,
-  asset: `runtime-workflows/${id}.yml`,
-  sourcePath: `.github/workflows/codekeeper-${id}.yml`,
-  packagePath: `release/workflows/codekeeper-${id}.yml`,
-  description: `Runs the ${label.toLowerCase()} from the verified Codekeeper package.`
-})])));
-export const RUNTIME_WORKFLOW_IDS = Object.freeze(Object.keys(RUNTIME_WORKFLOWS));
 export const RELEASE_PACKAGE_ASSETS = Object.freeze([
   PACKAGE_ACQUIRE_ACTION,
   ...RUNTIME_WORKFLOW_IDS.map((id) => RUNTIME_WORKFLOWS[id])
 ]);
-export const AGENT_PROFILES = Object.freeze({
-  "pr-reviewer": Object.freeze({
-    id: "pr-reviewer",
-    target: ".github/codekeeper/agents/pr-reviewer.md",
-    asset: "agents/pr-reviewer.md",
-    purpose: "Pull-request review judgment rules"
-  }),
-  "repository-auditor": Object.freeze({
-    id: "repository-auditor",
-    target: ".github/codekeeper/agents/repository-auditor.md",
-    asset: "agents/repository-auditor.md",
-    purpose: "Repository-audit judgment rules"
-  }),
-  "issue-triager": Object.freeze({
-    id: "issue-triager",
-    target: ".github/codekeeper/agents/issue-triager.md",
-    asset: "agents/issue-triager.md",
-    purpose: "Issue-triage judgment rules"
-  }),
-  fixer: Object.freeze({
-    id: "fixer",
-    target: ".github/codekeeper/agents/fixer.md",
-    asset: "agents/fixer.md",
-    purpose: "Implementation and repair rules"
-  })
-});
-export const AGENT_PROFILE_IDS = Object.freeze(Object.keys(AGENT_PROFILES));
 export const PRESET_IDS = Object.freeze(["mixed", "openai"]);
 export const RECOMMENDED_MODES = Object.freeze(["review", "maintain"]);
 export const RECOMMENDED_PRESET = "openai";
