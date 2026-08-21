@@ -413,7 +413,7 @@ test("verify passes controlled mode through, emits JSON, and uses readiness exit
   assert.equal(status, 0);
   assert.equal(received.cwd, "/tmp/widget");
   assert.equal(received.controlledCheck, true);
-  assert.equal(typeof received.inspectApp, "function");
+  assert.equal(received.inspectApp.name, "inspectInstalledAppRegistration");
   assert.equal(typeof received.verifyPackage, "function");
   assert.deepEqual(JSON.parse(output.toString()), report);
   assert.equal(errorOutput.toString(), "");

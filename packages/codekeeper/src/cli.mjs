@@ -11,7 +11,7 @@ import { normalizePackageRelease, RELEASE_VERSION } from "./package-release.mjs"
 import { formatCommand } from "./shell-command.mjs";
 import { runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate } from "./updater.mjs";
 import { verifyCodekeeperReadiness } from "./verify.mjs";
-import { inspectInstalledApp, inspectInstalledAppRegistration, runAppCredentialProbe, runMaintenanceDryRun, verifyInstalledPackage } from "./verification-adapters.mjs";
+import { inspectInstalledAppRegistration, runAppCredentialProbe, runMaintenanceDryRun, verifyInstalledPackage } from "./verification-adapters.mjs";
 
 export const USAGE = `Usage:
   codekeeper init
@@ -326,7 +326,7 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
       const report = await verifyReadiness({
         runner,
         cwd,
-        inspectApp: inspectInstalledApp,
+        inspectApp: inspectInstalledAppRegistration,
         verifyAppCredentials,
         verifyPackage: (input) => verifyInstalledPackage(input, { runner, environment, platform }),
         controlledCheck: parsed.controlled,
