@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.6](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.5...codekeeper-v0.3.6) (2026-08-21)
+
+
+### Bug Fixes
+
+* **release:** gate npm publish on customer lifecycle ([#260](https://github.com/coryparrry/Codekeeper/issues/260)) ([f7dfd9b](https://github.com/coryparrry/Codekeeper/commit/f7dfd9b29cfc7ab60c6d4037ac3c16ce44ba3e03))
+* **release:** tolerate npm registry propagation delay ([#262](https://github.com/coryparrry/Codekeeper/issues/262)) ([39e4b15](https://github.com/coryparrry/Codekeeper/commit/39e4b1562b668536cf5be63636e4b4ebd109e299))
+* **security:** bound semantic version validation ([#244](https://github.com/coryparrry/Codekeeper/issues/244)) ([2c4e359](https://github.com/coryparrry/Codekeeper/commit/2c4e359f828b0a32922cff9d4f14813a39c61dd1))
+
 ## [0.3.5](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.4...codekeeper-v0.3.5) (2026-08-21)
 
 
