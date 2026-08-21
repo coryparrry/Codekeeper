@@ -241,14 +241,24 @@ async function resolveTrustedCommandPaths({
   cwd = process.cwd(),
   environment = process.env,
   platform = process.platform,
-  fsImpl = DEFAULT_TRUSTED_COMMAND_FILE_SYSTEM
+  fsImpl = DEFAULT_TRUSTED_COMMAND_FILE_SYSTEM,
+  allowMissingCommands = []
 } = {}) {
+  if (!Array.isArray(allowMissingCommands) || allowMissingCommands.some((command) => !TRUSTED_COMMANDS.includes(command))) {
+    throw new TypeError("allowMissingCommands must contain only trusted command names");
+  }
+  const allowedMissing = new Set(allowMissingCommands);
   const { repositoryRoot, resolvedCwd } = await findRepositoryRoot(cwd, fsImpl);
   const originalRoot = originalRepositoryRoot(cwd, resolvedCwd, repositoryRoot);
   const { directories, environment: trustedEnvironment } = await trustedPathEntries({ repositoryRoot, originalRoot, environment, platform, fsImpl });
   const commandPaths = {};
   for (const command of TRUSTED_COMMANDS) {
-    commandPaths[command] = await findTrustedExecutable(command, directories, repositoryRoot, platform, fsImpl);
+    try {
+      commandPaths[command] = await findTrustedExecutable(command, directories, repositoryRoot, platform, fsImpl);
+    } catch (error) {
+      if (!allowedMissing.has(command) || error?.code !== "TRUSTED_COMMAND_UNAVAILABLE") throw error;
+      commandPaths[command] = null;
+    }
   }
   return Object.freeze({ commandPaths: Object.freeze(commandPaths), environment: trustedEnvironment });
 }
@@ -329,8 +339,8 @@ export function createCommandRunner({
 } = {}) {
   const frozenCommandPaths = commandPaths ? Object.freeze({ ...commandPaths }) : null;
   return Object.freeze({
-    async resolveTrustedCommands({ cwd = process.cwd(), fsImpl = DEFAULT_TRUSTED_COMMAND_FILE_SYSTEM } = {}) {
-      const trusted = await resolveTrustedCommandPaths({ cwd, environment, platform, fsImpl });
+    async resolveTrustedCommands({ cwd = process.cwd(), fsImpl = DEFAULT_TRUSTED_COMMAND_FILE_SYSTEM, allowMissingCommands = [] } = {}) {
+      const trusted = await resolveTrustedCommandPaths({ cwd, environment, platform, fsImpl, allowMissingCommands });
       return createCommandRunner({
         spawnImpl,
         environment: trusted.environment,
@@ -354,8 +364,17 @@ export function createCommandRunner({
       const provideInput = options.provideInput ?? null;
       if (provideInput !== null && typeof provideInput !== "function") throw new TypeError("provideInput must be a function");
       if (provideInput && stdinFd !== null) throw new TypeError("provideInput and stdinFd cannot be used together");
+      const stdoutFd = options.stdoutFd ?? null;
+      if (stdoutFd !== null && (!Number.isInteger(stdoutFd) || stdoutFd < 3)) {
+        throw new TypeError("stdoutFd must be an open non-standard file descriptor");
+      }
+      if (stdoutFd !== null && stdio !== "capture") throw new TypeError("stdoutFd requires captured stdio");
       const env = options.env ?? sanitizedEnvironment(environment, { platform });
-      const executable = frozenCommandPaths?.[command] ?? command;
+      const hasResolvedCommand = frozenCommandPaths !== null && Object.hasOwn(frozenCommandPaths, command);
+      const executable = hasResolvedCommand ? frozenCommandPaths[command] : command;
+      if (executable === null) {
+        return Promise.reject(new InstallerError(`Could not run ${command}.`, { code: "TRUSTED_COMMAND_UNAVAILABLE" }));
+      }
 
       return new Promise((resolve, reject) => {
         const stdout = [];
@@ -368,7 +387,7 @@ export function createCommandRunner({
         let child;
         try {
           const childStdio = stdio === "capture"
-            ? [provideInput ? "pipe" : (stdinFd ?? "ignore"), "pipe", "pipe"]
+            ? [provideInput ? "pipe" : (stdinFd ?? "ignore"), stdoutFd ?? "pipe", "pipe"]
             : stdinFd === null
               ? (provideInput ? ["pipe", stdio, stdio] : stdio)
               : [stdinFd, stdio, stdio];
@@ -384,7 +403,7 @@ export function createCommandRunner({
         }
 
         if (stdio === "capture") {
-          child.stdout?.on("data", (chunk) => appendBounded(stdout, chunk, stdoutState));
+          if (stdoutFd === null) child.stdout?.on("data", (chunk) => appendBounded(stdout, chunk, stdoutState));
           child.stderr?.on("data", (chunk) => appendBounded(stderr, chunk, stderrState));
         }
 

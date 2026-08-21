@@ -77,6 +77,30 @@ test("trusted command resolution rejects repository shadows and freezes absolute
   assert.ok(calls.every((call) => call.options.shell === false));
 });
 
+test("trusted command resolution may leave an explicitly diagnostic command unresolved", async (t) => {
+  const root = await temporaryDirectory(t, "codekeeper-optional-command-");
+  const safeBin = await temporaryDirectory(t, "codekeeper-safe-command-");
+  const rejectedBin = path.join(safeBin, "node_modules", "unsafe", "bin");
+  await mkdir(path.join(root, ".git"));
+  await mkdir(safeBin, { recursive: true });
+  const gitPath = path.join(safeBin, "git");
+  await writeFile(gitPath, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  await chmod(gitPath, 0o700);
+  await mkdir(rejectedBin, { recursive: true });
+  const rejectedGh = path.join(rejectedBin, "gh");
+  await writeFile(rejectedGh, "#!/bin/sh\nprintf unsafe-executed\n", { mode: 0o700 });
+  await chmod(rejectedGh, 0o700);
+  await symlink(rejectedGh, path.join(safeBin, "gh"));
+
+  const trusted = await createCommandRunner({ environment: { PATH: safeBin, HOME: root } })
+    .resolveTrustedCommands({ cwd: root, allowMissingCommands: ["gh"] });
+  assert.equal((await trusted.run("git", ["--version"], { cwd: root })).status, 0);
+  await assert.rejects(
+    trusted.run("gh", ["--version"], { cwd: root }),
+    (error) => error.code === "TRUSTED_COMMAND_UNAVAILABLE" && !String(error).includes("unsafe-executed")
+  );
+});
+
 test("trusted command resolution rejects checkout PATH symlinks before canonicalization", async (t) => {
   const root = await temporaryDirectory(t, "codekeeper-checkout-path-");
   const escapedBin = await temporaryDirectory(t, "codekeeper-escaped-command-");
