@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   inspectInstalledApp,
   inspectInstalledAppRegistration,
@@ -7,17 +9,36 @@ import {
   runMaintenanceDryRun,
   verifyInstalledPackage,
 } from "../src/verification-adapters.mjs";
-import { createRecordingRunner, result } from "./helpers.mjs";
+import { createRecordingRunner, result, temporaryDirectory } from "./helpers.mjs";
 
 const ROOT = "/repo/widget";
 const REPOSITORY = "acme/widget";
 const CLIENT_ID = "Iv123456789012345678";
 const INTEGRITY = `sha512-${Buffer.alloc(64, 0xab).toString("base64")}`;
 
-test("package verification keeps the package build commit separate from the installer source checkpoint", async () => {
+test("package verification keeps the package build commit separate from the installer source checkpoint", async (t) => {
   const verified = [];
   const removed = [];
   const runner = createRecordingRunner(() => result());
+  const stageRoot = await temporaryDirectory(t, "codekeeper-stage-");
+  const packageRoot = path.join(
+    stageRoot,
+    "install",
+    "node_modules",
+    "@coryparry",
+    "codekeeper",
+  );
+  const source = {
+    repository: "coryparrry/Codekeeper",
+    commit: "a".repeat(40),
+  };
+  await mkdir(path.join(packageRoot, "assets"), { recursive: true });
+  await mkdir(path.join(packageRoot, "bin"), { recursive: true });
+  await mkdir(path.join(packageRoot, "release"), { recursive: true });
+  await writeFile(
+    path.join(packageRoot, "assets", "metadata.json"),
+    `${JSON.stringify({ version: 1, source })}\n`,
+  );
   assert.equal(
     await verifyInstalledPackage(
       {
@@ -27,7 +48,7 @@ test("package verification keeps the package build commit separate from the inst
           integrity: INTEGRITY,
         },
         installation: {
-          releaseManifest: { source: { commit: "a".repeat(40) } },
+          releaseManifest: { source },
         },
         root: ROOT,
       },
@@ -42,9 +63,8 @@ test("package verification keeps the package build commit separate from the inst
           integrity: INTEGRITY,
         }),
         stagePackage: async () => ({
-          root: "/tmp/codekeeper-stage",
-          executable:
-            "/tmp/codekeeper-stage/install/node_modules/@coryparry/codekeeper/bin/codekeeper.mjs",
+          root: stageRoot,
+          executable: path.join(packageRoot, "bin", "codekeeper.mjs"),
         }),
         verifyRelease: async (options) => verified.push(options),
         remove: async (...args) => removed.push(args),
@@ -54,14 +74,14 @@ test("package verification keeps the package build commit separate from the inst
   );
   assert.deepEqual(verified, [
     {
-      root: "/tmp/codekeeper-stage/install/node_modules/@coryparry/codekeeper",
+      root: packageRoot,
       expectedName: "@coryparry/codekeeper",
       expectedVersion: "1.4.2",
       expectedIntegrity: INTEGRITY,
     },
   ]);
   assert.deepEqual(removed, [
-    ["/tmp/codekeeper-stage", { recursive: true, force: true }],
+    [stageRoot, { recursive: true, force: true }],
   ]);
 });
 
