@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.7](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.6...codekeeper-v0.3.7) (2026-08-21)
+
+
+### Bug Fixes
+
+* **installer:** offer npm lockfile preparation ([#265](https://github.com/coryparrry/Codekeeper/issues/265)) ([99cf15d](https://github.com/coryparrry/Codekeeper/commit/99cf15d376978843295c8ff3acb99ca03f92f43b))
+* **release:** retry npm pack until the public tarball is fetchable ([#263](https://github.com/coryparrry/Codekeeper/issues/263)) ([b764a35](https://github.com/coryparrry/Codekeeper/commit/b764a3543d8752209ebee681f3e24c769cac6ab8))
+
 ## [0.3.6](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.5...codekeeper-v0.3.6) (2026-08-21)
 
 
