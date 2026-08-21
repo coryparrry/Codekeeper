@@ -556,6 +556,17 @@ test("package receipt and release provenance mismatches fail before a scenario c
   }
 });
 
+test("package receipts reject oversized prerelease identifiers", () => {
+  assert.throws(
+    () => parsePinnedWorkflowUses(
+      callerSource("codekeeper-maintain.yml"),
+      "codekeeper-maintain.yml",
+      { ...PACKAGE_RELEASE, version: `0.0.0-0.${"--.".repeat(256)}` }
+    ),
+    /requires a valid exact Codekeeper package receipt/
+  );
+});
+
 test("misplaced and gated package caller references fail before an acceptance tag can be created", async () => {
   for (const source of [
     `${callerSource("codekeeper-maintain.yml")}  observer:\n    uses: ./.github/workflows/codekeeper-runtime-maintain.yml`,

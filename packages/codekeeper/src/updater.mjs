@@ -6,7 +6,7 @@ import path from "node:path";
 import { createCommandRunner, resolveRepositoryBoundary, sanitizedEnvironment } from "./command-runner.mjs";
 import { PACKAGE_NAME, RELEASE_MANIFEST_TARGET } from "./constants.mjs";
 import { InstallerError } from "./errors.mjs";
-import { RELEASE_VERSION, validSha512Integrity } from "./package-release.mjs";
+import { isReleaseVersion, validSha512Integrity } from "./package-release.mjs";
 import { parseReleaseManifest } from "./preflight.mjs";
 
 const NPM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -102,7 +102,7 @@ function failReleaseResolution(message) {
 
 function releaseSelector(value) {
   if (value === "latest") return value;
-  if (typeof value === "string" && RELEASE_VERSION.test(value)) return value;
+  if (isReleaseVersion(value)) return value;
   failReleaseResolution("Codekeeper updates require the latest tag or an exact semantic version.");
 }
 
@@ -112,7 +112,7 @@ function compareNumericIdentifier(left, right) {
 }
 
 function parsedReleaseVersion(value) {
-  if (typeof value !== "string" || !RELEASE_VERSION.test(value)) {
+  if (!isReleaseVersion(value)) {
     failReleaseResolution("Codekeeper release comparison requires exact semantic versions.");
   }
   const withoutBuild = value.split("+", 1)[0];
@@ -183,7 +183,7 @@ function releaseReceipt(source, requestedVersion) {
   }
   const version = metadata.version;
   const integrity = metadata.dist?.integrity ?? metadata["dist.integrity"];
-  if (typeof version !== "string" || !RELEASE_VERSION.test(version)) {
+  if (!isReleaseVersion(version)) {
     failReleaseResolution("npm returned an invalid Codekeeper release version.");
   }
   if (!validSha512Integrity(integrity)) {

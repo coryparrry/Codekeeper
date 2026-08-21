@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { isReleaseVersion } from "../../packages/codekeeper/src/package-release.mjs";
 import { prepareEvidenceDestination, writeEvidenceAtomically } from "./evidence.mjs";
 
 const PRIVATE_REPOSITORY_PREFIX = "codekeeper-acceptance-";
@@ -10,7 +11,6 @@ const SHA_PATTERN = "[0-9A-Fa-f]{40}";
 const REPOSITORY_PATTERN = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
 const SHA = new RegExp(`^${SHA_PATTERN}$`, "i");
 const REPOSITORY = new RegExp(`^${REPOSITORY_PATTERN}$`);
-const PACKAGE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const SHA512_INTEGRITY = /^sha512-([A-Za-z0-9+/]+={0,2})$/;
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
 const ISO_8601_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -96,7 +96,7 @@ function validatePackageRelease(value) {
       && !Array.isArray(value)
       && value.name === "@coryparry/codekeeper"
       && typeof value.version === "string"
-      && PACKAGE_VERSION.test(value.version)
+      && isReleaseVersion(value.version)
       && digest?.length === 64
       && digest.toString("base64").replace(/=+$/, "") === integrityMatch[1].replace(/=+$/, ""),
     "Caller workflow requires a valid exact Codekeeper package receipt"
