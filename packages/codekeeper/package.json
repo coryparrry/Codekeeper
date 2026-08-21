@@ -1,6 +1,6 @@
 {
   "name": "@coryparry/codekeeper",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Repository-owned AI maintainer for GitHub Actions, with pull request review, issue triage, audits, and verified repairs",
   "repository": {
     "type": "git",

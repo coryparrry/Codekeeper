@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.2...codekeeper-v0.3.3) (2026-08-21)
+
+
+### Bug Fixes
+
+* **verify:** prove exact packages and private Apps ([#251](https://github.com/coryparrry/Codekeeper/issues/251)) ([0f979ab](https://github.com/coryparrry/Codekeeper/commit/0f979abbbe6575debc88543cf43efd177a53a2d6))
+
 ## [0.3.2](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.1...codekeeper-v0.3.2) (2026-08-21)
 
 
