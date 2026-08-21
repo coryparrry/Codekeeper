@@ -1,0 +1,6 @@
+{
+  "review": ["analyze", "gate"],
+  "issue": ["workspace", "analyze", "seal", "publish"],
+  "fix": ["workspace", "analyze", "verify", "seal", "publish"],
+  "maintain": ["workspace", "analyze", "verify", "seal", "publish"]
+}
