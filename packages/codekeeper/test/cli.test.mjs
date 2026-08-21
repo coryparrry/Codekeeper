@@ -413,7 +413,7 @@ test("verify passes controlled mode through, emits JSON, and uses readiness exit
   assert.equal(status, 0);
   assert.equal(received.cwd, "/tmp/widget");
   assert.equal(received.controlledCheck, true);
-  assert.equal(typeof received.inspectApp, "function");
+  assert.equal(received.inspectApp.name, "inspectInstalledAppRegistration");
   assert.equal(typeof received.verifyPackage, "function");
   assert.deepEqual(JSON.parse(output.toString()), report);
   assert.equal(errorOutput.toString(), "");
@@ -1108,7 +1108,6 @@ test("an already-current update reconciles App permissions before success", asyn
             {
               permission: "issues",
               registered: "write",
-              installed: "read",
               required: "write"
             }
           ]
@@ -1118,7 +1117,7 @@ test("an already-current update reconciles App permissions before success", asyn
     },
     prompt: {
       async confirm(options) {
-        assert.match(options.message, /updated the App permissions/i);
+        assert.match(options.message, /updated the App registration permissions/i);
         return true;
       },
       async dispose() {}
@@ -1132,7 +1131,7 @@ test("an already-current update reconciles App permissions before success", asyn
   assert.equal(rawModeCalls, 0);
   assert.equal(inspections, 2);
   assert.equal(openedUrl, "https://github.com/settings/apps/codekeeper-widget/permissions");
-  assert.match(output.toString(), /issues: registered write; installed read; required write/);
+  assert.match(output.toString(), /issues: registered write; required write/);
   assert.match(output.toString(), new RegExp(`already up to date at ${bundle.metadata.source.repository}@${bundle.metadata.source.commit}`));
   assert.match(output.toString(), /Required secret availability was not validated; secret values were not inspected or exposed/);
 });

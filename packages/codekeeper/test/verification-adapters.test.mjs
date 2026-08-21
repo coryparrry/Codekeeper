@@ -1,16 +1,89 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   inspectInstalledApp,
   inspectInstalledAppRegistration,
   runAppCredentialProbe,
   runMaintenanceDryRun,
+  verifyInstalledPackage,
 } from "../src/verification-adapters.mjs";
-import { createRecordingRunner, result } from "./helpers.mjs";
+import { createRecordingRunner, result, temporaryDirectory } from "./helpers.mjs";
 
 const ROOT = "/repo/widget";
 const REPOSITORY = "acme/widget";
 const CLIENT_ID = "Iv123456789012345678";
+const INTEGRITY = `sha512-${Buffer.alloc(64, 0xab).toString("base64")}`;
+
+test("package verification keeps the package build commit separate from the installer source checkpoint", async (t) => {
+  const verified = [];
+  const removed = [];
+  const runner = createRecordingRunner(() => result());
+  const stageRoot = await temporaryDirectory(t, "codekeeper-stage-");
+  const packageRoot = path.join(
+    stageRoot,
+    "install",
+    "node_modules",
+    "@coryparry",
+    "codekeeper",
+  );
+  const source = {
+    repository: "coryparrry/Codekeeper",
+    commit: "a".repeat(40),
+  };
+  await mkdir(path.join(packageRoot, "assets"), { recursive: true });
+  await mkdir(path.join(packageRoot, "bin"), { recursive: true });
+  await mkdir(path.join(packageRoot, "release"), { recursive: true });
+  await writeFile(
+    path.join(packageRoot, "assets", "metadata.json"),
+    `${JSON.stringify({ version: 1, source })}\n`,
+  );
+  assert.equal(
+    await verifyInstalledPackage(
+      {
+        packageRelease: {
+          name: "@coryparry/codekeeper",
+          version: "1.4.2",
+          integrity: INTEGRITY,
+        },
+        installation: {
+          releaseManifest: { source },
+        },
+        root: ROOT,
+      },
+      {
+        runner,
+        environment: { PATH: "/trusted/bin" },
+        platform: "linux",
+        resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+        resolveRelease: async () => ({
+          npmCli: "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+          version: "1.4.2",
+          integrity: INTEGRITY,
+        }),
+        stagePackage: async () => ({
+          root: stageRoot,
+          executable: path.join(packageRoot, "bin", "codekeeper.mjs"),
+        }),
+        verifyRelease: async (options) => verified.push(options),
+        remove: async (...args) => removed.push(args),
+      },
+    ),
+    true,
+  );
+  assert.deepEqual(verified, [
+    {
+      root: packageRoot,
+      expectedName: "@coryparry/codekeeper",
+      expectedVersion: "1.4.2",
+      expectedIntegrity: INTEGRITY,
+    },
+  ]);
+  assert.deepEqual(removed, [
+    [stageRoot, { recursive: true, force: true }],
+  ]);
+});
 
 function appRunner({
   clientId = CLIENT_ID,
@@ -20,11 +93,7 @@ function appRunner({
     metadata: "read",
     pull_requests: "write",
   },
-  installationPermissions = permissions,
   events = [],
-  repositorySelection = "selected",
-  suspendedAt = null,
-  repositories = [REPOSITORY],
 } = {}) {
   return createRecordingRunner(({ command, args }) => {
     const key = `${command} ${args.join(" ")}`;
@@ -39,44 +108,11 @@ function appRunner({
         JSON.stringify({ client_id: clientId, permissions, events, owner: { login: "acme", type: "Organization" } }),
       );
     }
-    if (
-      key ===
-      "gh api --hostname github.com user/installations --paginate --slurp"
-    ) {
-      return result(
-        JSON.stringify([
-          {
-            installations: [
-              {
-                id: 42,
-                app_slug: "codekeeper-acme",
-                repository_selection: repositorySelection,
-                suspended_at: suspendedAt,
-                permissions: installationPermissions,
-              },
-            ],
-          },
-        ]),
-      );
-    }
-    if (
-      key ===
-      "gh api --hostname github.com user/installations/42/repositories?per_page=2"
-    ) {
-      return result(
-        JSON.stringify({
-          total_count: repositories.length,
-          repositories: repositories.map((fullName) => ({
-            full_name: fullName,
-          })),
-        }),
-      );
-    }
     throw new Error(`Unexpected command: ${key}`);
   });
 }
 
-test("App proof requires the exact identity, permission set, and one selected repository", async () => {
+test("App proof requires the exact public registration without querying user installations", async () => {
   const runner = appRunner();
   assert.equal(
     await inspectInstalledApp({ runner, root: ROOT, repository: REPOSITORY }),
@@ -84,6 +120,10 @@ test("App proof requires the exact identity, permission set, and one selected re
   );
   assert.equal(
     runner.calls.some((call) => call.args.includes("secret")),
+    false,
+  );
+  assert.equal(
+    runner.calls.some((call) => call.args.includes("user/installations")),
     false,
   );
 });
@@ -173,10 +213,10 @@ test("App proof rejects extra permissions, subscribed events, and a mismatched c
   }
 });
 
-test("App proof rejects stale or excessive installed permissions and reports the exact delta", async () => {
+test("App proof rejects stale registration permissions and reports the exact delta", async () => {
   const stale = await inspectInstalledAppRegistration({
     runner: appRunner({
-      installationPermissions: {
+      permissions: {
         contents: "read",
         issues: "write",
         metadata: "read",
@@ -192,23 +232,8 @@ test("App proof rejects stale or excessive installed permissions and reports the
   assert.deepEqual(stale.permissionDelta, [{
     permission: "contents",
     required: "write",
-    registered: "write",
-    installed: "read"
+    registered: "read"
   }]);
-
-  assert.equal(await inspectInstalledApp({
-    runner: appRunner({
-      installationPermissions: {
-        contents: "write",
-        issues: "write",
-        metadata: "read",
-        pull_requests: "write",
-        actions: "read"
-      }
-    }),
-    root: ROOT,
-    repository: REPOSITORY
-  }), false);
 });
 
 const VERIFICATION_ID = "123e4567-e89b-12d3-a456-426614174000";
@@ -293,25 +318,6 @@ test("controlled maintenance rejects ambiguous dispatches and skipped model jobs
     ),
     false,
   );
-});
-
-test("App proof rejects broad, suspended, and multi-repository installations", async () => {
-  const variants = [
-    { repositorySelection: "all" },
-    { suspendedAt: "2026-08-17T00:00:00Z" },
-    { repositories: [REPOSITORY, "acme/another"] },
-    { repositories: ["acme/another"] },
-  ];
-  for (const variant of variants) {
-    assert.equal(
-      await inspectInstalledApp({
-        runner: appRunner(variant),
-        root: ROOT,
-        repository: REPOSITORY,
-      }),
-      false,
-    );
-  }
 });
 
 function credentialRunner({ matchingIds = [201], jobs = [{ name: "Codekeeper App credential verification", conclusion: "success" }] } = {}) {

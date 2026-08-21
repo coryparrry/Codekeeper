@@ -2,7 +2,7 @@
   "version": 1,
   "source": {
     "repository": "coryparrry/Codekeeper",
-    "commit": "87b4f9813c1a16dee6cbca020181cc72af5e21d5"
+    "commit": "5488765c3f44cc1e3b76dd7ec979bf70a658a3f5"
   },
   "assets": {
     "agents/pr-reviewer.md": {
@@ -41,8 +41,8 @@
       "sourcePath": "packages/codekeeper/assets/repository/README.md"
     },
     "workflows/assistant.yml": {
-      "sha256": "1082c498455335eb2d3726ea6ad697554be09f46877ed760ace8706102c9a24a",
-      "bytes": 4816,
+      "sha256": "c82462ccf37e31cfb1c06dfe957d82e58f7eba8da72e25f246113b723c5c605b",
+      "bytes": 4818,
       "sourcePath": "examples/workflows/codekeeper-assistant.yml.example"
     },
     "workflows/review.yml": {
@@ -78,8 +78,8 @@
       "packagePath": "release/workflows/codekeeper-assistant.yml"
     },
     "runtime-workflows/review.yml": {
-      "sha256": "4d82df06279921e7f6be17c9dc59ec8e1ce77c5e803195eb33cb54a46631cd33",
-      "bytes": 33329,
+      "sha256": "b0d3968088c4c0b4e37a59483e67562978fde0ce5985b28aa16adb74595e5892",
+      "bytes": 33462,
       "sourcePath": ".github/workflows/codekeeper-review.yml",
       "packagePath": "release/workflows/codekeeper-review.yml"
     },

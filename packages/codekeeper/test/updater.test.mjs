@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { writeSync } from "node:fs";
+import { mkdir, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { createRecordingRunner, result, temporaryDirectory, textSink } from "./helpers.mjs";
 import { SOURCE_REPOSITORY } from "../src/constants.mjs";
-import { installedReleaseVersion, resolveNpmCliPath, resolveNpmRelease, runLatestCommand, runLatestInit, runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate, verifyDownloadedTarball } from "../src/updater.mjs";
+import { installedReleaseVersion, resolveNpmCliPath, resolveNpmRelease, runLatestCommand, runLatestInit, runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate, stageVerifiedPackage, verifyDownloadedTarball } from "../src/updater.mjs";
 
 const RELEASE_INTEGRITY = `sha512-${Buffer.alloc(64, 0xab).toString("base64")}`;
 
@@ -374,6 +375,69 @@ test("the trusted launcher rejects changed tarball bytes for the same package ve
   );
 });
 
+test("package staging accepts a complete npm pack report larger than the command output bound", async (t) => {
+  const temporaryRoot = await temporaryDirectory(t, "codekeeper-updater-stage-");
+  const downloadBytes = Buffer.from("verified package bytes");
+  const filename = "codekeeper-1.4.2.tgz";
+  const integrity = `sha512-${createHash("sha512").update(downloadBytes).digest("base64")}`;
+  const report = JSON.stringify([{ name: "@coryparry/codekeeper", version: "1.4.2", integrity, filename }])
+    + " ".repeat(200_000);
+  let reportFd;
+  const runner = createRecordingRunner(async (call) => {
+    if (call.args[1] === "pack") {
+      reportFd = call.options.stdoutFd;
+      writeSync(reportFd, report);
+      await mkdir(call.args[call.args.indexOf("--pack-destination") + 1], { recursive: true });
+      await writeFile(path.join(call.args[call.args.indexOf("--pack-destination") + 1], filename), downloadBytes);
+      return result();
+    }
+    const installRoot = call.args[call.args.indexOf("--prefix") + 1];
+    const executable = path.join(installRoot, "node_modules", "@coryparry", "codekeeper", "bin", "codekeeper.mjs");
+    await mkdir(path.dirname(executable), { recursive: true });
+    await writeFile(executable, "#!/usr/bin/env node\n");
+    return result();
+  });
+  const staged = await stageVerifiedPackage({
+    cwd: "/tmp/widget",
+    environment: { PATH: "/trusted/bin" },
+    platform: "linux",
+    receipt: { version: "1.4.2", integrity },
+    npmCli: "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+    runner,
+    temporaryDirectory: temporaryRoot
+  });
+  t.after(() => rm(staged.root, { recursive: true, force: true }));
+  assert.equal(runner.calls[0].options.stdoutFd, reportFd);
+  assert.equal((await stat(path.join(staged.root, "npm-pack.json"))).mode & 0o777, 0o600);
+  assert.throws(() => writeSync(reportFd, "closed"), { code: "EBADF" });
+  assert.equal(staged.executable, await realpath(path.join(staged.root, "install", "node_modules", "@coryparry", "codekeeper", "bin", "codekeeper.mjs")));
+});
+
+test("package staging rejects an npm pack report above its deliberate size limit and removes the stage", async (t) => {
+  const temporaryRoot = await temporaryDirectory(t, "codekeeper-updater-stage-oversized-");
+  const oversizedReport = "x".repeat(4 * 1024 * 1024 + 1);
+  let reportFd;
+  const runner = createRecordingRunner(async (call) => {
+    reportFd = call.options.stdoutFd;
+    writeSync(reportFd, oversizedReport);
+    return result();
+  });
+  await assert.rejects(
+    stageVerifiedPackage({
+      cwd: "/tmp/widget",
+      environment: { PATH: "/trusted/bin" },
+      platform: "linux",
+      receipt: { version: "1.4.2", integrity: RELEASE_INTEGRITY },
+      npmCli: "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+      runner,
+      temporaryDirectory: temporaryRoot
+    }),
+    (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /oversized report/.test(error.message)
+  );
+  assert.throws(() => writeSync(reportFd, "closed"), { code: "EBADF" });
+  assert.deepEqual(await readdir(temporaryRoot), []);
+});
+
 for (const [description, wrapReport] of [
   ["a single-array report", (entry) => [entry]],
   ["a direct report object", (entry) => entry],
@@ -436,29 +500,51 @@ test("the latest-release bootstrap rejects invalid registry versions before exec
   assert.equal(runner.calls.length, 1);
 });
 
-test("the release resolver queries an explicit version and requires an exact matching receipt", async () => {
-  const runner = createRecordingRunner(() =>
-    result(
-      JSON.stringify({
-        version: "1.4.2",
-        "dist.integrity": RELEASE_INTEGRITY
-      })
-    )
+for (const [description, wrapReceipt] of [
+  ["an object receipt", (receipt) => receipt],
+  ["a single-element array receipt", (receipt) => [receipt]]
+]) {
+  test(`the release resolver queries an explicit version and accepts ${description}`, async () => {
+    const runner = createRecordingRunner(() =>
+      result(
+        JSON.stringify(
+          wrapReceipt({
+            version: "1.4.2",
+            "dist.integrity": RELEASE_INTEGRITY
+          })
+        )
+      )
+    );
+    const receipt = await resolveNpmRelease({
+      cwd: "/tmp/widget",
+      environment: { PATH: "/trusted/bin" },
+      platform: "linux",
+      version: "1.4.2",
+      resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+      runner
+    });
+    assert.deepEqual(receipt, {
+      npmCli: "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+      version: "1.4.2",
+      integrity: RELEASE_INTEGRITY
+    });
+    assert.deepEqual(runner.calls[0].args, ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "@coryparry/codekeeper@1.4.2", "version", "dist.integrity", "--json"]);
+  });
+}
+
+test("the release resolver rejects ambiguous array receipts", async () => {
+  const runner = createRecordingRunner(() => result(JSON.stringify([])));
+  await assert.rejects(
+    resolveNpmRelease({
+      cwd: "/tmp/widget",
+      environment: { PATH: "/trusted/bin" },
+      platform: "linux",
+      version: "1.4.2",
+      resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+      runner
+    }),
+    (error) => error.code === "UPDATE_BOOTSTRAP_FAILED" && /invalid.*metadata/.test(error.message)
   );
-  const receipt = await resolveNpmRelease({
-    cwd: "/tmp/widget",
-    environment: { PATH: "/trusted/bin" },
-    platform: "linux",
-    version: "1.4.2",
-    resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
-    runner
-  });
-  assert.deepEqual(receipt, {
-    npmCli: "/trusted/lib/node_modules/npm/bin/npm-cli.js",
-    version: "1.4.2",
-    integrity: RELEASE_INTEGRITY
-  });
-  assert.deepEqual(runner.calls[0].args, ["/trusted/lib/node_modules/npm/bin/npm-cli.js", "view", "@coryparry/codekeeper@1.4.2", "version", "dist.integrity", "--json"]);
 });
 
 test("the release resolver rejects ranges before invoking npm", async () => {

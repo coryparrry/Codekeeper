@@ -7,9 +7,10 @@ import { PACKAGE_SOURCE_REPOSITORY, PACKAGE_SOURCE_REPOSITORY_URL } from "../src
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
-const REVIEWED_SOURCE_CHECKPOINT = "87b4f9813c1a16dee6cbca020181cc72af5e21d5";
+const REVIEWED_SOURCE_CHECKPOINT = "5488765c3f44cc1e3b76dd7ec979bf70a658a3f5";
 const PRODUCTION_SOURCE_PATHS = [
   "tools/codekeeper",
+  "examples/workflows/codekeeper-assistant.yml.example",
   ".github/workflows/codekeeper-assistant.yml",
   ".github/workflows/codekeeper-fix.yml",
   ".github/workflows/codekeeper-issues.yml",
@@ -166,9 +167,9 @@ test("installer source pin includes the latest production workflow checkpoint on
     "--",
     ...PRODUCTION_SOURCE_PATHS,
   ]).trim();
-  assert.equal(
-    SOURCE_COMMIT,
-    latestProductionCheckpoint,
+  assert.match(latestProductionCheckpoint, /^[0-9a-f]{40}$/);
+  assert.doesNotThrow(
+    () => git(REPOSITORY_ROOT, ["merge-base", "--is-ancestor", latestProductionCheckpoint, SOURCE_COMMIT]),
     "Installer source pin is stale; publish a follow-up checkpoint update after production workflow changes land on the default branch",
   );
 });

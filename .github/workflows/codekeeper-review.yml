@@ -273,8 +273,9 @@ jobs:
           ! id -u "$WORKSPACE_USER" >/dev/null 2>&1 || { echo "Workspace account already exists"; exit 1; }
           sudo useradd --system --no-create-home --user-group --shell /usr/sbin/nologin "$WORKSPACE_USER"
           install -d -m 700 "$CODEX_HOME" "$WORKSPACE_TEMP" "$QUARANTINE"
-          chmod -R go-w "$REPOSITORY_PATH" "$BUNDLE" "$TOOLING_PATH"
-          chmod go-w "$GITHUB_WORKSPACE" "$CONFIG"
+          chmod a+x,go-w "$GITHUB_WORKSPACE"
+          chmod -R a+rX,go-w "$REPOSITORY_PATH" "$BUNDLE" "$TOOLING_PATH"
+          chmod a+r,go-w "$CONFIG"
           install -m 600 /dev/null "$BUNDLE/workspace-result.json"
           install -m 600 /dev/null "$BUNDLE/workspace-runtime-metadata.json"
           {
@@ -307,6 +308,7 @@ jobs:
           sudo chown "$WORKSPACE_USER:$WORKSPACE_USER" \
             "$BUNDLE/workspace-result.json" \
             "$BUNDLE/workspace-runtime-metadata.json"
+          sudo --user "$WORKSPACE_USER" -- test -r "$TOOLING_PATH/codekeeper-runtime/src/cli.mjs"
 
       - name: Review with isolated Codex through the Agents SDK
         if: steps.intent.outputs.execute == 'true' && steps.settings.outputs.workspace_enabled == 'true'
