@@ -9,9 +9,10 @@ import { InstallerError, formatInstallerError } from "./errors.mjs";
 import { MODES, PACKAGE_NAME, PACKAGE_VERSION, SECRET_PURPOSES } from "./constants.mjs";
 import { isReleaseVersion, normalizePackageRelease } from "./package-release.mjs";
 import { formatCommand } from "./shell-command.mjs";
-import { runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate } from "./updater.mjs";
+import { resolveNpmCliPath, runLatestUpdate, runRollback, runUpdateCheck, runVersionedUpdate } from "./updater.mjs";
 import { verifyCodekeeperReadiness } from "./verify.mjs";
 import { inspectInstalledAppRegistration, runAppCredentialProbe, runMaintenanceDryRun, verifyInstalledPackage } from "./verification-adapters.mjs";
+import { prepareNpmPackageLock } from "./package-lock-preparation.mjs";
 
 export const USAGE = `Usage:
   codekeeper init
@@ -265,7 +266,7 @@ async function reconcileExistingApp({ inspectAppRegistration, runner, snapshot, 
   output.write("  GitHub App registration permissions now match this update.\n");
 }
 
-export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd(), input = stdin, output = stdout, errorOutput = stderr, runner = createCommandRunner(), prompt = null, interactive = input.isTTY === true && output.isTTY === true, environment = process.env, platform = process.platform, openUrl = null, loadAssets = loadVerifiedAssets, inspect = inspectRepository, inspectAppRegistration = inspectInstalledAppRegistration, doctor = doctorRepository, showDoctor = true, verifyReadiness = verifyCodekeeperReadiness, verifyAppCredentials = runAppCredentialProbe, resumeCommand = null, launchLatestUpdate = runLatestUpdate, launchVersionedUpdate = runVersionedUpdate, launchRollback = runRollback, checkUpdate = runUpdateCheck } = {}) {
+export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd(), input = stdin, output = stdout, errorOutput = stderr, runner = createCommandRunner(), prompt = null, interactive = input.isTTY === true && output.isTTY === true, environment = process.env, platform = process.platform, openUrl = null, loadAssets = loadVerifiedAssets, inspect = inspectRepository, inspectAppRegistration = inspectInstalledAppRegistration, doctor = doctorRepository, showDoctor = true, verifyReadiness = verifyCodekeeperReadiness, verifyAppCredentials = runAppCredentialProbe, resumeCommand = null, launchLatestUpdate = runLatestUpdate, launchVersionedUpdate = runVersionedUpdate, launchRollback = runRollback, checkUpdate = runUpdateCheck, resolveNpm = resolveNpmCliPath } = {}) {
   let parsed;
   try {
     parsed = parseCliArgs(argv);
@@ -416,6 +417,30 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
             bundle,
             output: presentationOutput
           });
+    if (parsed.command === "init" && !snapshot.installation) {
+      const packageLockSecondPrompt = activePrompt.kind === "ink"
+        ? createTerminalPrompter({ input: activePrompt.input, output })
+        : activePrompt;
+      const packageLockPrepared = await prepareNpmPackageLock({
+        root: snapshot.root,
+        runner,
+        prompt: activePrompt,
+        secondPrompt: packageLockSecondPrompt,
+        output,
+        platform,
+        environment,
+        resolveNpm,
+        withInteractiveTerminal: activePrompt.kind === "ink" && typeof activePrompt.suspendTerminal === "function"
+          ? (callback) => activePrompt.suspendTerminal(callback)
+          : null,
+      });
+      if (packageLockPrepared) {
+        throw new InstallerError("Commit or merge the retained package-lock.json, then rerun setup from a clean, current default-branch checkout.", {
+          code: "PACKAGE_LOCK_PREPARED",
+          resume: resumeCommand,
+        });
+      }
+    }
     let appAnswers;
     if (parsed.command === "update") {
       appAnswers = {
