@@ -41,8 +41,8 @@
       "sourcePath": "packages/codekeeper/assets/repository/README.md"
     },
     "workflows/assistant.yml": {
-      "sha256": "1082c498455335eb2d3726ea6ad697554be09f46877ed760ace8706102c9a24a",
-      "bytes": 4816,
+      "sha256": "c82462ccf37e31cfb1c06dfe957d82e58f7eba8da72e25f246113b723c5c605b",
+      "bytes": 4818,
       "sourcePath": "examples/workflows/codekeeper-assistant.yml.example"
     },
     "workflows/review.yml": {
