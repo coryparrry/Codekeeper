@@ -1,6 +1,6 @@
 {
   "name": "codekeeper-runtime",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "Private runtime dependency graph embedded in the codekeeper release",
   "type": "module",
