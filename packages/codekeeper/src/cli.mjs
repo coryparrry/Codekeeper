@@ -306,7 +306,12 @@ export async function runCli({ argv = process.argv.slice(2), cwd = process.cwd()
   }
   if (["doctor", "verify"].includes(parsed.command)) {
     try {
-      if (typeof runner.resolveTrustedCommands === "function") runner = await runner.resolveTrustedCommands({ cwd });
+      if (typeof runner.resolveTrustedCommands === "function") {
+        runner = await runner.resolveTrustedCommands({
+          cwd,
+          ...(parsed.command === "doctor" ? { allowMissingCommands: ["git", "gh"] } : {})
+        });
+      }
       if (parsed.command === "doctor") {
         const report = await doctor({ runner, cwd });
         if (parsed.json) output.write(`${JSON.stringify(report)}\n`);
