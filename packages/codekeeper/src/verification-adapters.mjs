@@ -233,11 +233,20 @@ export async function inspectInstalledApp(options) {
 }
 
 export async function verifyInstalledPackage(
-  { packageRelease, installation, root },
-  { runner, environment, platform },
+  { packageRelease, root },
+  {
+    runner,
+    environment,
+    platform,
+    resolveNpm = resolveNpmCliPath,
+    resolveRelease = resolveNpmRelease,
+    stagePackage = stageVerifiedPackage,
+    verifyRelease = verifyCodekeeperRelease,
+    remove = rm,
+  },
 ) {
-  const npmCli = await resolveNpmCliPath({ cwd: root, environment, platform });
-  const resolved = await resolveNpmRelease({
+  const npmCli = await resolveNpm({ cwd: root, environment, platform });
+  const resolved = await resolveRelease({
     cwd: root,
     environment,
     platform,
@@ -246,7 +255,7 @@ export async function verifyInstalledPackage(
     runner,
   });
   if (resolved.integrity !== packageRelease.integrity) return false;
-  const staged = await stageVerifiedPackage({
+  const staged = await stagePackage({
     cwd: root,
     environment,
     platform,
@@ -256,12 +265,11 @@ export async function verifyInstalledPackage(
   });
   try {
     const packageRoot = path.dirname(path.dirname(staged.executable));
-    await verifyCodekeeperRelease({
+    await verifyRelease({
       root: packageRoot,
       expectedName: packageRelease.name,
       expectedVersion: packageRelease.version,
       expectedIntegrity: packageRelease.integrity,
-      expectedSourceCommit: installation.releaseManifest?.source?.commit,
     });
     const runtimeRoot = path.join(packageRoot, "runtime");
     const installed = await runner.run(
@@ -282,7 +290,7 @@ export async function verifyInstalledPackage(
     );
     return successful(checked);
   } finally {
-    await rm(staged.root, { recursive: true, force: true });
+    await remove(staged.root, { recursive: true, force: true });
   }
 }
 

@@ -5,12 +5,65 @@ import {
   inspectInstalledAppRegistration,
   runAppCredentialProbe,
   runMaintenanceDryRun,
+  verifyInstalledPackage,
 } from "../src/verification-adapters.mjs";
 import { createRecordingRunner, result } from "./helpers.mjs";
 
 const ROOT = "/repo/widget";
 const REPOSITORY = "acme/widget";
 const CLIENT_ID = "Iv123456789012345678";
+const INTEGRITY = `sha512-${Buffer.alloc(64, 0xab).toString("base64")}`;
+
+test("package verification keeps the package build commit separate from the installer source checkpoint", async () => {
+  const verified = [];
+  const removed = [];
+  const runner = createRecordingRunner(() => result());
+  assert.equal(
+    await verifyInstalledPackage(
+      {
+        packageRelease: {
+          name: "@coryparry/codekeeper",
+          version: "1.4.2",
+          integrity: INTEGRITY,
+        },
+        installation: {
+          releaseManifest: { source: { commit: "a".repeat(40) } },
+        },
+        root: ROOT,
+      },
+      {
+        runner,
+        environment: { PATH: "/trusted/bin" },
+        platform: "linux",
+        resolveNpm: async () => "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+        resolveRelease: async () => ({
+          npmCli: "/trusted/lib/node_modules/npm/bin/npm-cli.js",
+          version: "1.4.2",
+          integrity: INTEGRITY,
+        }),
+        stagePackage: async () => ({
+          root: "/tmp/codekeeper-stage",
+          executable:
+            "/tmp/codekeeper-stage/install/node_modules/@coryparry/codekeeper/bin/codekeeper.mjs",
+        }),
+        verifyRelease: async (options) => verified.push(options),
+        remove: async (...args) => removed.push(args),
+      },
+    ),
+    true,
+  );
+  assert.deepEqual(verified, [
+    {
+      root: "/tmp/codekeeper-stage/install/node_modules/@coryparry/codekeeper",
+      expectedName: "@coryparry/codekeeper",
+      expectedVersion: "1.4.2",
+      expectedIntegrity: INTEGRITY,
+    },
+  ]);
+  assert.deepEqual(removed, [
+    ["/tmp/codekeeper-stage", { recursive: true, force: true }],
+  ]);
+});
 
 function appRunner({
   clientId = CLIENT_ID,
