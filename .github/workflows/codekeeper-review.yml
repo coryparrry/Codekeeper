@@ -1,10 +1,10 @@
 name: Codekeeper review
 
+# Compatibility wrapper. Existing callers retain their public inputs while the
+# verified generic runtime owns execution and derives App permissions.
 # Forks and merge queues remain unsupported. Drafts may produce a sealed manual
-# result, and same-repository stacked PRs may receive a report. Labels, repair,
-# deferred issues, and auto-merge remain limited to non-draft same-repository PRs
-# targeting the configured default branch. merge_group does not provide the
-# single-PR head/base contract required by the sealed publication guard.
+# result, and same-repository stacked pull requests may receive a report.
+# merge_group lacks the single-head contract required by the publication guard.
 on:
   workflow_call:
     inputs:
@@ -46,17 +46,17 @@ on:
         required: true
         type: string
       app_contents_permission:
-        description: GitHub App Contents permission requested by this workflow.
+        description: Deprecated compatibility input; permissions come from the verified mode plan.
         required: false
         default: read
         type: string
       app_issues_permission:
-        description: GitHub App Issues permission requested by this workflow.
+        description: Deprecated compatibility input; permissions come from the verified mode plan.
         required: false
         default: write
         type: string
       app_pull_requests_permission:
-        description: GitHub App Pull requests permission requested by this workflow.
+        description: Deprecated compatibility input; permissions come from the verified mode plan.
         required: false
         default: write
         type: string
@@ -79,473 +79,89 @@ on:
 permissions:
   contents: read
 
-env:
-  CODEKEEPER_PACKAGE_NAME: codekeeper
-  CODEKEEPER_PACKAGE_VERSION: ${{ inputs.package_version }}
-  CODEKEEPER_PACKAGE_INTEGRITY: ${{ inputs.package_integrity }}
-
 concurrency:
   group: codekeeper-review-${{ github.event.pull_request.number || github.event.client_payload.number }}
   cancel-in-progress: ${{ github.actor != inputs.automation_bot_login }}
 
 jobs:
-  analyze:
-    name: Codekeeper review analysis
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      route: ${{ steps.intent.outputs.route }}
-      owner_command: ${{ steps.intent.outputs.owner_command }}
-      execute: ${{ steps.intent.outputs.execute }}
-      candidate_sha256: ${{ steps.validate.outputs.candidate_sha256 }}
-      handoff_manifest_sha256: ${{ steps.validate.outputs.handoff_manifest_sha256 }}
-      context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
-      package_manifest_sha256: ${{ steps.codekeeper-package.outputs.package_manifest_sha256 }}
-      package_source_commit: ${{ steps.codekeeper-package.outputs.source_commit }}
-    steps:
-      - name: Detect Codekeeper review intent
-        id: intent
-        env:
-          ENABLED: ${{ inputs.enabled }}
-          AUTO_REVIEW: ${{ inputs.auto_review }}
-          FEEDBACK_TRIAGE: ${{ inputs.feedback_triage }}
-          OWNER_COMMAND: ${{ inputs.owner_command }}
-          AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
-        run: |
-          node --input-type=module -e '
-            import { appendFileSync, readFileSync } from "node:fs";
-            const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
-            const eventName = String(process.env.GITHUB_EVENT_NAME ?? "");
-            const repository = String(process.env.GITHUB_REPOSITORY ?? "");
-            const actor = String(process.env.GITHUB_ACTOR ?? "").toLowerCase();
-            const automationBot = String(process.env.AUTOMATION_BOT_LOGIN ?? "").toLowerCase();
-            const body = String(event.comment?.body ?? "").trim();
-            const commentAuthor = String(event.comment?.user?.login ?? "").toLowerCase();
-            const reviewAuthor = String(event.review?.user?.login ?? "").toLowerCase();
-            const author = eventName === "pull_request_review" ? reviewAuthor : commentAuthor;
-            const association = String(event.comment?.author_association ?? "");
-            const mentionBot = automationBot.replace(/\[bot\]$/i, "");
-            const escapedMention = mentionBot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            // CODEKEEPER_OWNER_COMMANDS_START
-            const actions = ["help","status","review","rerun","triage","implement","repair","fix","defer","pause","stop"];
-            // CODEKEEPER_OWNER_COMMANDS_END
-            const slash = new RegExp(`^/codekeeper\\s+(${actions.join("|")})$`, "i").test(body);
-            const mentioned = Boolean(mentionBot && new RegExp(`^@${escapedMention}\\s+(${actions.join("|")})$`, "i").test(body));
-            const trustedAssociation = ["OWNER", "MEMBER", "COLLABORATOR"].includes(association);
-            const classifiedOwnerCommand = process.env.OWNER_COMMAND === "true";
-            const commandIntent = Boolean(classifiedOwnerCommand || (
-              eventName === "pull_request_review_comment" && trustedAssociation && (slash || mentioned)
-            ));
-            const feedbackEvent = eventName === "pull_request_review" || eventName === "pull_request_review_comment";
-            const automationReply = Boolean(feedbackEvent && automationBot && author === automationBot);
-            const route = (!feedbackEvent || Boolean(automationBot)) && !commandIntent && !automationReply;
-            const dispatch = eventName === "repository_dispatch"
-              && event.action === "codekeeper_review"
-              && Boolean(automationBot)
-              && actor === automationBot;
-            const sameRepository = event.pull_request?.head?.repo?.full_name === repository
-              && event.pull_request?.base?.repo?.full_name === repository;
-            const automatic = process.env.AUTO_REVIEW === "true" && eventName === "pull_request_target";
-            const feedback = process.env.FEEDBACK_TRIAGE === "true"
-              && Boolean(automationBot)
-              && actor !== automationBot
-              && feedbackEvent;
-            const eligible = dispatch || ((automatic || feedback) && sameRepository);
-            const execute = process.env.ENABLED === "true" && route && eligible;
-            appendFileSync(
-              process.env.GITHUB_OUTPUT,
-              `owner_command=${commandIntent}\nroute=${route}\nexecute=${execute}\n`,
-            );
-          '
-
-      - name: Check out trusted default-branch configuration
-        if: steps.intent.outputs.execute == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          path: repository
-          sparse-checkout: |
-            .github/codekeeper.json
-            .github/codekeeper/agents/pr-reviewer.md
-            .github/codekeeper/actions/acquire-package
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
-      - name: Check out exact pull request head
-        if: steps.intent.outputs.execute == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}
-          fetch-depth: 0
-          path: worktree
-          persist-credentials: false
-
-      - name: Set up pinned Node.js
-        if: steps.intent.outputs.execute == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.19.0
-          package-manager-cache: false
-
-      - name: Acquire exact Codekeeper package
-        if: steps.intent.outputs.execute == 'true'
-        id: codekeeper-package
-        uses: ./repository/.github/codekeeper/actions/acquire-package
-        with:
-          package_version: ${{ inputs.package_version }}
-          package_integrity: ${{ inputs.package_integrity }}
-
-      - name: Install exact Codekeeper runtime
-        if: steps.intent.outputs.execute == 'true'
-        run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
-
-      - name: Prepare one frozen review bundle
-        if: steps.intent.outputs.execute == 'true'
-        id: prepare
-        working-directory: worktree
-        env:
-          CODEKEEPER_TOOLING_SHA: ${{ steps.codekeeper-package.outputs.source_commit }}
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CONFIG: ${{ github.workspace }}/codekeeper-config.json
-          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
-          SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GITHUB_TOKEN: ${{ github.token }}
-          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
-        run: |
-          mkdir -p "$(dirname "$MODE_PLAN")"
-          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode review --event "$GITHUB_EVENT_NAME" \
-            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$SOURCE_CONFIG" > "$MODE_PLAN"
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation prepare --mode review \
-            --config "$CONFIG" \
-            --source-config "$SOURCE_CONFIG" \
-            --default-branch "$DEFAULT_BRANCH" \
-            --mode-plan "$MODE_PLAN" \
-            --directory "$BUNDLE" \
-            --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
-            --event "$GITHUB_EVENT_PATH" \
-            --tooling-sha "$CODEKEEPER_TOOLING_SHA"
-
-      - name: Resolve review agent settings
-        if: steps.intent.outputs.execute == 'true'
-        id: settings
-        working-directory: worktree
-        env:
-          CONFIG: ${{ github.workspace }}/codekeeper-config.json
-        run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs agent-settings \
-            --config "$CONFIG" \
-            --mode review
-
-      - name: Run review workspace stage
-        if: steps.intent.outputs.execute == 'true' && steps.settings.outputs.workspace_enabled == 'true'
-        working-directory: worktree
-        env:
-          CODEKEEPER_WORKSPACE_API_KEY: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
-          QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
-          CONFIG: ${{ github.workspace }}/codekeeper-config.json
-          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
-          WORKSPACE_TEMP: ${{ github.workspace }}/codekeeper-workspace-tmp
-          WORKSPACE_USER: codekeeper-workspace
-          TOOLING_PATH: ${{ github.workspace }}/tooling
-        run: |
-          node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage compute --operation workspace --mode review \
-            --config "$CONFIG" \
-            --directory "$BUNDLE" \
-            --mode-plan "$MODE_PLAN" \
-            --result "$BUNDLE/workspace-result.json"
-
-      - name: Finalize review with configured Agents SDK model
-        if: steps.intent.outputs.execute == 'true'
-        working-directory: worktree
-        env:
-          CODEKEEPER_MODEL_API_KEY: ${{ secrets.model_api_key }}
-          CODEKEEPER_TRACE_API_KEY: ${{ secrets.trace_api_key }}
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CONFIG: ${{ github.workspace }}/codekeeper-config.json
-          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
-        run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation analyze --mode review \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --mode review \
-            --directory "$BUNDLE" \
-            --workspace-result "$BUNDLE/workspace-result.json" \
-            --expected-context-sha "${{ steps.prepare.outputs.context_sha256 }}" \
-            --result "$BUNDLE/agent-result.json"
-
-      - name: Validate untrusted review candidate
-        if: steps.intent.outputs.execute == 'true'
-        id: validate
-        working-directory: worktree
-        env:
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CANDIDATE: ${{ github.workspace }}/codekeeper-private/candidate
-          CONFIG: ${{ github.workspace }}/codekeeper-config.json
-          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
-        run: |
-          PRIVATE_ROOT="$(dirname "$CANDIDATE")"
-          test ! -e "$PRIVATE_ROOT" || { echo "Coordinator output directory already exists"; exit 1; }
-          install -d -m 700 "$PRIVATE_ROOT"
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage validate --operation candidate --mode review \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --directory "$BUNDLE" \
-            --context "$BUNDLE/context.json" \
-            --result "$BUNDLE/agent-result.json" \
-            --workspace-result "$BUNDLE/workspace-result.json" \
-            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
-            --artifact "$CANDIDATE"
-
-      - name: Stage one review publication handoff
-        if: steps.intent.outputs.execute == 'true'
-        env:
-          CANDIDATE: ${{ github.workspace }}/codekeeper-private/candidate
-          HANDOFF: ${{ github.workspace }}/codekeeper-private/handoff
-        run: |
-          test ! -e "$HANDOFF" || { echo "Review handoff already exists"; exit 1; }
-          install -d -m 700 "$(dirname "$HANDOFF")"
-          mkdir -p "$HANDOFF/tooling"
-          mv "$GITHUB_WORKSPACE/tooling/tools" "$HANDOFF/tooling/tools"
-          mv "$CANDIDATE" "$HANDOFF/candidate"
-
-      - name: Upload review publication handoff
-        if: steps.intent.outputs.execute == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codekeeper-review-publication-${{ github.run_id }}
-          path: ${{ github.workspace }}/codekeeper-private/handoff
-          retention-days: 1
-          if-no-files-found: error
-          overwrite: true
-
-  gate:
-    name: Codekeeper review gate
-    needs: analyze
-    if: always() && needs.analyze.outputs.route != 'false'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Download review publication handoff
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-review-publication-${{ github.run_id }}
-          path: ${{ runner.temp }}/codekeeper-review-handoff
-
-      - name: Restore verified package and candidate
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        env:
-          HANDOFF: ${{ runner.temp }}/codekeeper-review-handoff
-        run: |
-          test -d "$HANDOFF/tooling/tools/codekeeper" || { echo "Review handoff is missing verified tooling"; exit 1; }
-          test -d "$HANDOFF/candidate" || { echo "Review handoff is missing the candidate"; exit 1; }
-          test ! -e "$GITHUB_WORKSPACE/tooling" || { echo "Tooling path already exists"; exit 1; }
-          mv "$HANDOFF/tooling" "$GITHUB_WORKSPACE/tooling"
-
-      - name: Check out trusted default-branch configuration
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          path: repository
-          sparse-checkout: |
-            .github/codekeeper.json
-            .github/codekeeper/agents/pr-reviewer.md
-            .github/codekeeper/actions/acquire-package
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
-      - name: Set up pinned Node.js
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.19.0
-          package-manager-cache: false
-
-      - name: Verify downloaded Codekeeper package
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        id: codekeeper-package
-        uses: ./repository/.github/codekeeper/actions/acquire-package
-        with:
-          package_source: artifact
-          package_version: ${{ inputs.package_version }}
-          package_integrity: ${{ inputs.package_integrity }}
-          expected_manifest_sha256: ${{ needs.analyze.outputs.package_manifest_sha256 }}
-          expected_source_commit: ${{ needs.analyze.outputs.package_source_commit }}
-
-      - name: Install exact Codekeeper runtime
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
-      - name: Validate GitHub App permissions through the mode plan
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        working-directory: repository
-        env:
-          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-        run: |
-          mkdir -p "$(dirname "$MODE_PLAN")"
-          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode review --event "$GITHUB_EVENT_NAME" \
-            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$CONFIG" > "$MODE_PLAN"
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage publish --operation permissions --mode review \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --app-contents-permission "${{ inputs.app_contents_permission }}" \
-            --app-issues-permission "${{ inputs.app_issues_permission }}" \
-            --app-pull-requests-permission "${{ inputs.app_pull_requests_permission }}"
-
-      - name: Seal review artifact without repository execution
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        id: seal
-        env:
-          CANDIDATE: ${{ runner.temp }}/codekeeper-review-handoff/candidate
-          ARTIFACT: ${{ runner.temp }}/codekeeper-artifact
-          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          CANDIDATE_SHA256: ${{ needs.analyze.outputs.candidate_sha256 }}
-          HANDOFF_MANIFEST_SHA256: ${{ needs.analyze.outputs.handoff_manifest_sha256 }}
-          CONTEXT_SHA256: ${{ needs.analyze.outputs.context_sha256 }}
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-        run: |
-          mkdir -p "$(dirname "$MODE_PLAN")"
-          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode review --event "$GITHUB_EVENT_NAME" \
-            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$CONFIG" > "$MODE_PLAN"
-          node tooling/codekeeper-runtime/src/cli.mjs stage validate --operation seal --mode review \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --candidate "$CANDIDATE" \
-            --artifact "$ARTIFACT" \
-            --expected-candidate-sha "$CANDIDATE_SHA256" \
-            --expected-context-sha "$CONTEXT_SHA256" \
-            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
-            --expected-handoff-manifest-sha "$HANDOFF_MANIFEST_SHA256"
-
-      - name: Create short-lived GitHub App token
-        if: steps.seal.outcome == 'success'
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-        with:
-          client-id: ${{ inputs.app_client_id }}
-          private-key: ${{ secrets.app_private_key }}
-          permission-contents: ${{ inputs.app_contents_permission }}
-          permission-issues: ${{ inputs.app_issues_permission }}
-          permission-pull-requests: ${{ inputs.app_pull_requests_permission }}
-
-      - name: Resolve immutable automation bot identity
-        if: steps.seal.outcome == 'success'
-        id: bot
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-        run: |
-          node tooling/codekeeper-runtime/src/cli.mjs stage publish --operation bot --mode review \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --token "$GITHUB_TOKEN" \
-            --app-slug "$APP_SLUG" \
-            --api-url "$GITHUB_API_URL"
-
-      - name: Publish sealed review decision
-        if: steps.seal.outcome == 'success'
-        id: publish
-        working-directory: tooling
-        env:
-          CODEKEEPER_TOOLING_SHA: ${{ needs.analyze.outputs.package_source_commit }}
-          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
-          CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
-          MANIFEST_SHA256: ${{ steps.seal.outputs.manifest_sha256 }}
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-        run: |
-          node codekeeper-runtime/src/cli.mjs stage publish --operation publish --mode review \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
-            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
-            --artifact "$RUNNER_TEMP/codekeeper-artifact" \
-            --expected-manifest-sha "$MANIFEST_SHA256"
-
-      - name: Fail closed unless a current review was published
-        if: always()
-        env:
-          ENABLED: ${{ inputs.enabled }}
-          AUTO_REVIEW: ${{ inputs.auto_review }}
-          AUTO_REVIEW_FEEDBACK: ${{ inputs.feedback_triage }}
-          IS_AUTOMATION_REPLY: ${{ github.event_name == 'pull_request_review_comment' && github.event.comment.user.login == inputs.automation_bot_login }}
-          IS_REVIEW_FEEDBACK: ${{ github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment' || (github.event_name == 'repository_dispatch' && github.event.client_payload.review_feedback) }}
-          IS_COMMAND_REVIEW: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'codekeeper_review' }}
-          IS_OWNER_COMMAND_REVIEW: ${{ needs.analyze.outputs.owner_command }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.event.client_payload.head_repository }}
-          BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.client_payload.base_sha }}
-          REPOSITORY: ${{ github.repository }}
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.client_payload.base_ref }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          ACTOR: ${{ github.actor }}
-          AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
-          ANALYZE_RESULT: ${{ needs.analyze.result }}
-          SEAL_RESULT: ${{ steps.seal.outcome }}
-          PUBLISH_DISPOSITION: ${{ steps.publish.outputs.result != '' && fromJSON(steps.publish.outputs.result).disposition || '' }}
-          PUBLISH_BLOCKING: ${{ steps.publish.outputs.result != '' && fromJSON(steps.publish.outputs.result).blocking || false }}
-        run: |
-          [[ "$IS_AUTOMATION_REPLY" == "true" || ("$IS_REVIEW_FEEDBACK" == "true" && -n "$AUTOMATION_BOT_LOGIN" && "$ACTOR" == "$AUTOMATION_BOT_LOGIN") ]] && {
-            echo "Codekeeper-authored review feedback is intentionally ignored."
-            exit 0
-          }
-          [[ "$IS_OWNER_COMMAND_REVIEW" == "true" ]] && {
-            echo "Owner review commands must be routed by the repository assistant, not the required review gate."
-            exit 1
-          }
-          [[ "$ENABLED" == "true" ]] || { echo "Codekeeper is disabled; this required gate fails closed."; exit 1; }
-          [[ "$IS_COMMAND_REVIEW" == "true" || ("$IS_REVIEW_FEEDBACK" == "true" && "$AUTO_REVIEW_FEEDBACK" == "true") || ("$IS_REVIEW_FEEDBACK" != "true" && "$AUTO_REVIEW" == "true") ]] || { echo "The matching automatic review policy is disabled; this required gate fails closed."; exit 1; }
-          manual_review() {
-            echo "::notice title=Codekeeper manual review::$1"
-            printf '## Codekeeper manual review\n\n%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          }
-          [[ "$BASE_REPOSITORY" == "$REPOSITORY" && "$HEAD_REPOSITORY" == "$REPOSITORY" ]] || {
-            echo "Fork pull requests are unsupported; manual review is required."
-            exit 1
-          }
-          [[ "$ANALYZE_RESULT" == "success" && "$SEAL_RESULT" == "success" ]] || {
-            echo "Codekeeper did not seal a current review."
-            exit 1
-          }
-          case "$PUBLISH_DISPOSITION" in
-            published)
-              [[ "$PUBLISH_BLOCKING" != "true" ]] || {
-                echo "Codekeeper published blocking findings for the current pull request head."
-                exit 1
-              }
-              if [[ "$BASE_REF" != "$DEFAULT_BRANCH" ]]; then
-                echo "Stacked pull request target $BASE_REF is review-publication-only; automatic repair and auto-merge remain restricted to $DEFAULT_BRANCH."
-              fi
-              ;;
-            manual)
-              manual_review "The sealed publication step rechecked the live pull request and returned a manual-review disposition without mutation."
-              ;;
-            unsupported)
-              manual_review "The sealed publication step rechecked the live pull request and returned an unsupported disposition without mutation."
-              ;;
-            *)
-              echo "Codekeeper did not produce a sealed live review disposition."
-              exit 1
-              ;;
-          esac
+  runtime:
+    # Owner commands are routed by the assistant workflow and intentionally do
+    # not create a second review check. Ordinary review events enter the
+    # generic runtime, which fails the required gate closed when ineligible.
+    # CODEKEEPER_OWNER_COMMANDS_START
+    if: >-
+      !inputs.owner_command &&
+      !(
+        (github.event_name == 'pull_request_review' ||
+         github.event_name == 'pull_request_review_comment') &&
+        (
+          inputs.automation_bot_login == '' ||
+          github.event.review.user.login == inputs.automation_bot_login ||
+          github.event.comment.user.login == inputs.automation_bot_login
+        )
+      ) &&
+      !(
+        github.event_name == 'pull_request_review_comment' &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+        (
+          contains(fromJSON('["/codekeeper help","/codekeeper status","/codekeeper review","/codekeeper rerun","/codekeeper triage","/codekeeper implement","/codekeeper repair","/codekeeper fix","/codekeeper defer","/codekeeper pause","/codekeeper stop"]'), github.event.comment.body) ||
+          (
+            startsWith(github.event.comment.body, '@') &&
+            (endsWith(github.event.comment.body, ' help') ||
+             endsWith(github.event.comment.body, ' status') ||
+             endsWith(github.event.comment.body, ' review') ||
+             endsWith(github.event.comment.body, ' rerun') ||
+             endsWith(github.event.comment.body, ' triage') ||
+             endsWith(github.event.comment.body, ' implement') ||
+             endsWith(github.event.comment.body, ' repair') ||
+             endsWith(github.event.comment.body, ' fix') ||
+             endsWith(github.event.comment.body, ' defer') ||
+             endsWith(github.event.comment.body, ' pause') ||
+             endsWith(github.event.comment.body, ' stop'))
+          )
+        )
+      )
+    # CODEKEEPER_OWNER_COMMANDS_END
+    uses: ./.github/workflows/codekeeper-runtime.yml
+    with:
+      mode: review
+      package_version: ${{ inputs.package_version }}
+      package_integrity: ${{ inputs.package_integrity }}
+      enabled: >-
+        ${{
+          inputs.enabled &&
+          (
+            (
+              github.event_name == 'repository_dispatch' &&
+              github.event.action == 'codekeeper_review' &&
+              inputs.automation_bot_login != '' &&
+              github.actor == inputs.automation_bot_login
+            ) ||
+            (
+              github.event.pull_request.head.repo.full_name == github.repository &&
+              github.event.pull_request.base.repo.full_name == github.repository &&
+              (
+                (inputs.auto_review && github.event_name == 'pull_request_target') ||
+                (
+                  inputs.feedback_triage &&
+                  inputs.automation_bot_login != '' &&
+                  github.actor != inputs.automation_bot_login &&
+                  (
+                    github.event_name == 'pull_request_review' ||
+                    github.event_name == 'pull_request_review_comment'
+                  ) &&
+                  github.event.review.user.login != inputs.automation_bot_login &&
+                  github.event.comment.user.login != inputs.automation_bot_login
+                )
+              )
+            )
+          )
+        }}
+      dry_run: false
+      automation_bot_login: ${{ inputs.automation_bot_login }}
+      app_client_id: ${{ inputs.app_client_id }}
+    secrets:
+      model_api_key: ${{ secrets.model_api_key }}
+      workspace_api_key: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
+      trace_api_key: ${{ secrets.trace_api_key }}
+      app_private_key: ${{ secrets.app_private_key }}

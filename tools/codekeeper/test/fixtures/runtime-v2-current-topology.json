@@ -1,6 +1,6 @@
 {
-  "review": ["analyze", "gate"],
-  "issue": ["workspace", "analyze", "seal", "publish"],
-  "fix": ["workspace", "analyze", "verify", "seal", "publish"],
-  "maintain": ["workspace", "analyze", "verify", "seal", "publish"]
+  "review": ["runtime"],
+  "issue": ["runtime"],
+  "fix": ["runtime"],
+  "maintain": ["runtime"]
 }

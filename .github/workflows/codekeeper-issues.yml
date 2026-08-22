@@ -30,17 +30,17 @@ on:
         required: true
         type: string
       app_contents_permission:
-        description: GitHub App Contents permission requested by this workflow.
+        description: Deprecated compatibility input; permissions come from the verified mode plan.
         required: false
         default: read
         type: string
       app_issues_permission:
-        description: GitHub App Issues permission requested by this workflow.
+        description: Deprecated compatibility input; permissions come from the verified mode plan.
         required: false
         default: write
         type: string
       app_pull_requests_permission:
-        description: GitHub App Pull requests permission requested by this workflow.
+        description: Deprecated compatibility input; permissions come from the verified mode plan.
         required: false
         default: read
         type: string
@@ -65,20 +65,12 @@ permissions:
   issues: read
   pull-requests: read
 
-env:
-  CODEKEEPER_PACKAGE_NAME: codekeeper
-  CODEKEEPER_PACKAGE_VERSION: ${{ inputs.package_version }}
-  CODEKEEPER_PACKAGE_INTEGRITY: ${{ inputs.package_integrity }}
-
 concurrency:
   group: codekeeper-issue-${{ github.event.issue.number || github.event.client_payload.number }}
   cancel-in-progress: false
 
 jobs:
-  workspace:
-    name: Codekeeper issue workspace specialist
-    # Cheap event routing drops obvious bot, outsider, and direct-command comments.
-    # prepare-issue still re-fetches and fail-closes the complete trusted state.
+  runtime:
     # CODEKEEPER_OWNER_COMMANDS_START
     if: >-
       inputs.enabled &&
@@ -103,409 +95,21 @@ jobs:
         ) ||
         (github.event_name == 'repository_dispatch' &&
          github.event.action == 'codekeeper_issue' &&
+         inputs.automation_bot_login != '' &&
          github.actor == inputs.automation_bot_login)
       )
     # CODEKEEPER_OWNER_COMMANDS_END
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
-    outputs:
-      context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
-      package_manifest_sha256: ${{ steps.codekeeper-package.outputs.package_manifest_sha256 }}
-      package_source_commit: ${{ steps.codekeeper-package.outputs.source_commit }}
-    steps:
-      - name: Check out trusted default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          path: repository
-          persist-credentials: false
-      - name: Set up pinned Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.19.0
-          package-manager-cache: false
-
-      - name: Acquire exact Codekeeper package
-        id: codekeeper-package
-        uses: ./repository/.github/codekeeper/actions/acquire-package
-        with:
-          package_version: ${{ inputs.package_version }}
-          package_integrity: ${{ inputs.package_integrity }}
-
-      - name: Upload verified Codekeeper package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}/tooling
-          retention-days: 1
-          if-no-files-found: error
-          overwrite: true
-
-      - name: Install exact Codekeeper runtime
-        run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
-      - name: Prepare runner-owned issue bundle
-        id: prepare
-        working-directory: repository
-        env:
-          CODEKEEPER_TOOLING_SHA: ${{ steps.codekeeper-package.outputs.source_commit }}
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CONFIG: ${{ runner.temp }}/codekeeper-config.json
-          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
-          SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GITHUB_TOKEN: ${{ github.token }}
-          TRIAGE_MODE: ${{ (github.event_name == 'issues' || github.event_name == 'issue_comment') && 'automatic' || 'manual' }}
-          REQUESTED_BY: ${{ github.event.client_payload.requested_by || github.actor }}
-          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
-          CODEKEEPER_APP_CLIENT_ID: ${{ inputs.app_client_id }}
-        run: |
-          mkdir -p "$(dirname "$MODE_PLAN")"
-          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode issues --event "$GITHUB_EVENT_NAME" \
-            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$SOURCE_CONFIG" > "$MODE_PLAN"
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation prepare --mode issues \
-            --config "$CONFIG" \
-            --source-config "$SOURCE_CONFIG" \
-            --default-branch "$DEFAULT_BRANCH" \
-            --mode-plan "$MODE_PLAN" \
-            --directory "$BUNDLE" \
-            --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
-            --event "$GITHUB_EVENT_PATH" \
-            --actor "$REQUESTED_BY" \
-            --triage-mode "$TRIAGE_MODE" \
-            --tooling-sha "$CODEKEEPER_TOOLING_SHA"
-      - name: Run issue workspace stage
-        working-directory: repository
-        env:
-          CODEKEEPER_WORKSPACE_API_KEY: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
-          QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
-          CONFIG: ${{ runner.temp }}/codekeeper-config.json
-          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
-        run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation workspace --mode issues \
-            --config "$CONFIG" \
-            --directory "$BUNDLE" \
-            --mode-plan "$MODE_PLAN" \
-            --result "$BUNDLE/workspace-result.json"
-      - name: Upload untrusted workspace evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codekeeper-issue-workspace-${{ github.run_id }}
-          path: ${{ github.workspace }}/codekeeper-bundle
-          retention-days: 1
-          if-no-files-found: error
-          overwrite: true
-
-  analyze:
-    name: Codekeeper issue analysis
-    needs: workspace
-    if: needs.workspace.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
-    outputs:
-      candidate_sha256: ${{ steps.validate.outputs.candidate_sha256 }}
-      handoff_manifest_sha256: ${{ steps.validate.outputs.handoff_manifest_sha256 }}
-      context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
-    steps:
-      - name: Download verified Codekeeper package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}/tooling
-      - name: Check out trusted default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          path: repository
-          persist-credentials: false
-      - name: Set up pinned Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.19.0
-          package-manager-cache: false
-
-      - name: Verify downloaded Codekeeper package
-        id: codekeeper-package
-        uses: ./repository/.github/codekeeper/actions/acquire-package
-        with:
-          package_source: artifact
-          package_version: ${{ inputs.package_version }}
-          package_integrity: ${{ inputs.package_integrity }}
-          expected_manifest_sha256: ${{ needs.workspace.outputs.package_manifest_sha256 }}
-          expected_source_commit: ${{ needs.workspace.outputs.package_source_commit }}
-
-      - name: Install exact Codekeeper runtime
-        run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
-      - name: Download untrusted workspace evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-issue-workspace-${{ github.run_id }}
-          path: ${{ runner.temp }}/codekeeper-workspace
-      - name: Prepare runner-owned issue bundle
-        id: prepare
-        working-directory: repository
-        env:
-          CODEKEEPER_TOOLING_SHA: ${{ needs.workspace.outputs.package_source_commit }}
-          BUNDLE: ${{ runner.temp }}/codekeeper-bundle
-          CONFIG: ${{ runner.temp }}/codekeeper-config.json
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-          SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GITHUB_TOKEN: ${{ github.token }}
-          TRIAGE_MODE: ${{ (github.event_name == 'issues' || github.event_name == 'issue_comment') && 'automatic' || 'manual' }}
-          REQUESTED_BY: ${{ github.event.client_payload.requested_by || github.actor }}
-          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
-          CODEKEEPER_APP_CLIENT_ID: ${{ inputs.app_client_id }}
-        run: |
-          mkdir -p "$(dirname "$MODE_PLAN")"
-          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode issues --event "$GITHUB_EVENT_NAME" \
-            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$SOURCE_CONFIG" > "$MODE_PLAN"
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation prepare --mode issues \
-            --config "$CONFIG" \
-            --source-config "$SOURCE_CONFIG" \
-            --default-branch "$DEFAULT_BRANCH" \
-            --mode-plan "$MODE_PLAN" \
-            --directory "$BUNDLE" \
-            --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
-            --event "$GITHUB_EVENT_PATH" \
-            --actor "$REQUESTED_BY" \
-            --triage-mode "$TRIAGE_MODE" \
-            --tooling-sha "$CODEKEEPER_TOOLING_SHA"
-      - name: Triage issue with configured Agents SDK model
-        working-directory: repository
-        env:
-          CODEKEEPER_MODEL_API_KEY: ${{ secrets.model_api_key }}
-          CODEKEEPER_TRACE_API_KEY: ${{ secrets.trace_api_key }}
-          BUNDLE: ${{ runner.temp }}/codekeeper-bundle
-          WORKSPACE: ${{ runner.temp }}/codekeeper-workspace
-          CONFIG: ${{ runner.temp }}/codekeeper-config.json
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-        run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation analyze --mode issues \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --mode issue \
-            --directory "$BUNDLE" \
-            --workspace-result "$WORKSPACE/workspace-result.json" \
-            --expected-context-sha "${{ needs.workspace.outputs.context_sha256 }}" \
-            --result "$BUNDLE/agent-result.json"
-      - name: Validate untrusted issue candidate
-        id: validate
-        working-directory: repository
-        env:
-          BUNDLE: ${{ runner.temp }}/codekeeper-bundle
-          WORKSPACE: ${{ runner.temp }}/codekeeper-workspace
-          CANDIDATE: ${{ runner.temp }}/codekeeper-candidate
-          CONFIG: ${{ runner.temp }}/codekeeper-config.json
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-        run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage validate --operation candidate --mode issues \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --directory "$BUNDLE" \
-            --context "$BUNDLE/context.json" \
-            --result "$BUNDLE/agent-result.json" \
-            --workspace-result "$WORKSPACE/workspace-result.json" \
-            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
-            --artifact "$CANDIDATE"
-      - name: Upload untrusted issue candidate
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codekeeper-issue-candidate-${{ github.run_id }}
-          path: ${{ runner.temp }}/codekeeper-candidate
-          retention-days: 1
-          if-no-files-found: error
-          overwrite: true
-
-  seal:
-    needs: [workspace, analyze]
-    if: needs.analyze.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
-    steps:
-      - name: Download verified Codekeeper package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}/tooling
-      - name: Check out trusted default-branch configuration
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          path: repository
-          persist-credentials: false
-      - name: Set up pinned Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.19.0
-          package-manager-cache: false
-
-      - name: Verify downloaded Codekeeper package
-        id: codekeeper-package
-        uses: ./repository/.github/codekeeper/actions/acquire-package
-        with:
-          package_source: artifact
-          package_version: ${{ inputs.package_version }}
-          package_integrity: ${{ inputs.package_integrity }}
-          expected_manifest_sha256: ${{ needs.workspace.outputs.package_manifest_sha256 }}
-          expected_source_commit: ${{ needs.workspace.outputs.package_source_commit }}
-
-      - name: Install exact Codekeeper runtime
-        run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
-      - name: Download untrusted issue candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-issue-candidate-${{ github.run_id }}
-          path: ${{ runner.temp }}/codekeeper-candidate
-      - name: Seal issue artifact without repository execution
-        id: seal
-        env:
-          CANDIDATE: ${{ runner.temp }}/codekeeper-candidate
-          ARTIFACT: ${{ runner.temp }}/codekeeper-artifact
-          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          CANDIDATE_SHA256: ${{ needs.analyze.outputs.candidate_sha256 }}
-          HANDOFF_MANIFEST_SHA256: ${{ needs.analyze.outputs.handoff_manifest_sha256 }}
-          CONTEXT_SHA256: ${{ needs.analyze.outputs.context_sha256 }}
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-        run: |
-          mkdir -p "$(dirname "$MODE_PLAN")"
-          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode issues --event "$GITHUB_EVENT_NAME" \
-            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$CONFIG" > "$MODE_PLAN"
-          node tooling/codekeeper-runtime/src/cli.mjs stage validate --operation seal --mode issues \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --candidate "$CANDIDATE" \
-            --artifact "$ARTIFACT" \
-            --expected-candidate-sha "$CANDIDATE_SHA256" \
-            --expected-context-sha "$CONTEXT_SHA256" \
-            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
-            --expected-handoff-manifest-sha "$HANDOFF_MANIFEST_SHA256"
-      - name: Upload sealed issue artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codekeeper-issue-artifact-${{ github.run_id }}
-          path: ${{ runner.temp }}/codekeeper-artifact
-          retention-days: 1
-          if-no-files-found: error
-          overwrite: true
-
-  publish:
-    needs: [workspace, seal]
-    if: needs.seal.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Download verified Codekeeper package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-tooling-${{ github.run_id }}
-          path: ${{ github.workspace }}/tooling
-      - name: Check out trusted default-branch configuration
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          path: repository
-          persist-credentials: false
-
-      - name: Set up pinned Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.19.0
-          package-manager-cache: false
-
-      - name: Verify downloaded Codekeeper package
-        id: codekeeper-package
-        uses: ./repository/.github/codekeeper/actions/acquire-package
-        with:
-          package_source: artifact
-          package_version: ${{ inputs.package_version }}
-          package_integrity: ${{ inputs.package_integrity }}
-          expected_manifest_sha256: ${{ needs.workspace.outputs.package_manifest_sha256 }}
-          expected_source_commit: ${{ needs.workspace.outputs.package_source_commit }}
-
-      - name: Install exact Codekeeper runtime
-        run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
-      - name: Validate GitHub App permissions through the mode plan
-        working-directory: repository
-        env:
-          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-        run: |
-          mkdir -p "$(dirname "$MODE_PLAN")"
-          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode issues --event "$GITHUB_EVENT_NAME" \
-            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$CONFIG" > "$MODE_PLAN"
-          node ../tooling/codekeeper-runtime/src/cli.mjs stage publish --operation permissions --mode issues \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --app-contents-permission "${{ inputs.app_contents_permission }}" \
-            --app-issues-permission "${{ inputs.app_issues_permission }}" \
-            --app-pull-requests-permission "${{ inputs.app_pull_requests_permission }}"
-      - name: Download sealed issue artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codekeeper-issue-artifact-${{ github.run_id }}
-          path: ${{ runner.temp }}/codekeeper-artifact
-      - name: Create short-lived GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-        with:
-          client-id: ${{ inputs.app_client_id }}
-          private-key: ${{ secrets.app_private_key }}
-          permission-contents: ${{ inputs.app_contents_permission }}
-          permission-issues: ${{ inputs.app_issues_permission }}
-          permission-pull-requests: ${{ inputs.app_pull_requests_permission }}
-      - name: Resolve immutable automation bot identity
-        id: bot
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-        run: |
-          node tooling/codekeeper-runtime/src/cli.mjs stage publish --operation bot --mode issues \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --token "$GITHUB_TOKEN" \
-            --app-slug "$APP_SLUG" \
-            --api-url "$GITHUB_API_URL"
-      - name: Publish sealed issue triage
-        working-directory: tooling
-        env:
-          CODEKEEPER_TOOLING_SHA: ${{ needs.workspace.outputs.package_source_commit }}
-          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
-          CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
-          AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
-          MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
-          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-        run: |
-          node codekeeper-runtime/src/cli.mjs stage publish --operation publish --mode issues \
-            --config "$CONFIG" \
-            --mode-plan "$MODE_PLAN" \
-            --agent-profile "$AGENT_PROFILE" \
-            --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
-            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
-            --artifact "$RUNNER_TEMP/codekeeper-artifact" \
-            --expected-manifest-sha "$MANIFEST_SHA256"
+    uses: ./.github/workflows/codekeeper-runtime.yml
+    with:
+      mode: issues
+      package_version: ${{ inputs.package_version }}
+      package_integrity: ${{ inputs.package_integrity }}
+      enabled: true
+      dry_run: false
+      automation_bot_login: ${{ inputs.automation_bot_login }}
+      app_client_id: ${{ inputs.app_client_id }}
+    secrets:
+      model_api_key: ${{ secrets.model_api_key }}
+      workspace_api_key: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
+      trace_api_key: ${{ secrets.trace_api_key }}
+      app_private_key: ${{ secrets.app_private_key }}

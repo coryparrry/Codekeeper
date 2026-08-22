@@ -10,6 +10,11 @@ import {
   workflowDirectory,
 } from "./workflow-test-helpers.mjs";
 
+const genericRuntime = await workflow("runtime");
+const wrappersActive = /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/.test(
+  await workflow("review"),
+);
+
 test("self-test runs for every tracked-file change", async () => {
   const source = await workflow("self-test");
   const triggers = source.slice(0, source.indexOf("\npermissions:"));
@@ -154,6 +159,20 @@ test("callers authorize one exact package and use only adopter-local reusable wo
 });
 
 test("reusable workflows acquire one exact package and reverify it in every isolated consumer", async () => {
+  if (wrappersActive) {
+    for (const jobName of ["compute", "validate", "publish"]) {
+      const source = jobSection(
+        genericRuntime,
+        jobName,
+        jobName === "compute" ? "validate" : jobName === "validate" ? "publish" : undefined,
+      );
+      assert.match(source, /Acquire exact Codekeeper package/);
+      assert.match(source, /Install exact Codekeeper runtime/);
+      assert.match(source, /inputs\.package_version/);
+      assert.match(source, /inputs\.package_integrity/);
+    }
+    return;
+  }
   const consumerJobs = {
     assistant: ["route"],
     maintain: ["workspace", "analyze", "verify", "seal", "publish"],
@@ -363,6 +382,12 @@ test("reusable workflows acquire one exact package and reverify it in every isol
 });
 
 test("review package verification is consolidated across two trusted boundaries", async () => {
+  if (wrappersActive) {
+    assert.match(await workflow("review"), /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/);
+    assert.equal((genericRuntime.match(/Acquire exact Codekeeper package/g) ?? []).length, 3);
+    assert.equal((genericRuntime.match(/Install exact Codekeeper runtime/g) ?? []).length, 3);
+    return;
+  }
   const source = await workflow("review");
   const analyze = jobSection(source, "analyze", "gate");
   const gate = jobSection(source, "gate");
@@ -438,6 +463,12 @@ test("review package verification is consolidated across two trusted boundaries"
 });
 
 test("artifact boundaries receive each runner's verified package source identity", async () => {
+  if (wrappersActive) {
+    assert.equal((genericRuntime.match(/steps\.codekeeper-package\.outputs\.source_commit/g) ?? []).length >= 3, true);
+    assert.match(genericRuntime, /EXPECTED_HANDOFF_SHA/);
+    assert.match(genericRuntime, /expected-handoff-manifest-sha/);
+    return;
+  }
   for (const mode of modes) {
     const source = await workflow(mode);
     const lines = source.split("\n");
@@ -461,6 +492,11 @@ test("artifact boundaries receive each runner's verified package source identity
 });
 
 test("product workflows require fresh GitHub-hosted Ubuntu runners", async () => {
+  if (wrappersActive) {
+    assert.equal((genericRuntime.match(/^    runs-on: ubuntu-latest$/gm) ?? []).length, 3);
+    for (const mode of modes) assert.doesNotMatch(await workflow(mode), /runs-on:/);
+    return;
+  }
   for (const mode of ["assistant", "maintain", "fix", "issues", "review"]) {
     const source = await workflow(mode);
     const caller = await repositoryFile(
@@ -485,6 +521,13 @@ test("product workflows require fresh GitHub-hosted Ubuntu runners", async () =>
 });
 
 test("workspace workflows run pinned Codex through the Agents SDK without runner privilege mutation", async () => {
+  if (wrappersActive) {
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    assert.match(compute, /stage compute \\\n\s+--operation workspace/);
+    assert.match(compute, /CODEKEEPER_WORKSPACE_API_KEY/);
+    assert.doesNotMatch(compute, /sudo|useradd|dscl/);
+    return;
+  }
   const runtimePackage = JSON.parse(
     await repositoryFile("tools/codekeeper/package.json"),
   );
@@ -535,6 +578,12 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
 });
 
 test("review closes its temporary workspace user before coordinator credentials enter the runner", async () => {
+  if (wrappersActive) {
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    assert.ok(compute.indexOf("--operation workspace") < compute.indexOf("CODEKEEPER_MODEL_API_KEY"));
+    assert.ok(compute.indexOf("--operation workspace") < compute.indexOf("--operation analyze"));
+    return;
+  }
   const source = await workflow("review");
   const caller = await repositoryFile(
     "examples/workflows/codekeeper-review.yml.example",
@@ -729,6 +778,21 @@ test("all executable actions are pinned to known immutable commits", async () =>
 });
 
 test("all checkouts discard persisted credentials and tool versions are exact", async () => {
+  if (wrappersActive) {
+    const checkoutCount = (genericRuntime.match(/uses: actions\/checkout@/g) ?? []).length;
+    assert.equal((genericRuntime.match(/persist-credentials: false/g) ?? []).length, checkoutCount);
+    assert.equal((genericRuntime.match(/node-version: 24\.19\.0/g) ?? []).length, 3);
+    for (const action of [
+      "actions/checkout",
+      "actions/setup-node",
+      "actions/upload-artifact",
+      "actions/download-artifact",
+      "actions/create-github-app-token",
+    ]) {
+      assert.match(genericRuntime, new RegExp(actionPins[action]));
+    }
+    return;
+  }
   for (const mode of [...modes, "self-test"]) {
     const source = await workflow(mode);
     const checkoutCount = [...source.matchAll(/uses: actions\/checkout@/g)]

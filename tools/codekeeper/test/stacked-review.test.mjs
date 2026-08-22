@@ -227,6 +227,26 @@ test("review workflows admit stacked publication but keep forks, drafts, and mer
     new URL("../../../examples/workflows/codekeeper-review.yml.example", import.meta.url),
     "utf8",
   );
+  const generic = await readFile(
+    new URL("../../../.github/workflows/codekeeper-runtime.yml", import.meta.url),
+    "utf8",
+  );
+  const prepareSource = await readFile(
+    new URL("../src/lib/prepare.mjs", import.meta.url),
+    "utf8",
+  );
+  if (/uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/.test(reusable)) {
+    assert.match(reusable, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+    assert.match(reusable, /github\.event\.pull_request\.base\.repo\.full_name == github\.repository/);
+    assert.doesNotMatch(reusable, /github\.event\.pull_request\.base\.ref == github\.event\.repository\.default_branch/);
+    assert.match(prepareSource, /Fork pull requests are unsupported; manual review is required/);
+    assert.match(generic, /PUBLISH_DISPOSITION/);
+    assert.match(reusable, /merge_group lacks the single-head contract/);
+    assert.doesNotMatch(reusable, /merge_group:/);
+    assert.match(caller, /stacked PRs receive review publication/);
+    assert.doesNotMatch(caller, /merge_group:/);
+    return;
+  }
   assert.match(
     reusable,
     /const sameRepository = event\.pull_request\?\.head\?\.repo\?\.full_name === repository\n\s+&& event\.pull_request\?\.base\?\.repo\?\.full_name === repository;/,

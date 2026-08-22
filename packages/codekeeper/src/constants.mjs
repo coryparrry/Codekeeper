@@ -36,8 +36,18 @@ export const PACKAGE_ACQUIRE_ACTION = Object.freeze({
   packagePath: "release/actions/acquire-package/action.yml",
   description: "Downloads and verifies the exact Codekeeper npm release inside each isolated runtime job."
 });
+export const GENERIC_RUNTIME_WORKFLOW = Object.freeze({
+  id: "runtime",
+  label: "Generic staged runtime",
+  target: ".github/workflows/codekeeper-runtime.yml",
+  asset: "runtime-workflows/runtime.yml",
+  sourcePath: ".github/workflows/codekeeper-runtime.yml",
+  packagePath: "release/workflows/codekeeper-runtime.yml",
+  description: "Runs every Codekeeper mode through the shared compute, validate, and publish stages."
+});
 export const RELEASE_PACKAGE_ASSETS = Object.freeze([
   PACKAGE_ACQUIRE_ACTION,
+  GENERIC_RUNTIME_WORKFLOW,
   ...RUNTIME_WORKFLOW_IDS.map((id) => RUNTIME_WORKFLOWS[id])
 ]);
 export const PRESET_IDS = Object.freeze(["mixed", "openai"]);

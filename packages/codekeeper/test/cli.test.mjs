@@ -1362,7 +1362,7 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
     calls.some((call) => call.args.includes("DEEPSEEK_API_KEY")),
     false
   );
-  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [".github/codekeeper-release.json", ".github/codekeeper.json", ".github/codekeeper/README.md", ".github/codekeeper/actions/acquire-package/action.yml", ".github/workflows/codekeeper-assistant.yml", ".github/workflows/codekeeper-maintain.yml", ".github/workflows/codekeeper-review.yml", ".github/workflows/codekeeper-runtime-assistant.yml", ".github/workflows/codekeeper-runtime-maintain.yml", ".github/workflows/codekeeper-runtime-review.yml"]);
+  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [".github/codekeeper-release.json", ".github/codekeeper.json", ".github/codekeeper/README.md", ".github/codekeeper/actions/acquire-package/action.yml", ".github/workflows/codekeeper-assistant.yml", ".github/workflows/codekeeper-maintain.yml", ".github/workflows/codekeeper-review.yml", ".github/workflows/codekeeper-runtime-assistant.yml", ".github/workflows/codekeeper-runtime-maintain.yml", ".github/workflows/codekeeper-runtime-review.yml", ".github/workflows/codekeeper-runtime.yml"]);
   assert.match(output.toString(), /Starting model set: openai/);
   assert.match(output.toString(), /OpenAI traces: disabled/);
   assert.match(output.toString(), /Pull request reviewer \(Pull request review\): openai \/ gpt-5\.6-luna \/ medium effort/);

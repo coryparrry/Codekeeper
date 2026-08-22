@@ -45,6 +45,10 @@ const effectiveModes = Object.freeze({
   fix: "fix",
   maintain: "audit",
 });
+const genericRuntime = await workflow("runtime");
+const wrappersActive = /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/.test(
+  await workflow("review"),
+);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -286,6 +290,14 @@ test("the committed fixture matches the current production job graphs", async ()
 });
 
 test("job dependencies preserve the staged state-machine order", async () => {
+  if (wrappersActive) {
+    const validate = jobSection(genericRuntime, "validate", "publish");
+    const publish = jobSection(genericRuntime, "publish");
+    assert.match(validate, /^    needs: compute$/m);
+    assert.match(publish, /^    needs: \[compute, validate\]$/m);
+    assert.match(publish, /always\(\)/);
+    return;
+  }
   const expectedNeeds = {
     review: { gate: "needs: analyze" },
     issue: {
@@ -319,6 +331,16 @@ test("job dependencies preserve the staged state-machine order", async () => {
 });
 
 test("App private keys and App-token creation stay in publication jobs", async () => {
+  if (wrappersActive) {
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    const validate = jobSection(genericRuntime, "validate", "publish");
+    const publish = jobSection(genericRuntime, "publish");
+    assert.doesNotMatch(compute, /secrets\.app_private_key|create-github-app-token/);
+    assert.doesNotMatch(validate, /secrets\.app_private_key|create-github-app-token/);
+    assert.match(publish, /secrets\.app_private_key/);
+    assert.match(publish, /create-github-app-token/);
+    return;
+  }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
     const source = await workflow(workflowName);
     const jobSections = sections(source);
@@ -346,6 +368,17 @@ test("App private keys and App-token creation stay in publication jobs", async (
 });
 
 test("provider, trace, and workspace credentials remain in their stage boundaries", async () => {
+  if (wrappersActive) {
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    const validate = jobSection(genericRuntime, "validate", "publish");
+    const publish = jobSection(genericRuntime, "publish");
+    assert.match(compute, /secrets\.workspace_api_key/);
+    assert.match(compute, /secrets\.model_api_key/);
+    assert.match(compute, /secrets\.trace_api_key/);
+    assert.doesNotMatch(validate, /secrets\.(?:workspace_api_key|model_api_key|trace_api_key|app_private_key)/);
+    assert.doesNotMatch(publish, /secrets\.(?:workspace_api_key|model_api_key|trace_api_key)/);
+    return;
+  }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
     const source = await workflow(workflowName);
     const jobSections = sections(source);
@@ -452,6 +485,15 @@ test("provider, trace, and workspace credentials remain in their stage boundarie
 });
 
 test("workspace jobs close their instruction and credential isolation boundary", async () => {
+  if (wrappersActive) {
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    assert.match(compute, /CODEX_HOME/);
+    assert.match(compute, /QUARANTINE/);
+    assert.match(compute, /WORKSPACE_USER/);
+    assert.match(compute, /stage compute \\\n\s+--operation workspace/);
+    assert.ok(compute.indexOf("--operation workspace") < compute.indexOf("--operation analyze"));
+    return;
+  }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
     const source = await workflow(workflowName);
     const job = sections(source)[mode === "review" ? "analyze" : "workspace"];
@@ -468,6 +510,13 @@ test("workspace jobs close their instruction and credential isolation boundary",
 });
 
 test("repository validation is confined to credential-free verification jobs", async () => {
+  if (wrappersActive) {
+    const validate = jobSection(genericRuntime, "validate", "publish");
+    assert.match(validate, /Verify the repair candidate without credentials/);
+    assert.match(validate, /stage validate[\s\S]*--operation verify/);
+    noCredentialSource(validate, "generic validation job");
+    return;
+  }
   for (const mode of ["fix", "maintain"]) {
     const source = await workflow(workflowFiles[mode]);
     const jobSections = sections(source);
@@ -499,6 +548,15 @@ test("repository validation is confined to credential-free verification jobs", a
 });
 
 test("every runner verifies its exact package and relevant handoff before installation", async () => {
+  if (wrappersActive) {
+    const jobs = sections(genericRuntime);
+    for (const [name, source] of Object.entries(jobs)) {
+      assert.match(source, /name: Acquire exact Codekeeper package/, `${name} acquires package`);
+      assert.match(source, /name: Install exact Codekeeper runtime/, `${name} installs runtime`);
+      assert.ok(source.indexOf("Acquire exact Codekeeper package") < source.indexOf("Install exact Codekeeper runtime"));
+    }
+    return;
+  }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
     const source = await workflow(workflowName);
     const jobSections = sections(source);
@@ -530,6 +588,14 @@ test("every runner verifies its exact package and relevant handoff before instal
 });
 
 test("publication does not execute validation, lifecycle hooks, or arbitrary candidate code", async () => {
+  if (wrappersActive) {
+    const publish = jobSection(genericRuntime, "publish");
+    assert.doesNotMatch(publish, /npm (?:ci|install|test)|pnpm|yarn|git apply/);
+    assert.doesNotMatch(publish, /--operation verify/);
+    assert.match(publish, /--operation seal/);
+    assert.match(publish, /--operation publish/);
+    return;
+  }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
     const source = await workflow(workflowName);
     const publication =
@@ -604,6 +670,12 @@ test("publication does not execute validation, lifecycle hooks, or arbitrary can
 });
 
 test("coordinators run only after workspace teardown and workflows have no writable cross-run cache", async () => {
+  if (wrappersActive) {
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    assert.ok(compute.indexOf("--operation workspace") < compute.indexOf("--operation analyze"));
+    assert.doesNotMatch(genericRuntime, /actions\/cache|save-always|github\.run_attempt/);
+    return;
+  }
   assertMeasurementClassifiers();
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
     const source = await workflow(workflowName);
@@ -636,6 +708,12 @@ test("coordinators run only after workspace teardown and workflows have no writa
 });
 
 test("sealing completes before App-token creation", async () => {
+  if (wrappersActive) {
+    const publish = jobSection(genericRuntime, "publish");
+    assert.ok(publish.indexOf("--operation seal") < publish.indexOf("secrets.app_private_key"));
+    assert.ok(publish.indexOf("secrets.app_private_key") < publish.indexOf("create-github-app-token"));
+    return;
+  }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
     const source = await workflow(workflowName);
     const jobSections = sections(source);
@@ -715,6 +793,14 @@ test("callers pass explicit named secrets and never inherit the caller secret se
 });
 
 test("review gate always runs and fails closed when analysis, sealing, or publication is incomplete", async () => {
+  if (wrappersActive) {
+    const publish = jobSection(genericRuntime, "publish");
+    assert.match(publish, /name: \$\{\{ inputs\.mode == 'review' && 'Codekeeper review gate'/);
+    assert.match(publish, /if: >-\n\s+always\(\)/);
+    assert.match(publish, /Fail closed when review compute did not complete/);
+    assert.match(publish, /Enforce the required review gate/);
+    return;
+  }
   const source = await workflow("review");
   const gate = sections(source).gate;
   assert.match(

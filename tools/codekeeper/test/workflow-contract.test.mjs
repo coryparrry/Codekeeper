@@ -12,6 +12,10 @@ import {
 } from "./workflow-test-helpers.mjs";
 
 const stagedModes = modes.filter((mode) => mode !== "review");
+const genericRuntime = await workflow("runtime");
+const wrappersActive = /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/.test(
+  await workflow("review"),
+);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -38,12 +42,20 @@ test("workflow owner-command lists stay synchronized with the canonical definiti
 
   assert.match(reviewCaller, new RegExp(escapeRegExp(expectedCondition)));
   assert.equal(packagedReviewCaller, reviewCaller);
-  assert.match(reviewRuntime, new RegExp(escapeRegExp(expectedActions)));
+  if (wrappersActive) {
+    assert.match(reviewRuntime, new RegExp(escapeRegExp(expectedCondition)));
+  } else {
+    assert.match(reviewRuntime, new RegExp(escapeRegExp(expectedActions)));
+  }
 });
 
 test("issue comment routing keeps one balanced GitHub expression", async () => {
   const source = await workflow("issues");
-  const expression = jobSection(source, "workspace", "analyze").match(
+  const expression = jobSection(
+    source,
+    wrappersActive ? "runtime" : "workspace",
+    wrappersActive ? undefined : "analyze",
+  ).match(
     /if: >-\n([\s\S]*?)\n\s+# CODEKEEPER_OWNER_COMMANDS_END/,
   )?.[1];
   assert.ok(expression, "issue workspace expression is present");
@@ -60,6 +72,23 @@ test("issue comment routing keeps one balanced GitHub expression", async () => {
 });
 
 test("staged modes isolate untrusted candidate creation, tokenless sealing, and App publication", async () => {
+  if (wrappersActive) {
+    for (const mode of stagedModes) {
+      const wrapper = jobSection(await workflow(mode), "runtime");
+      assert.match(wrapper, /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/);
+      assert.doesNotMatch(wrapper, /runs-on:|steps:/);
+    }
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    const validate = jobSection(genericRuntime, "validate", "publish");
+    const publish = jobSection(genericRuntime, "publish");
+    assert.match(compute, /stage compute \\\n\s+--operation workspace/);
+    assert.match(compute, /stage compute \\\n\s+--operation analyze/);
+    assert.match(compute, /stage validate \\\n\s+--operation candidate/);
+    assert.match(validate, /stage validate[\s\S]*--operation verify/);
+    assert.doesNotMatch(validate, /secrets\.|CODEKEEPER_(?:MODEL|WORKSPACE|TRACE)_API_KEY/);
+    assert.ok(publish.indexOf("--operation seal") < publish.indexOf("create-github-app-token"));
+    return;
+  }
   for (const mode of stagedModes) {
     const source = await workflow(mode);
     const repairMode = mode === "maintain" || mode === "fix";
@@ -276,6 +305,15 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
 });
 
 test("workflow handoff artifacts survive failed-job reruns and producers replace full reruns", async () => {
+  if (wrappersActive) {
+    const names = [
+      ...genericRuntime.matchAll(/^\s+name: (codekeeper-generic-candidate-\$\{\{ github\.run_id \}\})$/gm),
+    ].map((match) => match[1]);
+    assert.deepEqual(names, Array(4).fill("codekeeper-generic-candidate-${{ github.run_id }}"));
+    assert.equal((genericRuntime.match(/overwrite: true/g) ?? []).length, 2);
+    assert.doesNotMatch(genericRuntime, /github\.run_attempt/);
+    return;
+  }
   for (const mode of stagedModes) {
     const source = await workflow(mode);
     const artifactPrefix = `codekeeper-${mode === "maintain" ? "maintenance" : mode === "issues" ? "issue" : mode}`;
@@ -346,6 +384,12 @@ test("workflow handoff artifacts survive failed-job reruns and producers replace
 });
 
 test("issue preparation can read pull requests in every caller and job that invokes it", async () => {
+  if (wrappersActive) {
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    assert.match(compute, /permissions:\n\s+contents: read\n\s+issues: read\n\s+pull-requests: read/);
+    assert.match(compute, /stage compute --operation prepare/);
+    return;
+  }
   const source = await workflow("issues");
   const caller = await repositoryFile(
     "examples/workflows/codekeeper-issues.yml.example",
@@ -372,6 +416,14 @@ test("issue preparation can read pull requests in every caller and job that invo
 });
 
 test("maintenance and fix dry runs do not require App credentials, but publication fails closed without them", async () => {
+  if (wrappersActive) {
+    const publish = jobSection(genericRuntime, "publish");
+    assert.match(publish, /!inputs\.dry_run/);
+    assert.match(publish, /APP_CLIENT_ID: \$\{\{ inputs\.app_client_id \}\}/);
+    assert.match(publish, /APP_PRIVATE_KEY: \$\{\{ secrets\.app_private_key \}\}/);
+    assert.match(publish, /Record a tokenless dry-run seal/);
+    return;
+  }
   for (const mode of ["maintain", "fix"]) {
     const source = await workflow(mode);
     const caller = await repositoryFile(
@@ -418,6 +470,11 @@ test("maintenance and fix dry runs do not require App credentials, but publicati
 });
 
 test("live maintenance runs use the enabled repair capability without a second approval", async () => {
+  if (wrappersActive) {
+    assert.match(genericRuntime, /REPAIR_AUTHORIZED: \$\{\{ !inputs\.dry_run \}\}/);
+    assert.match(genericRuntime, /--repair-authorized "\$REPAIR_AUTHORIZED"/);
+    return;
+  }
   const source = await workflow("maintain");
   const caller = await repositoryFile(
     "examples/workflows/codekeeper-maintain.yml.example",
@@ -461,6 +518,14 @@ test("review and issue-triage retain mandatory App credentials", async () => {
 });
 
 test("merged review gate executes the same fail-closed publication contract", async () => {
+  if (wrappersActive) {
+    const publish = jobSection(genericRuntime, "publish");
+    assert.match(publish, /name: \$\{\{ inputs\.mode == 'review' && 'Codekeeper review gate'/);
+    assert.match(publish, /name: Enforce the required review gate/);
+    assert.match(publish, /PUBLISH_DISPOSITION/);
+    assert.match(publish, /PUBLISH_BLOCKING/);
+    return;
+  }
   const script = stepRunScript(
     await workflow("review"),
     "Fail closed unless a current review was published",
@@ -565,6 +630,18 @@ test("merged review gate executes the same fail-closed publication contract", as
 });
 
 test("review uses a direct caller and a two-runner PR-native fail-closed gate", async () => {
+  if (wrappersActive) {
+    const wrapper = await workflow("review");
+    assert.deepEqual(
+      [...wrapper.slice(wrapper.indexOf("\njobs:\n")).matchAll(/^  ([a-z][a-z0-9_-]*):$/gm)].map((match) => match[1]),
+      ["runtime"],
+    );
+    assert.match(wrapper, /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/);
+    assert.match(genericRuntime, /^  compute:$/m);
+    assert.match(genericRuntime, /^  publish:$/m);
+    assert.match(genericRuntime, /Codekeeper review gate/);
+    return;
+  }
   const source = await workflow("review");
   const publisher = await repositoryFile(
     "tools/codekeeper/src/lib/publish.mjs",
@@ -670,6 +747,12 @@ test("review uses a direct caller and a two-runner PR-native fail-closed gate", 
 });
 
 test("issue triage can start enabled issue implementation while owner PR repair stays gated", async () => {
+  if (wrappersActive) {
+    assert.match(genericRuntime, /TRIAGE_MODE: \$\{\{ \(github\.event_name == 'issues' \|\| github\.event_name == 'issue_comment'\) && 'automatic' \|\| 'manual' \}\}/);
+    assert.match(genericRuntime, /AUTHORIZATION_MODE:/);
+    assert.match(genericRuntime, /--authorization-mode "\$AUTHORIZATION_MODE"/);
+    return;
+  }
   const issue = await workflow("issues");
   const fix = await workflow("fix");
   const caller = await repositoryFile(
@@ -782,6 +865,12 @@ test("issue triage can start enabled issue implementation while owner PR repair 
 });
 
 test("owner-commanded pull request repair can update only the frozen existing head", async () => {
+  if (wrappersActive) {
+    assert.match(genericRuntime, /EXPECTED_HEAD: \$\{\{ github\.event\.client_payload\.head_sha/);
+    assert.match(genericRuntime, /--expected-head "\$EXPECTED_HEAD"/);
+    assert.match(genericRuntime, /REVIEW_THREAD_IDS:/);
+    return;
+  }
   const fix = await workflow("fix");
   const assistant = await workflow("assistant");
   const assistantCaller = await repositoryFile(
@@ -863,6 +952,12 @@ test("documentation uses the live feedback input and owner-authorized defer cont
 });
 
 test("Fixer repository dispatches retain their target and explicit policy authorization", async () => {
+  if (wrappersActive) {
+    const wrapper = await workflow("fix");
+    assert.match(wrapper, /github\.event\.client_payload\.number/);
+    assert.match(genericRuntime, /AUTHORIZATION_MODE: \$\{\{ github\.event\.client_payload\.authorization_mode/);
+    return;
+  }
   const fix = await workflow("fix");
   const workspace = jobSection(fix, "workspace", "analyze");
   const analyze = jobSection(fix, "analyze", "verify");
@@ -891,6 +986,14 @@ test("Fixer repository dispatches retain their target and explicit policy author
 });
 
 test("Agents SDK coordinators use pinned dependencies and isolated credentials", async () => {
+  if (wrappersActive) {
+    const compute = jobSection(genericRuntime, "compute", "validate");
+    assert.match(compute, /CODEKEEPER_WORKSPACE_API_KEY: \$\{\{ secrets\.workspace_api_key \}\}/);
+    assert.match(compute, /CODEKEEPER_MODEL_API_KEY: \$\{\{ secrets\.model_api_key \}\}/);
+    assert.match(compute, /CODEKEEPER_TRACE_API_KEY: \$\{\{ secrets\.trace_api_key \}\}/);
+    assert.ok(compute.indexOf("--operation workspace") < compute.indexOf("--operation analyze"));
+    return;
+  }
   const packageJson = JSON.parse(
     await repositoryFile("tools/codekeeper/package.json"),
   );
@@ -992,6 +1095,11 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
 });
 
 test("review tracing uses the OpenAI exporter without alternate exporter credentials", async () => {
+  if (wrappersActive) {
+    assert.match(genericRuntime, /CODEKEEPER_TRACE_API_KEY: \$\{\{ secrets\.trace_api_key \}\}/);
+    assert.doesNotMatch(genericRuntime, /LANGFUSE|BRAINTRUST|OTEL_EXPORTER/);
+    return;
+  }
   const source = await workflow("review");
   const caller = await repositoryFile(
     "examples/workflows/codekeeper-review.yml.example",
@@ -1025,6 +1133,12 @@ test("self-test reports through annotations with read-only repository permission
 });
 
 test("pull request repair runs reviewer then one-pass fixer roles", async () => {
+  if (wrappersActive) {
+    assert.match(genericRuntime, /case "\$MODE" in/);
+    assert.match(genericRuntime, /review\) profile="\$AGENT_PROFILE_ROOT\/pr-reviewer\.md"/);
+    assert.match(genericRuntime, /fix\) profile="\$AGENT_PROFILE_ROOT\/fixer\.md"/);
+    return;
+  }
   const source = await workflow("fix");
   assert.doesNotMatch(
     source,

@@ -13,7 +13,10 @@ const permissionInputs = [
   "app_pull_requests_permission",
 ];
 
-test("reusable workflows expose typed, validated App permission inputs", async () => {
+test("compatibility wrappers retain permission inputs without granting callers authority", async () => {
+  const generic = await repositoryFile(
+    ".github/workflows/codekeeper-runtime.yml",
+  );
   for (const mode of modes) {
     const source = await workflow(mode);
     for (const input of permissionInputs) {
@@ -24,17 +27,17 @@ test("reusable workflows expose typed, validated App permission inputs", async (
         ),
         `${mode} declares ${input}`,
       );
-      assert.match(
+      assert.doesNotMatch(
         source,
         new RegExp(`\\$\\{\\{ inputs\\.${input} \\}\\}`),
-        `${mode} passes ${input} to the App token action`,
+        `${mode} does not forward ${input} into the generic runtime`,
       );
     }
-    assert.match(
-      source,
-      /stage publish --operation (?:permissions|preconditions)/,
-    );
   }
+  assert.match(generic, /CONTENTS_PERMISSION: \$\{\{ needs\.compute\.outputs\.contents_permission \}\}/);
+  assert.match(generic, /ISSUES_PERMISSION: \$\{\{ needs\.compute\.outputs\.issues_permission \}\}/);
+  assert.match(generic, /PULL_REQUESTS_PERMISSION: \$\{\{ needs\.compute\.outputs\.pull_requests_permission \}\}/);
+  assert.match(generic, /stage publish \\\n+            --operation preconditions/);
 });
 
 test("reusable workflow defaults preserve each role's minimum authority", async () => {
@@ -76,44 +79,21 @@ test("generated caller assets carry explicit permission placeholders for install
 });
 
 test("publication mints the privileged App token only after local verification", async () => {
-  for (const mode of modes) {
-    const source = await workflow(mode);
-    const publish = jobSection(source, mode === "review" ? "gate" : "publish");
-    const validation =
-      publish.indexOf("stage publish --operation permissions") >= 0
-        ? publish.indexOf("stage publish --operation permissions")
-        : publish.indexOf("stage publish --operation preconditions");
-    const install = publish.indexOf("- name: Install exact Codekeeper runtime");
-    const verification = publish.indexOf(
-      mode === "review"
-        ? "- name: Seal review artifact without repository execution"
-        : "- name: Download sealed",
-    );
-    const token = publish.indexOf(
-      "- name: Create short-lived GitHub App token",
-    );
-    const publication = publish.indexOf("- name: Publish sealed");
-    assert.ok(
-      validation !== -1 && install !== -1 && install < validation,
-      `${mode} validates permissions through the installed runtime`,
-    );
-    assert.ok(
-      install !== -1 && install < token,
-      `${mode} verifies and installs the runtime before minting`,
-    );
-    assert.ok(
-      verification !== -1 && verification < token,
-      `${mode} verifies its publication input before minting`,
-    );
-    if (mode === "review") {
-      assert.ok(
-        install < verification,
-        "review seals the restored candidate with the verified runtime before minting",
-      );
-    }
-    assert.ok(
-      token !== -1 && token < publication,
-      `${mode} mints only immediately before publication`,
-    );
-  }
+  const generic = await repositoryFile(
+    ".github/workflows/codekeeper-runtime.yml",
+  );
+  const publish = jobSection(generic, "publish");
+  const install = publish.indexOf("- name: Install exact Codekeeper runtime");
+  const seal = publish.indexOf("- name: Seal the candidate before App credentials");
+  const validation = publish.indexOf(
+    "- name: Validate App permissions from the verified mode plan",
+  );
+  const token = publish.indexOf(
+    "- name: Create the short-lived GitHub App token",
+  );
+  const publication = publish.indexOf("- name: Publish the sealed result");
+  assert.ok(install !== -1 && install < seal);
+  assert.ok(seal !== -1 && seal < validation);
+  assert.ok(validation !== -1 && validation < token);
+  assert.ok(token !== -1 && token < publication);
 });
