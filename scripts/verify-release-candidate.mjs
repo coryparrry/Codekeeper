@@ -35,6 +35,8 @@ const REQUIRED_PATHS = Object.freeze([
   "bin/codekeeper.mjs",
   "bin/verify-package.mjs",
   "release/actions/acquire-package/action.yml",
+  "release/runtime-archive.bin",
+  "release/runtime-archive.manifest.json",
   "release/workflows/codekeeper-runtime.yml",
   "runtime/agents/pr-reviewer.md",
   "runtime/package-lock.json",

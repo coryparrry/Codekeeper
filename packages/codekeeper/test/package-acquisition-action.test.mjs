@@ -13,6 +13,7 @@ import {
   git,
   REPOSITORY_ROOT,
   temporaryDirectory,
+  fixturePackageStageOptions,
 } from "./helpers.mjs";
 
 const execFile = promisify(execFileCallback);
@@ -44,8 +45,7 @@ async function localPackage(t) {
   const { manifest } = await buildCodekeeperPackageStage({
     repositoryRoot: REPOSITORY_ROOT,
     destination: stage,
-    sourceCommit,
-    requireClean: false,
+    ...fixturePackageStageOptions(sourceCommit),
   });
   await cp(stage, archivePackage, { recursive: true });
   const filename = `coryparry-codekeeper-${manifest.package.version}.tgz`;

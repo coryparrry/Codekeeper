@@ -5,10 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadVerifiedAssets as loadProductionAssets } from "../src/assets.mjs";
+import { skipRuntimeDependencyInstall } from "../src/prebuilt-runtime.mjs";
 
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const REPOSITORY_ROOT = path.resolve(PACKAGE_ROOT, "../..");
-export const PINNED_COMMIT = "ad58ff0df84f56b75e995e72e88d78063cf8af5b";
+export const PINNED_COMMIT = "0995922618cecb558166e94b527087e7b3193c3c";
 export const HEAD_SHA = "a".repeat(40);
 export const TEST_PACKAGE_INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
 export const VERSION = JSON.parse(
@@ -67,6 +68,14 @@ export function textSink({ isTTY = true } = {}) {
     toString() {
       return chunks.join("");
     },
+  };
+}
+
+export function fixturePackageStageOptions(sourceCommit) {
+  return {
+    sourceCommit,
+    requireClean: false,
+    installRuntimeDependencies: skipRuntimeDependencyInstall,
   };
 }
 

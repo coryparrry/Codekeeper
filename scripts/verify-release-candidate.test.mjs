@@ -7,6 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { skipRuntimeDependencyInstall } from "../packages/codekeeper/src/prebuilt-runtime.mjs";
 import { buildCodekeeperPackageStage } from "./build-codekeeper-package.mjs";
 import { runCommand } from "./release-candidate-lifecycle.mjs";
 import {
@@ -55,6 +56,7 @@ test("candidate structure verification fails closed when nested runtime is missi
     destination: stage,
     sourceCommit: "a".repeat(40),
     requireClean: false,
+    installRuntimeDependencies: skipRuntimeDependencyInstall,
   });
   await rm(path.join(stage, "runtime", "src", "cli.mjs"));
 
