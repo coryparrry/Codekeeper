@@ -117,7 +117,7 @@ scheduled maintenance, tracing, and automatic merge **off**.
 - [Architecture](https://github.com/coryparrry/Codekeeper/blob/main/docs/ARCHITECTURE.md)
 - [Support](https://github.com/coryparrry/Codekeeper/blob/main/SUPPORT.md)
 
-Bundled source checkpoint: `7506f8ddc5eb84f4da44c2063f0890d8a21f53d7`.
+Bundled source checkpoint: `cd4c6b4ec73a69bbe319653d32e18f158e3b0d24`.
 
 ## Security
 
