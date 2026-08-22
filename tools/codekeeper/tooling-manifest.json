@@ -35,7 +35,7 @@
     },
     {
       "path": "src/cli-heavy.mjs",
-      "sha256": "cd3d0b589be9210fe05180163a5bb88fca399be3f660fee79e6e84dce837750b"
+      "sha256": "f71ac3ab54476359405820a5a3000314d8fa7900ad1845e2c39df61d1921639f"
     },
     {
       "path": "src/cli.mjs",
@@ -130,12 +130,44 @@
       "sha256": "bfa00cf520ebd01042fe93c5930e6d0702e06148b6f1fc79631908e46d73782c"
     },
     {
+      "path": "src/lib/orchestration/artifact-handoff.mjs",
+      "sha256": "ebe278daea234e2e9eaacc7283f73d2b996b3ed02a89ec5bee6b7418b2d008e7"
+    },
+    {
+      "path": "src/lib/orchestration/compute.mjs",
+      "sha256": "6f832049a6046a5fd118ccbc177aac5f7a04ad587c8aa3bfd595902c71a29159"
+    },
+    {
+      "path": "src/lib/orchestration/credential-boundaries.mjs",
+      "sha256": "e34d141d75fff1261a72cac3653896faa165b397e14e5fe45739e8a9ba67d4ba"
+    },
+    {
       "path": "src/lib/orchestration/envelope.mjs",
       "sha256": "73e9f1d94c813db34e3e91821363babfc932ce044d22d14722426d649bc44fea"
     },
     {
       "path": "src/lib/orchestration/handoff.mjs",
       "sha256": "a5be94c4ab2507c3f5e5843382f40c351ceb958be37348448c8f72d2e45384dd"
+    },
+    {
+      "path": "src/lib/orchestration/index.mjs",
+      "sha256": "4e063c8b7c127c615d8c5e4e1ce215c08d349dace82976224b703a01c261d361"
+    },
+    {
+      "path": "src/lib/orchestration/mode-adapters.mjs",
+      "sha256": "056743b83c4df1efbd09e5ea4b162ebcf7768c710211999a6e0dcd9bb803a784"
+    },
+    {
+      "path": "src/lib/orchestration/publish.mjs",
+      "sha256": "f2af54154528b7cd8107fbfc92394ab793d543afc4dcd4ac322fa232abdbae98"
+    },
+    {
+      "path": "src/lib/orchestration/validate.mjs",
+      "sha256": "0cd6e89b6e5d085808c4443f275670a440c6ecb064de53a52f149d1a0bae6952"
+    },
+    {
+      "path": "src/lib/orchestration/workspace-isolation.mjs",
+      "sha256": "6f7b9fc524f9c7ca2cac35325521e277ddc4a90530fe11b5ba98b72a8e8fc19c"
     },
     {
       "path": "src/lib/owner-commands.mjs",
