@@ -55,7 +55,11 @@ test("mode compatibility wrappers allocate no runner and call only the generic r
   for (const mode of MODE_IDS) {
     const source = wrappers[mode];
     const job = runtimeJob(source);
-    assert.deepEqual(jobNames(source), ["runtime"], `${mode} has one wrapper job`);
+    assert.deepEqual(
+      jobNames(source),
+      ["runtime"],
+      `${mode} has one wrapper job`,
+    );
     assert.match(job, /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/);
     assert.match(job, new RegExp(`^      mode: ${mode}$`, "m"));
     assert.doesNotMatch(job, /runs-on:|steps:|uses: actions\//);
@@ -117,7 +121,10 @@ test("wrapper routing retains mode-specific eligibility and review command suppr
   assert.match(wrappers.review, /inputs\.auto_review/);
   assert.match(wrappers.review, /inputs\.feedback_triage/);
   assert.match(wrappers.review, /codekeeper_review/);
-  assert.match(wrappers.review, /startsWith\(github\.event\.comment\.body, '@'\)/);
+  assert.match(
+    wrappers.review,
+    /startsWith\(github\.event\.comment\.body, '@'\)/,
+  );
   assert.match(wrappers.issues, /inputs\.auto_triage/);
   assert.match(wrappers.issues, /codekeeper:needs-information/);
   assert.match(wrappers.issues, /codekeeper_issue/);
@@ -155,13 +162,21 @@ test("the generic workflow is a packaged always-installed release artifact", asy
   );
 });
 
-test("the shared runtime retains three runner stages and the protected review gate name", () => {
-  assert.deepEqual(jobNames(generic), ["compute", "validate", "publish"]);
+test("the shared runtime retains staged execution plus its credential proof and protected review gate name", () => {
+  assert.deepEqual(jobNames(generic), [
+    "compute",
+    "validate",
+    "publish",
+    "credential-probe",
+  ]);
   assert.match(
     generic,
     /name: \$\{\{ \(inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'\) && 'Codekeeper review gate' \|\| 'Codekeeper trusted publication' \}\}/,
   );
   for (const mode of MODE_IDS) {
-    assert.equal(MODES[mode].runtime.sourcePath, wrapperPaths[mode].pathname.replace(repositoryRoot.pathname, ""));
+    assert.equal(
+      MODES[mode].runtime.sourcePath,
+      wrapperPaths[mode].pathname.replace(repositoryRoot.pathname, ""),
+    );
   }
 });

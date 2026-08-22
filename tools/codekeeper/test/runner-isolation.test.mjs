@@ -37,7 +37,7 @@ test("product runtime workflows keep every job on GitHub-hosted Ubuntu", async (
     ".github/workflows/codekeeper-runtime.yml",
   );
   const genericRunners = generic.match(/^\s+runs-on: .*$/gm) ?? [];
-  assert.equal(genericRunners.length, 3);
+  assert.equal(genericRunners.length, 4);
   assert.ok(
     genericRunners.every((line) => line.trim() === "runs-on: ubuntu-latest"),
   );
