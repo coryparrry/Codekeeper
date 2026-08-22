@@ -15,8 +15,12 @@ function usage() {
     "  --surface <issue|pull-request|review-thread> Trusted owner-command surface",
     "  --target-number <number>                   Issue or pull request number",
     "  --dry-run                                  Disable live publication",
+    "  --dry-run-value <boolean>                  Set dry-run from a trusted workflow input",
+    "  --event-payload <path>                     Read action and target from the trusted event payload",
+    "  --policy-config <path>                     Read permission policy from frozen Codekeeper config",
     "  --candidate-requires-validation <boolean>  Set validated candidate context",
     "  --publication-enabled <boolean>            Set validated publication context",
+    "  --ready-label-fix <boolean>                 Authorize the verified ready-label route",
     "  --input <path>                             Read a JSON resolver context",
     "  --json <json>                              Read a JSON resolver context",
   ].join("\n");
@@ -86,6 +90,30 @@ export function parseResolverArgs(args) {
           "JSON input options cannot be combined with field options.",
         );
       context.event.dryRun = true;
+    } else if (argument === "--dry-run-value") {
+      if (inputSource)
+        throw new TypeError(
+          "JSON input options cannot be combined with field options.",
+        );
+      context.event.dryRun = parseBoolean(
+        takeValue(args, index, "--dry-run-value"),
+        argument,
+      );
+      index += 1;
+    } else if (argument === "--event-payload") {
+      if (inputSource)
+        throw new TypeError(
+          "JSON input options cannot be combined with field options.",
+        );
+      context.eventPayloadPath = takeValue(args, index, argument);
+      index += 1;
+    } else if (argument === "--policy-config") {
+      if (inputSource)
+        throw new TypeError(
+          "JSON input options cannot be combined with field options.",
+        );
+      context.policyConfigPath = takeValue(args, index, argument);
+      index += 1;
     } else if (argument === "--candidate-requires-validation") {
       if (inputSource)
         throw new TypeError(
@@ -103,6 +131,16 @@ export function parseResolverArgs(args) {
         );
       context.policy.publicationEnabled = parseBoolean(
         takeValue(args, index, "--publication-enabled"),
+        argument,
+      );
+      index += 1;
+    } else if (argument === "--ready-label-fix") {
+      if (inputSource)
+        throw new TypeError(
+          "JSON input options cannot be combined with field options.",
+        );
+      context.policy.readyLabelFix = parseBoolean(
+        takeValue(args, index, "--ready-label-fix"),
         argument,
       );
       index += 1;
@@ -124,23 +162,55 @@ export function parseResolverArgs(args) {
 }
 
 async function loadContext(parsed) {
-  if (!parsed.input) return parsed;
-  const source = parsed.input.path
-    ? parsed.input.path === "-"
-      ? readFileSync(0, "utf8")
-      : await readFile(parsed.input.path, "utf8")
-    : parsed.input.json;
-  const value = JSON.parse(source);
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Resolver input must be a JSON object.");
+  if (parsed.input) {
+    const source = parsed.input.path
+      ? parsed.input.path === "-"
+        ? readFileSync(0, "utf8")
+        : await readFile(parsed.input.path, "utf8")
+      : parsed.input.json;
+    const value = JSON.parse(source);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new TypeError("Resolver input must be a JSON object.");
+    }
+    const allowed = new Set(["requestedMode", "event", "policy"]);
+    const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+    if (unknown.length)
+      throw new TypeError(
+        `Resolver input contains unknown properties: ${unknown.join(", ")}`,
+      );
+    return value;
   }
-  const allowed = new Set(["requestedMode", "event", "policy"]);
-  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
-  if (unknown.length)
-    throw new TypeError(
-      `Resolver input contains unknown properties: ${unknown.join(", ")}`,
-    );
-  return value;
+  const { eventPayloadPath, policyConfigPath, ...context } = parsed;
+  if (eventPayloadPath) {
+    const payload = JSON.parse(await readFile(eventPayloadPath, "utf8"));
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new TypeError("Trusted event payload must be a JSON object.");
+    }
+    context.event.action = payload.action;
+    const payloadTargetNumber =
+      payload.pull_request?.number ??
+      payload.issue?.number ??
+      payload.client_payload?.number;
+    if (
+      context.event.targetNumber === undefined &&
+      payloadTargetNumber !== undefined
+    ) {
+      context.event.targetNumber = payloadTargetNumber;
+    }
+  }
+  if (policyConfigPath) {
+    const config = JSON.parse(await readFile(policyConfigPath, "utf8"));
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      throw new TypeError("Codekeeper policy config must be a JSON object.");
+    }
+    context.policy.review = {
+      autoRepair: config.review?.autoRepair === true,
+    };
+    context.policy.audit = {
+      repair: { enabled: config.audit?.repair?.enabled === true },
+    };
+  }
+  return context;
 }
 
 export async function main(

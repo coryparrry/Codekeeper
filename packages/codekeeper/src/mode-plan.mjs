@@ -15,6 +15,7 @@ const COMMAND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const EVENT_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const SUPPORTED_EVENT_NAMES = new Set([
   "pull_request",
+  "pull_request_target",
   "pull_request_review",
   "pull_request_review_comment",
   "issues",
@@ -25,6 +26,7 @@ const SUPPORTED_EVENT_NAMES = new Set([
 ]);
 const PULL_REQUEST_EVENTS = new Set([
   "pull_request",
+  "pull_request_target",
   "pull_request_review",
   "pull_request_review_comment",
 ]);
@@ -33,6 +35,7 @@ const OWNER_COMMAND_SURFACES_BY_EVENT = Object.freeze({
   issues: new Set(),
   issue_comment: new Set(["issue", "pull-request"]),
   pull_request: new Set(),
+  pull_request_target: new Set(),
   pull_request_review: new Set(),
   pull_request_review_comment: new Set(["review-thread"]),
   schedule: new Set(),

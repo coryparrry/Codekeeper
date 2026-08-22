@@ -669,6 +669,7 @@ test("owner command routes preserve every surface and alias", () => {
   for (const eventName of [
     "issues",
     "pull_request",
+    "pull_request_target",
     "pull_request_review",
     "schedule",
     "workflow_dispatch",
@@ -686,6 +687,7 @@ test("owner command routes preserve every surface and alias", () => {
   for (const [eventName, surface] of [
     ["issues", "issue"],
     ["pull_request", "pull-request"],
+    ["pull_request_target", "pull-request"],
     ["pull_request_review", "pull-request"],
     ["pull_request_review_comment", "pull-request"],
   ]) {
@@ -701,6 +703,13 @@ test("owner command routes preserve every surface and alias", () => {
 });
 
 test("registry permission rules drive dynamic mode plans", () => {
+  assert.equal(
+    resolveModePlan({
+      requestedMode: "review",
+      event: { eventName: "pull_request_target" },
+    }).trigger,
+    "pull-request",
+  );
   const reviewDefault = resolveModePlan({
     requestedMode: "review",
     event: { eventName: "pull_request" },
@@ -772,6 +781,8 @@ test("the direct resolver CLI accepts JSON input or standalone field flags", () 
 
   const directory = mkdtempSync(join(tmpdir(), "codekeeper-mode-plan-"));
   const inputPath = join(directory, "context.json");
+  const eventPath = join(directory, "event.json");
+  const policyPath = join(directory, "codekeeper.json");
   writeFileSync(
     inputPath,
     JSON.stringify({
@@ -786,7 +797,47 @@ test("the direct resolver CLI accepts JSON input or standalone field flags", () 
   });
   assert.equal(file.status, 0, file.stderr);
   assert.equal(JSON.parse(file.stdout).resolvedMode, "maintain");
-  rmSync(directory, { recursive: true, force: true });
+
+  writeFileSync(
+    eventPath,
+    JSON.stringify({ action: "labeled", issue: { number: 27 } }),
+    "utf8",
+  );
+  writeFileSync(
+    policyPath,
+    JSON.stringify({
+      review: { autoRepair: true },
+      audit: { repair: { enabled: true } },
+    }),
+    "utf8",
+  );
+  const trustedFiles = spawnSync(
+    process.execPath,
+    [
+      cli,
+      "--mode",
+      "fix",
+      "--event",
+      "issues",
+      "--event-payload",
+      eventPath,
+      "--policy-config",
+      policyPath,
+      "--ready-label-fix",
+      "true",
+      "--dry-run-value",
+      "true",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(trustedFiles.status, 0, trustedFiles.stderr);
+  assert.deepEqual(
+    {
+      targetNumber: JSON.parse(trustedFiles.stdout).targetNumber,
+      publicationRequired: JSON.parse(trustedFiles.stdout).publicationRequired,
+    },
+    { targetNumber: 27, publicationRequired: false },
+  );
 
   const flags = spawnSync(
     process.execPath,
@@ -807,6 +858,8 @@ test("the direct resolver CLI accepts JSON input or standalone field flags", () 
   );
   assert.equal(flags.status, 0, flags.stderr);
   assert.equal(JSON.parse(flags.stdout).resolvedMode, "fix");
+
+  rmSync(directory, { recursive: true, force: true });
 
   const conflictingSources = spawnSync(
     process.execPath,
