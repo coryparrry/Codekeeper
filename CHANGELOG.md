@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.8](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.7...codekeeper-v0.4.8) (2026-08-22)
+
+
+### Bug Fixes
+
+* **runtime:** bind skipped issue triage repair to package release ([76b6e4a](https://github.com/coryparrry/Codekeeper/commit/76b6e4abf816a8e01b627ac3cba74e0a1092451b))
+
 ## [0.4.7](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.6...codekeeper-v0.4.7) (2026-08-22)
 
 
