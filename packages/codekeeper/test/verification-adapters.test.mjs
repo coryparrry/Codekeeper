@@ -264,9 +264,9 @@ function dryRunRunner({ matchingIds = [101], jobs = [] } = {}) {
 }
 
 const successfulJobs = [
-  "Codekeeper maintenance workspace specialist",
-  "Codekeeper maintenance analysis",
-  "Codekeeper maintenance verification",
+  "maintain / Codekeeper generic compute",
+  "maintain / Codekeeper generic validation",
+  "maintain / Codekeeper trusted publication",
 ].map((name) => ({ name, conclusion: "success" }));
 
 test("controlled maintenance correlates one new dispatch and proves required jobs", async () => {
@@ -284,6 +284,29 @@ test("controlled maintenance correlates one new dispatch and proves required job
     { wait: async () => {}, verificationId: VERIFICATION_ID },
   );
   assert.equal(passed, true);
+});
+
+test("controlled maintenance accepts Runtime v2 leaf job names", async () => {
+  const leafJobs = [
+    "Codekeeper generic compute",
+    "Codekeeper generic validation",
+    "Codekeeper trusted publication",
+  ].map((name) => ({ name, conclusion: "success" }));
+  assert.equal(
+    await runMaintenanceDryRun(
+      {
+        runner: dryRunRunner({ jobs: leafJobs }),
+        root: ROOT,
+        repository: REPOSITORY,
+        installation: {
+          modes: ["maintain"],
+          policy: { repository: { defaultBranch: "main" } },
+        },
+      },
+      { wait: async () => {}, verificationId: VERIFICATION_ID },
+    ),
+    true,
+  );
 });
 
 test("controlled maintenance rejects ambiguous dispatches and skipped model jobs", async () => {
@@ -320,7 +343,7 @@ test("controlled maintenance rejects ambiguous dispatches and skipped model jobs
   );
 });
 
-function credentialRunner({ matchingIds = [201], jobs = [{ name: "Codekeeper App credential verification", conclusion: "success" }] } = {}) {
+function credentialRunner({ matchingIds = [201], jobs = [{ name: "command / Codekeeper App credential verification", conclusion: "success" }] } = {}) {
   return createRecordingRunner(({ command, args, options }) => {
     const key = `${command} ${args.join(" ")}`;
     if (key.startsWith("gh workflow run codekeeper.yml")) {
