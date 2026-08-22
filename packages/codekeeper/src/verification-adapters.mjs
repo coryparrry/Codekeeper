@@ -10,11 +10,19 @@ import { verifyCodekeeperRelease } from "./release-verifier.mjs";
 import { appPermissions } from "./plan.mjs";
 
 const REQUIRED_DRY_RUN_JOBS = Object.freeze([
-  "Codekeeper maintenance workspace specialist",
-  "Codekeeper maintenance analysis",
-  "Codekeeper maintenance verification",
+  "Codekeeper generic compute",
+  "Codekeeper generic validation",
+  "Codekeeper trusted publication",
 ]);
 const APP_CREDENTIAL_JOB = "Codekeeper App credential verification";
+
+function jobSucceeded(jobs, leafName) {
+  return jobs.some((job) => {
+    if (job?.conclusion !== "success") return false;
+    const name = String(job?.name ?? "");
+    return name === leafName || name.endsWith(` / ${leafName}`);
+  });
+}
 
 function successful(result) {
   return (
@@ -295,9 +303,7 @@ function requiredJobsPassed(result) {
     const response = JSON.parse(result.stdout);
     if (!Array.isArray(response?.jobs)) return false;
     return REQUIRED_DRY_RUN_JOBS.every((name) =>
-      response.jobs.some(
-        (job) => job?.name === name && job?.conclusion === "success",
-      ),
+      jobSucceeded(response.jobs, name),
     );
   } catch {
     return false;
@@ -377,9 +383,7 @@ function appCredentialJobPassed(result) {
   if (!successful(result)) return false;
   try {
     const response = JSON.parse(result.stdout);
-    return Array.isArray(response?.jobs) && response.jobs.some(
-      (job) => job?.name === APP_CREDENTIAL_JOB && job?.conclusion === "success"
-    );
+    return Array.isArray(response?.jobs) && jobSucceeded(response.jobs, APP_CREDENTIAL_JOB);
   } catch {
     return false;
   }

@@ -264,7 +264,7 @@ async function exerciseProductionVerificationAdapters({
           JSON.stringify({
             jobs: [
               {
-                name: "Codekeeper App credential verification",
+                name: "command / Codekeeper App credential verification",
                 conclusion: "success",
               },
             ],
