@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.3](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.2...codekeeper-v0.4.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **runtime:** let isolated workspace users traverse GitHub runner home ([b28fec6](https://github.com/coryparrry/Codekeeper/commit/b28fec60c48da73409ec5f1ec3abcd7ccf756d8f))
+* **runtime:** let isolated workspace users traverse GitHub runner home ([086040e](https://github.com/coryparrry/Codekeeper/commit/086040ebba3ad8607d2d51e252bb7fe1d78a2a2f))
+
 ## [0.4.2](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.1...codekeeper-v0.4.2) (2026-08-22)
 
 
