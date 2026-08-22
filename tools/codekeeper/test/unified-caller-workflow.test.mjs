@@ -114,13 +114,17 @@ test("comment events route commands away from review and issue automation", asyn
     const command = job(source, "command");
     for (const body of [review, issue, command]) {
       assert.match(body, /CODEKEEPER_OWNER_COMMANDS_START/);
-      assert.match(body, /\/codekeeper help/);
+      assert.match(body, /contains\(github\.event\.comment\.body, '\/codekeeper'\)/);
+      assert.match(body, /contains\(github\.event\.comment\.body, 'AUTOMATION_BOT_MENTION'\)/);
       assert.match(body, /CODEKEEPER_AUTOMATION_BOT_LOGIN/);
     }
     assert.match(review, /github\.event_name == 'pull_request_review_comment'/);
     assert.match(issue, /codekeeper:needs-information/);
-    assert.match(issue, /!contains\(fromJSON/);
+    assert.match(issue, /!contains\(github\.event\.comment\.body, '\/codekeeper'\)/);
+    assert.match(issue, /!contains\(github\.event\.comment\.body, 'AUTOMATION_BOT_MENTION'\)/);
     assert.match(command, /github\.event\.action == 'created'/);
+    assert.doesNotMatch(command, /endsWith\(github\.event\.comment\.body/);
+    assert.equal(source.match(/AUTOMATION_BOT_MENTION/g)?.length, 3);
   }
 });
 
