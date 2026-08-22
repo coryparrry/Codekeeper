@@ -130,6 +130,14 @@
       "sha256": "bfa00cf520ebd01042fe93c5930e6d0702e06148b6f1fc79631908e46d73782c"
     },
     {
+      "path": "src/lib/orchestration/envelope.mjs",
+      "sha256": "3aad83ffcaa239fd25a3b09730dc59f39baf5c9388d2729029c00e065df5a657"
+    },
+    {
+      "path": "src/lib/orchestration/handoff.mjs",
+      "sha256": "1ddf49f7c8fac4d94946bb22777d08d37c6c6acd82164e4c6d78d660125af65f"
+    },
+    {
       "path": "src/lib/owner-commands.mjs",
       "sha256": "63812bf8310f85b6a28fdcb78f5eaf3bf1166a8065bad55ed733dcaf178f6d7a"
     },
