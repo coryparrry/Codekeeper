@@ -117,10 +117,26 @@ export const labelMethods = {
     if (!isCodekeeperOwnedLabel(label)) {
       throw new Error(`Attempted to remove label outside Codekeeper ownership: ${label}`);
     }
+    const endpoint = this.repoPath(
+      `/issues/${number}/labels/${encodeURIComponent(label)}`,
+    );
     try {
-      await this.request("DELETE", this.repoPath(`/issues/${number}/labels/${encodeURIComponent(label)}`));
+      await this.request("DELETE", endpoint);
     } catch (error) {
-      if (error.status !== 404) throw error;
+      if (error.status === 404) return;
+      const expected = this.pullMutation;
+      if (
+        error?.githubMutationOutcome !== "ambiguous" ||
+        !expected ||
+        expected.number !== number
+      ) {
+        throw error;
+      }
+      const pull = await this.getPull(number);
+      this.assertPullMutationIdentity(pull);
+      const reconciled = expected.labels.filter((item) => item !== label);
+      if (!sameStrings(labelNames(pull), reconciled)) throw error;
+      this.advancePullMutationState("DELETE", endpoint);
     }
   }
 };

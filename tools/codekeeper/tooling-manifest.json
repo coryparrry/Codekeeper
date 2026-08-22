@@ -35,7 +35,7 @@
     },
     {
       "path": "src/cli-heavy.mjs",
-      "sha256": "f3129802e84b92cf55b22b5526f644e082f38ec181854b843657fd012954f9a8"
+      "sha256": "794e20af2ba39225880bd7909a7551cac5a4fe4787cdb8892d4d4aba30cd0b88"
     },
     {
       "path": "src/cli.mjs",
@@ -95,11 +95,11 @@
     },
     {
       "path": "src/lib/github/labels.mjs",
-      "sha256": "24b140630c1685695331a039872dc7e7c75c24032c436b555d16200b58b781c4"
+      "sha256": "992f25d9af3770af759bbe1a3359396f5e1cd98ae82b2f048cfd77833a7f25af"
     },
     {
       "path": "src/lib/github/mutation-guard.mjs",
-      "sha256": "2923185a6e9031ee995285327d72e9b93b326871b9783d65d4b88ab292ad6f2e"
+      "sha256": "b728adc986ecf6360f0fa95a802c83880415c545bfcd2455e1995aef8076add4"
     },
     {
       "path": "src/lib/github/pagination.mjs",
@@ -134,6 +134,10 @@
       "sha256": "ebe278daea234e2e9eaacc7283f73d2b996b3ed02a89ec5bee6b7418b2d008e7"
     },
     {
+      "path": "src/lib/orchestration/command-artifact.mjs",
+      "sha256": "ff2457126c422c623ee1049067370334a007ff2e284d5e6d72e38aace8ed37a1"
+    },
+    {
       "path": "src/lib/orchestration/compute.mjs",
       "sha256": "6f832049a6046a5fd118ccbc177aac5f7a04ad587c8aa3bfd595902c71a29159"
     },
@@ -159,11 +163,11 @@
     },
     {
       "path": "src/lib/orchestration/publish.mjs",
-      "sha256": "f2af54154528b7cd8107fbfc92394ab793d543afc4dcd4ac322fa232abdbae98"
+      "sha256": "66458488fed4aae8592c8fb52709aff31b61feacf36ec647fdea84dafeea42ce"
     },
     {
       "path": "src/lib/orchestration/validate.mjs",
-      "sha256": "0cd6e89b6e5d085808c4443f275670a440c6ecb064de53a52f149d1a0bae6952"
+      "sha256": "33a7cb571883bc2815fc8883036fcf6bcdcc9599b7e13942149cc2dd82ca9f21"
     },
     {
       "path": "src/lib/orchestration/workspace-isolation.mjs",
@@ -187,7 +191,7 @@
     },
     {
       "path": "src/lib/pr-repair.mjs",
-      "sha256": "6b919ee33222f4a8a5018502336427bef14cf448a1bbd4610a4f287646e8e18e"
+      "sha256": "4eca0f3e2bf6caa01c0578d8823cc06117785fe79103eeed8c43ea854f5a6a04"
     },
     {
       "path": "src/lib/prepare-support.mjs",
@@ -195,7 +199,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "02beaa2e545512c973cf400d4cea0087a30bc38c5e7b024dade742f63225336d"
+      "sha256": "c2464b071ca2f6dc9af13b380e03bc81574f8f22c99edd18428fd45794fd2c01"
     },
     {
       "path": "src/lib/process-supervisor.mjs",
@@ -223,7 +227,7 @@
     },
     {
       "path": "src/lib/publish/fix.mjs",
-      "sha256": "c06f50a71f2a70d5f11fe05e8c859bbc7e96f1a3f96a0cb46717899d9892a886"
+      "sha256": "94184728f530ec501e54dc2133a3c18bbe3f0547cdc8868e1ae41df82a815660"
     },
     {
       "path": "src/lib/publish/index.mjs",
@@ -232,6 +236,10 @@
     {
       "path": "src/lib/publish/issue.mjs",
       "sha256": "7f03c30c2083af2cdf8a6ad310b97b82ef28a2c8e827a3d187ba8c7a7f1c1069"
+    },
+    {
+      "path": "src/lib/publish/owner-command.mjs",
+      "sha256": "dc29982e92ab2b3356925c56585ef368017a27566f2af7a73bd784f0ef8835e4"
     },
     {
       "path": "src/lib/publish/repair-pr.mjs",

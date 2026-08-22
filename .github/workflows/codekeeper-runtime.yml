@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       mode:
-        description: Verified Codekeeper mode to execute.
+        description: Requested Codekeeper mode, or auto for an owner command.
         required: true
         type: string
       package_version:
@@ -34,10 +34,24 @@ on:
         description: GitHub App client ID. The verified mode plan supplies permissions.
         required: true
         type: string
+      installed_modes:
+        description: Comma-separated modes installed by the verified package.
+        required: false
+        default: review,maintain,issues,fix
+        type: string
     secrets:
       model_api_key:
-        description: API key for the configured coordinator model.
-        required: true
+        description: Compatibility key for an explicitly selected legacy mode.
+        required: false
+      openai_api_key:
+        description: OpenAI key selected only from the frozen resolved policy.
+        required: false
+      deepseek_api_key:
+        description: DeepSeek key selected only from the frozen resolved policy.
+        required: false
+      openrouter_api_key:
+        description: OpenRouter key selected only from the frozen resolved policy.
+        required: false
       workspace_api_key:
         description: API key for the optional isolated workspace specialist.
         required: false
@@ -71,13 +85,15 @@ jobs:
       issues: read
       pull-requests: read
     outputs:
+      resolved_mode: ${{ steps.prepare.outputs.resolved_mode }}
+      command_execution_kind: ${{ steps.prepare.outputs.command_execution_kind }}
       validation_required: ${{ steps.prepare.outputs.validation_required }}
       publication_required: ${{ steps.prepare.outputs.publication_required }}
       required_gate: ${{ steps.prepare.outputs.required_gate }}
       contents_permission: ${{ steps.prepare.outputs.contents_permission }}
       issues_permission: ${{ steps.prepare.outputs.issues_permission }}
       pull_requests_permission: ${{ steps.prepare.outputs.pull_requests_permission }}
-      context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
+      context_sha256: ${{ steps.candidate.outputs.context_sha256 || steps.prepare.outputs.context_sha256 }}
       execution_sha: ${{ steps.prepare.outputs.execution_sha }}
       candidate_sha256: ${{ steps.candidate.outputs.candidate_sha256 }}
       handoff_manifest_sha256: ${{ steps.candidate.outputs.handoff_manifest_sha256 }}
@@ -120,11 +136,13 @@ jobs:
         id: prepare
         working-directory: worktree
         env:
-          MODE: ${{ inputs.mode }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          INSTALLED_MODES: ${{ inputs.installed_modes }}
           DRY_RUN: ${{ inputs.dry_run }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
+          COMMAND_CONTEXT: ${{ runner.temp }}/codekeeper-command-context.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE_ROOT: ${{ github.workspace }}/repository/.github/codekeeper/agents
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -142,6 +160,47 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$MODE_PLAN")"
+          execution_kind="mode"
+          command_args=()
+          owner_context_args=()
+          if [[ "$REQUESTED_MODE" == "auto" ]]; then
+            node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage compute \
+              --operation owner-command-context --mode auto --config "$SOURCE_CONFIG" \
+              --event "$GITHUB_EVENT_PATH" \
+              --automation-bot-login "$CODEKEEPER_AUTOMATION_BOT_LOGIN" \
+              --result "$COMMAND_CONTEXT"
+            command_values="$(COMMAND_CONTEXT="$COMMAND_CONTEXT" node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const value = JSON.parse(readFileSync(process.env.COMMAND_CONTEXT, "utf8"));
+              process.stdout.write([value.command, value.surface, value.targetNumber, value.actor, value.executionKind].join("\t"));
+            ')"
+            IFS=$'\t' read -r command surface TARGET_NUMBER REQUESTED_BY execution_kind <<< "$command_values"
+            command_args=(--command "$command" --surface "$surface" --target-number "$TARGET_NUMBER")
+            owner_context_args=(--command-context "$COMMAND_CONTEXT")
+            TRIAGE_MODE=manual
+            AUTHORIZATION_MODE=owner
+            EXPECTED_HEAD=""
+          fi
+
+          resolver=(node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
+            --mode "$REQUESTED_MODE" --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$SOURCE_CONFIG" \
+            --dry-run-value "$DRY_RUN" "${command_args[@]}")
+          if [[ "$REQUESTED_MODE" == "fix" ]]; then
+            resolver+=(--ready-label-fix true --target-number "$TARGET_NUMBER")
+          elif [[ "$REQUESTED_MODE" == "issues" && -n "$TARGET_NUMBER" ]]; then
+            resolver+=(--target-number "$TARGET_NUMBER")
+          fi
+          "${resolver[@]}" > "$MODE_PLAN"
+
+          MODE="$(MODE_PLAN="$MODE_PLAN" node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            process.stdout.write(JSON.parse(readFileSync(process.env.MODE_PLAN, "utf8")).resolvedMode);
+          ')"
+          if [[ "$execution_kind" == "mode" && ",$INSTALLED_MODES," != *",$MODE,"* ]]; then
+            echo "Resolved Codekeeper mode $MODE is not installed" >&2
+            exit 1
+          fi
           profile=""
           case "$MODE" in
             review) profile="$AGENT_PROFILE_ROOT/pr-reviewer.md" ;;
@@ -156,52 +215,63 @@ jobs:
               --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)")
           fi
 
-          resolver=(node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode "$MODE" --event "$GITHUB_EVENT_NAME" \
-            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$SOURCE_CONFIG" \
-            --dry-run-value "$DRY_RUN")
-          if [[ "$MODE" == "fix" ]]; then
-            resolver+=(--ready-label-fix true --target-number "$TARGET_NUMBER")
-          elif [[ "$MODE" == "issues" && -n "$TARGET_NUMBER" ]]; then
-            resolver+=(--target-number "$TARGET_NUMBER")
+          if [[ "$execution_kind" == "deterministic" ]]; then
+            cp "$SOURCE_CONFIG" "$CONFIG"
+            node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" check-config --config "$CONFIG"
+            DEFAULT_BRANCH="$DEFAULT_BRANCH" CONFIG="$CONFIG" node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const config = JSON.parse(readFileSync(process.env.CONFIG, "utf8"));
+              if (config.repository.defaultBranch !== process.env.DEFAULT_BRANCH) {
+                throw new Error("Configured default branch does not match the trusted event repository");
+              }
+            '
+          else
+            common=(node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation prepare \
+              --mode "$MODE" --config "$CONFIG" --source-config "$SOURCE_CONFIG" \
+              --default-branch "$DEFAULT_BRANCH" --mode-plan "$MODE_PLAN" --directory "$BUNDLE" \
+              "${profile_args[@]}" "${owner_context_args[@]}" \
+              --tooling-sha "$TOOLING_SHA")
+            case "$MODE" in
+              review)
+                "${common[@]}" --event "$GITHUB_EVENT_PATH"
+                ;;
+              issues)
+                "${common[@]}" --event "$GITHUB_EVENT_PATH" --actor "$REQUESTED_BY" \
+                  --triage-mode "$TRIAGE_MODE" --target-number "$TARGET_NUMBER"
+                ;;
+              maintain)
+                "${common[@]}" --actor "$GITHUB_ACTOR" --repair-authorized "$REPAIR_AUTHORIZED"
+                ;;
+              fix)
+                "${common[@]}" --event "$GITHUB_EVENT_PATH" --target-number "$TARGET_NUMBER" \
+                  --actor "$REQUESTED_BY" --authorization-mode "$AUTHORIZATION_MODE" \
+                  --expected-head "$EXPECTED_HEAD" --review-thread-ids "$REVIEW_THREAD_IDS"
+                ;;
+            esac
           fi
-          "${resolver[@]}" > "$MODE_PLAN"
 
-          common=(node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation prepare \
-            --mode "$MODE" --config "$CONFIG" --source-config "$SOURCE_CONFIG" \
-            --default-branch "$DEFAULT_BRANCH" --mode-plan "$MODE_PLAN" --directory "$BUNDLE" \
-            "${profile_args[@]}" \
-            --tooling-sha "$TOOLING_SHA")
-          case "$MODE" in
-            review)
-              "${common[@]}" --event "$GITHUB_EVENT_PATH"
-              ;;
-            issues)
-              "${common[@]}" --event "$GITHUB_EVENT_PATH" --actor "$REQUESTED_BY" \
-                --triage-mode "$TRIAGE_MODE" --target-number "$TARGET_NUMBER"
-              ;;
-            maintain)
-              "${common[@]}" --actor "$GITHUB_ACTOR" --repair-authorized "$REPAIR_AUTHORIZED"
-              ;;
-            fix)
-              "${common[@]}" --event "$GITHUB_EVENT_PATH" --target-number "$TARGET_NUMBER" \
-                --actor "$REQUESTED_BY" --authorization-mode "$AUTHORIZATION_MODE" \
-                --expected-head "$EXPECTED_HEAD" --review-thread-ids "$REVIEW_THREAD_IDS"
-              ;;
-          esac
-
-          PLAN_PATH="$MODE_PLAN" CONTEXT_PATH="$BUNDLE/context.json" OUTPUT_PATH="$GITHUB_OUTPUT" node --input-type=module -e '
+          PLAN_PATH="$MODE_PLAN" CONTEXT_PATH="$BUNDLE/context.json" CONFIG_PATH="$CONFIG" \
+            EXECUTION_KIND="$execution_kind" OUTPUT_PATH="$GITHUB_OUTPUT" node --input-type=module -e '
             import { appendFileSync, readFileSync } from "node:fs";
             const plan = JSON.parse(readFileSync(process.env.PLAN_PATH, "utf8"));
-            const context = JSON.parse(readFileSync(process.env.CONTEXT_PATH, "utf8"));
+            const context = process.env.EXECUTION_KIND === "deterministic"
+              ? null
+              : JSON.parse(readFileSync(process.env.CONTEXT_PATH, "utf8"));
+            const runtimeMode = plan.resolvedMode === "issues" ? "issue"
+              : plan.resolvedMode === "maintain" ? "audit" : plan.resolvedMode;
+            const config = JSON.parse(readFileSync(process.env.CONFIG_PATH, "utf8"));
             const values = {
+              resolved_mode: plan.resolvedMode,
+              command_execution_kind: process.env.EXECUTION_KIND,
+              model_provider: config.ai.agents[runtimeMode].provider,
               validation_required: plan.validationRequired,
               publication_required: plan.publicationRequired,
-              required_gate: plan.requiredGate,
+              required_gate: plan.requiredGate && process.env.EXECUTION_KIND !== "deterministic",
               contents_permission: plan.appPermissions.contents,
               issues_permission: plan.appPermissions.issues,
               pull_requests_permission: plan.appPermissions.pullRequests,
-              execution_sha: context.pullRequest?.headSha ?? context.baseSha,
+              execution_sha: context?.pullRequest?.headSha ?? context?.baseSha \
+                ?? process.env.GITHUB_SHA,
             };
             if (!/^[a-f0-9]{40}$/.test(String(values.execution_sha ?? ""))) {
               throw new Error("Frozen execution SHA is missing or invalid");
@@ -211,17 +281,18 @@ jobs:
             }
           '
 
-          if [[ "$MODE" == "fix" ]]; then
-            base_sha="$(CONTEXT_PATH="$BUNDLE/context.json" node --input-type=module -e '
+          if [[ "$execution_kind" != "deterministic" && ("$MODE" == "fix" || "$MODE" == "review") ]]; then
+            execution_sha="$(MODE="$MODE" CONTEXT_PATH="$BUNDLE/context.json" node --input-type=module -e '
               import { readFileSync } from "node:fs";
               const context = JSON.parse(readFileSync(process.env.CONTEXT_PATH, "utf8"));
-              process.stdout.write(String(context.baseSha));
+              process.stdout.write(String(process.env.MODE === "review" ? context.pullRequest?.headSha : context.baseSha));
             ')"
-            git -c "http.extraheader=AUTHORIZATION: bearer $GITHUB_TOKEN" fetch --no-tags origin "$base_sha"
-            git checkout --detach "$base_sha"
+            git -c "http.extraheader=AUTHORIZATION: bearer $GITHUB_TOKEN" fetch --no-tags origin "$execution_sha"
+            git checkout --detach "$execution_sha"
           fi
 
       - name: Run the isolated workspace stage
+        if: steps.prepare.outputs.command_execution_kind != 'deterministic'
         working-directory: worktree
         env:
           CODEKEEPER_WORKSPACE_API_KEY: ${{ secrets.workspace_api_key }}
@@ -233,7 +304,7 @@ jobs:
           WORKSPACE_TEMP: ${{ github.workspace }}/codekeeper-workspace-tmp
           WORKSPACE_USER: codekeeper-workspace
           TOOLING_PATH: ${{ github.workspace }}/tooling
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ steps.prepare.outputs.resolved_mode }}
           PREPARE_RESULT: ${{ steps.prepare.outputs.result }}
         run: |
           set -euo pipefail
@@ -266,18 +337,38 @@ jobs:
 
       - name: Run the configured coordinator stage
         id: analyze
+        if: steps.prepare.outputs.command_execution_kind != 'deterministic'
         working-directory: worktree
         env:
-          CODEKEEPER_MODEL_API_KEY: ${{ secrets.model_api_key }}
+          LEGACY_MODEL_API_KEY: ${{ secrets.model_api_key }}
+          OPENAI_MODEL_API_KEY: ${{ secrets.openai_api_key }}
+          DEEPSEEK_MODEL_API_KEY: ${{ secrets.deepseek_api_key }}
+          OPENROUTER_MODEL_API_KEY: ${{ secrets.openrouter_api_key }}
           CODEKEEPER_TRACE_API_KEY: ${{ secrets.trace_api_key }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
           MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
-          MODE: ${{ inputs.mode }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          MODE: ${{ steps.prepare.outputs.resolved_mode }}
+          MODEL_PROVIDER: ${{ steps.prepare.outputs.model_provider }}
           CONTEXT_SHA: ${{ steps.prepare.outputs.context_sha256 }}
           PREPARE_RESULT: ${{ steps.prepare.outputs.result }}
         run: |
           set -euo pipefail
+          case "$MODEL_PROVIDER" in
+            openai) model_api_key="$OPENAI_MODEL_API_KEY" ;;
+            deepseek) model_api_key="$DEEPSEEK_MODEL_API_KEY" ;;
+            openrouter) model_api_key="$OPENROUTER_MODEL_API_KEY" ;;
+            *) echo "Unsupported coordinator provider: $MODEL_PROVIDER" >&2; exit 1 ;;
+          esac
+          if [[ -z "$model_api_key" && "$REQUESTED_MODE" != "auto" ]]; then
+            model_api_key="$LEGACY_MODEL_API_KEY"
+          fi
+          test -n "$model_api_key" || {
+            echo "The resolved $MODEL_PROVIDER coordinator credential is missing" >&2
+            exit 1
+          }
+          unset LEGACY_MODEL_API_KEY OPENAI_MODEL_API_KEY DEEPSEEK_MODEL_API_KEY OPENROUTER_MODEL_API_KEY
           args=(node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage compute \
             --operation analyze --mode "$MODE" --config "$CONFIG" --mode-plan "$MODE_PLAN" \
             --directory "$BUNDLE" --workspace-result "$BUNDLE/workspace-result.json" \
@@ -289,13 +380,15 @@ jobs:
           elif [[ "$MODE" == "maintain" ]]; then
             args+=(--workspace-patch "$BUNDLE/workspace.patch")
           fi
-          "${args[@]}"
+          CODEKEEPER_MODEL_API_KEY="$model_api_key" "${args[@]}"
 
       - name: Validate the untrusted candidate
         id: candidate
         working-directory: worktree
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ steps.prepare.outputs.resolved_mode }}
+          COMMAND_EXECUTION_KIND: ${{ steps.prepare.outputs.command_execution_kind }}
+          COMMAND_CONTEXT: ${{ runner.temp }}/codekeeper-command-context.json
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CANDIDATE: ${{ runner.temp }}/codekeeper-candidate
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
@@ -305,12 +398,19 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e "$CANDIDATE" || { echo "Candidate directory already exists" >&2; exit 1; }
-          args=(node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage validate \
-            --operation candidate --mode "$MODE" --config "$CONFIG" --mode-plan "$MODE_PLAN" \
-            --directory "$BUNDLE" --context "$BUNDLE/context.json" --result "$BUNDLE/agent-result.json" \
-            --workspace-result "$BUNDLE/workspace-result.json" --artifact "$CANDIDATE" \
-            --tooling-sha "$TOOLING_SHA")
-          if [[ "$MODE" == "fix" ]]; then args+=(--target-number "$TARGET_NUMBER"); fi
+          if [[ "$COMMAND_EXECUTION_KIND" == "deterministic" ]]; then
+            args=(node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage validate \
+              --operation command-candidate --mode "$MODE" --config "$CONFIG" \
+              --mode-plan "$MODE_PLAN" --command-context "$COMMAND_CONTEXT" \
+              --artifact "$CANDIDATE" --tooling-sha "$TOOLING_SHA")
+          else
+            args=(node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage validate \
+              --operation candidate --mode "$MODE" --config "$CONFIG" --mode-plan "$MODE_PLAN" \
+              --directory "$BUNDLE" --context "$BUNDLE/context.json" --result "$BUNDLE/agent-result.json" \
+              --workspace-result "$BUNDLE/workspace-result.json" --artifact "$CANDIDATE" \
+              --tooling-sha "$TOOLING_SHA")
+            if [[ "$MODE" == "fix" ]]; then args+=(--target-number "$TARGET_NUMBER"); fi
+          fi
           "${args[@]}"
 
       - name: Upload the compute candidate handoff
@@ -376,20 +476,38 @@ jobs:
       - name: Resolve the verified validation mode plan
         working-directory: policy
         env:
-          MODE: ${{ inputs.mode }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          MODE: ${{ needs.compute.outputs.resolved_mode }}
           DRY_RUN: ${{ inputs.dry_run }}
           CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
           MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
+          COMMAND_CONTEXT: ${{ runner.temp }}/codekeeper-command-context.json
+          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
           TARGET_NUMBER: ${{ github.event.inputs.issue_number || github.event.issue.number || github.event.pull_request.number || github.event.client_payload.number }}
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$MODE_PLAN")"
+          command_args=()
+          if [[ "$REQUESTED_MODE" == "auto" ]]; then
+            node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage compute \
+              --operation owner-command-context --mode auto --config "$CONFIG" \
+              --event "$GITHUB_EVENT_PATH" \
+              --automation-bot-login "$CODEKEEPER_AUTOMATION_BOT_LOGIN" \
+              --result "$COMMAND_CONTEXT"
+            command_values="$(COMMAND_CONTEXT="$COMMAND_CONTEXT" node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const value = JSON.parse(readFileSync(process.env.COMMAND_CONTEXT, "utf8"));
+              process.stdout.write([value.command, value.surface, value.targetNumber].join("\t"));
+            ')"
+            IFS=$'\t' read -r command surface TARGET_NUMBER <<< "$command_values"
+            command_args=(--command "$command" --surface "$surface" --target-number "$TARGET_NUMBER")
+          fi
           args=(node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode "$MODE" --event "$GITHUB_EVENT_NAME" --event-payload "$GITHUB_EVENT_PATH" \
-            --policy-config "$CONFIG" --dry-run-value "$DRY_RUN")
-          if [[ "$MODE" == "fix" ]]; then
+            --mode "$REQUESTED_MODE" --event "$GITHUB_EVENT_NAME" --event-payload "$GITHUB_EVENT_PATH" \
+            --policy-config "$CONFIG" --dry-run-value "$DRY_RUN" "${command_args[@]}")
+          if [[ "$REQUESTED_MODE" == "fix" ]]; then
             args+=(--ready-label-fix true --target-number "$TARGET_NUMBER")
-          elif [[ "$MODE" == "issues" && -n "$TARGET_NUMBER" ]]; then
+          elif [[ "$REQUESTED_MODE" == "issues" && -n "$TARGET_NUMBER" ]]; then
             args+=(--target-number "$TARGET_NUMBER")
           fi
           "${args[@]}" > "$MODE_PLAN"
@@ -398,7 +516,7 @@ jobs:
         id: verify
         working-directory: repository
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ needs.compute.outputs.resolved_mode }}
           CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
           MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
           CANDIDATE: ${{ runner.temp }}/codekeeper-candidate
@@ -425,12 +543,13 @@ jobs:
           overwrite: true
 
   publish:
-    name: ${{ inputs.mode == 'review' && 'Codekeeper review gate' || 'Codekeeper trusted publication' }}
+    name: ${{ (inputs.mode == 'review' || needs.compute.outputs.required_gate == 'true') && 'Codekeeper review gate' || 'Codekeeper trusted publication' }}
     needs: [compute, validate]
     if: >-
       always() &&
       (
         inputs.mode == 'review' ||
+        needs.compute.outputs.required_gate == 'true' ||
         (
           needs.compute.result == 'success' &&
           (needs.validate.result == 'success' || needs.validate.result == 'skipped') &&
@@ -448,7 +567,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Fail closed when review compute did not complete
-        if: inputs.mode == 'review' && needs.compute.result != 'success'
+        if: (inputs.mode == 'review' || needs.compute.outputs.required_gate == 'true') && needs.compute.result != 'success'
         run: |
           echo "Codekeeper did not compute a current review; this required gate fails closed." >&2
           exit 1
@@ -494,20 +613,38 @@ jobs:
       - name: Resolve the verified publication mode plan
         working-directory: policy
         env:
-          MODE: ${{ inputs.mode }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          MODE: ${{ needs.compute.outputs.resolved_mode }}
           DRY_RUN: ${{ inputs.dry_run }}
           CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
           MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
+          COMMAND_CONTEXT: ${{ runner.temp }}/codekeeper-command-context.json
+          CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
           TARGET_NUMBER: ${{ github.event.inputs.issue_number || github.event.issue.number || github.event.pull_request.number || github.event.client_payload.number }}
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$MODE_PLAN")"
+          command_args=()
+          if [[ "$REQUESTED_MODE" == "auto" ]]; then
+            node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage compute \
+              --operation owner-command-context --mode auto --config "$CONFIG" \
+              --event "$GITHUB_EVENT_PATH" \
+              --automation-bot-login "$CODEKEEPER_AUTOMATION_BOT_LOGIN" \
+              --result "$COMMAND_CONTEXT"
+            command_values="$(COMMAND_CONTEXT="$COMMAND_CONTEXT" node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const value = JSON.parse(readFileSync(process.env.COMMAND_CONTEXT, "utf8"));
+              process.stdout.write([value.command, value.surface, value.targetNumber].join("\t"));
+            ')"
+            IFS=$'\t' read -r command surface TARGET_NUMBER <<< "$command_values"
+            command_args=(--command "$command" --surface "$surface" --target-number "$TARGET_NUMBER")
+          fi
           args=(node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
-            --mode "$MODE" --event "$GITHUB_EVENT_NAME" --event-payload "$GITHUB_EVENT_PATH" \
-            --policy-config "$CONFIG" --dry-run-value "$DRY_RUN")
-          if [[ "$MODE" == "fix" ]]; then
+            --mode "$REQUESTED_MODE" --event "$GITHUB_EVENT_NAME" --event-payload "$GITHUB_EVENT_PATH" \
+            --policy-config "$CONFIG" --dry-run-value "$DRY_RUN" "${command_args[@]}")
+          if [[ "$REQUESTED_MODE" == "fix" ]]; then
             args+=(--ready-label-fix true --target-number "$TARGET_NUMBER")
-          elif [[ "$MODE" == "issues" && -n "$TARGET_NUMBER" ]]; then
+          elif [[ "$REQUESTED_MODE" == "issues" && -n "$TARGET_NUMBER" ]]; then
             args+=(--target-number "$TARGET_NUMBER")
           fi
           "${args[@]}" > "$MODE_PLAN"
@@ -516,7 +653,8 @@ jobs:
         id: seal
         working-directory: policy
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ needs.compute.outputs.resolved_mode }}
+          COMMAND_EXECUTION_KIND: ${{ needs.compute.outputs.command_execution_kind }}
           CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
           MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
           CANDIDATE: ${{ runner.temp }}/codekeeper-candidate
@@ -528,8 +666,10 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e "$ARTIFACT" || { echo "Sealed artifact directory already exists" >&2; exit 1; }
+          operation=seal
+          if [[ "$COMMAND_EXECUTION_KIND" == "deterministic" ]]; then operation=command-seal; fi
           args=(node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage validate \
-            --operation seal --mode "$MODE" --config "$CONFIG" --mode-plan "$MODE_PLAN" \
+            --operation "$operation" --mode "$MODE" --config "$CONFIG" --mode-plan "$MODE_PLAN" \
             --candidate "$CANDIDATE" --artifact "$ARTIFACT" \
             --expected-candidate-sha "$EXPECTED_CANDIDATE_SHA" \
             --expected-context-sha "$EXPECTED_CONTEXT_SHA" \
@@ -542,13 +682,14 @@ jobs:
         if: >-
           steps.seal.outcome == 'success' &&
           (
+            inputs.mode == 'review' ||
             needs.compute.outputs.required_gate == 'true' ||
             (!inputs.dry_run && needs.compute.outputs.publication_required == 'true')
           )
         working-directory: policy
         env:
-          MODE: ${{ inputs.mode }}
-          DRY_RUN: ${{ inputs.dry_run && needs.compute.outputs.required_gate != 'true' }}
+          MODE: ${{ needs.compute.outputs.resolved_mode }}
+          DRY_RUN: ${{ inputs.dry_run && inputs.mode != 'review' && needs.compute.outputs.required_gate != 'true' }}
           CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
           MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
           APP_CLIENT_ID: ${{ inputs.app_client_id }}
@@ -569,7 +710,7 @@ jobs:
         id: app-token
         if: >-
           steps.preconditions.outcome == 'success' &&
-          (!inputs.dry_run || needs.compute.outputs.required_gate == 'true')
+          (!inputs.dry_run || inputs.mode == 'review' || needs.compute.outputs.required_gate == 'true')
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ inputs.app_client_id }}
@@ -583,7 +724,7 @@ jobs:
         if: steps.app-token.outcome == 'success'
         working-directory: policy
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ needs.compute.outputs.resolved_mode }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           CONFIG: ${{ github.workspace }}/policy/.github/codekeeper.json
@@ -598,7 +739,9 @@ jobs:
         if: steps.app-token.outcome == 'success'
         working-directory: publication
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ needs.compute.outputs.resolved_mode }}
+          COMMAND_EXECUTION_KIND: ${{ needs.compute.outputs.command_execution_kind }}
+          INSTALLED_MODES: ${{ inputs.installed_modes }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ steps.bot.outputs.login }}
           CODEKEEPER_AUTOMATION_BOT_ID: ${{ steps.bot.outputs.id }}
@@ -622,11 +765,19 @@ jobs:
             profile_args=(--agent-profile "$profile" \
               --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/policy" rev-parse HEAD)")
           fi
-          node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage publish \
-            --operation publish --mode "$MODE" --config "$CONFIG" --mode-plan "$MODE_PLAN" \
-            "${profile_args[@]}" \
-            --tooling-sha "$TOOLING_SHA" --artifact "$ARTIFACT" \
-            --expected-manifest-sha "$MANIFEST_SHA"
+          if [[ "$COMMAND_EXECUTION_KIND" == "deterministic" ]]; then
+            node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage publish \
+              --operation command --mode "$MODE" --config "$CONFIG" --mode-plan "$MODE_PLAN" \
+              --event "$GITHUB_EVENT_PATH" --automation-bot-login "$CODEKEEPER_AUTOMATION_BOT_LOGIN" \
+              --automation-bot-id "$CODEKEEPER_AUTOMATION_BOT_ID" --installed-modes "$INSTALLED_MODES" \
+              --token "$GITHUB_TOKEN" --artifact "$ARTIFACT" --expected-manifest-sha "$MANIFEST_SHA"
+          else
+            node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage publish \
+              --operation publish --mode "$MODE" --config "$CONFIG" --mode-plan "$MODE_PLAN" \
+              "${profile_args[@]}" \
+              --tooling-sha "$TOOLING_SHA" --artifact "$ARTIFACT" \
+              --expected-manifest-sha "$MANIFEST_SHA"
+          fi
 
       - name: Record a tokenless dry-run seal
         if: >-
@@ -635,7 +786,7 @@ jobs:
         run: echo "Codekeeper sealed a dry-run result without minting an App token."
 
       - name: Enforce the required review gate
-        if: always() && inputs.mode == 'review'
+        if: always() && (inputs.mode == 'review' || needs.compute.outputs.required_gate == 'true')
         env:
           ENABLED: ${{ inputs.enabled }}
           COMPUTE_RESULT: ${{ needs.compute.result }}

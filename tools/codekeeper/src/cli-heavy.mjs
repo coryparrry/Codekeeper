@@ -234,9 +234,23 @@ async function runStageCommand({
     });
   }
   if (phase === "validate") {
-    if (!directory && !["verify", "seal"].includes(operation))
+    if (
+      !directory &&
+      !["verify", "seal", "command-candidate", "command-seal"].includes(
+        operation,
+      )
+    )
       throw new Error("Validation stages require --directory");
     const { plan } = await stagePlan(args, directory, mode);
+    const commandContext = args.get("command-context")
+      ? JSON.parse(
+          (
+            await readRegularFile(
+              runnerFile(args.get("command-context"), "command-context"),
+            )
+          ).toString("utf8"),
+        )
+      : undefined;
     return runValidate({
       mode,
       operation,
@@ -265,6 +279,7 @@ async function runStageCommand({
       expectedCandidateSha256: args.get("expected-candidate-sha"),
       expectedContextSha256: args.get("expected-context-sha"),
       expectedHandoffManifestSha256: args.get("expected-handoff-manifest-sha"),
+      commandContext,
       targetNumber: args.get("target-number")
         ? integer(args.get("target-number"), "target-number")
         : undefined,
@@ -291,6 +306,16 @@ async function runStageCommand({
       apiUrl: args.get("api-url"),
       appClientId: process.env.APP_CLIENT_ID,
       appPrivateKey: process.env.APP_PRIVATE_KEY,
+      eventPath: args.get("event"),
+      automationLogin: args.get("automation-bot-login"),
+      automationId: args.get("automation-bot-id"),
+      installedModes: args
+        .get("installed-modes", "review,maintain,issues,fix")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+      modePlanPath: args.get("mode-plan"),
+      configPath: args.get("config"),
       ...(await agentProfileInputs(args, toolingSha)),
     });
   }
@@ -413,9 +438,13 @@ async function main() {
     "tooling-sha",
     process.env.CODEKEEPER_TOOLING_SHA ?? "",
   );
-  const expectedManifestSha256 = sealedPublishCommands.has(command)
-    ? args.require("expected-manifest-sha")
-    : undefined;
+  const expectedManifestSha256 =
+    sealedPublishCommands.has(command) ||
+    (command === "stage" &&
+      args.positional[1] === "publish" &&
+      args.get("operation") === "command")
+      ? args.require("expected-manifest-sha")
+      : undefined;
 
   let result;
   switch (command) {

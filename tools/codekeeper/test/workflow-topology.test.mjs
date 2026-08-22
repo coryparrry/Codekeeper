@@ -592,7 +592,9 @@ test("publication does not execute validation, lifecycle hooks, or arbitrary can
     const publish = jobSection(genericRuntime, "publish");
     assert.doesNotMatch(publish, /npm (?:ci|install|test)|pnpm|yarn|git apply/);
     assert.doesNotMatch(publish, /--operation verify/);
-    assert.match(publish, /--operation seal/);
+    assert.match(publish, /operation=seal/);
+    assert.match(publish, /operation=command-seal/);
+    assert.match(publish, /--operation \"\$operation\"/);
     assert.match(publish, /--operation publish/);
     return;
   }
@@ -795,7 +797,7 @@ test("callers pass explicit named secrets and never inherit the caller secret se
 test("review gate always runs and fails closed when analysis, sealing, or publication is incomplete", async () => {
   if (wrappersActive) {
     const publish = jobSection(genericRuntime, "publish");
-    assert.match(publish, /name: \$\{\{ inputs\.mode == 'review' && 'Codekeeper review gate'/);
+    assert.match(publish, /name: \$\{\{ \(inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'\) && 'Codekeeper review gate'/);
     assert.match(publish, /if: >-\n\s+always\(\)/);
     assert.match(publish, /Fail closed when review compute did not complete/);
     assert.match(publish, /Enforce the required review gate/);

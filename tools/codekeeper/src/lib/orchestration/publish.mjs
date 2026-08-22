@@ -4,6 +4,7 @@ import {
   resolveAutomationBot,
   validateAppPermissionInputs,
 } from "./credential-boundaries.mjs";
+import { publishCommandArtifact } from "./command-artifact.mjs";
 
 function required(value, name) {
   if (value === undefined || value === null || value === "")
@@ -77,6 +78,29 @@ export async function runPublish({
       ...options,
       mode: adapterMode(verifiedPlan.resolvedMode),
       config,
+    });
+  }
+  if (operation === "command") {
+    if (verifiedPlan.trigger !== "owner-command") {
+      throw new Error(
+        "Direct command publication requires an owner-command plan",
+      );
+    }
+    return publishCommandArtifact({
+      artifactDirectory: options.artifactDirectory,
+      expectedManifestSha256: options.expectedManifestSha256,
+      eventPath: options.eventPath,
+      automationLogin: options.automationLogin,
+      automationIdentity: {
+        login: required(options.automationLogin, "automationLogin"),
+        id: required(options.automationId, "automationId"),
+      },
+      installedModes: options.installedModes,
+      modePlanPath: options.modePlanPath,
+      configPath: options.configPath,
+      config,
+      configSha256: options.configSha256,
+      token: required(options.token, "token"),
     });
   }
   throw new Error(`Unknown publish operation: ${operation}`);

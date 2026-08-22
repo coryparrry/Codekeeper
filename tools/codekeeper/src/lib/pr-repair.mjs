@@ -18,6 +18,7 @@ import { fixRunMarker, sha256 } from "./markers.mjs";
 import { validatePatch } from "./policy.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
 import { sanitizeMarkdown } from "./render.mjs";
+import { resumeDirectOwnerFix } from "./publish/owner-command.mjs";
 
 export { frozenPullRepairReviewThreads, frozenPullRepairSubject, frozenPullRepairSubjectSha256 } from "./pull-repair-state.mjs";
 
@@ -195,6 +196,7 @@ export async function publishPullRequestRepair({
   result,
   config,
   automationIdentity,
+  resumePaused = false,
   dryRun = false,
   gitOperations = defaultGitOperations
 }) {
@@ -210,8 +212,10 @@ export async function publishPullRequestRepair({
     target,
     policy: config,
     repairEvidencePolicy: evidencePolicy,
-    rejectPaused: true
+    rejectPaused: !resumePaused,
+    allowPausedResume: resumePaused,
   });
+  if (resumePaused) await resumeDirectOwnerFix(github, context);
   if (!String(context.runId ?? "").trim()) throw new Error("Frozen PR repair context is missing its workflow run ID");
   try {
     if (!manifest.patch?.valid || !manifest.patch.fileName) {

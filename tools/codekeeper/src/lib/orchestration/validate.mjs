@@ -5,6 +5,10 @@ import {
   createValidationArtifactHandoff,
   verifyArtifactHandoff,
 } from "./artifact-handoff.mjs";
+import {
+  createCommandArtifactHandoff,
+  sealCommandArtifact,
+} from "./command-artifact.mjs";
 
 function required(value, name) {
   if (value === undefined || value === null || value === "")
@@ -32,6 +36,17 @@ export async function runValidate({
   const verifiedPlan = assertVerifiedModePlan(plan, mode, { config });
   const adapter = modeAdapter(verifiedPlan.resolvedMode);
   const translatedMode = adapterMode(verifiedPlan.resolvedMode);
+  if (operation === "command-candidate") {
+    return createCommandArtifactHandoff({
+      artifactDirectory: options.artifactDirectory,
+      commandContext: options.commandContext,
+      modePlanPath: options.modePlanPath,
+      configPath: options.configPath,
+      config,
+      toolingSha: options.toolingSha,
+      configSha256: options.configSha256,
+    });
+  }
   if (operation === "candidate") {
     if (typeof adapter.validate !== "function")
       throw new Error(`Mode ${mode} has no candidate validation adapter`);
@@ -100,6 +115,20 @@ export async function runValidate({
       });
     }
     return adapter.seal({ ...options, mode: translatedMode, config });
+  }
+  if (operation === "command-seal") {
+    return sealCommandArtifact({
+      candidateDirectory: options.candidateDirectory,
+      artifactDirectory: options.artifactDirectory,
+      expectedCandidateSha256: options.expectedCandidateSha256,
+      expectedContextSha256: options.expectedContextSha256,
+      expectedHandoffManifestSha256: options.expectedHandoffManifestSha256,
+      modePlanPath: options.modePlanPath,
+      configPath: options.configPath,
+      config,
+      toolingSha: options.toolingSha,
+      configSha256: options.configSha256,
+    });
   }
   throw new Error(`Unknown validation operation: ${operation}`);
 }

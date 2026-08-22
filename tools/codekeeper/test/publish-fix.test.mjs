@@ -451,11 +451,30 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
     ["protected", (pull) => pull, /is protected/, { protected: true }],
     ["branch moved", (pull) => pull, /head branch moved/, { protected: false, commit: { sha: "e".repeat(40) } }]
   ];
-  for (const [name, mutate, expected, branchOverride, commentsOverride, authorizationMode = "owner"] of cases) {
+  cases.push([
+    "stale paused direct owner repair",
+    (pull) => ({
+      ...pull,
+      labels: [{ name: "codekeeper:paused" }],
+      head: { ...pull.head, sha: "f".repeat(40) },
+    }),
+    /head SHA changed/,
+    undefined,
+    undefined,
+    "owner",
+    true,
+  ]);
+  for (const [name, mutate, expected, branchOverride, commentsOverride, authorizationMode = "owner", directOwner = false] of cases) {
     await t.test(name, async () => {
       const artifactDirectory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-pr-repair-negative-"));
       const configSha256 = "3".repeat(64);
       const context = pullRepairContext({ configSha256, headSha: "a".repeat(40), runId: `negative-${name}`, authorizationMode });
+      if (directOwner) {
+        context.ownerCommandContext = {
+          executionKind: "mode",
+          canonicalCommand: "repair",
+        };
+      }
       const patch = Buffer.from("not reached");
       await writeFile(path.join(artifactDirectory, "patch.diff"), patch);
       const integrity = await writeSealedArtifact(artifactDirectory, {
@@ -467,11 +486,13 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
       });
       const comments = [];
       let createPullCalls = 0;
+      let removeLabelCalls = 0;
       const restoreGitHub = replaceGitHubMethods({
         async getPull() { return mutate(liveRepairPull(context)); },
         async listIssueComments() { return liveRepairComments(context, commentsOverride); },
         async getBranch() { return branchOverride ?? { protected: false, commit: { sha: context.target.headSha } }; },
         async createPull() { createPullCalls += 1; },
+        async removeLabel() { removeLabelCalls += 1; },
         async upsertMarkerComment(number, marker, body, authorIdentity) {
           comments.push({ number, marker, body, authorIdentity });
         }
@@ -497,6 +518,7 @@ test("PR repair rejects changed, stale-evidence, paused, forked, draft, closed, 
           expected
         );
         assert.equal(createPullCalls, 0);
+        assert.equal(removeLabelCalls, 0, "stale direct repairs must remain paused");
         assert.equal(comments.length, 0, "stale or ineligible repair targets must not be mutated");
       } finally {
         restoreGitHub();

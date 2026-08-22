@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GitHubClient } from "../src/lib/github.mjs";
+import { labelMethods } from "../src/lib/github/labels.mjs";
 
 function client(transport = {}) {
   return new GitHubClient({ token: "token", repository: "owner/repository", transport });
@@ -113,6 +114,37 @@ test("conditional pull labels reconcile an applied mutation after response loss"
   await github.createRepositoryDispatch("codekeeper_fix", { number: 7 });
   assert.deepEqual(state.labels, ["auto repaired"]);
   assert.equal(requests.filter(({ method, href }) => method === "POST" && href.endsWith("/labels")).length, 1);
+});
+
+test("conditional pull label removal reconciles an applied mutation after response loss", async () => {
+  const endpoint =
+    "/repos/owner/repository/issues/7/labels/codekeeper%3Apaused";
+  let advanced = null;
+  const github = {
+    pullMutation: { number: 7, labels: ["codekeeper:paused"] },
+    repoPath(value) {
+      return `/repos/owner/repository${value}`;
+    },
+    async request(method, actualEndpoint) {
+      assert.equal(method, "DELETE");
+      assert.equal(actualEndpoint, endpoint);
+      const error = new Error("label removal response lost");
+      error.githubMutationOutcome = "ambiguous";
+      throw error;
+    },
+    async getPull(number) {
+      assert.equal(number, 7);
+      return pullState({ labels: [] });
+    },
+    assertPullMutationIdentity(pull) {
+      assert.equal(pull.number, 7);
+    },
+    advancePullMutationState(method, actualEndpoint) {
+      advanced = [method, actualEndpoint];
+    },
+  };
+  await labelMethods.removeLabel.call(github, 7, "codekeeper:paused");
+  assert.deepEqual(advanced, ["DELETE", endpoint]);
 });
 
 test("Codekeeper label management preserves existing metadata and unrelated labels", async () => {

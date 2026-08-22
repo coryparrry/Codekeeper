@@ -520,7 +520,7 @@ test("review and issue-triage retain mandatory App credentials", async () => {
 test("merged review gate executes the same fail-closed publication contract", async () => {
   if (wrappersActive) {
     const publish = jobSection(genericRuntime, "publish");
-    assert.match(publish, /name: \$\{\{ inputs\.mode == 'review' && 'Codekeeper review gate'/);
+    assert.match(publish, /name: \$\{\{ \(inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'\) && 'Codekeeper review gate'/);
     assert.match(publish, /name: Enforce the required review gate/);
     assert.match(publish, /PUBLISH_DISPOSITION/);
     assert.match(publish, /PUBLISH_BLOCKING/);
@@ -772,7 +772,12 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
   if (wrappersActive) {
     const compute = jobSection(genericRuntime, "compute", "validate");
     assert.match(compute, /CODEKEEPER_WORKSPACE_API_KEY: \$\{\{ secrets\.workspace_api_key \}\}/);
-    assert.match(compute, /CODEKEEPER_MODEL_API_KEY: \$\{\{ secrets\.model_api_key \}\}/);
+    assert.match(compute, /LEGACY_MODEL_API_KEY: \$\{\{ secrets\.model_api_key \}\}/);
+    assert.match(compute, /OPENAI_MODEL_API_KEY: \$\{\{ secrets\.openai_api_key \}\}/);
+    assert.match(compute, /DEEPSEEK_MODEL_API_KEY: \$\{\{ secrets\.deepseek_api_key \}\}/);
+    assert.match(compute, /OPENROUTER_MODEL_API_KEY: \$\{\{ secrets\.openrouter_api_key \}\}/);
+    assert.match(compute, /case \"\$MODEL_PROVIDER\" in/);
+    assert.match(compute, /CODEKEEPER_MODEL_API_KEY=\"\$model_api_key\" \"\$\{args\[@\]\}\"/);
     assert.match(compute, /CODEKEEPER_TRACE_API_KEY: \$\{\{ secrets\.trace_api_key \}\}/);
     assert.ok(compute.indexOf("--operation workspace") < compute.indexOf("--operation analyze"));
     return;
