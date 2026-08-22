@@ -14,10 +14,10 @@
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.mjs audit/*.test.mjs",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/*.mjs' --test-coverage-include='src/lib/*.mjs' --test-coverage-include='src/lib/github/*.mjs' --test-coverage-include='src/lib/publish/*.mjs' --test-coverage-lines=80 --test-coverage-branches=65 --test-coverage-functions=85 --test-concurrency=1 test/*.test.mjs audit/*.test.mjs evals/*.test.mjs",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/*.mjs' --test-coverage-include='src/lib/*.mjs' --test-coverage-include='src/lib/github/*.mjs' --test-coverage-include='src/lib/publish/*.mjs' --test-coverage-include='src/lib/orchestration/*.mjs' --test-coverage-lines=80 --test-coverage-branches=65 --test-coverage-functions=85 --test-concurrency=1 test/*.test.mjs audit/*.test.mjs evals/*.test.mjs",
     "eval:offline": "node evals/decision-quality.mjs --offline",
     "eval:live": "node evals/decision-quality.mjs",
     "eval:live-review": "node evals/live-review-suite.mjs",
-    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs src/lib/github/*.mjs src/lib/publish/*.mjs presets/*.mjs scripts/*.mjs evals/*.mjs test/*.mjs test/helpers/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node scripts/generate-tooling-manifest.mjs --check && npm run coverage"
+    "check": "bash -c 'for file in src/*.mjs src/lib/*.mjs src/lib/github/*.mjs src/lib/publish/*.mjs src/lib/orchestration/*.mjs presets/*.mjs scripts/*.mjs evals/*.mjs test/*.mjs test/helpers/*.mjs audit/*.mjs; do node --check \"$file\"; done' && node scripts/generate-tooling-manifest.mjs --check && npm run coverage"
   }
 }

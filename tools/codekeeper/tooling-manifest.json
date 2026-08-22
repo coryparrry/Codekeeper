@@ -23,7 +23,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "c63b46c3564ba0ef06141238920adf46e0b836e65a5619cb18e3160b20218600"
+      "sha256": "f3528afdcbcc1b8828e8c95a142543c84d00dcde09453084c38e813fc8e465b6"
     },
     {
       "path": "presets/catalogue.mjs",
@@ -128,6 +128,14 @@
     {
       "path": "src/lib/markers.mjs",
       "sha256": "bfa00cf520ebd01042fe93c5930e6d0702e06148b6f1fc79631908e46d73782c"
+    },
+    {
+      "path": "src/lib/orchestration/envelope.mjs",
+      "sha256": "73e9f1d94c813db34e3e91821363babfc932ce044d22d14722426d649bc44fea"
+    },
+    {
+      "path": "src/lib/orchestration/handoff.mjs",
+      "sha256": "a5be94c4ab2507c3f5e5843382f40c351ceb958be37348448c8f72d2e45384dd"
     },
     {
       "path": "src/lib/owner-commands.mjs",
