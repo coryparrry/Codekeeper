@@ -502,6 +502,11 @@ test("product runtime workflows install the prebuilt runtime without npm ci", as
   const selfTest = await repositoryFile(".github/workflows/codekeeper-self-test.yml");
   assert.match(runtime, /bin\/install-runtime\.mjs/);
   assert.doesNotMatch(runtime, /npm ci/);
+  assert.match(
+    runtime,
+    /execution_sha: context\?\.pullRequest\?\.headSha \?\? context\?\.baseSha \?\? process\.env\.GITHUB_SHA,/,
+  );
+  assert.doesNotMatch(runtime, /baseSha \\\n/);
   assert.match(assistant, /bin\/install-runtime\.mjs/);
   assert.doesNotMatch(assistant, /npm ci/);
   assert.match(selfTest, /npm ci --ignore-scripts --no-audit --no-fund/);
