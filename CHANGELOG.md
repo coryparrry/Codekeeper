@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.0...codekeeper-v0.4.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **installer:** bind the unified caller GITHUB_TOKEN ceiling in the packaged installer ([0e0a59c](https://github.com/coryparrry/Codekeeper/commit/0e0a59c637e31c3e2a4f718b8e224f06d5a7c148))
+* **installer:** bind the unified caller GITHUB_TOKEN ceiling in the packaged installer ([0cb935f](https://github.com/coryparrry/Codekeeper/commit/0cb935f9692d7a39259cc2c5152e3fc5d063a1e1))
+
 ## [0.4.0](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.7...codekeeper-v0.4.0) (2026-08-22)
 
 
