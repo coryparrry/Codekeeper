@@ -401,6 +401,10 @@ test("the unified caller wires named provider secrets and leaves App permissions
   const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
   const caller = contents[UNIFIED_CALLER_WORKFLOW.target];
   assert.match(caller, /installed_modes: "review,maintain,issues,fix"/);
+  assert.match(
+    caller,
+    /permissions:\n  contents: read\n  issues: read\n  pull-requests: read\n/,
+  );
   assert.doesNotMatch(caller, /APP_(?:CONTENTS|ISSUES|PULL_REQUESTS)_PERMISSION/);
   for (const secret of ["OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "OPENAI_TRACE_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]) {
     assert.match(caller, new RegExp(`secrets\\.${secret}`));

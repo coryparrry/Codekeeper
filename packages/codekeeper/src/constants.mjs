@@ -51,7 +51,7 @@ export const UNIFIED_CALLER_WORKFLOW = Object.freeze({
   asset: "workflows/codekeeper.yml",
   sourcePath: "examples/workflows/codekeeper.yml.example",
   packagePath: "assets/workflows/codekeeper.yml",
-  description: "Routes every automatic and owner-command event directly into the generic staged runtime."
+  description: "Routes every automatic and owner-command event directly into the generic staged runtime. The caller GITHUB_TOKEN ceiling must include contents, issues, and pull-requests read so nested reusable-workflow jobs can start."
 });
 export const RELEASE_PACKAGE_ASSETS = Object.freeze([
   PACKAGE_ACQUIRE_ACTION,
