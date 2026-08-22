@@ -47,7 +47,7 @@
     },
     {
       "path": "src/lib/agents-runtime-core.mjs",
-      "sha256": "791b53fbe98fc8f881e1810d4bd794c471de24f2d167349eb57769c2a6f69180"
+      "sha256": "eb37db1a1712a121be295312b854c6699bd1c01de291c51af9e40548881709f4"
     },
     {
       "path": "src/lib/agents-runtime-provider.mjs",
@@ -55,7 +55,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "bb02e954643eca42faa256d6a5e4f93ff984983e3f9e801dbfa02da658e275de"
+      "sha256": "a90490ae74a78b9bd2b66a4b4917240cf540466fcb3ba82fd0604336af3d89d3"
     },
     {
       "path": "src/lib/commands.mjs",

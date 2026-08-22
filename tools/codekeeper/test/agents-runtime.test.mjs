@@ -28,7 +28,8 @@ import {
   runConfiguredAgent,
   runWorkspaceAgentFromBundle,
   structuredOutputType,
-  workspaceCodexDeveloperInstructions
+  workspaceCodexDeveloperInstructions,
+  isSkippedWorkspaceHandoff
 } from "../src/lib/agents-runtime.mjs";
 import { issueSchema, providerCompatibleJsonSchema, validateIssueResult } from "../src/lib/schemas.mjs";
 import { sha256 } from "../src/lib/markers.mjs";
@@ -759,6 +760,93 @@ test("enabled issue workspaces require specialist evidence before provider const
   assert.equal(metadataResult.workspaceSpecialistUsed, false);
   assert.equal(metadataResult.coordinatorSkipped, "no-workspace");
   assert.equal(providers, 0);
+});
+
+test("isSkippedWorkspaceHandoff accepts only the exact skipped handoff object", () => {
+  assert.equal(isSkippedWorkspaceHandoff({ skipped: true }), true);
+  assert.equal(isSkippedWorkspaceHandoff({ skipped: true, extra: 1 }), false);
+  assert.equal(isSkippedWorkspaceHandoff({ skipped: false }), false);
+  assert.equal(isSkippedWorkspaceHandoff(null), false);
+  assert.equal(isSkippedWorkspaceHandoff({}), false);
+});
+
+test("issue triage with a skipped workspace handoff runs the coordinator", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-skipped-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const profile = "# Trusted issue behavior\n";
+  const metadata = {
+    path: agentProfilePathForMode("issue"),
+    sha256: sha256(Buffer.from(profile)),
+    sourceSha: trustedSourceSha
+  };
+  const workspaceConfig = withoutTracing();
+  workspaceConfig.ai.agents.issue.workspace.enabled = true;
+  await Promise.all([
+    writeFile(path.join(directory, "prompt.md"), "Classify the issue.\n"),
+    writeFile(path.join(directory, "schema.json"), JSON.stringify(schema)),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", baseSha: trustedHeadSha, agentProfile: metadata })),
+    writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), profile),
+    writeFile(path.join(directory, "workspace-result.json"), "{\"skipped\":true}\n")
+  ]);
+  let providers = 0;
+  class FakeProvider {
+    constructor() { providers += 1; }
+    async close() {}
+  }
+  class FakeAgent {}
+  class FakeRunner {
+    async run() { return { finalOutput: validIssue() }; }
+  }
+  const result = await runAgentFromBundle({
+    mode: "issue",
+    directory,
+    config: workspaceConfig,
+    resultPath: path.join(directory, "result.json"),
+    apiKey: "provider-secret",
+    sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider })
+  });
+  assert.equal(result.workspaceSpecialistUsed, false);
+  assert.equal(result.coordinatorSkipped, undefined);
+  assert.equal(providers, 1);
+  assert.equal(JSON.parse(await readFile(path.join(directory, "result.json"), "utf8")).summary, validIssue().summary);
+});
+
+test("a skipped workspace handoff cannot carry runtime metadata", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-issue-skipped-meta-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const profile = "# Trusted issue behavior\n";
+  const metadata = {
+    path: agentProfilePathForMode("issue"),
+    sha256: sha256(Buffer.from(profile)),
+    sourceSha: trustedSourceSha
+  };
+  const workspaceConfig = withoutTracing();
+  workspaceConfig.ai.agents.issue.workspace.enabled = true;
+  await Promise.all([
+    writeFile(path.join(directory, "prompt.md"), "Classify the issue.\n"),
+    writeFile(path.join(directory, "schema.json"), JSON.stringify(schema)),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", baseSha: trustedHeadSha, agentProfile: metadata })),
+    writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), profile),
+    writeFile(path.join(directory, "workspace-result.json"), "{\"skipped\":true}\n"),
+    writeFile(path.join(directory, "workspace-runtime-metadata.json"), JSON.stringify({
+      version: 1,
+      mode: "issue",
+      passes: [{ tier: "configured", model: "gpt-5.6-terra", effort: "medium", durationMs: 1 }],
+      postReviewEscalation: null,
+      totalDurationMs: 1
+    }))
+  ]);
+  await assert.rejects(
+    runAgentFromBundle({
+      mode: "issue",
+      directory,
+      config: workspaceConfig,
+      resultPath: path.join(directory, "result.json"),
+      apiKey: "provider-secret",
+      sdkLoader: async () => ({ Agent: class {}, Runner: class {}, OpenAIProvider: class {} })
+    }),
+    /without specialist evidence/
+  );
 });
 
 test("bundle execution rejects a tampered or wrong-mode frozen profile before provider construction", async (context) => {

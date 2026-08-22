@@ -80,6 +80,12 @@ export async function runAgentFromBundle(options) {
     readOptionalRegularJson(path.join(path.dirname(workspaceResultPath), "workspace-runtime-metadata.json"))
   ]);
   if (context?.mode !== "issue") throw new Error(`Frozen context mode is ${context?.mode ?? "missing"}; expected issue`);
+  if (core.isSkippedWorkspaceHandoff(specialistResult)) {
+    if (workspaceMetadata !== null) {
+      throw new Error("Codekeeper issue received workspace runtime metadata without specialist evidence");
+    }
+    return core.runAgentFromBundle(options);
+  }
   await loadFrozenAgentProfile({ mode: "issue", directory, context });
   const settings = getAgentRuntimeSettings(config, "issue", { mutationAuthorized: false, context });
 

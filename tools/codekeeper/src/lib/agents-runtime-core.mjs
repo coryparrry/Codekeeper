@@ -24,6 +24,10 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+export function isSkippedWorkspaceHandoff(value) {
+  return isPlainObject(value) && value.skipped === true && Object.keys(value).length === 1;
+}
+
 function validatorForBundle(mode, config, context) {
   if (mode === "review") return (output) => validateReviewResult(output, config);
   if (mode === "audit") {
@@ -380,21 +384,23 @@ export async function runAgentFromBundle({
   if (context?.mode !== mode) {
     throw new Error(`Frozen context mode is ${context?.mode ?? "missing"}; expected ${mode}`);
   }
+  const skippedHandoff = isSkippedWorkspaceHandoff(specialistResult);
+  const specialistEvidence = skippedHandoff ? null : specialistResult;
   const validateOutput = validatorForBundle(mode, config, context);
   const frozenProfile = await loadFrozenAgentProfile({ mode, directory, context });
-  if (specialistResult === null && config.ai.agents[mode].workspace.enabled === true) {
+  if (specialistEvidence === null && config.ai.agents[mode].workspace.enabled === true && !skippedHandoff) {
     throw new Error(`Codekeeper ${mode} requires the configured workspace specialist result`);
   }
-  if (specialistResult !== null && workspaceMetadata === null) {
+  if (specialistEvidence !== null && workspaceMetadata === null) {
     throw new Error(`Codekeeper ${mode} requires workspace runtime metadata with specialist evidence`);
   }
-  if (specialistResult === null && workspaceMetadata !== null) {
+  if (specialistEvidence === null && workspaceMetadata !== null) {
     throw new Error(`Codekeeper ${mode} received workspace runtime metadata without specialist evidence`);
   }
-  if (mode === "audit" && specialistResult !== null) {
-    validateOutput(specialistResult);
+  if (mode === "audit" && specialistEvidence !== null) {
+    validateOutput(specialistEvidence);
   }
-  if (specialistResult === null && mode !== "issue") {
+  if (specialistEvidence === null && mode !== "issue") {
     const output = validateOutput(deterministicNoWorkspaceResult(mode, context));
     const metadata = deterministicRuntimeMetadata(mode, prompt, output);
     await writeJson(resultPath, output);
@@ -406,7 +412,7 @@ export async function runAgentFromBundle({
     config,
     prompt,
     schema,
-    specialistResult,
+    specialistResult: specialistEvidence,
     validateOutput,
     apiKey,
     sdkLoader,
