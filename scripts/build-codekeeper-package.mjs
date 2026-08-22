@@ -23,6 +23,10 @@ import {
   RELEASE_PUBLISHED_PATHS,
 } from "../packages/codekeeper/src/release-layout.mjs";
 import {
+  buildPrebuiltRuntimeArchive,
+  writeGeneratedRuntimeArchive,
+} from "../packages/codekeeper/src/prebuilt-runtime.mjs";
+import {
   RELEASE_MANIFEST_PATH,
   verifyCodekeeperRelease,
 } from "../packages/codekeeper/src/release-verifier.mjs";
@@ -153,6 +157,7 @@ export async function buildCodekeeperPackageStage({
   destination,
   sourceCommit,
   requireClean = true,
+  installRuntimeDependencies,
 } = {}) {
   if (typeof destination !== "string" || destination.length === 0) fail("destination is required");
   repositoryRoot = path.resolve(repositoryRoot);
@@ -193,6 +198,11 @@ export async function buildCodekeeperPackageStage({
         }),
       );
     }
+    const archive = await buildPrebuiltRuntimeArchive({
+      stagedRuntimeRoot: path.join(temporaryDestination, "runtime"),
+      ...(installRuntimeDependencies ? { installRuntimeDependencies } : {}),
+    });
+    files.push(...(await writeGeneratedRuntimeArchive(temporaryDestination, archive)));
     files.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 
     const packageManifest = JSON.parse(

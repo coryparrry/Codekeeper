@@ -11,7 +11,7 @@ import {
   INTEGRITY_RECEIPT_PATH,
   verifyCodekeeperRelease,
 } from "../src/release-verifier.mjs";
-import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
+import { fixturePackageStageOptions, git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const INSTALLER_DEPENDENCIES = Object.freeze(["ink", "react"]);
 const REPLACED_RUNTIME_FILES = new Set([
@@ -35,8 +35,7 @@ async function buildFixtureStage(t, name = "stage") {
   return buildCodekeeperPackageStage({
     repositoryRoot: REPOSITORY_ROOT,
     destination,
-    sourceCommit,
-    requireClean: false,
+    ...fixturePackageStageOptions(sourceCommit),
   });
 }
 
@@ -70,6 +69,8 @@ test("package stage contains one release with separate closed installer and runt
     "runtime/src/lib/agents-runtime.mjs",
     "runtime/src/lib/runtime-paths.mjs",
     "release/actions/acquire-package/action.yml",
+    "release/runtime-archive.bin",
+    "release/runtime-archive.manifest.json",
     "release/workflows/codekeeper-runtime.yml",
     "package.json",
   ]) {
@@ -87,6 +88,11 @@ test("package stage contains one release with separate closed installer and runt
   );
 
   for (const entry of manifest.files) {
+    if (entry.sourcePath.startsWith("generated/")) {
+      assert.equal(entry.role, "production");
+      assert.match(entry.sha256, /^[0-9a-f]{64}$/);
+      continue;
+    }
     const source = await readFile(path.join(REPOSITORY_ROOT, entry.sourcePath));
     const staged = await readFile(path.join(destination, entry.path));
     assert.deepEqual(staged, source, `${entry.path} matches ${entry.sourcePath}`);
@@ -206,8 +212,7 @@ test("package stage rejects destination reuse, repository output, and mismatched
     buildCodekeeperPackageStage({
       repositoryRoot: REPOSITORY_ROOT,
       destination: temporaryRoot,
-      sourceCommit,
-      requireClean: false,
+      ...fixturePackageStageOptions(sourceCommit),
     }),
     /destination already exists/,
   );
@@ -215,8 +220,7 @@ test("package stage rejects destination reuse, repository output, and mismatched
     buildCodekeeperPackageStage({
       repositoryRoot: REPOSITORY_ROOT,
       destination: path.join(REPOSITORY_ROOT, "dist", "unsafe-stage"),
-      sourceCommit,
-      requireClean: false,
+      ...fixturePackageStageOptions(sourceCommit),
     }),
     /outside the source repository/,
   );
@@ -239,8 +243,7 @@ test("failed package stages remove their partial destination", async (t) => {
     buildCodekeeperPackageStage({
       repositoryRoot,
       destination,
-      sourceCommit: "0".repeat(40),
-      requireClean: false,
+      ...fixturePackageStageOptions("0".repeat(40)),
     }),
     /ENOENT/,
   );

@@ -495,3 +495,14 @@ test("Release Please prepares reviewed Codekeeper releases for the hardened publ
   assert.doesNotMatch(checks, /promotion-policy/);
   assert.doesNotMatch(checks, /staging/);
 });
+
+test("product runtime workflows install the prebuilt runtime without npm ci", async () => {
+  const runtime = await repositoryFile(".github/workflows/codekeeper-runtime.yml");
+  const assistant = await repositoryFile(".github/workflows/codekeeper-assistant.yml");
+  const selfTest = await repositoryFile(".github/workflows/codekeeper-self-test.yml");
+  assert.match(runtime, /bin\/install-runtime\.mjs/);
+  assert.doesNotMatch(runtime, /npm ci/);
+  assert.match(assistant, /bin\/install-runtime\.mjs/);
+  assert.doesNotMatch(assistant, /npm ci/);
+  assert.match(selfTest, /npm ci --ignore-scripts --no-audit --no-fund/);
+});

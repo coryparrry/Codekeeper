@@ -5,6 +5,7 @@ import {
   PACKAGE_NAME,
   PACKAGE_SOURCE_REPOSITORY_URL,
 } from "./package-identity.mjs";
+import { verifyRuntimeArchive } from "./runtime-archive.mjs";
 import {
   normalizePackageIdentity,
   validSha512Integrity,
@@ -185,6 +186,7 @@ export async function verifyCodekeeperRelease({
       fail(`digest mismatch for ${relativePath}`);
     }
   }
+  await verifyRuntimeArchive(resolvedRoot);
   const packageManifest = parseJson(await readRegularFile(resolvedRoot, "package.json"), "package manifest");
   if (packageManifest.name !== manifest.package.name || packageManifest.version !== manifest.package.version) {
     fail("package manifest identity does not match the release manifest");

@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { buildCodekeeperPackageStage } from "../../../scripts/build-codekeeper-package.mjs";
-import { git, PACKAGE_ROOT, REPOSITORY_ROOT, temporaryDirectory, VERSION } from "./helpers.mjs";
+import { git, PACKAGE_ROOT, REPOSITORY_ROOT, temporaryDirectory, VERSION, fixturePackageStageOptions } from "./helpers.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -21,8 +21,7 @@ async function buildStage(t) {
   await buildCodekeeperPackageStage({
     repositoryRoot: REPOSITORY_ROOT,
     destination,
-    sourceCommit: git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim(),
-    requireClean: false,
+    ...fixturePackageStageOptions(git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim()),
   });
   return destination;
 }

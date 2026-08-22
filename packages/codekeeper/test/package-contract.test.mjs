@@ -7,7 +7,7 @@ import { PACKAGE_SOURCE_REPOSITORY, PACKAGE_SOURCE_REPOSITORY_URL } from "../src
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
-const REVIEWED_SOURCE_CHECKPOINT = "ad58ff0df84f56b75e995e72e88d78063cf8af5b";
+const REVIEWED_SOURCE_CHECKPOINT = "0995922618cecb558166e94b527087e7b3193c3c";
 const PRODUCTION_SOURCE_PATHS = [
   "tools/codekeeper",
   "examples/workflows/codekeeper.yml.example",
