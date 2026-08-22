@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.4](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.3...codekeeper-v0.4.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **runtime:** pass env -i KEY=VALUE assignments to isolated workspace users ([7c2bdd3](https://github.com/coryparrry/Codekeeper/commit/7c2bdd39c5eae40f2e6e448baef3e6562536c790))
+* **runtime:** pass env -i KEY=VALUE assignments to isolated workspace users ([1d1658b](https://github.com/coryparrry/Codekeeper/commit/1d1658b0e7e34b9229b1298ff611a9a299959753))
+
 ## [0.4.3](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.2...codekeeper-v0.4.3) (2026-08-22)
 
 
