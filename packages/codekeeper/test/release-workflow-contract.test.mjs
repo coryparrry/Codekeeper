@@ -524,3 +524,15 @@ test("packaged runtime grants the isolated user execute on ancestor directories 
   );
   assert.ok(isolate.indexOf("grantWorldTraverse") < isolate.indexOf('"test"'));
 });
+
+test("packaged runtime passes env -i KEY=VALUE assignments to the isolated user", async () => {
+  const isolate = await repositoryFile(
+    "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",
+  );
+  assert.match(isolate, /export function environmentAssignments/);
+  assert.match(isolate, /\$\{key\}=\$\{assignment\}/);
+  assert.doesNotMatch(
+    isolate,
+    /flatMap\(\(\[key, value\]\) => \[\s*key,\s*String\(value\)/,
+  );
+});

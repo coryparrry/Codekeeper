@@ -70,6 +70,19 @@ async function grantWorldTraverse(pathnames) {
   }
 }
 
+export function environmentAssignments(environment) {
+  return Object.entries(environment).map(([key, value]) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error(`Invalid environment name: ${key}`);
+    }
+    const assignment = String(value);
+    if (assignment.includes("\0")) {
+      throw new Error(`Environment value for ${key} contains NUL`);
+    }
+    return `${key}=${assignment}`;
+  });
+}
+
 export async function prepareTrustedConfig({
   source,
   destination,
@@ -170,13 +183,19 @@ async function restore(repositoryPath, quarantinePath) {
 }
 
 async function commandAsUser({ user, node, cliPath, args, environment, cwd }) {
-  const values = Object.entries(environment).flatMap(([key, value]) => [
-    key,
-    String(value),
-  ]);
   await exec(
     "sudo",
-    ["--user", user, "--", "env", "-i", ...values, node, cliPath, ...args],
+    [
+      "--user",
+      user,
+      "--",
+      "env",
+      "-i",
+      ...environmentAssignments(environment),
+      node,
+      cliPath,
+      ...args,
+    ],
     { cwd, maxBuffer: 10 * 1024 * 1024 },
   );
 }

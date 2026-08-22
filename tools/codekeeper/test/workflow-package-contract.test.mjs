@@ -670,6 +670,12 @@ test("review grants its isolated user read-only traversal to the installed runti
     isolate.indexOf("grantWorldTraverse") < isolate.indexOf('"test"'),
     "ancestor traverse must be granted before the isolated user reads the CLI",
   );
+  assert.match(isolate, /export function environmentAssignments/);
+  assert.match(isolate, /\$\{key\}=\$\{assignment\}/);
+  assert.doesNotMatch(
+    isolate,
+    /flatMap\(\(\[key, value\]\) => \[\s*key,\s*String\(value\)/,
+  );
 });
 
 test("package acquisition validates tarball SRI before deriving package provenance", async () => {
