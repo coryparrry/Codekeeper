@@ -131,11 +131,11 @@
     },
     {
       "path": "src/lib/orchestration/envelope.mjs",
-      "sha256": "3aad83ffcaa239fd25a3b09730dc59f39baf5c9388d2729029c00e065df5a657"
+      "sha256": "5c061c10ae4d487400e2d505c41424bec7e31daaa6fdc8a52c41fbf3755b7ce7"
     },
     {
       "path": "src/lib/orchestration/handoff.mjs",
-      "sha256": "1ddf49f7c8fac4d94946bb22777d08d37c6c6acd82164e4c6d78d660125af65f"
+      "sha256": "a5be94c4ab2507c3f5e5843382f40c351ceb958be37348448c8f72d2e45384dd"
     },
     {
       "path": "src/lib/owner-commands.mjs",
