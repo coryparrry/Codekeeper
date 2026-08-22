@@ -171,7 +171,7 @@
     },
     {
       "path": "src/lib/orchestration/workspace-isolation.mjs",
-      "sha256": "6f7b9fc524f9c7ca2cac35325521e277ddc4a90530fe11b5ba98b72a8e8fc19c"
+      "sha256": "c2088c9ee060a7cffbc80b126931f827e5040f81add30830734e0694ed2cc54e"
     },
     {
       "path": "src/lib/owner-command-prepare.mjs",

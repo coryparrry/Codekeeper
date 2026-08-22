@@ -511,3 +511,16 @@ test("product runtime workflows install the prebuilt runtime without npm ci", as
   assert.doesNotMatch(assistant, /npm ci/);
   assert.match(selfTest, /npm ci --ignore-scripts --no-audit --no-fund/);
 });
+
+test("packaged runtime grants the isolated user execute on ancestor directories of the CLI", async () => {
+  const isolate = await repositoryFile(
+    "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",
+  );
+  assert.match(isolate, /export function ancestorDirectories/);
+  assert.match(isolate, /grantWorldTraverse/);
+  assert.match(
+    isolate,
+    /chmod[\s\S]*a\+r,go-w[\s\S]*configPath[\s\S]*modePlanPath[\s\S]*cliPath/,
+  );
+  assert.ok(isolate.indexOf("grantWorldTraverse") < isolate.indexOf('"test"'));
+});
