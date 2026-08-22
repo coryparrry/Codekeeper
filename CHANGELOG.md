@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.9](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.8...codekeeper-v0.4.9) (2026-08-22)
+
+
+### Bug Fixes
+
+* **runtime:** prepare Codex sandbox on hosted Ubuntu ([6c28ee2](https://github.com/coryparrry/Codekeeper/commit/6c28ee2141fff9368061435fe6d20436f163aa4f))
+
 ## [0.4.8](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.7...codekeeper-v0.4.8) (2026-08-22)
 
 
