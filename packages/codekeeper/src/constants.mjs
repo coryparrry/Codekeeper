@@ -22,7 +22,7 @@ export {
   RUNTIME_WORKFLOWS,
 } from "./mode-registry.mjs";
 export const MINIMUM_NODE_MAJOR = 22;
-export const SOURCE_COMMIT = "48d3d14d7b0181da40b874a7ddfa1396a3dc5bbb";
+export const SOURCE_COMMIT = "f1f468c5514a9e840de67c933cf3d0c2e626aa64";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
