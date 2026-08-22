@@ -536,6 +536,14 @@ test("packaged runtime omits lookaround regex patterns from provider schemas", a
   assert.match(source, /item\.includes\("\(\?"\)/);
 });
 
+test("packaged runtime treats a skipped workspace handoff as coordinator-only issue triage", async () => {
+  const wrapper = await repositoryFile("tools/codekeeper/src/lib/agents-runtime.mjs");
+  const core = await repositoryFile("tools/codekeeper/src/lib/agents-runtime-core.mjs");
+  assert.match(core, /export function isSkippedWorkspaceHandoff/);
+  assert.match(wrapper, /isSkippedWorkspaceHandoff\(specialistResult\)/);
+  assert.match(wrapper, /return core\.runAgentFromBundle\(options\)/);
+});
+
 test("packaged runtime passes env -i KEY=VALUE assignments to the isolated user", async () => {
   const isolate = await repositoryFile(
     "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",
