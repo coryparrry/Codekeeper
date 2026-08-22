@@ -161,6 +161,19 @@ test("envelopes use an exact closed schema and canonical bytes", () => {
   );
 });
 
+test("envelope construction cannot skip the created state or override its schema", () => {
+  for (const state of ["created", "compute-complete", "sealed", "published"]) {
+    assert.throws(
+      () => createEnvelope({ ...baseInput, state }),
+      /cannot override state or schemaVersion/,
+    );
+  }
+  assert.throws(
+    () => createEnvelope({ ...baseInput, schemaVersion: 2 }),
+    /cannot override state or schemaVersion/,
+  );
+});
+
 test("envelope validation rejects malformed fields, unknown fields, and prototype tricks", () => {
   const cases = [
     [
@@ -287,7 +300,7 @@ test("envelope validation rejects malformed fields, unknown fields, and prototyp
   for (const [name, mutate] of cases) {
     const invalid = structuredClone(baseInput);
     mutate(invalid);
-    assert.throws(() => createEnvelope(invalid), /invalid|unexpected|missing|must be|unsupported|unknown/i, name);
+    assert.throws(() => createEnvelope(invalid), /invalid|unexpected|missing|must be|unsupported|unknown|override/i, name);
   }
   const prototypeEnvelope = structuredClone(baseInput);
   prototypeEnvelope.run = Object.assign(Object.create({ polluted: true }), prototypeEnvelope.run);

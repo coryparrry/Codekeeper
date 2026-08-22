@@ -278,13 +278,16 @@ export function envelopeSha256(envelope) {
 
 export function createEnvelope(input) {
   assertPlainObject(input, "Envelope input");
-  const { state = "created", digests = {}, ...rest } = input;
+  if (Object.hasOwn(input, "state") || Object.hasOwn(input, "schemaVersion")) {
+    throw new Error("Envelope input cannot override state or schemaVersion");
+  }
+  const { digests = {}, ...rest } = input;
   assertPlainObject(digests, "Envelope input digests");
   if (Reflect.ownKeys(digests).some((key) => !DIGEST_KEYS.includes(key)))
     throw new Error("Envelope input digests contain an unknown property");
   const envelope = {
     schemaVersion: ENVELOPE_SCHEMA_VERSION,
-    state,
+    state: "created",
     ...rest,
     digests: {
       modePlan: digests.modePlan ?? null,
