@@ -1,0 +1,95 @@
+name: Finalize Codekeeper Fixer sandbox normalization
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: normalize-codekeeper-fixer-sandbox-v2
+  cancel-in-progress: false
+
+jobs:
+  normalize:
+    if: github.event.pull_request.head.ref == 'fix/codex-sandbox-prerequisites'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/codex-sandbox-prerequisites
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Normalize exact source blocks and refresh integrity
+        env:
+          HEAD_BRANCH: fix/codex-sandbox-prerequisites
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          isolation_path = Path("tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs")
+          isolation = isolation_path.read_text()
+          old_isolation = '''  if (workspaceUser) {
+          // Current GitHub-hosted Ubuntu images can block Codex's Bubblewrap
+          // user namespace before any repository command starts. Enable the
+          // same ephemeral-runner prerequisites as OpenAI's codex-action,
+          // then retain the normal read-only or workspace-write sandbox.
+          await prepareCodexLinuxSandbox();
+          }
+          let accountCreated = false;
+          '''.replace("          //", "//").replace("          await", "await").replace("          }", "}").replace("          let", "let")
+          new_isolation = '''  if (workspaceUser) {
+            // Current GitHub-hosted Ubuntu images can block Codex's Bubblewrap
+            // user namespace before any repository command starts. Enable the
+            // same ephemeral-runner prerequisites as OpenAI's codex-action,
+            // then retain the normal read-only or workspace-write sandbox.
+            await prepareCodexLinuxSandbox();
+          }
+          let accountCreated = false;
+          '''
+          if isolation.count(old_isolation) != 1:
+              raise SystemExit(f"expected one exact isolation block, found {isolation.count(old_isolation)}")
+          isolation_path.write_text(isolation.replace(old_isolation, new_isolation))
+
+          schema_path = Path("tools/codekeeper/src/lib/schemas.mjs")
+          schema = schema_path.read_text()
+          old_schema = '''    assertString(test.result, `testsRun[${index}].result`, { maxLength: LIMITS.result });
+          assert(
+            !/^did not run(?:\\b|:)/i.test(test.result.trim()),
+            `testsRun[${index}].result must describe a command that actually ran`,
+          );
+          }
+          '''.replace("          assert(", "assert(").replace("            !/", "  !/").replace("            `testsRun", "  `testsRun").replace("          );", ");").replace("          }", "}")
+          new_schema = '''    assertString(test.result, `testsRun[${index}].result`, { maxLength: LIMITS.result });
+            assert(
+              !/^did not run(?:\\b|:)/i.test(test.result.trim()),
+              `testsRun[${index}].result must describe a command that actually ran`,
+            );
+          }
+          '''
+          if schema.count(old_schema) != 1:
+              raise SystemExit(f"expected one exact schema block, found {schema.count(old_schema)}")
+          schema_path.write_text(schema.replace(old_schema, new_schema))
+          PY
+
+          rm \
+            .github/workflows/codekeeper-fixer-sandbox-format-temp.yml \
+            .github/workflows/codekeeper-fixer-sandbox-normalize-v2-temp.yml
+          node --check tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs
+          node --check tools/codekeeper/src/lib/schemas.mjs
+          node --test \
+            tools/codekeeper/test/workspace-sandbox-prerequisites.test.mjs \
+            packages/codekeeper/test/fixer-sandbox-release.test.mjs
+          node tools/codekeeper/scripts/generate-tooling-manifest.mjs --write
+          git diff --check
+          git add -A
+          git commit -m 'style(runtime): normalize Fixer sandbox repair'
+          node scripts/refresh-release-manifest.mjs
+          git push origin "HEAD:refs/heads/${HEAD_BRANCH}"
