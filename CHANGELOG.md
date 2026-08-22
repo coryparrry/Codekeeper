@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.1...codekeeper-v0.4.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **runtime:** keep the compute execution SHA eval valid in Node ESM ([be91f14](https://github.com/coryparrry/Codekeeper/commit/be91f1467f413732dd826f17783f289e17d263e0))
+* **runtime:** keep the compute execution SHA eval valid in Node ESM ([7035296](https://github.com/coryparrry/Codekeeper/commit/7035296dce72bee9d794e5848716da7b48e60f27))
+
 ## [0.4.1](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.0...codekeeper-v0.4.1) (2026-08-22)
 
 
