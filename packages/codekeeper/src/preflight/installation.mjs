@@ -33,7 +33,7 @@ const PACKAGE_MANAGER_LOCKFILES = Object.freeze([
 ]);
 
 function callerBoolean(source, name) {
-  const matches = [...source.matchAll(new RegExp(`^\\s*${name}:\\s*(true|false)\\s*$`, "gm"))];
+  const matches = [...source.matchAll(new RegExp(`^\\s*(?:#\\s*)?${name}:\\s*(true|false)\\s*$`, "gm"))];
   if (matches.length > 1) throw new InstallerError(`Existing caller has duplicate ${name} controls.`, { code: "EXISTING_INSTALLATION_INVALID" });
   return matches.length ? matches[0][1] === "true" : null;
 }
@@ -46,6 +46,26 @@ function callerSchedule(source) {
     throw new InstallerError("Existing maintenance caller has an invalid schedule.", { code: "EXISTING_INSTALLATION_INVALID" });
   }
   return value;
+}
+
+function installedModes(source) {
+  const matches = [
+    ...source.matchAll(
+      /^\s*installed_modes:\s*(?:"([a-z,]+)"|([a-z,]+))\s*$/gm,
+    ),
+  ].map((match) => match[1] ?? match[2]);
+  if (!matches.length || matches.some((value) => value !== matches[0])) {
+    throw new InstallerError("Existing unified caller has inconsistent installed_modes controls.", { code: "EXISTING_INSTALLATION_INVALID" });
+  }
+  const modes = matches[0].split(",");
+  if (
+    modes.length === 0 ||
+    new Set(modes).size !== modes.length ||
+    modes.some((mode) => !MODE_IDS.includes(mode))
+  ) {
+    throw new InstallerError("Existing unified caller has invalid installed modes.", { code: "EXISTING_INSTALLATION_INVALID" });
+  }
+  return modes;
 }
 
 async function exists(fsImpl, target) {
@@ -232,7 +252,7 @@ async function installedCaller(root, mode, releaseManifest, fsImpl, artifactCata
     ...Object.keys(releaseManifest?.managedFiles ?? {}).filter((target) => {
       const artifact = artifactCatalog.artifactForTarget(target);
       return artifact?.validation === "caller"
-        && artifact.callerMode === mode
+        && artifact.callerModes.includes(mode)
         && target !== currentArtifact.target;
     })
   ];
@@ -297,15 +317,23 @@ export async function inspectInstallationFiles(root, {
     if (!stat) continue;
     contents[target] = await fsImpl.readFile(filePath, "utf8");
   }
-  const modes = [];
+  let modes = [];
   const callerSources = {};
   let maintenanceScheduled = false;
-  for (const mode of MODE_IDS) {
-    const caller = await installedCaller(root, mode, releaseManifest, fsImpl, artifactCatalog);
-    if (!caller) continue;
-    modes.push(mode);
-    contents[caller.target] = caller.source;
-    callerSources[mode] = caller.source;
+  const assistantCaller = await installedCaller(root, ASSISTANT_WORKFLOW.id, releaseManifest, fsImpl, artifactCatalog);
+  const unifiedTarget = artifactCatalog.callerArtifactForMode(ASSISTANT_WORKFLOW.id)?.target;
+  if (assistantCaller?.target === unifiedTarget) {
+    modes = installedModes(assistantCaller.source);
+    contents[assistantCaller.target] = assistantCaller.source;
+    for (const mode of modes) callerSources[mode] = assistantCaller.source;
+  } else {
+    for (const mode of MODE_IDS) {
+      const caller = await installedCaller(root, mode, releaseManifest, fsImpl, artifactCatalog);
+      if (!caller) continue;
+      modes.push(mode);
+      contents[caller.target] = caller.source;
+      callerSources[mode] = caller.source;
+    }
   }
   if (!modes.length) throw new InstallerError("The existing installation has no Codekeeper workflows.", { code: "EXISTING_INSTALLATION_INVALID" });
   if (callerSources.review) {
@@ -320,7 +348,6 @@ export async function inspectInstallationFiles(root, {
     policy.automation.maintenanceSchedule = installedSchedule ?? policy.automation.maintenanceSchedule;
     maintenanceScheduled = installedSchedule !== null;
   }
-  const assistantCaller = await installedCaller(root, ASSISTANT_WORKFLOW.id, releaseManifest, fsImpl, artifactCatalog);
   if (assistantCaller) {
     contents[assistantCaller.target] = assistantCaller.source;
     policy.automation.ownerRequests = callerBoolean(assistantCaller.source, "owner_requests") ?? policy.automation.ownerRequests;

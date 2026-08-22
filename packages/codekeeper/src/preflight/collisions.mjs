@@ -16,7 +16,7 @@ import {
   parseReleaseManifest
 } from "./managed-files.mjs";
 
-const GITHUB_WORKFLOW_REFERENCE = /(?:\/tools\/codekeeper@|\/.github\/workflows\/codekeeper-|codekeeper@[0-9]|\.\/\.github\/workflows\/codekeeper-)/i;
+const GITHUB_WORKFLOW_REFERENCE = /(?:\/tools\/codekeeper@|\/.github\/workflows\/codekeeper(?:-|\.yml)|codekeeper@[0-9]|\.\/\.github\/workflows\/codekeeper(?:-|\.yml))/i;
 
 async function exists(fsImpl, target) {
   try {
@@ -162,7 +162,7 @@ export async function assertNoInstallationFiles(
           code: "EXISTING_INSTALLATION"
         });
       const source = await fsImpl.readFile(path.join(workflowsRoot, entry.name), "utf8");
-      if (!isInstalledCodekeeperWorkflow(source, knownWorkflow.artifact.callerMode)) {
+      if (!isInstalledCodekeeperWorkflow(source, knownWorkflow.artifact.callerModes)) {
         throw new InstallerError(`Existing workflow ${entry.name} is not an installed Codekeeper caller.`, { code: "PATH_COLLISION" });
       }
       releasedWorkflowNames.delete(entry.name.toLowerCase());

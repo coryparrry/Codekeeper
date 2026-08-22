@@ -23,12 +23,10 @@ const FULL_COMMIT = /^[0-9a-f]{40}$/;
 const DEFAULT_BRANCH = "main";
 const PRODUCTION_SOURCE_PATHS = Object.freeze([
   "tools/codekeeper",
-  "examples/workflows/codekeeper-assistant.yml.example",
-  ".github/workflows/codekeeper-assistant.yml",
-  ".github/workflows/codekeeper-fix.yml",
-  ".github/workflows/codekeeper-issues.yml",
-  ".github/workflows/codekeeper-maintain.yml",
-  ".github/workflows/codekeeper-review.yml",
+  "examples/workflows/codekeeper.yml.example",
+  ".github/codekeeper/actions/acquire-package/action.yml",
+  ".github/workflows/codekeeper.yml",
+  ".github/workflows/codekeeper-runtime.yml",
 ]);
 
 function fail(message) {

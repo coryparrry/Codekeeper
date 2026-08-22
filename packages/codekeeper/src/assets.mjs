@@ -29,6 +29,8 @@ const DEFAULT_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const BOT_LOGIN = /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,99}))\[bot\]$/;
+const DISABLED_BOT_MENTION = "@_codekeeper_owner_commands_disabled_";
 const RELEASE_PACKAGE_ASSET_MAP = new Map(RELEASE_PACKAGE_ASSETS.map((asset) => [asset.asset, asset]));
 const APP_PERMISSION_VALUE_SET = new Set(APP_PERMISSION_VALUES);
 
@@ -370,6 +372,75 @@ export function renderAssistantWorkflow(template, { packageRelease, ownerRequest
   return fullyPermissioned;
 }
 
+export function renderUnifiedWorkflow(template, {
+  packageRelease,
+  ownerRequests,
+  automationBotLogin,
+  modes,
+  policy,
+  maintenanceScheduled = true
+}) {
+  const receipt = normalizePackageRelease(packageRelease);
+  const botLoginMatch = String(automationBotLogin ?? "").trim().match(BOT_LOGIN);
+  const automationBotMention = ownerRequests && botLoginMatch
+    ? `@${botLoginMatch[1].toLowerCase()}`
+    : DISABLED_BOT_MENTION;
+  if (
+    count(template, "PACKAGE_VERSION") !== 5 ||
+    count(template, "PACKAGE_INTEGRITY") !== 5 ||
+    count(template, "OWNER_REQUESTS_ENABLED") !== 2 ||
+    count(template, "AUTOMATION_BOT_MENTION") !== 3 ||
+    count(template, "INSTALLED_MODES") !== 5
+  ) {
+    throw new InstallerError("Bundled unified workflow has incomplete release or routing controls.", { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  let rendered = template
+    .replaceAll("PACKAGE_VERSION", receipt.version)
+    .replaceAll("PACKAGE_INTEGRITY", receipt.integrity)
+    .replaceAll("OWNER_REQUESTS_ENABLED", String(ownerRequests))
+    .replaceAll("AUTOMATION_BOT_MENTION", automationBotMention)
+    .replaceAll("INSTALLED_MODES", modes.join(","));
+  if (policy) {
+    const automation = policy.automation;
+    if (
+      typeof automation.automaticPrReview !== "boolean" ||
+      typeof automation.reviewFeedbackTriage !== "boolean" ||
+      typeof automation.issueTriage !== "boolean" ||
+      count(rendered, "AUTO_REVIEW_ENABLED") !== 2 ||
+      count(rendered, "FEEDBACK_TRIAGE_ENABLED") !== 2 ||
+      count(rendered, "AUTO_TRIAGE_ENABLED") !== 2
+    ) {
+      throw new InstallerError("Unified workflow automation settings cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+    }
+    rendered = rendered
+      .replaceAll("AUTO_REVIEW_ENABLED", String(automation.automaticPrReview))
+      .replaceAll("FEEDBACK_TRIAGE_ENABLED", String(automation.reviewFeedbackTriage))
+      .replaceAll("AUTO_TRIAGE_ENABLED", String(automation.issueTriage));
+    if (
+      typeof automation.maintenanceSchedule !== "string" ||
+      !automation.maintenanceSchedule.trim() ||
+      count(rendered, 'cron: "17 7 * * *"') !== 1
+    ) {
+      throw new InstallerError("Unified workflow maintenance schedule cannot be rendered safely.", { code: "WORKFLOW_RENDER_INVALID" });
+    }
+    if (maintenanceScheduled !== false) {
+      rendered = rendered.replace('cron: "17 7 * * *"', `cron: ${JSON.stringify(automation.maintenanceSchedule)}`);
+    }
+  }
+  if (maintenanceScheduled === false) {
+    const scheduleBlock = rendered.match(/^  schedule:\n    - cron: "[^"\n]*"\n/m)?.[0];
+    if (!scheduleBlock || count(rendered, scheduleBlock) !== 1 || !/^  workflow_dispatch:/m.test(rendered)) {
+      throw new InstallerError("Unified workflow must retain manual dispatch when scheduling is disabled.", { code: "WORKFLOW_RENDER_INVALID" });
+    }
+    rendered = rendered.replace(scheduleBlock, "");
+  }
+  const uses = rendered.match(/^\s+uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml\s*$/gm) ?? [];
+  if (uses.length !== 5 || /PACKAGE_(?:VERSION|INTEGRITY)|AUTOMATION_BOT_MENTION/.test(rendered)) {
+    throw new InstallerError("Rendered unified workflow does not use the installed generic runtime exactly five times.", { code: "WORKFLOW_RENDER_INVALID" });
+  }
+  return rendered;
+}
+
 export function renderInstallFiles(bundle, {
   modes,
   preset,
@@ -380,6 +451,7 @@ export function renderInstallFiles(bundle, {
   models = {},
   tracing = true,
   maintenanceScheduled = true,
+  automationBotLogin = null,
   policySource = bundle.contents[`policies/${preset}.json`],
   profileSources = {},
   enforceBundledDefaults = true,
@@ -412,13 +484,16 @@ export function renderInstallFiles(bundle, {
         artifact
       };
     }
-    if (artifact.renderer === "assistant-workflow") {
+    if (artifact.renderer === "unified-workflow") {
       return {
         path: artifact.target,
-        contents: renderAssistantWorkflow(bundle.contents[artifact.asset], {
+        contents: renderUnifiedWorkflow(bundle.contents[artifact.asset], {
           packageRelease,
           ownerRequests: renderedPolicy.automation.ownerRequests,
-          modes
+          automationBotLogin,
+          modes,
+          policy: renderedPolicy,
+          maintenanceScheduled
         }),
         artifact
       };

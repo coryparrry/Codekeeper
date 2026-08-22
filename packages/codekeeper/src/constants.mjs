@@ -22,7 +22,7 @@ export {
   RUNTIME_WORKFLOWS,
 } from "./mode-registry.mjs";
 export const MINIMUM_NODE_MAJOR = 22;
-export const SOURCE_COMMIT = "7f10d46f15b6dbb172febc9ce578cc4cc145e090";
+export const SOURCE_COMMIT = "ad58ff0df84f56b75e995e72e88d78063cf8af5b";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -45,10 +45,17 @@ export const GENERIC_RUNTIME_WORKFLOW = Object.freeze({
   packagePath: "release/workflows/codekeeper-runtime.yml",
   description: "Runs every Codekeeper mode through the shared compute, validate, and publish stages."
 });
+export const UNIFIED_CALLER_WORKFLOW = Object.freeze({
+  id: "caller",
+  label: "Codekeeper caller",
+  target: ".github/workflows/codekeeper.yml",
+  asset: "workflows/codekeeper.yml",
+  sourcePath: "examples/workflows/codekeeper.yml.example",
+  description: "Routes every automatic and owner-command event directly into the generic staged runtime."
+});
 export const RELEASE_PACKAGE_ASSETS = Object.freeze([
   PACKAGE_ACQUIRE_ACTION,
-  GENERIC_RUNTIME_WORKFLOW,
-  ...RUNTIME_WORKFLOW_IDS.map((id) => RUNTIME_WORKFLOWS[id])
+  GENERIC_RUNTIME_WORKFLOW
 ]);
 export const PRESET_IDS = Object.freeze(["mixed", "openai"]);
 export const RECOMMENDED_MODES = Object.freeze(["review", "maintain"]);

@@ -5,7 +5,7 @@ import test from "node:test";
 import { verifyReleaseAuthority } from "../../../scripts/pack-codekeeper-package.mjs";
 import { git, temporaryDirectory } from "./helpers.mjs";
 
-const ASSISTANT_SOURCE = "examples/workflows/codekeeper-assistant.yml.example";
+const UNIFIED_SOURCE = "examples/workflows/codekeeper.yml.example";
 
 async function commitFile(repositoryRoot, relativePath, contents, message) {
   const filePath = path.join(repositoryRoot, relativePath);
@@ -24,15 +24,15 @@ test("release authority accepts a reviewed no-ff source checkpoint and rejects s
 
   const baseProductionCommit = await commitFile(
     repositoryRoot,
-    ASSISTANT_SOURCE,
-    "name: Codekeeper assistant\n",
+    UNIFIED_SOURCE,
+    "name: Codekeeper\n",
     "base production checkpoint",
   );
   git(repositoryRoot, ["checkout", "-b", "assistant-fix"]);
   const featureProductionCommit = await commitFile(
     repositoryRoot,
-    ASSISTANT_SOURCE,
-    'name: Codekeeper assistant\nrun-name: "${{ github.run_id }}"\n',
+    UNIFIED_SOURCE,
+    'name: Codekeeper\nrun-name: "${{ github.run_id }}"\n',
     "fix assistant caller",
   );
   git(repositoryRoot, ["checkout", "main"]);
@@ -68,8 +68,8 @@ test("release authority accepts a reviewed no-ff source checkpoint and rejects s
 
   const laterProductionCommit = await commitFile(
     repositoryRoot,
-    ASSISTANT_SOURCE,
-    'name: Codekeeper assistant\nrun-name: "${{ github.run_attempt }}"\n',
+    UNIFIED_SOURCE,
+    'name: Codekeeper\nrun-name: "${{ github.run_attempt }}"\n',
     "change assistant caller again",
   );
   const laterReleaseCommit = await commitFile(

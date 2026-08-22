@@ -563,7 +563,6 @@ test("extracted changed-file comparison records previous hashes and managed dele
   }), files);
 
   const profileTarget = AGENT_PROFILES["pr-reviewer"].target;
-  const issuesTarget = MODES.issues.target;
   const retiredTarget = ".github/workflows/codekeeper-retired.yml";
   const installation = {
     modes: ["review", "issues"],
@@ -571,13 +570,12 @@ test("extracted changed-file comparison records previous hashes and managed dele
       ".github/codekeeper.json": "old-policy",
       [RELEASE_MANIFEST_TARGET]: "old-manifest",
       [profileTarget]: "override",
-      [issuesTarget]: "issues",
       [retiredTarget]: "retired"
     },
     releaseManifest: {
       managedFiles: {
         ".github/codekeeper.json": "x",
-        [retiredTarget]: "y"
+        [retiredTarget]: sha256("retired")
       }
     }
   };
@@ -593,7 +591,6 @@ test("extracted changed-file comparison records previous hashes and managed dele
     ".github/codekeeper.json",
     RELEASE_MANIFEST_TARGET,
     profileTarget,
-    issuesTarget,
     retiredTarget
   ]);
   assert.equal(changed[0].previousSha256, sha256("old-policy"));
@@ -607,9 +604,84 @@ test("extracted changed-file comparison records previous hashes and managed dele
     delete: true
   });
   assert.equal(changed[3].delete, true);
-  assert.equal(changed[3].previousSha256, sha256("issues"));
-  assert.equal(changed[4].delete, true);
-  assert.equal(changed[4].previousSha256, sha256("retired"));
+  assert.equal(changed[3].previousSha256, sha256("retired"));
+});
+
+test("unified-caller migration deletes every unchanged legacy caller and runtime ledger entry", () => {
+  const legacyTargets = [
+    ".github/workflows/codekeeper-assistant.yml",
+    ".github/workflows/codekeeper-review.yml",
+    ".github/workflows/codekeeper-issues.yml",
+    ".github/workflows/codekeeper-fix.yml",
+    ".github/workflows/codekeeper-maintain.yml",
+    ".github/workflows/codekeeper-runtime-assistant.yml",
+    ".github/workflows/codekeeper-runtime-review.yml",
+    ".github/workflows/codekeeper-runtime-issues.yml",
+    ".github/workflows/codekeeper-runtime-fix.yml",
+    ".github/workflows/codekeeper-runtime-maintain.yml",
+  ];
+  const contents = Object.fromEntries(legacyTargets.map((target) => [target, `legacy: ${target}\n`]));
+  const managedFiles = Object.fromEntries(
+    legacyTargets.map((target) => [target, sha256(contents[target])]),
+  );
+  const files = [
+    {
+      path: ".github/codekeeper.json",
+      contents: "new-policy\n",
+      bytes: 11,
+      sha256: sha256("new-policy\n"),
+    },
+    {
+      path: RELEASE_MANIFEST_TARGET,
+      contents: JSON.stringify({
+        managedFiles: { ".github/codekeeper.json": sha256("new-policy\n") },
+      }),
+      bytes: 100,
+      sha256: "manifest",
+    },
+  ];
+  const changed = changedInstallFiles({
+    files,
+    installation: {
+      modes: ["review", "issues", "fix", "maintain"],
+      contents: {
+        ".github/codekeeper.json": "old-policy\n",
+        [RELEASE_MANIFEST_TARGET]: "old-manifest\n",
+        ...contents,
+      },
+      releaseManifest: { managedFiles },
+    },
+    desiredProfileSettings: { profileSources: {} },
+    modes: ["review"],
+  });
+  assert.deepEqual(
+    changed.filter((file) => file.delete).map((file) => file.path),
+    legacyTargets,
+  );
+  assert.ok(changed.every((file) => file.delete || file.path === ".github/codekeeper.json" || file.path === RELEASE_MANIFEST_TARGET));
+
+  const alteredContents = { ...contents, [legacyTargets[3]]: "legacy: edited\n" };
+  assert.throws(
+    () => changedInstallFiles({
+      files,
+      installation: {
+        modes: ["review", "issues", "fix", "maintain"],
+        contents: {
+          ".github/codekeeper.json": "old-policy\n",
+          [RELEASE_MANIFEST_TARGET]: "old-manifest\n",
+          ...alteredContents,
+        },
+        releaseManifest: { managedFiles },
+      },
+      desiredProfileSettings: { profileSources: {} },
+      modes: ["review"],
+    }),
+    (error) => {
+      assert.equal(error.code, "MANAGED_FILE_CHANGED");
+      assert.match(error.message, new RegExp(legacyTargets[3].replaceAll("/", "\\/")));
+      return true;
+    },
+  );
 });
 
 test("extracted setup pull request body keeps document and workflow tables", () => {

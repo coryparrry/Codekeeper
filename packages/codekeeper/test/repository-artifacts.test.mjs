@@ -65,8 +65,8 @@ test("repository artifact catalog is canonical and complete", () => {
   assert.ok(ASSET_KEYS.includes("repository/README.md"));
   assert.ok(RELEASE_MANAGED_TARGETS.includes(".github/codekeeper/README.md"));
   assert.equal(
-    RELEASE_MANAGED_CATALOG.callerArtifactForMode("review").callerMode,
-    "review",
+    RELEASE_MANAGED_CATALOG.callerArtifactForMode("review").target,
+    ".github/workflows/codekeeper.yml",
   );
 });
 
@@ -129,7 +129,7 @@ test("catalog data represents additions, renames, and retirements without reconc
   assert.throws(
     () =>
       validateRepositoryArtifactCatalog({
-        artifacts: [{ ...caller, callerMode: undefined }],
+        artifacts: [{ ...caller, callerModes: [] }],
         retiredArtifacts: [],
       }),
     /explicit supported caller mode/,
@@ -153,10 +153,8 @@ test("activation is data-driven for modes and optional profiles", () => {
     modes: ["review"],
     profileSources: {},
   });
-  assert.ok(active.some(({ id }) => id === "repository.workflow.review"));
-  assert.ok(
-    active.some(({ id }) => id === "repository.workflow.runtime.review"),
-  );
+  assert.ok(active.some(({ id }) => id === "repository.workflow.caller"));
+  assert.ok(active.some(({ id }) => id === "repository.workflow.runtime"));
   assert.ok(active.some(({ id }) => id === "repository.guide"));
   assert.ok(!active.some(({ id }) => id === "repository.workflow.fix"));
   assert.ok(!active.some(({ id }) => id.startsWith("repository.profile.")));

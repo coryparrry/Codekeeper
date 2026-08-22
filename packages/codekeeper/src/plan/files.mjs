@@ -1,10 +1,10 @@
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
-  MODES,
   RELEASE_MANIFEST_TARGET
 } from "../constants.mjs";
 import { renderInstallFiles, sha256 } from "../assets.mjs";
+import { InstallerError } from "../errors.mjs";
 
 export function renderPlannedInstallFiles({
   bundle,
@@ -33,6 +33,7 @@ export function renderPlannedInstallFiles({
     models,
     tracing,
     maintenanceScheduled,
+    automationBotLogin: answers.automationBotLogin,
     policySource,
     profileSources,
     enforceBundledDefaults: !installation,
@@ -63,29 +64,27 @@ export function changedInstallFiles({ files, installation, desiredProfileSetting
         delete: true
       });
     }
-    for (const mode of installation.modes.filter((mode) => !modes.includes(mode))) {
-      const target = MODES[mode].target;
-      if (!Object.hasOwn(installation.contents, target)) continue;
-      changedFiles.push({
-        path: target,
-        contents: null,
-        bytes: 0,
-        sha256: null,
-        previousSha256: sha256(installation.contents[target]),
-        delete: true
-      });
-    }
     const nextReleaseManifest = JSON.parse(files.find((file) => file.path === RELEASE_MANIFEST_TARGET).contents);
     const nextManagedTargets = new Set(Object.keys(nextReleaseManifest.managedFiles));
     const changedTargets = new Set(changedFiles.map((file) => file.path));
     for (const target of Object.keys(installation.releaseManifest?.managedFiles ?? {})) {
       if (nextManagedTargets.has(target) || changedTargets.has(target)) continue;
+      const recordedSha256 = installation.releaseManifest.managedFiles[target];
+      const currentSha256 = Object.hasOwn(installation.contents, target)
+        ? sha256(installation.contents[target])
+        : null;
+      if (currentSha256 !== recordedSha256) {
+        throw new InstallerError(
+          `Retired managed artifact ${target} no longer matches the inspected installation ledger.`,
+          { code: "MANAGED_FILE_CHANGED" },
+        );
+      }
       changedFiles.push({
         path: target,
         contents: null,
         bytes: 0,
         sha256: null,
-        previousSha256: sha256(installation.contents[target]),
+        previousSha256: currentSha256,
         delete: true
       });
     }

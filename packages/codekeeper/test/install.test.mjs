@@ -45,7 +45,7 @@ async function completePlan(overrides = {}) {
 
 function simplePlan(root, originalHead, fileContents = [
   [".github/codekeeper.json", "{}\n"],
-  [".github/workflows/codekeeper-review.yml", "name: Codekeeper review\n"]
+  [".github/workflows/codekeeper.yml", "name: Codekeeper\n"]
 ]) {
   const files = fileContents.map(([filePath, contents]) => ({
     path: filePath,
@@ -433,7 +433,7 @@ test("real Git integration creates one exact generated-only commit without broad
   assert.ok(calls.every((call) => !call.args.includes("-A") && !call.args.includes("--all") && !call.args.includes("--force")));
 });
 
-test("real Git integration reruns can change configuration and remove a workflow exactly", async (t) => {
+test("real Git integration reruns can change configuration and remove a mode exactly", async (t) => {
   const { root, head } = await committedRepository(t);
   const bundle = await loadVerifiedAssets();
   const initial = buildInstallPlan({
@@ -513,14 +513,13 @@ test("real Git integration reruns can change configuration and remove a workflow
   assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [
     ".github/codekeeper-release.json",
     ".github/codekeeper.json",
-    ".github/workflows/codekeeper-assistant.yml",
-    ".github/workflows/codekeeper-maintain.yml"
+    ".github/workflows/codekeeper.yml"
   ]);
   assert.match(
-    await readFile(path.join(root, ".github/workflows/codekeeper-assistant.yml"), "utf8"),
-    /installed_modes: review/
+    await readFile(path.join(root, ".github/workflows/codekeeper.yml"), "utf8"),
+    /installed_modes: "review"/
   );
-  await assert.rejects(readFile(path.join(root, ".github/workflows/codekeeper-maintain.yml"), "utf8"), /ENOENT/);
+  await assert.rejects(readFile(path.join(root, ".github/workflows/codekeeper-runtime-maintain.yml"), "utf8"), /ENOENT/);
   assert.match(await readFile(path.join(root, ".github/codekeeper/agents/pr-reviewer.md"), "utf8"), /Team preference/);
   const policy = JSON.parse(await readFile(path.join(root, ".github/codekeeper.json"), "utf8"));
   assert.equal(policy.ai.agents.review.model, "gpt-5.6-luna");

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256 } from "../src/assets.mjs";
 import { SOURCE_COMMIT, SOURCE_REPOSITORY } from "../src/constants.mjs";
@@ -34,6 +34,36 @@ function installedWorkflow(source) {
   return source
     .replaceAll("OWNER/REPOSITORY", SOURCE_REPOSITORY)
     .replaceAll("FULL_COMMIT_SHA", SOURCE_COMMIT);
+}
+
+function unifiedWorkflow(bundle, modes = ["review"]) {
+  return installedWorkflow(bundle.contents["workflows/codekeeper.yml"])
+    .replaceAll("OWNER_REQUESTS_ENABLED", "true")
+    .replaceAll("AUTO_REVIEW_ENABLED", "true")
+    .replaceAll("FEEDBACK_TRIAGE_ENABLED", "true")
+    .replaceAll("AUTO_TRIAGE_ENABLED", "true")
+    .replaceAll('installed_modes: "INSTALLED_MODES"', `installed_modes: ${modes.join(",")}`);
+}
+
+function legacyWorkflow(mode, {
+  ownerRequests = true,
+  autoReview = true,
+  feedbackTriage = true,
+  schedule = null,
+} = {}) {
+  return [
+    "# Legacy Codekeeper caller fixture.",
+    `# owner_requests: ${ownerRequests}`,
+    `# auto_review: ${autoReview}`,
+    `# feedback_triage: ${feedbackTriage}`,
+    ...(schedule ? [`  - cron: "${schedule}"`] : []),
+    "jobs:",
+    "  codekeeper:",
+    `    uses: ${SOURCE_REPOSITORY}/tools/codekeeper@${SOURCE_COMMIT}`,
+    "  runtime:",
+    `    uses: ${SOURCE_REPOSITORY}/.github/workflows/codekeeper-${mode}.yml@${SOURCE_COMMIT}`,
+    "",
+  ].join("\n");
 }
 
 function preflightRunner(root, options = {}) {
@@ -251,11 +281,11 @@ test("installation-file collision checks reject known, case-colliding, and disgu
     await writeFile(path.join(root, ".github", "workflows", "ci.yml"), "name: CI\n");
     await assertNoInstallationFiles(root);
   });
-  await t.test("unrelated workflow at the reserved assistant path blocks a rerun", async (t) => {
+  await t.test("unrelated workflow at the reserved unified caller path blocks a rerun", async (t) => {
     const root = await temporaryDirectory(t);
     await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
     await writeFile(path.join(root, ".github", "codekeeper.json"), "{}\n");
-    await writeFile(path.join(root, ".github", "workflows", "codekeeper-assistant.yml"), "name: Existing assistant\n");
+    await writeFile(path.join(root, ".github", "workflows", "codekeeper.yml"), "name: Existing caller\n");
     await assert.rejects(
       assertNoInstallationFiles(root, { allowExisting: true }),
       assertInstallerCode(assert, "PATH_COLLISION")
@@ -273,7 +303,7 @@ test("release manifests admit only digest-bound retired Codekeeper workflows", a
   const root = await temporaryDirectory(t);
   const bundle = await loadVerifiedAssets();
   const retiredTarget = ".github/workflows/codekeeper-runtime-fix.yml";
-  const retiredSource = bundle.contents["runtime-workflows/fix.yml"];
+  const retiredSource = "name: Retired Codekeeper runtime\n";
   await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
   await writeFile(path.join(root, ...retiredTarget.split("/")), retiredSource);
   const manifestPath = path.join(root, ".github", "codekeeper-release.json");
@@ -342,30 +372,30 @@ test("release-owned Markdown is accepted only at its exact digest-bound catalog 
 test("edited caller workflows retain semantic validation across catalog renames and retirement", async (t) => {
   const bundle = await loadVerifiedAssets();
   const target = ".github/workflows/codekeeper-router.yml";
-  const installedSource = bundle.contents["workflows/assistant.yml"];
+  const installedSource = legacyWorkflow("review");
   const source = `${installedSource.replace(
-    "owner_requests: true",
-    "owner_requests: false",
+    "# owner_requests: true",
+    "# owner_requests: false",
   )}\n# Repository setting retained.\n`;
   const activeArtifact = {
-    id: "repository.workflow.assistant-v2",
-    target: ".github/workflows/codekeeper-assistant-v2.yml",
+    id: "repository.workflow.caller-v2",
+    target: ".github/workflows/codekeeper-caller-v2.yml",
     previousTargets: [target],
-    asset: "workflows/assistant.yml",
+    asset: "workflows/codekeeper.yml",
     ownership: "release",
     activation: { kind: "always" },
-    renderer: "assistant-workflow",
+    renderer: "unified-workflow",
     validation: "caller",
-    callerMode: "assistant",
-    purpose: "Repository assistant workflow",
+    callerModes: ["review"],
+    purpose: "Repository unified caller workflow",
   };
   const retiredArtifact = {
     id: "repository.workflow.router-retired",
     target,
     ownership: "release",
     validation: "caller",
-    callerMode: "assistant",
-    purpose: "Retired repository assistant workflow",
+    callerModes: ["review"],
+    purpose: "Retired repository caller workflow",
   };
 
   for (const [label, artifactCatalog] of [
@@ -386,14 +416,15 @@ test("edited caller workflows retain semantic validation across catalog renames 
   ]) {
     await t.test(label, async (t) => {
       const root = await temporaryDirectory(t);
+      const legacySource = legacyWorkflow("review");
       const manifest = {
         version: 2,
         package: bundle.packageRelease,
         source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
-        managedFiles: { [target]: sha256(installedSource) },
+        managedFiles: { [target]: sha256(label === "retired" ? legacySource : installedSource) },
       };
       await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
-      await writeFile(path.join(root, ...target.split("/")), source);
+      await writeFile(path.join(root, ...target.split("/")), label === "retired" ? legacySource : source);
       await writeFile(
         path.join(root, ".github", "codekeeper-release.json"),
         `${JSON.stringify(manifest, null, 2)}\n`,
@@ -418,23 +449,23 @@ test("edited caller workflows retain semantic validation across catalog renames 
   }
 });
 
-test("assistant callers retain semantic validation with the pinned App credential probe", async (t) => {
+test("unified callers retain semantic validation at the pinned runtime boundary", async (t) => {
   const root = await temporaryDirectory(t);
   const bundle = await loadVerifiedAssets();
-  const source = installedWorkflow(bundle.contents["workflows/assistant.yml"]);
+  const source = unifiedWorkflow(bundle, ["review"]);
   await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
   await writeFile(
-    path.join(root, ".github", "workflows", "codekeeper-assistant.yml"),
+    path.join(root, ".github", "workflows", "codekeeper.yml"),
     source,
   );
 
   await assertNoInstallationFiles(root, { allowExisting: true });
 
   await writeFile(
-    path.join(root, ".github", "workflows", "codekeeper-assistant.yml"),
+    path.join(root, ".github", "workflows", "codekeeper.yml"),
     source.replace(
-      "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3",
-      "actions/create-github-app-token@main",
+      "uses: ./.github/workflows/codekeeper-runtime.yml",
+      "uses: ./.github/workflows/codekeeper-runtime-missing.yml",
     ),
   );
   await assert.rejects(
@@ -443,25 +474,25 @@ test("assistant callers retain semantic validation with the pinned App credentia
   );
 });
 
-test("installation inspection and planning migrate an edited caller from a catalog previous target", async (t) => {
+test("installation inspection retains edited legacy callers while blocking their migration deletion", async (t) => {
   const root = await temporaryDirectory(t);
   const bundle = await loadVerifiedAssets();
   const previousTarget = ".github/workflows/codekeeper-review-v1.yml";
   const currentArtifact = REPOSITORY_ARTIFACTS.find(
-    ({ id }) => id === "repository.workflow.review",
+    ({ validation }) => validation === "caller",
   );
   const artifactCatalog = createReleaseManagedCatalog({
     artifacts: REPOSITORY_ARTIFACTS.map((artifact) =>
       artifact === currentArtifact
-        ? { ...artifact, previousTargets: [previousTarget] }
+        ? { ...artifact, previousTargets: [previousTarget], callerModes: ["assistant", "review"] }
         : artifact,
     ),
     retiredArtifacts: [],
   });
-  const installedSource = installedWorkflow(bundle.contents["workflows/review.yml"]);
+  const installedSource = unifiedWorkflow(bundle, ["review"]);
   const editedSource = installedSource
-    .replace("auto_review: true", "auto_review: false")
-    .replace("feedback_triage: true", "feedback_triage: false");
+    .replace("# auto_review: true", "# auto_review: false")
+    .replace("# feedback_triage: true", "# feedback_triage: false");
   const manifest = {
     version: 2,
     package: bundle.packageRelease,
@@ -484,48 +515,39 @@ test("installation inspection and planning migrate an edited caller from a catal
   assert.equal(installation.policy.automation.automaticPrReview, false);
   assert.equal(installation.contents[previousTarget], editedSource);
 
-  const plan = buildInstallPlan({
-    bundle,
-    snapshot: {
-      root,
-      repository: "acme/widget",
-      defaultBranch: "main",
-      headSha: HEAD_SHA,
-      viewerLogin: "cory",
-      installation,
-      existingSettings: {
-        enabled: true,
+  assert.throws(
+    () => buildInstallPlan({
+      bundle,
+      snapshot: {
+        root,
+        repository: "acme/widget",
+        defaultBranch: "main",
+        headSha: HEAD_SHA,
+        viewerLogin: "cory",
+        installation,
+        existingSettings: {
+          enabled: true,
+          appClientId: "Iv123456789012345678",
+          automationBotLogin: "codekeeper-widget[bot]",
+        },
+      },
+      answers: {
+        modes: ["review"],
+        preset: "openai",
+        displayName: "Widget",
+        ownerLogins: ["cory"],
         appClientId: "Iv123456789012345678",
         automationBotLogin: "codekeeper-widget[bot]",
+        enabled: true,
+        capabilities: [],
+        tracing: true,
+        releaseUpdate: true,
       },
-    },
-    answers: {
-      modes: ["review"],
-      preset: "openai",
-      displayName: "Widget",
-      ownerLogins: ["cory"],
-      appClientId: "Iv123456789012345678",
-      automationBotLogin: "codekeeper-widget[bot]",
-      enabled: true,
-      capabilities: [],
-      tracing: true,
-      releaseUpdate: true,
-    },
-  });
-  const migratedCaller = plan.files.find(
-    ({ path: target }) => target === currentArtifact.target,
-  );
-  assert.match(migratedCaller.contents, /auto_review: false/);
-  assert.match(migratedCaller.contents, /feedback_triage: false/);
-  assert.deepEqual(
-    plan.files.find(({ path: target }) => target === previousTarget),
-    {
-      path: previousTarget,
-      contents: null,
-      bytes: 0,
-      sha256: null,
-      previousSha256: sha256(editedSource),
-      delete: true,
+    }),
+    (error) => {
+      assert.equal(error.code, "MANAGED_FILE_CHANGED");
+      assert.match(error.message, /codekeeper-review-v1\.yml/);
+      return true;
     },
   );
 });
@@ -540,13 +562,21 @@ test("existing generated files with every optional profile missing are recognize
   for (const agent of Object.values(legacyPolicy.ai.agents)) agent.maxTurns = 2;
   await writeFile(path.join(root, ".github", "codekeeper.json"), `${JSON.stringify(legacyPolicy, null, 2)}\n`);
   await writeFile(path.join(root, ".github", "codekeeper", "agents", "maintenance-planner.md"), "# Legacy planner\n");
-  await writeFile(path.join(root, ".github", "workflows", "codekeeper-review.yml"), installedWorkflow(bundle.contents["workflows/review.yml"])
-    .replace("auto_review: true", "auto_review: false")
-    .replace("feedback_triage: true", "feedback_triage: false"));
-  await writeFile(path.join(root, ".github", "workflows", "codekeeper-maintain.yml"), installedWorkflow(bundle.contents["workflows/maintain.yml"])
+  await writeFile(path.join(root, ".github", "workflows", "codekeeper.yml"), unifiedWorkflow(bundle, ["review", "maintain"])
+    .replace("# owner_requests: true", "# owner_requests: false")
+    .replace("# auto_review: true", "# auto_review: false")
+    .replace("# feedback_triage: true", "# feedback_triage: false")
     .replace('cron: "17 7 * * *"', 'cron: "23 4 * * 2"'));
-  await writeFile(path.join(root, ".github", "workflows", "codekeeper-assistant.yml"), installedWorkflow(bundle.contents["workflows/assistant.yml"])
-    .replace("owner_requests: true", "owner_requests: false"));
+  const unifiedSource = await readFile(path.join(root, ".github", "workflows", "codekeeper.yml"), "utf8");
+  await writeFile(
+    path.join(root, ".github", "codekeeper-release.json"),
+    `${JSON.stringify({
+      version: 2,
+      package: bundle.packageRelease,
+      source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+      managedFiles: { ".github/workflows/codekeeper.yml": sha256(unifiedSource) },
+    }, null, 2)}\n`,
+  );
 
   const installation = await inspectInstallationFiles(root);
   assert.deepEqual(installation.modes, ["review", "maintain"]);
@@ -603,24 +633,65 @@ test("existing generated files with every optional profile missing are recognize
     ["repository-auditor.md", "agents/repository-auditor.md"],
     ["issue-triager.md", "agents/issue-triager.md"]
   ]) await writeFile(path.join(issuesRoot, ".github", "codekeeper", "agents", name), bundle.contents[asset]);
-  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper-issues.yml"), installedWorkflow(bundle.contents["workflows/issues.yml"]));
-  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper-assistant.yml"), installedWorkflow(bundle.contents["workflows/assistant.yml"]));
+  const issuesSource = unifiedWorkflow(bundle, ["issues"]);
+  await writeFile(path.join(issuesRoot, ".github", "workflows", "codekeeper.yml"), issuesSource);
+  await writeFile(
+    path.join(issuesRoot, ".github", "codekeeper-release.json"),
+    `${JSON.stringify({
+      version: 2,
+      package: bundle.packageRelease,
+      source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+      managedFiles: { ".github/workflows/codekeeper.yml": sha256(issuesSource) },
+    }, null, 2)}\n`,
+  );
   const issuesOnly = await inspectRepository({ runner: preflightRunner(issuesRoot), cwd: issuesRoot });
   assert.deepEqual(issuesOnly.installation.modes, ["issues"]);
   assert.equal(issuesOnly.installation.policy.automation.ownerRequests, true);
   assert.equal(issuesOnly.existingSettings.automationBotLogin, "codekeeper-widget[bot]");
 
-  await rm(path.join(issuesRoot, ".github", "workflows", "codekeeper-assistant.yml"));
   await writeFile(
-    path.join(issuesRoot, ".github", "workflows", "codekeeper-issues.yml"),
-    installedWorkflow(bundle.contents["workflows/issues.yml"]).replace(
-      "      enabled: true",
-      "      enabled: true\n      owner_requests: false"
-    )
+    path.join(issuesRoot, ".github", "workflows", "codekeeper.yml"),
+    issuesSource.replace("# owner_requests: true", "# owner_requests: false"),
   );
   const legacyIssuesOnly = await inspectRepository({ runner: preflightRunner(issuesRoot), cwd: issuesRoot });
   assert.equal(legacyIssuesOnly.installation.policy.automation.ownerRequests, false);
   assert.equal(legacyIssuesOnly.existingSettings.automationBotLogin, "codekeeper-widget[bot]");
+});
+
+test("legacy callers remain inspectable when their retired targets are recorded in the release ledger", async (t) => {
+  const root = await temporaryDirectory(t);
+  const bundle = await loadVerifiedAssets();
+  await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
+  await writeFile(path.join(root, ".github", "codekeeper.json"), bundle.contents["policies/openai.json"]);
+  const legacyFiles = {
+    ".github/workflows/codekeeper-review.yml": legacyWorkflow("review", {
+      autoReview: false,
+      feedbackTriage: false,
+    }),
+    ".github/workflows/codekeeper-maintain.yml": legacyWorkflow("maintain", {
+      schedule: "23 4 * * 2",
+    }),
+    ".github/workflows/codekeeper-runtime-review.yml": "name: Legacy review runtime\n",
+    ".github/workflows/codekeeper-runtime-maintain.yml": "name: Legacy maintain runtime\n",
+  };
+  for (const [target, source] of Object.entries(legacyFiles)) {
+    await writeFile(path.join(root, ...target.split("/")), source);
+  }
+  await writeFile(
+    path.join(root, ".github", "codekeeper-release.json"),
+    `${JSON.stringify({
+      version: 2,
+      package: bundle.packageRelease,
+      source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+      managedFiles: Object.fromEntries(Object.entries(legacyFiles).map(([target, source]) => [target, sha256(source)])),
+    }, null, 2)}\n`,
+  );
+
+  const installation = await inspectInstallationFiles(root);
+  assert.deepEqual(installation.modes, ["review", "maintain"]);
+  assert.equal(installation.policy.automation.automaticPrReview, false);
+  assert.equal(installation.policy.automation.reviewFeedbackTriage, false);
+  assert.equal(installation.policy.automation.maintenanceSchedule, "23 4 * * 2");
 });
 
 test("setup branch collision detection covers local refs, remote refs, and open pull requests", async () => {

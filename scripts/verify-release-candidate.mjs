@@ -31,19 +31,11 @@ const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?
 
 const REQUIRED_PATHS = Object.freeze([
   "assets/metadata.json",
-  "assets/workflows/assistant.yml",
-  "assets/workflows/fix.yml",
-  "assets/workflows/issues.yml",
-  "assets/workflows/maintain.yml",
-  "assets/workflows/review.yml",
+  "assets/workflows/codekeeper.yml",
   "bin/codekeeper.mjs",
   "bin/verify-package.mjs",
   "release/actions/acquire-package/action.yml",
-  "release/workflows/codekeeper-assistant.yml",
-  "release/workflows/codekeeper-fix.yml",
-  "release/workflows/codekeeper-issues.yml",
-  "release/workflows/codekeeper-maintain.yml",
-  "release/workflows/codekeeper-review.yml",
+  "release/workflows/codekeeper-runtime.yml",
   "runtime/agents/pr-reviewer.md",
   "runtime/package-lock.json",
   "runtime/package.json",
@@ -249,7 +241,10 @@ async function exerciseProductionVerificationAdapters({
       if (command === "node" && args.some((argument) => argument.endsWith("runtime/src/cli.mjs"))) {
         return successfulResult();
       }
-      if (commandLine.startsWith("gh workflow run codekeeper-assistant.yml")) {
+      if (commandLine.startsWith("gh workflow run codekeeper.yml")) {
+        if (!commandLine.includes("--field verify_app_credentials=true")) {
+          fail("production credential verification did not select the App probe");
+        }
         return successfulResult();
       }
       if (commandLine.includes("gh run list")) {

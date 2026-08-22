@@ -7,15 +7,12 @@ import { PACKAGE_SOURCE_REPOSITORY, PACKAGE_SOURCE_REPOSITORY_URL } from "../src
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
-const REVIEWED_SOURCE_CHECKPOINT = "7f10d46f15b6dbb172febc9ce578cc4cc145e090";
+const REVIEWED_SOURCE_CHECKPOINT = "ad58ff0df84f56b75e995e72e88d78063cf8af5b";
 const PRODUCTION_SOURCE_PATHS = [
   "tools/codekeeper",
-  "examples/workflows/codekeeper-assistant.yml.example",
-  ".github/workflows/codekeeper-assistant.yml",
-  ".github/workflows/codekeeper-fix.yml",
-  ".github/workflows/codekeeper-issues.yml",
-  ".github/workflows/codekeeper-maintain.yml",
-  ".github/workflows/codekeeper-review.yml",
+  "examples/workflows/codekeeper.yml.example",
+  ".github/workflows/codekeeper.yml",
+  ".github/workflows/codekeeper-runtime.yml",
 ];
 
 function resolveDefaultBranchRef(repositoryRoot, defaultBranch) {
