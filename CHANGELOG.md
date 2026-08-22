@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.6](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.5...codekeeper-v0.4.6) (2026-08-22)
+
+
+### Bug Fixes
+
+* **runtime:** omit lookaround regex from OpenAI structured-output schemas ([969581a](https://github.com/coryparrry/Codekeeper/commit/969581af00514a995f4982b47febed606ee623e2))
+* **runtime:** omit lookaround regex from OpenAI structured-output schemas ([c5093e7](https://github.com/coryparrry/Codekeeper/commit/c5093e73fa203b2f261c3b28507a5c0f6165b2fc))
+
 ## [0.4.5](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.4...codekeeper-v0.4.5) (2026-08-22)
 
 
