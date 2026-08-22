@@ -1,56 +1,21 @@
-import path from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
-import { AGENT_PROFILE_BUNDLE_FILE, loadTrustedAgentProfile } from "./agent-profiles.mjs";
 import { issueDispatchReceipt } from "./commands.mjs";
 import { reviewReasoningEscalation } from "./config.mjs";
 import { boundedChangedFileStatsBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
-import { readJson, writeJson, writeText } from "./io.mjs";
+import { readJson } from "./io.mjs";
 import { ISSUE_TRIAGE_MARKER, automaticRepairMarker, parseIssueTriageStateMarker, sha256 } from "./markers.mjs";
 import { parseOwnerCommand } from "./owner-commands.mjs";
 import { evaluateReviewEligibility } from "./policy.mjs";
+import { normalizeOwnerCommandContext, ownerContextMetadata, verifyOwnerCommandContext } from "./owner-command-prepare.mjs";
 import { frozenPullRepairReviewThreads, frozenPullRepairSubject } from "./pr-repair.mjs";
 import { completeReviewFeedback } from "./review-feedback.mjs";
-import { auditSchema, fixSchema, issueSchema, providerCompatibleJsonSchema, reviewSchema } from "./schemas.mjs";
+import { auditSchema, fixSchema, issueSchema, reviewSchema } from "./schemas.mjs";
 import { buildAuditPrompt, buildCoordinatorPrompt, buildFixPrompt, buildIssuePrompt, buildReviewPrompt } from "./prompts.mjs";
-import { assertRunnerOwnedDirectory, runUrl } from "./workspace.mjs";
+import { runUrl } from "./workspace.mjs";
+import { boundedLabels, boundedOwnerComments, boundedText, isConfiguredOwner, runMetadata, trustedAgentProfile, writeBundle } from "./prepare-support.mjs";
 
 function repositoryFromEvent(event) {
   return event.repository?.full_name ?? process.env.GITHUB_REPOSITORY;
-}
-
-function boundedText(value, maximum, suffix = "\n…[truncated]") {
-  const text = String(value ?? "");
-  if (text.length <= maximum) return text;
-  return `${text.slice(0, Math.max(0, maximum - suffix.length))}${suffix}`;
-}
-
-function boundedLabels(labels, maximum = 30) {
-  return (labels ?? [])
-    .slice(0, maximum)
-    .map((label) => boundedText(typeof label === "string" ? label : label?.name, 128, "…"));
-}
-
-function labelNames(labels) {
-  return (labels ?? []).map((label) => typeof label === "string" ? label : label?.name);
-}
-
-function configuredOwnerLogins(config) {
-  return new Set((config.repository.ownerLogins ?? []).map((login) => String(login).trim().toLowerCase()));
-}
-
-function isConfiguredOwner(config, actor) {
-  const normalizedActor = String(actor ?? "").trim().toLowerCase();
-  return normalizedActor.length > 0 && configuredOwnerLogins(config).has(normalizedActor);
-}
-
-function pullRequestFromEvent(event, repository) {
-  const pull = event.pull_request;
-  if (!pull) throw new Error("Pull request payload is missing");
-  if (pull.head?.repo?.full_name !== repository || (pull.base?.repo?.full_name && pull.base.repo.full_name !== repository)) {
-    throw new Error("Fork pull requests are unsupported; manual review is required");
-  }
-  return pull;
 }
 
 function changedFileLimitReason(error) {
@@ -58,43 +23,12 @@ function changedFileLimitReason(error) {
   return message.startsWith("Review changed-file context exceeds configured maximum of ") ? message : null;
 }
 
-async function writeBundle({ directory, context, prompt, workspacePrompt, schema, agentProfile }) {
-  directory = assertRunnerOwnedDirectory(directory);
-  await mkdir(path.dirname(directory), { recursive: true });
-  directory = assertRunnerOwnedDirectory(directory);
-  try {
-    await mkdir(directory);
-  } catch (error) {
-    if (error.code === "EEXIST") throw new Error(`Runner-owned bundle directory already exists: ${directory}`);
-    throw error;
-  }
-  directory = assertRunnerOwnedDirectory(directory);
-  await writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), agentProfile.bytes, { flag: "wx" });
-  await writeJson(path.join(directory, "context.json"), context);
-  await writeText(path.join(directory, "prompt.md"), `${prompt}\n`);
-  await writeText(path.join(directory, "workspace-prompt.md"), `${workspacePrompt}\n`);
-  await writeJson(path.join(directory, "schema.json"), providerCompatibleJsonSchema(schema));
-}
-
-function trustedAgentProfile(mode, agentProfilePath, agentProfileSourceSha, agentProfileSource) {
-  return loadTrustedAgentProfile({
-    mode,
-    source: agentProfileSource,
-    sourcePath: agentProfilePath,
-    sourceSha: agentProfileSourceSha
-  });
-}
-
-function runMetadata({ toolingSha = process.env.CODEKEEPER_TOOLING_SHA ?? "", configSha256 = "" } = {}) {
-  return {
-    runId: process.env.GITHUB_RUN_ID ?? "",
-    toolingSha: String(toolingSha).trim(),
-    configSha256: String(configSha256).trim()
-  };
-}
-
 function normalizedWords(value) {
-  return new Set(String(value ?? "").toLowerCase().match(/[a-z0-9]{3,}/g) ?? []);
+  return new Set(
+    String(value ?? "")
+      .toLowerCase()
+      .match(/[a-z0-9]{3,}/g) ?? [],
+  );
 }
 
 function overlapScore(a, right) {
@@ -117,7 +51,7 @@ function relatedCandidates(issue, candidates, kind, maximum = 5) {
       body: boundedText(candidate.body, 2000),
       labels: boundedLabels(candidate.labels),
       url: boundedText(candidate.html_url, 2048, "…"),
-      score: overlapScore(needleWords, `${candidate.title ?? ""}\n${candidate.body ?? ""}`)
+      score: overlapScore(needleWords, `${candidate.title ?? ""}\n${candidate.body ?? ""}`),
     }))
     .sort((a, b) => b.score - a.score || a.number - b.number)
     .slice(0, maximum)
@@ -132,18 +66,6 @@ function relatedPullRequests(issue, pulls, maximum = 5) {
   return relatedCandidates(issue, pulls, "pull_request", maximum);
 }
 
-function boundedOwnerComments(comments, config) {
-  const owners = configuredOwnerLogins(config);
-  return comments
-    .filter((comment) => owners.has(String(comment.user?.login ?? "").trim().toLowerCase()))
-    .slice(-5)
-    .map((comment) => ({
-      author: boundedText(comment.user?.login, 256, "…"),
-      body: boundedText(comment.body, 2000),
-      createdAt: comment.created_at ?? ""
-    }));
-}
-
 const TRUSTED_ISSUE_COMMENT_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const ISSUE_CONVERSATION_MAXIMUM_COMMENTS = 40;
 const ISSUE_CONVERSATION_MAXIMUM_WINDOW_COMMENTS = ISSUE_CONVERSATION_MAXIMUM_COMMENTS + 1;
@@ -153,6 +75,24 @@ function normalizedLogin(value) {
   return String(value ?? "")
     .trim()
     .toLowerCase();
+}
+
+function labelNames(labels) {
+  return (labels ?? []).map((label) =>
+    typeof label === "string" ? label : label?.name,
+  );
+}
+
+function pullRequestFromEvent(event, repository) {
+  const pull = event.pull_request;
+  if (!pull) throw new Error("Pull request payload is missing");
+  if (
+    pull.head?.repo?.full_name !== repository ||
+    (pull.base?.repo?.full_name && pull.base.repo.full_name !== repository)
+  ) {
+    throw new Error("Fork pull requests are unsupported; manual review is required");
+  }
+  return pull;
 }
 
 function numericCommentId(value) {
@@ -198,7 +138,7 @@ function issueConversation(comments, totalComments, { truncatedBefore = false } 
         createdAt,
         updatedAt: validTimestamp(comment.updated_at) ?? createdAt,
         body,
-        bodyTruncated: body.length !== comment.body.length
+        bodyTruncated: body.length !== comment.body.length,
       };
     })
     .sort((left, right) =>
@@ -207,16 +147,16 @@ function issueConversation(comments, totalComments, { truncatedBefore = false } 
         {
           id: right.id,
           created_at: right.createdAt,
-          updated_at: right.updatedAt
-        }
-      )
+          updated_at: right.updatedAt,
+        },
+      ),
     );
   return {
     comments: frozen,
     includedComments: frozen.length,
     totalComments,
     truncatedBefore,
-    truncated: truncatedBefore || totalComments > frozen.length || frozen.some((comment) => comment.bodyTruncated)
+    truncated: truncatedBefore || totalComments > frozen.length || frozen.some((comment) => comment.bodyTruncated),
   };
 }
 
@@ -260,7 +200,7 @@ async function verifiedIssueDispatchReceipt({ event, github, repository, number,
     number,
     command,
     actor: requestedBy,
-    commentId: commandCommentId
+    commentId: commandCommentId,
   });
   if (payload?.command_request_id !== expected.requestId || payload?.command_receipt_sha256 !== expected.sha256) {
     throw new Error("Owner-command dispatch receipt identity is invalid");
@@ -294,7 +234,7 @@ async function verifiedIssueDispatchReceipt({ event, github, repository, number,
     receiptSha256: expected.sha256,
     receiptAuthor: authorIdentity,
     receiptCreatedAt,
-    receiptUpdatedAt
+    receiptUpdatedAt,
   };
 }
 
@@ -366,27 +306,48 @@ async function freezeCommentTriggeredIssue({ event, github }) {
   return {
     issue,
     conversation: issueConversation(conversation, issue.comments, {
-      truncatedBefore: recent.truncatedBefore || markerIndex > 0
+      truncatedBefore: recent.truncatedBefore || markerIndex > 0,
     }),
     previousTriage: {
       ...previousTriage,
       markerCommentId: numericCommentId(latestMarker.id),
-      markerUpdatedAt: commentTimestamp(latestMarker)
+      markerUpdatedAt: commentTimestamp(latestMarker),
     },
     trigger: {
       commentId: eventCommentId,
       author: normalizedLogin(trigger.user?.login),
       createdAt: validTimestamp(trigger.created_at),
-      authorAssociation: String(trigger.author_association ?? "")
-    }
+      authorAssociation: String(trigger.author_association ?? ""),
+    },
   };
 }
 
-export async function prepareReview({ eventPath, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
+export async function prepareReview({ eventPath, directory, config, token, toolingSha, configSha256, ownerCommandContext: ownerCommandContextInput, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
   const agentProfile = await trustedAgentProfile("review", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   const event = await readJson(eventPath);
   const repository = repositoryFromEvent(event);
-  if (!event.pull_request && event.action === "codekeeper_review") {
+  const requestedOwnerContext = normalizeOwnerCommandContext(ownerCommandContextInput, event);
+  let ownerContext = null;
+  if (requestedOwnerContext) {
+    const github = new GitHubClient({ token, repository });
+    ownerContext = await verifyOwnerCommandContext({
+      context: requestedOwnerContext,
+      event,
+      github,
+      repository,
+      config,
+      allowedCommands: ["review", "rerun", "triage"],
+      surfaces: ["pull-request", "review-thread"],
+    });
+    const pull = await github.getPull(ownerContext.targetNumber);
+    if (pull.number !== ownerContext.targetNumber) {
+      throw new Error("Owner-command review target changed before preparation");
+    }
+    if (ownerContext.headSha && pull.head?.sha !== ownerContext.headSha) {
+      throw new Error(`PR #${ownerContext.targetNumber} moved from ${ownerContext.headSha} to ${pull.head?.sha}; stale owner review will not start`);
+    }
+    event.pull_request = pull;
+  } else if (!event.pull_request && event.action === "codekeeper_review") {
     const number = Number(event.client_payload?.number);
     if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Review dispatch has no valid pull request number");
     const github = new GitHubClient({ token, repository });
@@ -396,16 +357,27 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     }
   }
   const pull = pullRequestFromEvent(event, repository);
-  const feedbackEvent = Boolean(event.review || event.comment?.pull_request_review_id || event.client_payload?.review_feedback);
-  if (feedbackEvent && event.action !== "codekeeper_review" && config.automation.reviewFeedbackTriage !== true) {
+  if (ownerContext && pull.number !== ownerContext.targetNumber) {
+    throw new Error("Owner-command review target does not match the live pull request");
+  }
+  if (ownerContext && pull.state !== "open") {
+    throw new Error(`PR #${ownerContext.targetNumber} is not open`);
+  }
+  if (ownerContext && pull.draft) {
+    throw new Error(`PR #${ownerContext.targetNumber} is a draft; owner review will not start`);
+  }
+  if (ownerContext && !pull.base?.ref) {
+    throw new Error(`PR #${ownerContext.targetNumber} has no base branch`);
+  }
+  const feedbackEvent = ownerContext ? ownerContext.command === "triage" : Boolean(event.review || event.comment?.pull_request_review_id || event.client_payload?.review_feedback);
+  const ownerReview = ownerContext !== null;
+  if (feedbackEvent && !ownerReview && event.action !== "codekeeper_review" && config.automation.reviewFeedbackTriage !== true) {
     throw new Error("Automatic review-feedback triage is off in the Codekeeper policy");
   }
-  if (!feedbackEvent && event.action !== "codekeeper_review" && config.automation.automaticPrReview !== true) {
+  if (!feedbackEvent && !ownerReview && event.action !== "codekeeper_review" && config.automation.automaticPrReview !== true) {
     throw new Error("Automatic pull request review is off in the Codekeeper policy");
   }
-  const reviewFeedback = feedbackEvent
-    ? await completeReviewFeedback(new GitHubClient({ token, repository }), pull.number, config)
-    : [];
+  const reviewFeedback = feedbackEvent ? await completeReviewFeedback(new GitHubClient({ token, repository }), pull.number, config) : [];
   const context = {
     mode: "review",
     repository,
@@ -427,9 +399,10 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
       baseRepository: boundedText(pull.base?.repo?.full_name, 512, "…"),
       headRepository: boundedText(pull.head?.repo?.full_name, 512, "…"),
       labels: boundedLabels(pull.labels),
-      reviewFeedbackFrozen: feedbackEvent,
-      reviewFeedback
-    }
+      reviewFeedbackFrozen: feedbackEvent || ownerContext?.command === "triage",
+      reviewFeedback,
+    },
+    ownerCommandContext: ownerContextMetadata(ownerContext),
   };
   if (!context.pullRequest.baseSha || !context.pullRequest.headSha) {
     throw new Error("Pull request base/head SHA is missing");
@@ -439,22 +412,9 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     bytes: 0,
     includedBytes: 0,
     truncated: false,
-    disabled: true
+    disabled: true,
   };
-  const [changeResult, diffResult] = await Promise.allSettled([
-    boundedChangedFileStatsBetween(
-      context.pullRequest.baseSha,
-      context.pullRequest.headSha,
-      config.review.maximumChangedFiles
-    ),
-    config.review.includeDiffInAgentContext
-      ? boundedDiffBetween(
-          context.pullRequest.baseSha,
-          context.pullRequest.headSha,
-          config.review.maximumDiffBytes
-        )
-      : disabledDiff
-  ]);
+  const [changeResult, diffResult] = await Promise.allSettled([boundedChangedFileStatsBetween(context.pullRequest.baseSha, context.pullRequest.headSha, config.review.maximumChangedFiles), config.review.includeDiffInAgentContext ? boundedDiffBetween(context.pullRequest.baseSha, context.pullRequest.headSha, config.review.maximumDiffBytes) : disabledDiff]);
   const reviewReasons = [];
   let changeSummary;
   if (changeResult.status === "fulfilled") {
@@ -463,7 +423,13 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     const reason = changedFileLimitReason(changeResult.reason);
     if (!reason) throw changeResult.reason;
     reviewReasons.push(reason);
-    changeSummary = { files: [], additions: 0, deletions: 0, changedLines: 0, largestFileChangedLines: 0 };
+    changeSummary = {
+      files: [],
+      additions: 0,
+      deletions: 0,
+      changedLines: 0,
+      largestFileChangedLines: 0,
+    };
   }
   if (diffResult.status === "rejected") throw diffResult.reason;
   const diff = diffResult.value;
@@ -476,10 +442,15 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     additions: changeSummary.additions,
     deletions: changeSummary.deletions,
     changedLines: changeSummary.changedLines,
-    largestFileChangedLines: changeSummary.largestFileChangedLines
+    largestFileChangedLines: changeSummary.largestFileChangedLines,
   };
   context.pullRequest.diff = diff;
-  context.pullRequest.eligibility = evaluateReviewEligibility({ config, pullRequest: context.pullRequest, repository, reviewReasons });
+  context.pullRequest.eligibility = evaluateReviewEligibility({
+    config,
+    pullRequest: context.pullRequest,
+    repository,
+    reviewReasons,
+  });
   context.pullRequest.reasoningEscalation = reviewReasoningEscalation(config, context);
   await writeBundle({
     directory,
@@ -487,7 +458,7 @@ export async function prepareReview({ eventPath, directory, config, token, tooli
     prompt: buildCoordinatorPrompt("review", context, config),
     workspacePrompt: buildReviewPrompt(context, config, agentProfile.text),
     schema: reviewSchema(config),
-    agentProfile
+    agentProfile,
   });
   return context;
 }
@@ -508,7 +479,7 @@ export async function prepareAudit({ directory, config, toolingSha, configSha256
     baseSha: currentHead(),
     defaultBranch: config.repository.defaultBranch,
     repairAuthorized,
-    repairAuthorizedBy: repairAuthorized ? actor : null
+    repairAuthorizedBy: repairAuthorized ? actor : null,
   };
   await writeBundle({
     directory,
@@ -516,12 +487,12 @@ export async function prepareAudit({ directory, config, toolingSha, configSha256
     prompt: buildCoordinatorPrompt("audit", context, config),
     workspacePrompt: buildAuditPrompt(context, config, agentProfile.text),
     schema: auditSchema(config),
-    agentProfile
+    agentProfile,
   });
   return context;
 }
 
-export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_EVENT_NAME, targetNumber, actor, triageMode, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
+export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_EVENT_NAME, targetNumber, actor, triageMode, directory, config, token, toolingSha, configSha256, ownerCommandContext: ownerCommandContextInput, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
   const agentProfile = await trustedAgentProfile("issue", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   if (triageMode !== "automatic" && triageMode !== "manual") {
     throw new Error("Issue triage mode must be automatic or manual");
@@ -535,8 +506,30 @@ export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_E
   const event = await readJson(eventPath);
   const repository = repositoryFromEvent(event);
   const github = new GitHubClient({ token, repository });
+  const requestedOwnerContext = normalizeOwnerCommandContext(ownerCommandContextInput, event);
+  let ownerContext = null;
+  if (requestedOwnerContext) {
+    if (triageMode !== "manual") throw new Error("Owner-command issue preparation requires manual triage mode");
+    if (normalizedLogin(actor) !== requestedOwnerContext.actor) {
+      throw new Error("Owner-command issue actor does not match the original owner comment");
+    }
+    ownerContext = await verifyOwnerCommandContext({
+      context: requestedOwnerContext,
+      event,
+      github,
+      repository,
+      config,
+      allowedCommands: ["review", "triage"],
+      surfaces: ["issue"],
+    });
+    if (targetNumber !== undefined && Number(targetNumber) !== ownerContext.targetNumber) {
+      throw new Error("Owner-command issue target does not match the prepared target");
+    }
+    targetNumber = ownerContext.targetNumber;
+    event.issue = await github.getIssue(targetNumber);
+  }
   let ownerCommandDispatch = null;
-  if (!event.issue && event.action === "codekeeper_issue") {
+  if (!ownerContext && !event.issue && event.action === "codekeeper_issue") {
     const number = Number(event.client_payload?.number);
     if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Issue dispatch has no valid issue number");
     if (triageMode !== "manual") throw new Error("Owner-command issue dispatch requires manual triage mode");
@@ -547,9 +540,9 @@ export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_E
       repository,
       number,
       actor,
-      allowedCommands: ["review", "triage"]
+      allowedCommands: ["review", "triage"],
     });
-  } else if (!event.issue && eventName === "workflow_dispatch") {
+  } else if (!ownerContext && !event.issue && eventName === "workflow_dispatch") {
     const inputNumber = Number(event.inputs?.issue_number);
     if (!Number.isSafeInteger(targetNumber) || targetNumber <= 0 || inputNumber !== targetNumber) {
       throw new Error("Manual issue triage has no valid bound issue number");
@@ -559,19 +552,14 @@ export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_E
     }
     event.issue = await github.getIssue(targetNumber);
   }
-  const commentTriggered = event.action === "created" && Boolean(event.comment);
-  const continuation = commentTriggered
-    ? await freezeCommentTriggeredIssue({ event, github })
-    : null;
+  const commentTriggered = !ownerContext && event.action === "created" && Boolean(event.comment);
+  const continuation = commentTriggered ? await freezeCommentTriggeredIssue({ event, github }) : null;
   const issue = continuation?.issue ?? event.issue;
   if (!issue || issue.pull_request) throw new Error("Issue payload is missing or refers to a pull request");
-  const [existing, pulls, closingPulls] = await Promise.all([
-    github.listOpenIssues(config.issues.maximumOpenIssueContext),
-    github.listOpenPulls(config.issues.maximumOpenIssueContext),
-    config.issues.closeResolvedIssues
-      ? github.listMergedPullRequestsClosingIssue(issue.number)
-      : Promise.resolve([])
-  ]);
+  if (ownerContext && issue.state !== "open") {
+    throw new Error(`#${ownerContext.targetNumber} is not open`);
+  }
+  const [existing, pulls, closingPulls] = await Promise.all([github.listOpenIssues(config.issues.maximumOpenIssueContext), github.listOpenPulls(config.issues.maximumOpenIssueContext), config.issues.closeResolvedIssues ? github.listMergedPullRequestsClosingIssue(issue.number) : Promise.resolve([])]);
   const context = {
     mode: "issue",
     triageMode,
@@ -581,6 +569,7 @@ export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_E
     runUrl: runUrl(repository),
     baseSha: currentHead(),
     ownerCommandDispatch,
+    ownerCommandContext: ownerContextMetadata(ownerContext),
     issue: {
       number: issue.number,
       title: boundedText(issue.title, 512, "…"),
@@ -592,11 +581,11 @@ export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_E
       labels: boundedLabels(issue.labels),
       conversation: continuation?.conversation ?? null,
       previousTriage: continuation?.previousTriage ?? null,
-      triageTrigger: continuation?.trigger ?? null
+      triageTrigger: continuation?.trigger ?? null,
     },
     resolvedByPullRequest: closingPulls[0] ?? null,
     duplicateCandidates: duplicateCandidates(issue, existing),
-    relatedPullRequests: relatedPullRequests(issue, pulls)
+    relatedPullRequests: relatedPullRequests(issue, pulls),
   };
   await writeBundle({
     directory,
@@ -604,18 +593,17 @@ export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_E
     prompt: buildCoordinatorPrompt("issue", context, config),
     workspacePrompt: buildIssuePrompt(context, config, agentProfile.text),
     schema: issueSchema(config),
-    agentProfile
+    agentProfile,
   });
   return context;
 }
 
-export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, targetNumber, actor, authorizationMode = "owner", expectedHead = "", reviewThreadIds = [], directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
+export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, targetNumber, actor, authorizationMode = "owner", expectedHead = "", reviewThreadIds = [], directory, config, token, toolingSha, configSha256, ownerCommandContext: ownerCommandContextInput, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
   const agentProfile = await trustedAgentProfile("fix", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   if (!["owner", "policy"].includes(authorizationMode)) {
     throw new Error("Codekeeper fix authorization mode must be owner or policy");
   }
-  if (!Array.isArray(reviewThreadIds) || reviewThreadIds.length > 128 || new Set(reviewThreadIds).size !== reviewThreadIds.length
-    || reviewThreadIds.some((threadId) => typeof threadId !== "string" || !threadId.trim() || threadId.length > 512)) {
+  if (!Array.isArray(reviewThreadIds) || reviewThreadIds.length > 128 || new Set(reviewThreadIds).size !== reviewThreadIds.length || reviewThreadIds.some((threadId) => typeof threadId !== "string" || !threadId.trim() || threadId.length > 512)) {
     throw new Error("Codekeeper fix review thread IDs are invalid");
   }
   if (authorizationMode === "owner" && !isConfiguredOwner(config, actor)) {
@@ -623,17 +611,41 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
   }
   const repository = process.env.GITHUB_REPOSITORY;
   const github = new GitHubClient({ token, repository });
-  const [issue, comments] = await Promise.all([
-    github.getIssue(targetNumber),
-    github.listIssueComments(targetNumber)
-  ]);
+  const event = eventPath ? await readJson(eventPath) : null;
+  const requestedOwnerContext = normalizeOwnerCommandContext(ownerCommandContextInput, event ?? {});
+  let ownerContext = null;
+  if (requestedOwnerContext) {
+    if (authorizationMode !== "owner") throw new Error("Direct owner-command repair requires owner authorization mode");
+    if (targetNumber !== undefined && Number(targetNumber) !== requestedOwnerContext.targetNumber) {
+      throw new Error("Owner-command repair target does not match the prepared target");
+    }
+    if (normalizedLogin(actor) !== requestedOwnerContext.actor) {
+      throw new Error("Owner-command repair actor does not match the original owner comment");
+    }
+    ownerContext = await verifyOwnerCommandContext({
+      context: requestedOwnerContext,
+      event: event ?? {},
+      github,
+      repository,
+      config,
+      allowedCommands: ["implement", "repair", "fix"],
+      surfaces: ["issue", "pull-request", "review-thread"],
+    });
+    targetNumber = ownerContext.targetNumber;
+  }
+  const [issue, comments] = await Promise.all([github.getIssue(targetNumber), github.listIssueComments(targetNumber)]);
   if (issue.number !== targetNumber) throw new Error(`GitHub returned an unexpected target for #${targetNumber}`);
   if (issue.state !== "open") throw new Error(`#${targetNumber} is not open`);
   let target;
   let baseSha;
   let subject;
   let ownerCommandDispatch = null;
+  let boundReviewThreadIds = [...reviewThreadIds];
+  const boundExpectedHead = expectedHead || ownerContext?.headSha || "";
   if (issue.pull_request) {
+    if (ownerContext && (ownerContext.surface === "issue" || ownerContext.command === "implement")) {
+      throw new Error("Owner-command issue implementation cannot target a pull request");
+    }
     const pull = await github.getPull(targetNumber);
     if (pull.number !== targetNumber || pull.state !== "open") throw new Error(`PR #${targetNumber} is not open`);
     if (pull.draft) throw new Error(`PR #${targetNumber} is a draft`);
@@ -646,8 +658,8 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
     if (pull.head?.ref === config.repository.defaultBranch) {
       throw new Error(`PR #${targetNumber} uses the default branch as its head`);
     }
-    if (expectedHead && pull.head?.sha !== expectedHead) {
-      throw new Error(`PR #${targetNumber} moved from ${expectedHead} to ${pull.head?.sha}; stale repair will not start`);
+    if (boundExpectedHead && pull.head?.sha !== boundExpectedHead) {
+      throw new Error(`PR #${targetNumber} moved from ${boundExpectedHead} to ${pull.head?.sha}; stale repair will not start`);
     }
     const liveLabels = labelNames(issue.labels);
     if (liveLabels.includes("codekeeper:paused") || liveLabels.includes("paused")) {
@@ -655,25 +667,38 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
     }
     if (authorizationMode === "policy") {
       if (!config.review.autoRepair) throw new Error("Automatic review repair is off in the Codekeeper policy");
-      if (!expectedHead) throw new Error("Automatic review repair requires its dispatched head SHA");
-      const normalizedActor = String(actor ?? "").trim().toLowerCase();
-      const marker = automaticRepairMarker(expectedHead);
-      const authorized = comments.some((comment) =>
-        comment?.user?.type === "Bot" &&
-        String(comment?.user?.login ?? "").trim().toLowerCase() === normalizedActor &&
-        typeof comment?.body === "string" &&
-        comment.body.endsWith(marker)
+      if (!boundExpectedHead) throw new Error("Automatic review repair requires its dispatched head SHA");
+      const normalizedActor = String(actor ?? "")
+        .trim()
+        .toLowerCase();
+      const marker = automaticRepairMarker(boundExpectedHead);
+      const authorized = comments.some(
+        (comment) =>
+          comment?.user?.type === "Bot" &&
+          String(comment?.user?.login ?? "")
+            .trim()
+            .toLowerCase() === normalizedActor &&
+          typeof comment?.body === "string" &&
+          comment.body.endsWith(marker),
       );
       if (!authorized) {
         throw new Error("Automatic review repair requires its current-head authorization marker");
       }
     }
-    const reviewThreads = reviewThreadIds.length > 0
-      ? frozenPullRepairReviewThreads(
-        await github.listPullReviewThreads(targetNumber),
-        reviewThreadIds
-      )
-      : [];
+    if (ownerContext?.surface === "review-thread") {
+      const threads = await github.listPullReviewThreads(targetNumber);
+      const sourceCommentId = Number(ownerContext.commentId);
+      const thread = threads.find((candidate) => (candidate.comments?.nodes ?? candidate.comments ?? []).some((comment) => Number(comment.databaseId ?? comment.id) === sourceCommentId));
+      if (!thread) throw new Error(`Owner-command review thread ${ownerContext.reviewThreadId ?? sourceCommentId} no longer exists`);
+      if (ownerContext.reviewThreadId && thread.id !== ownerContext.reviewThreadId) {
+        throw new Error("Owner-command review thread does not match the live source comment");
+      }
+      if (boundReviewThreadIds.length > 0 && (boundReviewThreadIds.length !== 1 || boundReviewThreadIds[0] !== thread.id)) {
+        throw new Error("Owner-command review repair must be bound to exactly its source thread");
+      }
+      boundReviewThreadIds = [thread.id];
+    }
+    const reviewThreads = boundReviewThreadIds.length > 0 ? frozenPullRepairReviewThreads(await github.listPullReviewThreads(targetNumber), boundReviewThreadIds) : [];
     if (!/^[0-9a-f]{40}$/i.test(String(pull.head?.sha ?? "")) || !/^[0-9a-f]{40}$/i.test(String(pull.base?.sha ?? ""))) {
       throw new Error(`PR #${targetNumber} is missing full head or base commit SHAs`);
     }
@@ -684,24 +709,26 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
       headSha: pull.head.sha,
       headRepository: pull.head.repo.full_name,
       baseRef: pull.base.ref,
-      reviewThreadIds: [...reviewThreadIds],
+      reviewThreadIds: [...boundReviewThreadIds],
       baseSha: pull.base.sha,
-      baseRepository: pull.base.repo.full_name
+      baseRepository: pull.base.repo.full_name,
     };
     baseSha = target.headSha;
     const repairEvidencePolicy = {
       authorizationMode,
       actor,
-      ownerLogins: [...config.repository.ownerLogins]
+      ownerLogins: [...config.repository.ownerLogins],
     };
     const frozenSubject = frozenPullRepairSubject(pull, comments, reviewThreads, repairEvidencePolicy);
     subject = {
-      pullRequest: frozenSubject
+      pullRequest: frozenSubject,
     };
     target.subjectSha256 = sha256(JSON.stringify(frozenSubject));
   } else {
-    if (eventPath) {
-      const event = await readJson(eventPath);
+    if (ownerContext && (ownerContext.surface !== "issue" || ownerContext.command !== "implement")) {
+      throw new Error("Owner-command pull-request repair cannot target an issue");
+    }
+    if (!ownerContext && event) {
       if (event.action === "codekeeper_fix") {
         if (authorizationMode !== "owner" || Number(event.client_payload?.number) !== targetNumber) {
           throw new Error("Owner-command issue implementation dispatch is invalid");
@@ -712,7 +739,7 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
           repository,
           number: targetNumber,
           actor,
-          allowedCommands: ["implement"]
+          allowedCommands: ["implement"],
         });
       }
     }
@@ -738,8 +765,8 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
         url: boundedText(issue.html_url, 2048, "…"),
         updatedAt: issue.updated_at ?? "",
         labels: boundedLabels(issue.labels),
-        comments: boundedOwnerComments(comments, config)
-      }
+        comments: boundedOwnerComments(comments, config),
+      },
     };
   }
   const context = {
@@ -754,7 +781,8 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
     authorizationMode,
     ownerCommandDispatch,
     target,
-    ...subject
+    ...subject,
+    ownerCommandContext: ownerContextMetadata(ownerContext),
   };
   await writeBundle({
     directory,
@@ -762,7 +790,7 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
     prompt: buildCoordinatorPrompt("fix", context, config),
     workspacePrompt: buildFixPrompt(context, config, agentProfile.text),
     schema: fixSchema(target),
-    agentProfile
+    agentProfile,
   });
   return context;
 }

@@ -35,7 +35,7 @@
     },
     {
       "path": "src/cli-heavy.mjs",
-      "sha256": "f71ac3ab54476359405820a5a3000314d8fa7900ad1845e2c39df61d1921639f"
+      "sha256": "f3129802e84b92cf55b22b5526f644e082f38ec181854b843657fd012954f9a8"
     },
     {
       "path": "src/cli.mjs",
@@ -59,7 +59,7 @@
     },
     {
       "path": "src/lib/commands.mjs",
-      "sha256": "5cfe740a0b416961b883a88e362433c0cae2c39e03245ee4a060b46bad690cce"
+      "sha256": "3ba4fbbc82ca4afc6b5baf0bbeeb7ade6f25f2276ebccafc03d10262e35ef58a"
     },
     {
       "path": "src/lib/config.mjs",
@@ -170,6 +170,10 @@
       "sha256": "6f7b9fc524f9c7ca2cac35325521e277ddc4a90530fe11b5ba98b72a8e8fc19c"
     },
     {
+      "path": "src/lib/owner-command-prepare.mjs",
+      "sha256": "5d0f329076cbfd2db2e5a842655e81a6ba83597db016d1624490ca14ca747c27"
+    },
+    {
       "path": "src/lib/owner-commands.mjs",
       "sha256": "63812bf8310f85b6a28fdcb78f5eaf3bf1166a8065bad55ed733dcaf178f6d7a"
     },
@@ -186,8 +190,12 @@
       "sha256": "6b919ee33222f4a8a5018502336427bef14cf448a1bbd4610a4f287646e8e18e"
     },
     {
+      "path": "src/lib/prepare-support.mjs",
+      "sha256": "b8e39c5865f7672dcf8b66d9d24cd1220cce2454488e1d15e8a54255b4007493"
+    },
+    {
       "path": "src/lib/prepare.mjs",
-      "sha256": "1a79f693e1d80cc8d6a381c77933becd29d833c7c409cde1dfae9e7163d2a2e4"
+      "sha256": "02beaa2e545512c973cf400d4cea0087a30bc38c5e7b024dade742f63225336d"
     },
     {
       "path": "src/lib/process-supervisor.mjs",

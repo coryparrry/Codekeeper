@@ -43,7 +43,10 @@ import {
   runAgentFromBundle,
   runWorkspaceAgentFromBundle,
 } from "./lib/agents-runtime.mjs";
-import { runOwnerCommand } from "./lib/commands.mjs";
+import {
+  resolveOwnerCommandContext,
+  runOwnerCommand,
+} from "./lib/commands.mjs";
 import { resolveAgentProfileInputs } from "./lib/agent-profiles.mjs";
 import { runCompute } from "./lib/orchestration/compute.mjs";
 import { runValidate } from "./lib/orchestration/validate.mjs";
@@ -143,6 +146,21 @@ async function runStageCommand({
 }) {
   const operation = args.require("operation");
   const mode = args.get("mode");
+  if (phase === "compute" && operation === "owner-command-context") {
+    const context = resolveOwnerCommandContext({
+      event: await readJson(args.require("event")),
+      config,
+      automationLogin: args.require("automation-bot-login"),
+    });
+    if (args.get("result")) {
+      await writeFile(
+        runnerFile(args.get("result"), "result"),
+        `${JSON.stringify(context, null, 2)}\n`,
+        { flag: "wx" },
+      );
+    }
+    return context;
+  }
   const rawDirectory = args.get("directory");
   const directory = rawDirectory
     ? assertRunnerOwnedDirectory(rawDirectory)
@@ -203,6 +221,15 @@ async function runStageCommand({
         args.get("review-thread-ids", ""),
         "review-thread-ids",
       ),
+      ownerCommandContext: args.get("command-context")
+        ? JSON.parse(
+            (
+              await readRegularFile(
+                runnerFile(args.get("command-context"), "command-context"),
+              )
+            ).toString("utf8"),
+          )
+        : undefined,
       ...(await agentProfileInputs(args, toolingSha)),
     });
   }
@@ -280,6 +307,7 @@ const KNOWN_FLAGS = new Set([
   "automation-bot-id",
   "automation-bot-login",
   "candidate",
+  "command-context",
   "config",
   "context",
   "directory",
