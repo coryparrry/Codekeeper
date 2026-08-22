@@ -1031,6 +1031,7 @@ test("update advances release-owned files while preserving adopter configuration
     reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-assistant.yml"),
     false
   );
+  assert.equal(reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper.yml"), false);
   assert.equal(
     reviewedPlan.files.some((file) => file.path === ".github/workflows/codekeeper-review.yml"),
     false
@@ -1363,7 +1364,7 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
     false
   );
   const w = ".github/workflows/";
-  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [".github/codekeeper-release.json", ".github/codekeeper.json", ".github/codekeeper/README.md", ".github/codekeeper/actions/acquire-package/action.yml", `${w}codekeeper-assistant.yml`, `${w}codekeeper-maintain.yml`, `${w}codekeeper-review.yml`, `${w}codekeeper-runtime-assistant.yml`, `${w}codekeeper-runtime-maintain.yml`, `${w}codekeeper-runtime-review.yml`, `${w}codekeeper-runtime.yml`]);
+  assert.deepEqual(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]).trim().split("\n").sort(), [".github/codekeeper-release.json", ".github/codekeeper.json", ".github/codekeeper/README.md", ".github/codekeeper/actions/acquire-package/action.yml", `${w}codekeeper-runtime.yml`, `${w}codekeeper.yml`]);
   assert.match(output.toString(), /Starting model set: openai/);
   assert.match(output.toString(), /OpenAI traces: disabled/);
   assert.match(output.toString(), /Pull request reviewer \(Pull request review\): openai \/ gpt-5\.6-luna \/ medium effort/);
@@ -1372,12 +1373,11 @@ test("successful init revalidates the confirmed snapshot and orders commit, publ
   assert.doesNotMatch(output.toString(), /OPENAI_TRACE_API_KEY:/);
   assert.match(output.toString(), /CODEKEEPER_APP_PRIVATE_KEY: downloaded GitHub App PEM private key used to mint App installation tokens/);
   assert.doesNotMatch(output.toString(), /DEEPSEEK_API_KEY:/);
-  assert.match(output.toString(), /\.github\/workflows\/codekeeper-review\.yml/);
-  assert.match(output.toString(), /\.github\/workflows\/codekeeper-maintain\.yml/);
+  assert.match(output.toString(), /\.github\/workflows\/codekeeper\.yml/);
   assert.doesNotMatch(output.toString(), /\.github\/codekeeper\/agents\/pr-reviewer\.md/);
   assert.match(output.toString(), /Packaged agent profiles are the default/);
   assert.match(output.toString(), /Capability switches control repair, issue implementation, issue closure, and merge actions/);
-  assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:issues|fix)\.yml/);
+  assert.doesNotMatch(output.toString(), /\.github\/workflows\/codekeeper-(?:assistant|review|issues|fix|maintain|runtime-(?:assistant|review|issues|fix|maintain))\.yml/);
   assert.match(output.toString(), /Startup: enabled after merge/);
   assert.match(output.toString(), /run codekeeper verify before treating it as ready/i);
   assert.match(output.toString(), /Created setup pull request: https:\/\/github\.com\/acme\/widget\/pull\/42/);

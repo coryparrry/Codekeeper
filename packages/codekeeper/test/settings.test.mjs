@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
-import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODES } from "../src/constants.mjs";
+import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODES, UNIFIED_CALLER_WORKFLOW } from "../src/constants.mjs";
 import { buildInstallPlan } from "../src/plan.mjs";
 import { upgradePolicy } from "../src/policy.mjs";
 import { editProfileWithEditor } from "../src/settings-tui.mjs";
@@ -400,7 +400,7 @@ test("an enabled issue workspace receives the OpenAI workspace key", async () =>
       automationBotLogin: "codekeeper-acme[bot]"
     }
   });
-  const workflow = plan.files.find((file) => file.path === MODES.issues.target).contents;
+  const workflow = plan.files.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents;
 
   assert.ok(plan.secrets.some((secret) => secret.name === "OPENAI_API_KEY"));
   assert.match(workflow, /workspace_api_key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
@@ -500,7 +500,7 @@ test("fresh settings can enable capabilities after bundled defaults are verified
     }
   });
   assert.equal(plan.policy.review.autoRepair, true);
-  assert.ok(plan.files.some((file) => file.path === MODES.fix.target));
+  assert.ok(plan.files.some((file) => file.path === UNIFIED_CALLER_WORKFLOW.target));
 });
 
 test("profile editing uses a temporary copy and returns only validated Markdown", async () => {
@@ -587,12 +587,13 @@ test("one validated settings object renders matching caller controls and schedul
     }
   });
   const contents = Object.fromEntries(plan.files.map((file) => [file.path, file.contents]));
-  assert.match(contents[MODES.review.target], /auto_review: false/);
-  assert.match(contents[MODES.review.target], /feedback_triage: false/);
-  assert.match(contents[MODES.issues.target], /auto_triage: false/);
-  assert.match(contents[MODES.maintain.target], /cron: "23 4 \* \* 2"/);
-  assert.match(contents[MODES.maintain.target], /dry_run: \$\{\{ github\.event_name == 'schedule' \|\| inputs\.dry_run \}\}/);
-  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /owner_requests: false/);
+  const caller = contents[UNIFIED_CALLER_WORKFLOW.target];
+  assert.match(caller, /auto_review: false/);
+  assert.match(caller, /feedback_triage: false/);
+  assert.match(caller, /auto_triage: false/);
+  assert.match(caller, /cron: "23 4 \* \* 2"/);
+  assert.match(caller, /dry_run: \$\{\{ github\.event_name == 'schedule' \|\| inputs\.dry_run \}\}/);
+  assert.match(caller, /owner_requests: false/);
 });
 
 test("existing installations can remove a workflow and change a profile in one configuration PR", async () => {
@@ -656,7 +657,8 @@ test("existing installations can remove a workflow and change a profile in one c
     }
   });
   assert.deepEqual(update.modes, ["review"]);
-  assert.equal(update.files.find((file) => file.path === MODES.maintain.target).delete, true);
+  assert.equal(update.files.some((file) => file.path === UNIFIED_CALLER_WORKFLOW.target && file.delete), false);
+  assert.match(update.files.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents, /installed_modes: "review"/);
   assert.match(update.files.find((file) => file.path === AGENT_PROFILES["pr-reviewer"].target).contents, /Prioritise API regressions/);
-  assert.match(update.files.find((file) => file.path.endsWith("codekeeper-assistant.yml")).contents, /owner_requests: false/);
+  assert.match(update.files.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents, /owner_requests: false/);
 });

@@ -58,6 +58,14 @@ export function isInstalledCodekeeperWorkflow(source, mode) {
     .map((line) => line.trim())
     .filter((line) => /^(?:-\s+)?uses:/.test(line))
     .map((line) => line.replace(/^-\s+/, ""));
+  if (Array.isArray(mode) && mode.length > 1) {
+    return (
+      activeUses.length === 5 &&
+      activeUses.every((line) => line === "uses: ./.github/workflows/codekeeper-runtime.yml") &&
+      /^\s*installed_modes:\s*(?:"[a-z]+(?:,[a-z]+)*"|[a-z]+(?:,[a-z]+)*)\s*$/m.test(source)
+    );
+  }
+  if (Array.isArray(mode)) [mode] = mode;
   const actionPrefix = `uses: ${SOURCE_REPOSITORY}/tools/codekeeper@`;
   const workflowPrefix = `uses: ${SOURCE_REPOSITORY}/.github/workflows/codekeeper-${mode}.yml@`;
   const localBootstrap = "uses: ./.github/workflows/codekeeper-bootstrap.yml";
@@ -152,7 +160,7 @@ export async function assertManagedArtifacts(
       required: true,
     });
     if (artifact.validation === "caller") {
-      if (!isInstalledCodekeeperWorkflow(source, artifact.callerMode)) {
+      if (!isInstalledCodekeeperWorkflow(source, artifact.callerModes)) {
         throw new InstallerError(
           `Managed caller ${target} is not an installed Codekeeper workflow.`,
           { code: "EXISTING_INSTALLATION_INVALID" },

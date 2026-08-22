@@ -48,8 +48,8 @@ includes:
 - `.github/codekeeper-release.json` — installed package identity and receipt
 - `.github/codekeeper/README.md` — ownership of installed files
 - `.github/codekeeper/actions/acquire-package/action.yml` — exact package fetch
-- `.github/workflows/codekeeper-assistant.yml` and matching `codekeeper-runtime-*.yml`
-- caller workflows such as `.github/workflows/codekeeper-review.yml`
+- `.github/workflows/codekeeper.yml` — one static caller for every installed mode
+- `.github/workflows/codekeeper-runtime.yml` — shared compute, validate, publish, and credential-proof jobs
 
 Optional `.github/codekeeper/agents/*.md` files override packaged agent
 profiles after they merge to the default branch.
@@ -117,7 +117,7 @@ scheduled maintenance, tracing, and automatic merge **off**.
 - [Architecture](https://github.com/coryparrry/Codekeeper/blob/main/docs/ARCHITECTURE.md)
 - [Support](https://github.com/coryparrry/Codekeeper/blob/main/SUPPORT.md)
 
-Bundled source checkpoint: `7f10d46f15b6dbb172febc9ce578cc4cc145e090`.
+Bundled source checkpoint: `ad58ff0df84f56b75e995e72e88d78063cf8af5b`.
 
 ## Security
 

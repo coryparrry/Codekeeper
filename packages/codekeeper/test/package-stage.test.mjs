@@ -70,11 +70,7 @@ test("package stage contains one release with separate closed installer and runt
     "runtime/src/lib/agents-runtime.mjs",
     "runtime/src/lib/runtime-paths.mjs",
     "release/actions/acquire-package/action.yml",
-    "release/workflows/codekeeper-assistant.yml",
-    "release/workflows/codekeeper-fix.yml",
-    "release/workflows/codekeeper-issues.yml",
-    "release/workflows/codekeeper-maintain.yml",
-    "release/workflows/codekeeper-review.yml",
+    "release/workflows/codekeeper-runtime.yml",
     "package.json",
   ]) {
     assert.ok(paths.includes(requiredPath), `${requiredPath} is staged`);

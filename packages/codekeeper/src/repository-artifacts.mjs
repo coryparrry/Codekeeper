@@ -7,7 +7,7 @@ import {
   PACKAGE_ACQUIRE_ACTION,
   POLICY_TARGET,
   RELEASE_MANIFEST_TARGET,
-  RUNTIME_WORKFLOWS,
+  UNIFIED_CALLER_WORKFLOW,
 } from "./constants.mjs";
 import { MODE_REGISTRY } from "./mode-registry.mjs";
 
@@ -15,14 +15,13 @@ const ARTIFACT_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const ASSET_PATH =
   /^(?:agents|policies|repository|runtime-actions|runtime-workflows|workflows)\/[A-Za-z0-9._/-]+$/;
 const CODEKEEPER_TARGET =
-  /^(?:\.github\/codekeeper\.json|\.github\/codekeeper\/[A-Za-z0-9._/-]+|\.github\/workflows\/codekeeper-[a-z0-9-]+\.yml)$/;
+  /^(?:\.github\/codekeeper\.json|\.github\/codekeeper\/[A-Za-z0-9._/-]+|\.github\/workflows\/codekeeper(?:-[a-z0-9-]+)?\.yml)$/;
 const OWNERSHIP = new Set(["mixed", "release", "user"]);
 const RENDERERS = new Set([
-  "assistant-workflow",
   "copy",
-  "mode-workflow",
   "policy",
   "profile",
+  "unified-workflow",
 ]);
 const ACTIVATION_KINDS = new Set(["always", "mode", "profile"]);
 
@@ -42,6 +41,7 @@ function freezeArtifact(artifact) {
       ...(artifact.assets ?? (artifact.asset ? [artifact.asset] : [])),
     ]),
     previousTargets: Object.freeze([...(artifact.previousTargets ?? [])]),
+    callerModes: Object.freeze([...(artifact.callerModes ?? [])]),
   });
 }
 
@@ -55,16 +55,16 @@ const POLICY_ARTIFACT = {
   validation: "policy",
   purpose: "Policy, model choices, protected paths, and startup controls",
 };
-const ASSISTANT_ARTIFACT = {
-  id: "repository.workflow.assistant",
-  target: ASSISTANT_WORKFLOW.target,
-  asset: ASSISTANT_WORKFLOW.asset,
+const CALLER_ARTIFACT = {
+  id: "repository.workflow.caller",
+  target: UNIFIED_CALLER_WORKFLOW.target,
+  asset: UNIFIED_CALLER_WORKFLOW.asset,
   ownership: "release",
   activation: { kind: "always" },
-  renderer: "assistant-workflow",
+  renderer: "unified-workflow",
   validation: "caller",
-  callerMode: ASSISTANT_WORKFLOW.id,
-  purpose: ASSISTANT_WORKFLOW.description,
+  callerModes: [ASSISTANT_WORKFLOW.id, ...MODE_IDS],
+  purpose: UNIFIED_CALLER_WORKFLOW.description,
 };
 const PACKAGE_ACTION_ARTIFACT = {
   id: "repository.action.acquire-package",
@@ -100,29 +100,8 @@ export const REPOSITORY_ARTIFACTS = Object.freeze(
       validation: "profile",
       purpose: AGENT_PROFILES[profile].purpose,
     })),
-    ASSISTANT_ARTIFACT,
-    ...MODE_IDS.map((mode) => ({
-      id: `repository.workflow.${mode}`,
-      target: MODE_REGISTRY[mode].caller.target,
-      asset: MODE_REGISTRY[mode].caller.asset,
-      ownership: "release",
-      activation: { kind: "mode", id: mode },
-      renderer: "mode-workflow",
-      validation: "caller",
-      callerMode: mode,
-      purpose: MODE_REGISTRY[mode].label,
-    })),
+    CALLER_ARTIFACT,
     PACKAGE_ACTION_ARTIFACT,
-    {
-      id: "repository.workflow.runtime.assistant",
-      target: RUNTIME_WORKFLOWS.assistant.target,
-      asset: RUNTIME_WORKFLOWS.assistant.asset,
-      ownership: "release",
-      activation: { kind: "always" },
-      renderer: "copy",
-      validation: "digest",
-      purpose: RUNTIME_WORKFLOWS.assistant.description,
-    },
     {
       id: "repository.workflow.runtime",
       target: GENERIC_RUNTIME_WORKFLOW.target,
@@ -133,16 +112,6 @@ export const REPOSITORY_ARTIFACTS = Object.freeze(
       validation: "digest",
       purpose: GENERIC_RUNTIME_WORKFLOW.description,
     },
-    ...MODE_IDS.map((mode) => ({
-      id: `repository.workflow.runtime.${mode}`,
-      target: MODE_REGISTRY[mode].runtime.target,
-      asset: MODE_REGISTRY[mode].runtime.asset,
-      ownership: "release",
-      activation: { kind: "mode", id: mode },
-      renderer: "copy",
-      validation: "digest",
-      purpose: RUNTIME_WORKFLOWS[mode].description,
-    })),
     GUIDE_ARTIFACT,
   ].map(freezeArtifact),
 );
@@ -157,6 +126,36 @@ export const RETIRED_REPOSITORY_ARTIFACTS = Object.freeze([
     validation: "digest",
     purpose: "Retired per-run package bootstrap workflow",
   }),
+  freezeArtifact({
+    id: "repository.workflow.assistant",
+    target: ASSISTANT_WORKFLOW.target,
+    ownership: "release",
+    validation: "caller",
+    callerModes: [ASSISTANT_WORKFLOW.id],
+    purpose: "Retired repository assistant caller",
+  }),
+  ...MODE_IDS.map((mode) => freezeArtifact({
+    id: `repository.workflow.${mode}`,
+    target: MODE_REGISTRY[mode].caller.target,
+    ownership: "release",
+    validation: "caller",
+    callerModes: [mode],
+    purpose: `Retired ${MODE_REGISTRY[mode].label.toLowerCase()} caller`,
+  })),
+  freezeArtifact({
+    id: "repository.workflow.runtime.assistant",
+    target: ".github/workflows/codekeeper-runtime-assistant.yml",
+    ownership: "release",
+    validation: "digest",
+    purpose: "Retired repository assistant runtime wrapper",
+  }),
+  ...MODE_IDS.map((mode) => freezeArtifact({
+    id: `repository.workflow.runtime.${mode}`,
+    target: MODE_REGISTRY[mode].runtime.target,
+    ownership: "release",
+    validation: "digest",
+    purpose: `Retired ${MODE_REGISTRY[mode].label.toLowerCase()} runtime wrapper`,
+  })),
 ]);
 
 export function validateRepositoryArtifactCatalog({
@@ -173,6 +172,7 @@ export function validateRepositoryArtifactCatalog({
     const retired = index >= artifacts.length;
     const assets =
       artifact?.assets ?? (artifact?.asset ? [artifact.asset] : []);
+    const artifactCallerModes = artifact?.callerModes ?? [];
     if (
       !artifact ||
       typeof artifact !== "object" ||
@@ -210,8 +210,9 @@ export function validateRepositoryArtifactCatalog({
         typeof artifact.purpose !== "string" ||
         !artifact.purpose.trim() ||
         (artifact.validation === "caller" &&
-          ![ASSISTANT_WORKFLOW.id, ...MODE_IDS].includes(artifact.callerMode)) ||
-        (artifact.validation !== "caller" && artifact.callerMode !== undefined)
+          (artifactCallerModes.length !== 1 ||
+            ![ASSISTANT_WORKFLOW.id, ...MODE_IDS].includes(artifactCallerModes[0]))) ||
+        (artifact.validation !== "caller" && artifactCallerModes.length !== 0)
       ) {
         throw new TypeError(
           "Retired artifacts require explicit release ownership and validation.",
@@ -260,20 +261,24 @@ export function validateRepositoryArtifactCatalog({
     }
     if (
       (artifact.validation === "caller" &&
-        ![ASSISTANT_WORKFLOW.id, ...MODE_IDS].includes(artifact.callerMode)) ||
-      (artifact.validation !== "caller" && artifact.callerMode !== undefined)
+        (artifactCallerModes.length === 0 ||
+          artifactCallerModes.some((mode) =>
+            ![ASSISTANT_WORKFLOW.id, ...MODE_IDS].includes(mode)))) ||
+      (artifact.validation !== "caller" && artifactCallerModes.length !== 0)
     ) {
       throw new TypeError(
         "Caller artifacts require one explicit supported caller mode.",
       );
     }
     if (artifact.validation === "caller") {
-      if (callerModes.has(artifact.callerMode)) {
-        throw new TypeError(
-          "Repository artifact catalog contains a duplicate caller mode.",
-        );
+      for (const mode of artifactCallerModes) {
+        if (callerModes.has(mode)) {
+          throw new TypeError(
+            "Repository artifact catalog contains a duplicate caller mode.",
+          );
+        }
+        callerModes.add(mode);
       }
-      callerModes.add(artifact.callerMode);
     }
     if (
       (artifact.renderer === "policy") !==
@@ -283,8 +288,9 @@ export function validateRepositoryArtifactCatalog({
       (artifact.renderer === "copy" &&
         (artifact.ownership !== "release" ||
           artifact.validation !== "digest")) ||
-      (artifact.renderer === "mode-workflow" &&
-        artifact.activation.kind !== "mode")
+      (artifact.renderer === "unified-workflow" &&
+        (artifact.activation.kind !== "always" ||
+          artifact.validation !== "caller"))
     ) {
       throw new TypeError(
         "Repository artifact catalog contains incompatible ownership or rendering rules.",
@@ -356,7 +362,9 @@ export function createReleaseManagedCatalog({
   const callerArtifactByMode = new Map();
   for (const artifact of managedArtifacts) {
     if (artifact.validation !== "caller") continue;
-    callerArtifactByMode.set(artifact.callerMode, artifact);
+    for (const mode of artifact.callerModes) {
+      callerArtifactByMode.set(mode, artifact);
+    }
   }
   return Object.freeze({
     artifacts: managedArtifacts,

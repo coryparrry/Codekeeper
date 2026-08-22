@@ -250,7 +250,7 @@ function dryRunRunner({ matchingIds = [101], jobs = [] } = {}) {
         })),
       ]));
     }
-    if (key.startsWith("gh workflow run codekeeper-maintain.yml"))
+    if (key.startsWith("gh workflow run codekeeper.yml"))
       return result();
     if (key === `gh run watch 101 --repo ${REPOSITORY} --exit-status`) {
       assert.equal(options.stdio, "ignore");
@@ -323,7 +323,11 @@ test("controlled maintenance rejects ambiguous dispatches and skipped model jobs
 function credentialRunner({ matchingIds = [201], jobs = [{ name: "Codekeeper App credential verification", conclusion: "success" }] } = {}) {
   return createRecordingRunner(({ command, args, options }) => {
     const key = `${command} ${args.join(" ")}`;
-    if (key.startsWith("gh workflow run codekeeper-assistant.yml")) return result();
+    if (key.startsWith("gh workflow run codekeeper.yml")) {
+      assert.match(key, /--field verify_app_credentials=true/);
+      assert.match(key, new RegExp(`--field verification_id=${VERIFICATION_ID}`));
+      return result();
+    }
     if (key.includes("gh run list")) {
       return result(JSON.stringify([
         { databaseId: 200, displayTitle: "Codekeeper App credential verification another-run" },

@@ -4,17 +4,15 @@ import { execFileSync } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  renderAssistantWorkflow,
   renderInstallFiles,
   renderPolicy,
-  renderWorkflow,
+  renderUnifiedWorkflow,
   sha256
 } from "../src/assets.mjs";
 import { applyPolicyPreset } from "../../../tools/codekeeper/presets/catalogue.mjs";
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
-  ASSISTANT_WORKFLOW,
   APP_SECRET,
   DEEPSEEK_SECRET,
   MODE_IDS,
@@ -27,7 +25,8 @@ import {
   RELEASE_MANIFEST_TARGET,
   SOURCE_COMMIT,
   SOURCE_REPOSITORY,
-  TRACE_SECRET
+  TRACE_SECRET,
+  UNIFIED_CALLER_WORKFLOW
 } from "../src/constants.mjs";
 import { ASSET_KEYS } from "../src/repository-artifacts.mjs";
 import {
@@ -58,7 +57,7 @@ import {
 const CHECKPOINT_PATHS = Object.freeze({
   "policies/mixed.json": ".github/codekeeper.json",
   "policies/openai.json": ".github/codekeeper.json#preset=openai",
-  "workflows/assistant.yml": "examples/workflows/codekeeper-assistant.yml.example"
+  "workflows/codekeeper.yml": "examples/workflows/codekeeper.yml.example"
 });
 
 const CHECKPOINT_PROVENANCE_PATHS = Object.freeze({
@@ -185,7 +184,7 @@ test("asset verification rejects an altered inventory or a single changed byte",
   const metadataPath = path.join(PACKAGE_ROOT, "assets", "metadata.json");
   const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
   const extra = structuredClone(metadata);
-  extra.assets["workflows/extra.yml"] = extra.assets["workflows/review.yml"];
+  extra.assets["workflows/codekeeper-extra.yml"] = extra.assets["workflows/codekeeper.yml"];
   await assert.rejects(
     loadVerifiedAssets({
       packageRoot: PACKAGE_ROOT,
@@ -197,7 +196,7 @@ test("asset verification rejects an altered inventory or a single changed byte",
     assertInstallerCode(assert, "ASSET_INVENTORY_INVALID")
   );
 
-  const reviewPath = path.join(PACKAGE_ROOT, "assets", "workflows", "review.yml");
+  const reviewPath = path.join(PACKAGE_ROOT, "assets", "workflows", "codekeeper.yml");
   await assert.rejects(
     loadVerifiedAssets({
       packageRoot: PACKAGE_ROOT,
@@ -272,14 +271,12 @@ test("a same-provider model change stays in policy and does not rewrite a workfl
   assert.equal(renderedPolicy.ai.agents.review.model, "anthropic/claude-sonnet-4.5");
   assert.deepEqual(renderedPolicy.ai.agents.review.modelSettings, custom.ai.agents.review.modelSettings);
   assert.equal(renderedPolicy.ai.agents.review.workspace.model, "gpt-5.6-luna");
-  for (const mode of MODE_IDS) {
-    const rendered = renderWorkflow(bundle.contents[MODES[mode].asset], {
-      packageRelease: TEST_PACKAGE_RELEASE,
-      mode,
-      preset: "openai"
-    });
-    assert.doesNotMatch(rendered, /gpt-5\.6-(?:sol|terra|luna)/);
-  }
+  const rendered = renderUnifiedWorkflow(bundle.contents[UNIFIED_CALLER_WORKFLOW.asset], {
+    packageRelease: TEST_PACKAGE_RELEASE,
+    ownerRequests: true,
+    modes: MODE_IDS
+  });
+  assert.doesNotMatch(rendered, /gpt-5\.6-(?:sol|terra|luna)/);
 });
 
 test("retaining a curated model preserves adopter-edited model settings", async () => {
@@ -368,42 +365,33 @@ test("openai preset changes only issue-triage model policy from the mixed preset
   });
 });
 
-test("each rendered workflow contains exactly one local runtime workflow and package pin", async () => {
+test("the unified caller contains one pinned generic runtime per installed stage", async () => {
   const bundle = await loadVerifiedAssets();
   for (const preset of ["mixed", "openai"]) {
-    for (const mode of MODE_IDS) {
-      const rendered = renderWorkflow(bundle.contents[MODES[mode].asset], {
-        packageRelease: TEST_PACKAGE_RELEASE,
-        mode,
-        preset
-      });
-      const uses = rendered.split("\n").map((line) => line.trim()).filter((line) => /^(?:- )?uses:/.test(line));
-      assert.equal(uses.length, 1, `${preset}/${mode}`);
-      assert.deepEqual(uses, [
-        `uses: ./.github/workflows/codekeeper-runtime-${mode}.yml`
-      ]);
-      assert.match(rendered, new RegExp(TEST_PACKAGE_RELEASE.integrity.replaceAll("+", "\\+")));
-      assert.doesNotMatch(rendered, /OWNER\/REPOSITORY|FULL_COMMIT_SHA|PACKAGE_(?:VERSION|INTEGRITY)/);
-      assert.doesNotMatch(rendered, /codekeeper:ready/);
+    const policy = JSON.parse(bundle.contents[`policies/${preset}.json`]);
+    const rendered = renderUnifiedWorkflow(bundle.contents[UNIFIED_CALLER_WORKFLOW.asset], {
+      packageRelease: TEST_PACKAGE_RELEASE,
+      ownerRequests: true,
+      automationBotLogin: "Codekeeper-Acme[bot]",
+      modes: MODE_IDS,
+      policy
+    });
+    const uses = rendered.split("\n").map((line) => line.trim()).filter((line) => /^(?:- )?uses:/.test(line));
+    assert.equal(uses.length, 5, preset);
+    assert.equal(uses.filter((line) => line === "uses: ./.github/workflows/codekeeper-runtime.yml").length, 5);
+    assert.match(rendered, new RegExp(TEST_PACKAGE_RELEASE.integrity.replaceAll("+", "\\+")));
+    assert.match(rendered, new RegExp(`installed_modes: "${MODE_IDS.join(",")}"`));
+    assert.match(rendered, /contains\(github\.event\.comment\.body, '@codekeeper-acme'\)/);
+    assert.doesNotMatch(rendered, /AUTOMATION_BOT_MENTION/);
+    assert.doesNotMatch(rendered, /OWNER\/REPOSITORY|FULL_COMMIT_SHA|PACKAGE_(?:VERSION|INTEGRITY)/);
+    assert.match(rendered, /codekeeper:ready/);
+    for (const secret of ["OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "OPENAI_TRACE_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]) {
+      assert.match(rendered, new RegExp(`secrets\\.${secret}`));
     }
   }
-  const mixedIssue = renderWorkflow(bundle.contents[MODES.issues.asset], {
-    packageRelease: TEST_PACKAGE_RELEASE,
-    mode: "issues",
-    preset: "mixed"
-  });
-  const openaiIssue = renderWorkflow(bundle.contents[MODES.issues.asset], {
-    packageRelease: TEST_PACKAGE_RELEASE,
-    mode: "issues",
-    preset: "openai"
-  });
-  assert.match(mixedIssue, /secrets\.DEEPSEEK_API_KEY/);
-  assert.doesNotMatch(mixedIssue, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY/);
-  assert.match(openaiIssue, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY/);
-  assert.doesNotMatch(openaiIssue, /secrets\.DEEPSEEK_API_KEY/);
 });
 
-test("generated callers request only the App permissions required by their selected capabilities", async () => {
+test("the unified caller wires named provider secrets and leaves App permissions to the runtime", async () => {
   const bundle = await loadVerifiedAssets();
   const policy = upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"]));
   policy.review.autoRepair = false;
@@ -420,26 +408,12 @@ test("generated callers request only the App permissions required by their selec
     enforceBundledDefaults: false
   });
   const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
-  assert.match(contents[MODES.review.target], /app_contents_permission: "read"/);
-  assert.match(contents[MODES.review.target], /app_issues_permission: "write"/);
-  assert.match(contents[MODES.review.target], /app_pull_requests_permission: "write"/);
-  assert.match(contents[MODES.maintain.target], /app_contents_permission: "read"/);
-  assert.match(contents[MODES.maintain.target], /app_issues_permission: "write"/);
-  assert.match(contents[MODES.maintain.target], /app_pull_requests_permission: "read"/);
-  assert.match(contents[MODES.issues.target], /app_contents_permission: "read"/);
-  assert.match(contents[MODES.issues.target], /app_issues_permission: "write"/);
-  assert.match(contents[MODES.issues.target], /app_pull_requests_permission: "read"/);
-  assert.match(contents[MODES.fix.target], /app_contents_permission: "write"/);
-  assert.match(contents[MODES.fix.target], /app_issues_permission: "write"/);
-  assert.match(contents[MODES.fix.target], /app_pull_requests_permission: "write"/);
-  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /app_contents_permission: "write"/);
-  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /app_issues_permission: "write"/);
-  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /app_pull_requests_permission: "write"/);
-  const callerContents = [
-    contents[".github/workflows/codekeeper-assistant.yml"],
-    ...Object.values(MODES).map((mode) => contents[mode.target])
-  ];
-  assert.doesNotMatch(callerContents.join("\n"), /APP_(?:CONTENTS|ISSUES|PULL_REQUESTS)_PERMISSION/);
+  const caller = contents[UNIFIED_CALLER_WORKFLOW.target];
+  assert.match(caller, /installed_modes: "review,maintain,issues,fix"/);
+  assert.doesNotMatch(caller, /APP_(?:CONTENTS|ISSUES|PULL_REQUESTS)_PERMISSION/);
+  for (const secret of ["OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "OPENAI_TRACE_API_KEY", "CODEKEEPER_APP_PRIVATE_KEY"]) {
+    assert.match(caller, new RegExp(`secrets\\.${secret}`));
+  }
 
   const automaticRepairFiles = renderInstallFiles(bundle, {
     modes: ["review", "fix"],
@@ -451,10 +425,7 @@ test("generated callers request only the App permissions required by their selec
     policySource: JSON.stringify(policy),
     enforceBundledDefaults: false
   });
-  assert.match(
-    automaticRepairFiles.find((file) => file.path === MODES.review.target).contents,
-    /app_contents_permission: "write"/
-  );
+  assert.match(automaticRepairFiles.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents, /installed_modes: "review,fix"/);
 
   for (const [modes, contentsPermission] of [["issues"], ["maintain"]].map((selected) => [selected, selected[0] === "issues" ? "write" : "read"])) {
     const subset = renderInstallFiles(bundle, {
@@ -466,10 +437,9 @@ test("generated callers request only the App permissions required by their selec
       policySource: JSON.stringify(policy),
       enforceBundledDefaults: false
     });
-    const assistant = subset.find((file) => file.path === ".github/workflows/codekeeper-assistant.yml").contents;
-    assert.match(assistant, new RegExp(`app_contents_permission: "${contentsPermission}"`));
-    assert.match(assistant, /app_issues_permission: "write"/);
-    assert.match(assistant, /app_pull_requests_permission: "write"/);
+    const caller = subset.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents;
+    assert.match(caller, new RegExp(`installed_modes: "${modes.join(",")}"`));
+    assert.doesNotMatch(caller, new RegExp(`app_contents_permission: "${contentsPermission}"`));
   }
 });
 
@@ -482,39 +452,32 @@ test("owner-request dispatch authority is reflected in App registration permissi
   assert.equal(appPermissions({ modes: ["issues"], capabilities: [], ownerRequests: false }).pullRequests, "read");
 });
 
-test("workflow rendering rejects unresolved App permission placeholders", async () => {
+test("unified workflow rendering rejects unresolved release placeholders", async () => {
   const bundle = await loadVerifiedAssets();
-  const template = bundle.contents[MODES.review.asset].replace(
-    'app_contents_permission: "APP_CONTENTS_PERMISSION"',
-    'app_contents_permission: "UNRESOLVED"'
-  );
+  const template = bundle.contents[UNIFIED_CALLER_WORKFLOW.asset].replace("PACKAGE_VERSION", "UNRESOLVED");
   assert.throws(
-    () => renderWorkflow(template, {
+    () => renderUnifiedWorkflow(template, {
       packageRelease: TEST_PACKAGE_RELEASE,
-      mode: "review",
-      preset: "openai"
+      ownerRequests: true,
+      modes: ["review"]
     }),
     assertInstallerCode(assert, "WORKFLOW_RENDER_INVALID")
   );
 });
 
-test("assistant rendering honors an explicit disabled owner-request setting", async () => {
+test("unified caller rendering honors an explicit disabled owner-request setting", async () => {
   const bundle = await loadVerifiedAssets();
-  const rendered = renderAssistantWorkflow(bundle.contents[ASSISTANT_WORKFLOW.asset], {
+  const rendered = renderUnifiedWorkflow(bundle.contents[UNIFIED_CALLER_WORKFLOW.asset], {
     packageRelease: TEST_PACKAGE_RELEASE,
     ownerRequests: false,
     modes: ["review"]
   });
   assert.match(rendered, /owner_requests: false/);
-  assert.match(rendered, /app_contents_permission: "read"/);
-  assert.match(rendered, /app_issues_permission: "read"/);
-  assert.match(rendered, /app_pull_requests_permission: "read"/);
+  assert.match(rendered, /installed_modes: "review"/);
+  assert.doesNotMatch(rendered, /APP_(?:CONTENTS|ISSUES|PULL_REQUESTS)_PERMISSION/);
   assert.match(rendered, /^  workflow_dispatch:/m);
-  assert.match(rendered, /name: Codekeeper App credential verification/);
-  assert.match(rendered, /actions\/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1/);
-  assert.match(rendered, /permission-contents: "read"/);
-  assert.match(rendered, /permission-issues: "read"/);
-  assert.match(rendered, /permission-pull-requests: "read"/);
+  assert.match(rendered, /verification_id:/);
+  assert.doesNotMatch(rendered, /AUTOMATION_BOT_MENTION/);
   assert.doesNotMatch(rendered, /VERIFY_APP_[A-Z_]+/);
 });
 
@@ -536,26 +499,28 @@ test("generated callers honor the rendered policy automation controls", async ()
     enforceBundledDefaults: false
   });
   const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
-  assert.match(contents[MODES.review.target], /auto_review: false/);
-  assert.match(contents[MODES.review.target], /feedback_triage: false/);
-  assert.match(contents[MODES.issues.target], /auto_triage: false/);
-  assert.doesNotMatch(contents[MODES.issues.target], /owner_requests:/);
-  assert.doesNotMatch(contents[MODES.fix.target], /owner_requests:/);
-  assert.match(contents[".github/workflows/codekeeper-assistant.yml"], /owner_requests: false/);
-  assert.match(contents[MODES.maintain.target], /cron: "5 4 \* \* 1"/);
+  const caller = contents[UNIFIED_CALLER_WORKFLOW.target];
+  assert.match(caller, /auto_review: false/);
+  assert.match(caller, /feedback_triage: false/);
+  assert.match(caller, /auto_triage: false/);
+  assert.match(caller, /owner_requests: false/);
+  assert.match(caller, /cron: "5 4 \* \* 1"/);
 });
 
 test("maintenance scheduling can be disabled without removing manual dispatch or the policy cron", async () => {
   const bundle = await loadVerifiedAssets();
-  const implicit = renderWorkflow(bundle.contents[MODES.maintain.asset], {
+  const policy = JSON.parse(bundle.contents["policies/openai.json"]);
+  const implicit = renderUnifiedWorkflow(bundle.contents[UNIFIED_CALLER_WORKFLOW.asset], {
     packageRelease: TEST_PACKAGE_RELEASE,
-    mode: "maintain",
-    preset: "openai"
+    ownerRequests: policy.automation.ownerRequests,
+    modes: ["maintain"],
+    policy
   });
-  const explicitlyScheduled = renderWorkflow(bundle.contents[MODES.maintain.asset], {
+  const explicitlyScheduled = renderUnifiedWorkflow(bundle.contents[UNIFIED_CALLER_WORKFLOW.asset], {
     packageRelease: TEST_PACKAGE_RELEASE,
-    mode: "maintain",
-    preset: "openai",
+    ownerRequests: policy.automation.ownerRequests,
+    modes: ["maintain"],
+    policy,
     maintenanceScheduled: true
   });
   assert.equal(explicitlyScheduled, implicit);
@@ -569,10 +534,10 @@ test("maintenance scheduling can be disabled without removing manual dispatch or
     maintenanceScheduled: false
   });
   const contents = Object.fromEntries(files.map((file) => [file.path, file.contents]));
-  const policy = JSON.parse(contents[".github/codekeeper.json"]);
-  const caller = contents[MODES.maintain.target];
-  assert.equal(policy.version, 3);
-  assert.equal(policy.automation.maintenanceSchedule, "17 7 * * *");
+  const renderedPolicy = JSON.parse(contents[".github/codekeeper.json"]);
+  const caller = contents[UNIFIED_CALLER_WORKFLOW.target];
+  assert.equal(renderedPolicy.version, 3);
+  assert.equal(renderedPolicy.automation.maintenanceSchedule, "17 7 * * *");
   assert.doesNotMatch(caller, /^  schedule:/m);
   assert.match(caller, /^  workflow_dispatch:/m);
   assert.match(implicit, /dry_run: \$\{\{ github\.event_name == 'schedule' \|\| inputs\.dry_run \}\}/);
@@ -589,14 +554,9 @@ test("renderInstallFiles omits packaged profiles unless an explicit repository o
   });
   assert.deepEqual(files.map((file) => file.path), [
     ".github/codekeeper.json",
-    ".github/workflows/codekeeper-assistant.yml",
-    ".github/workflows/codekeeper-review.yml",
-    ".github/workflows/codekeeper-issues.yml",
+    ".github/workflows/codekeeper.yml",
     ".github/codekeeper/actions/acquire-package/action.yml",
-    ".github/workflows/codekeeper-runtime-assistant.yml",
     ".github/workflows/codekeeper-runtime.yml",
-    ".github/workflows/codekeeper-runtime-review.yml",
-    ".github/workflows/codekeeper-runtime-issues.yml",
     ".github/codekeeper/README.md",
     ".github/codekeeper-release.json"
   ]);
@@ -784,14 +744,9 @@ test("recommended starter plan selects review and manual maintenance without tra
   assert.equal(plan.preset, "openai");
   assert.deepEqual(plan.files.map((file) => file.path), [
     ".github/codekeeper.json",
-    ".github/workflows/codekeeper-assistant.yml",
-    ".github/workflows/codekeeper-review.yml",
-    ".github/workflows/codekeeper-maintain.yml",
+    ".github/workflows/codekeeper.yml",
     ".github/codekeeper/actions/acquire-package/action.yml",
-    ".github/workflows/codekeeper-runtime-assistant.yml",
     ".github/workflows/codekeeper-runtime.yml",
-    ".github/workflows/codekeeper-runtime-review.yml",
-    ".github/workflows/codekeeper-runtime-maintain.yml",
     ".github/codekeeper/README.md",
     ".github/codekeeper-release.json"
   ]);
@@ -870,7 +825,7 @@ test("a release update refreshes packaged defaults without materializing missing
   assert.equal(update.source.commit, "b".repeat(40));
   assert.equal(update.files.some((file) => file.path.startsWith(".github/codekeeper/agents/")), false);
   assert.ok(update.files.some((file) => file.path === RELEASE_MANIFEST_TARGET));
-  assert.equal(update.files.some((file) => file.path === MODES.review.target), false);
+  assert.equal(update.files.some((file) => file.path === UNIFIED_CALLER_WORKFLOW.target), false);
 });
 
 test("resetting an existing profile override deletes it and resumes packaged updates", async () => {
@@ -987,8 +942,7 @@ test("each role can use any supported provider and model", async () => {
     })
   });
   const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
-  const reviewWorkflow = plan.files.find((file) => file.path === MODES.review.target).contents;
-  const issueWorkflow = plan.files.find((file) => file.path === MODES.issues.target).contents;
+  const caller = plan.files.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents;
 
   assert.equal(policy.ai.agents.review.provider, "deepseek");
   assert.equal(policy.ai.agents.review.model, "deepseek-v4-flash");
@@ -996,8 +950,8 @@ test("each role can use any supported provider and model", async () => {
   assert.equal(policy.ai.agents.review.workspace.model, "gpt-5.6-luna");
   assert.equal(policy.ai.agents.issue.provider, "openai");
   assert.equal(policy.ai.agents.issue.model, "gpt-5.6-luna");
-  assert.match(reviewWorkflow, /secrets\.DEEPSEEK_API_KEY/);
-  assert.match(issueWorkflow, /secrets\.OPENAI_API_KEY/);
+  assert.match(caller, /secrets\.DEEPSEEK_API_KEY/);
+  assert.match(caller, /secrets\.OPENAI_API_KEY/);
   assert.deepEqual(plan.secrets.map((secret) => secret.name), [OPENAI_SECRET, DEEPSEEK_SECRET, APP_SECRET]);
 });
 
@@ -1020,7 +974,7 @@ test("arbitrary OpenRouter coordinator models preserve the OpenAI workspace spec
     })
   });
   const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
-  const workflow = plan.files.find((file) => file.path === MODES.review.target).contents;
+  const workflow = plan.files.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents;
 
   assert.deepEqual(plan.models.review, {
     provider: "openrouter",
@@ -1158,10 +1112,10 @@ test("fixer can use any supported model without a separate planner credential", 
     answers: answers({ modes: ["fix"], preset: "openai", models: { fix: "sol-high" }, tracing: false, capabilities: [] })
   });
   const policy = JSON.parse(plan.files.find((file) => file.path === ".github/codekeeper.json").contents);
-  const workflow = plan.files.find((file) => file.path === MODES.fix.target).contents;
+  const workflow = plan.files.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents;
   assert.equal(policy.ai.agents.fix.model, "gpt-5.6-sol");
   assert.doesNotMatch(workflow, /planner_model_api_key/);
-  assert.match(workflow, /model_api_key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+  assert.match(workflow, /secrets\.OPENAI_API_KEY/);
 });
 
 test("OpenAI model choices include current general and coding models and map Luna to one agent", async () => {
@@ -1256,12 +1210,8 @@ test("a rerun creates a configuration-only update and preserves edited profiles"
     name: DEEPSEEK_SECRET,
     purpose: "DeepSeek API key for each role assigned to DeepSeek. Used by: Pull request reviewer."
   }]);
-  assert.deepEqual(providerUpdate.files.map((file) => file.path), [
-    ".github/codekeeper.json",
-    ".github/workflows/codekeeper-review.yml",
-    ".github/codekeeper-release.json"
-  ]);
-  assert.match(providerUpdate.files[1].contents, /secrets\.DEEPSEEK_API_KEY/);
+  assert.deepEqual(providerUpdate.files.map((file) => file.path), [".github/codekeeper.json"]);
+  assert.match(contents[UNIFIED_CALLER_WORKFLOW.target], /secrets\.DEEPSEEK_API_KEY/);
 
   const disabled = buildInstallPlan({
     bundle,
@@ -1286,7 +1236,7 @@ test("a release update removes retired generated workflows recorded by the insta
   });
   const contents = Object.fromEntries(initial.files.map((file) => [file.path, file.contents]));
   const retiredTarget = ".github/workflows/codekeeper-fix.yml";
-  contents[retiredTarget] = contents[".github/workflows/codekeeper-assistant.yml"];
+  contents[retiredTarget] = "legacy retired workflow\n";
   const installedRelease = JSON.parse(contents[RELEASE_MANIFEST_TARGET]);
   installedRelease.managedFiles[retiredTarget] = sha256(contents[retiredTarget]);
   contents[RELEASE_MANIFEST_TARGET] = `${JSON.stringify(installedRelease, null, 2)}\n`;
@@ -1355,6 +1305,9 @@ test("fix-only issue implementation configures the trusted App bot identity", as
     plan.variables.find((variable) => variable.name === "CODEKEEPER_AUTOMATION_BOT_LOGIN"),
     { name: "CODEKEEPER_AUTOMATION_BOT_LOGIN", value: "codekeeper-acme[bot]" }
   );
+  const caller = plan.files.find((file) => file.path === UNIFIED_CALLER_WORKFLOW.target).contents;
+  assert.match(caller, /contains\(github\.event\.comment\.body, '@codekeeper-acme'\)/);
+  assert.doesNotMatch(caller, /AUTOMATION_BOT_MENTION/);
   assert.throws(
     () => buildInstallPlan({
       bundle,
@@ -1501,7 +1454,8 @@ test("plain-prompt updates validate capabilities after rendering the selected wo
   });
 
   assert.equal(update.policy.review.autoRepair, false);
-  assert.equal(update.files.some((file) => file.path === MODES.fix.target && file.delete), true);
+  assert.equal(update.files.some((file) => file.path === UNIFIED_CALLER_WORKFLOW.target && file.delete), false);
+  assert.equal(update.files.some((file) => file.path === UNIFIED_CALLER_WORKFLOW.target), true);
 });
 
 test("GitHub App registration URL is private, webhook-free, repository-owned, and permission-bounded", () => {

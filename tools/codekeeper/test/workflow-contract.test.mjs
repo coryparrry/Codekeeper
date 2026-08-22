@@ -35,13 +35,9 @@ test("workflow owner-command lists stay synchronized with the canonical definiti
   const reviewCaller = await repositoryFile(
     "examples/workflows/codekeeper-review.yml.example",
   );
-  const packagedReviewCaller = await repositoryFile(
-    "packages/codekeeper/assets/workflows/review.yml",
-  );
   const reviewRuntime = await workflow("review");
 
   assert.match(reviewCaller, new RegExp(escapeRegExp(expectedCondition)));
-  assert.equal(packagedReviewCaller, reviewCaller);
   if (wrappersActive) {
     assert.match(reviewRuntime, new RegExp(escapeRegExp(expectedCondition)));
   } else {
