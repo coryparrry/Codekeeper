@@ -55,7 +55,7 @@
     },
     {
       "path": "src/lib/agents-runtime.mjs",
-      "sha256": "a90490ae74a78b9bd2b66a4b4917240cf540466fcb3ba82fd0604336af3d89d3"
+      "sha256": "3de2348d56a9f123f028b1994d73e6045ff8b775a62935b1ca0ee83b4a0ed020"
     },
     {
       "path": "src/lib/commands.mjs",
@@ -79,7 +79,7 @@
     },
     {
       "path": "src/lib/github/comments.mjs",
-      "sha256": "896cab0e2d446e6bb9bc16386ec5213526dfeb5b41a645e523e25cee8b8d65ac"
+      "sha256": "28eb6e5e15a2bf6b0a3542074eef363e939443e77461a083e07fdc18b4d2602d"
     },
     {
       "path": "src/lib/github/graphql.mjs",
@@ -235,7 +235,7 @@
     },
     {
       "path": "src/lib/publish/issue.mjs",
-      "sha256": "7f03c30c2083af2cdf8a6ad310b97b82ef28a2c8e827a3d187ba8c7a7f1c1069"
+      "sha256": "0b50a4751588afd698bcaaad058b677f9e95161804177ca7ce56e2cf84d4934a"
     },
     {
       "path": "src/lib/publish/owner-command.mjs",

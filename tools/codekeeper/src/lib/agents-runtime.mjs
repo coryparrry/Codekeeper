@@ -1,9 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadFrozenAgentProfile } from "./agent-profiles.mjs";
 import * as core from "./agents-runtime-core.mjs";
 import { getAgentRuntimeSettings } from "./config.mjs";
 import { readJson, readOptionalRegularJson, writeJson } from "./io.mjs";
+import { buildIssuePrompt } from "./prompts.mjs";
 import { validateIssueResult } from "./schemas.mjs";
 import { loadTrustedRepositoryContext, repositoryContextGate } from "./repository-context.mjs";
 
@@ -84,6 +85,13 @@ export async function runAgentFromBundle(options) {
     if (workspaceMetadata !== null) {
       throw new Error("Codekeeper issue received workspace runtime metadata without specialist evidence");
     }
+    const frozenProfile = await loadFrozenAgentProfile({ mode: "issue", directory, context });
+    const directPrompt = [
+      "ISSUE-ONLY EXECUTION MODE:",
+      "The repository workspace handoff was intentionally skipped. Treat the frozen issue record in this trusted prompt as the complete bounded triage evidence; do not require a workspace result.",
+      buildIssuePrompt(context, config, frozenProfile.text)
+    ].join("\n\n");
+    await writeFile(path.join(directory, "prompt.md"), directPrompt, "utf8");
     return core.runAgentFromBundle(options);
   }
   await loadFrozenAgentProfile({ mode: "issue", directory, context });
