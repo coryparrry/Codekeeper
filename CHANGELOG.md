@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.7](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.6...codekeeper-v0.4.7) (2026-08-22)
+
+
+### Bug Fixes
+
+* **issues:** run coordinator when workspace handoff is skipped ([b2b8660](https://github.com/coryparrry/Codekeeper/commit/b2b8660c9c7840aa3caadcd5c66ae3fb6acb5fef))
+* **issues:** run coordinator when workspace handoff is skipped ([67d5ca0](https://github.com/coryparrry/Codekeeper/commit/67d5ca05834733e829c6b43bf99e1f0d0b389253))
+
 ## [0.4.6](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.5...codekeeper-v0.4.6) (2026-08-22)
 
 
