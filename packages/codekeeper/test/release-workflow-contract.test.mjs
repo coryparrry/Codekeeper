@@ -531,6 +531,11 @@ test("packaged runtime omits uniqueItems from provider structured-output schemas
   assert.match(source, /uniqueItems: true/);
 });
 
+test("packaged runtime omits lookaround regex patterns from provider schemas", async () => {
+  const source = await repositoryFile("tools/codekeeper/src/lib/schemas.mjs");
+  assert.match(source, /item\.includes\("\(\?"\)/);
+});
+
 test("packaged runtime passes env -i KEY=VALUE assignments to the isolated user", async () => {
   const isolate = await repositoryFile(
     "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",

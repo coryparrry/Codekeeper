@@ -49,6 +49,8 @@ function providerConstSchema(source) {
 // output-schema API. The local validators continue to use the source schemas;
 // this creates only the provider-wire representation it requires. OpenAI
 // structured outputs reject uniqueItems, so uniqueness stays a local check.
+// They also reject regex lookaround and other `(?` constructs, so those
+// patterns stay a local check.
 export function providerCompatibleJsonSchema(value) {
   if (Array.isArray(value)) return value.map((item) => providerCompatibleJsonSchema(item));
   if (!isPlainObject(value)) return cloneJson(value);
@@ -57,6 +59,13 @@ export function providerCompatibleJsonSchema(value) {
   for (const [key, item] of Object.entries(value)) {
     if (hasConst && (key === "const" || key === "enum" || key === "type")) continue;
     if (key === "uniqueItems") continue;
+    if (
+      key === "pattern" &&
+      typeof item === "string" &&
+      item.includes("(?")
+    ) {
+      continue;
+    }
     projected[key] = providerCompatibleJsonSchema(item);
   }
   return projected;
