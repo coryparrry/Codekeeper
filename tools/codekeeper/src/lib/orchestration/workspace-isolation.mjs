@@ -14,6 +14,45 @@ import { assertRunnerOwnedDirectory } from "../workspace.mjs";
 
 const exec = promisify(execFile);
 const INSTRUCTION_SURFACES = [".agents/skills", ".codex/skills"];
+const CODEX_SANDBOX_SYSCTLS = Object.freeze([
+  ["kernel.unprivileged_userns_clone", "1"],
+  ["kernel.apparmor_restrict_unprivileged_userns", "0"],
+]);
+
+function isGitHubHostedLinux(environment, platform) {
+  return (
+    platform === "linux" &&
+    environment.GITHUB_ACTIONS === "true" &&
+    environment.RUNNER_OS === "Linux" &&
+    environment.RUNNER_ENVIRONMENT === "github-hosted"
+  );
+}
+
+async function readSysctl(name, execute) {
+  try {
+    const { stdout } = await execute("sysctl", ["-n", name]);
+    return String(stdout ?? "").trim();
+  } catch (error) {
+    if (error?.code === 1) return "";
+    throw error;
+  }
+}
+
+export async function prepareCodexLinuxSandbox({
+  environment = process.env,
+  platform = process.platform,
+  execute = exec,
+} = {}) {
+  if (!isGitHubHostedLinux(environment, platform)) return { changed: [] };
+  const changed = [];
+  for (const [name, expected] of CODEX_SANDBOX_SYSCTLS) {
+    const current = await readSysctl(name, execute);
+    if (!current || current === expected) continue;
+    await execute("sudo", ["sysctl", "-w", `${name}=${expected}`]);
+    changed.push(name);
+  }
+  return { changed };
+}
 const INSTRUCTION_ROOTS = [".agents", ".codex"];
 
 function required(value, name) {
@@ -248,6 +287,13 @@ export async function runIsolatedWorkspaceAgent({
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
+  }
+  if (workspaceUser) {
+    // Current GitHub-hosted Ubuntu images can block Codex's Bubblewrap
+    // user namespace before any repository command starts. Enable the
+    // same ephemeral-runner prerequisites as OpenAI's codex-action,
+    // then retain the normal read-only or workspace-write sandbox.
+    await prepareCodexLinuxSandbox();
   }
   let accountCreated = false;
   try {
