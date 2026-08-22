@@ -79,9 +79,6 @@ function renderReviewCondition(source, relativePath) {
 }
 
 export function renderSource(source, relativePath) {
-  if (relativePath === ".github/workflows/codekeeper-review.yml") {
-    return renderActionList(source, relativePath);
-  }
   if (relativePath.startsWith(".github/workflows/")) {
     return renderReviewCondition(source, relativePath);
   }

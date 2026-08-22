@@ -10,7 +10,15 @@ test("product runtime workflows keep every job on GitHub-hosted Ubuntu", async (
     const source = await workflow(mode);
     const runsOn = source.match(/^\s+runs-on: .*$/gm) ?? [];
 
-    assert.ok(runsOn.length > 0, `${mode} must declare at least one job runner`);
+    if (mode === "assistant") {
+      assert.ok(runsOn.length > 0, `${mode} must declare at least one job runner`);
+    } else {
+      assert.deepEqual(runsOn, [], `${mode} wrapper must not allocate a runner`);
+      assert.match(
+        source,
+        /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/,
+      );
+    }
     assert.ok(
       runsOn.every((line) => line.trim() === "runs-on: ubuntu-latest"),
       `${mode} must not route a product job through a configurable or persistent runner`,
@@ -24,6 +32,16 @@ test("product runtime workflows keep every job on GitHub-hosted Ubuntu", async (
       `${mode} must not expose a reusable-workflow runner override`,
     );
   }
+
+  const generic = await repositoryFile(
+    ".github/workflows/codekeeper-runtime.yml",
+  );
+  const genericRunners = generic.match(/^\s+runs-on: .*$/gm) ?? [];
+  assert.equal(genericRunners.length, 3);
+  assert.ok(
+    genericRunners.every((line) => line.trim() === "runs-on: ubuntu-latest"),
+  );
+  assert.doesNotMatch(generic, /inputs\.runner|CODEKEEPER_RUNNER/);
 });
 
 test("generated callers do not pass a custom runtime runner", async () => {

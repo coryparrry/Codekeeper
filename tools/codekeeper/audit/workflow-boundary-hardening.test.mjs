@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const fixWorkflow = await readFile(new URL("../../../.github/workflows/codekeeper-fix.yml", import.meta.url), "utf8");
+const genericWorkflow = await readFile(new URL("../../../.github/workflows/codekeeper-runtime.yml", import.meta.url), "utf8");
 const publishSource = await readFile(new URL("../src/lib/publish.mjs", import.meta.url), "utf8");
 const reviewPublishSource = await readFile(new URL("../src/lib/publish/review.mjs", import.meta.url), "utf8");
 const repairSource = await readFile(new URL("../src/lib/pr-repair.mjs", import.meta.url), "utf8");
@@ -22,6 +23,14 @@ function assertContains(source, pattern, message) {
 }
 
 test("workspace and analyze resolve repository-dispatch repair targets identically", () => {
+  if (/uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/.test(fixWorkflow)) {
+    assertContains(fixWorkflow, /github\.event\.client_payload\.number/u, "wrapper omits repository-dispatch issue number");
+    assert.ok(
+      (genericWorkflow.match(/github\.event\.client_payload\.number/g) ?? []).length >= 3,
+      "generic stages do not consistently bind repository-dispatch targets",
+    );
+    return;
+  }
   const workspace = section(fixWorkflow, "  workspace:", "\n  analyze:");
   const analyze = section(fixWorkflow, "  analyze:", "\n  seal:");
   assertContains(workspace, /github\.event\.client_payload\.number/u, "workspace omits repository-dispatch issue number");
