@@ -72,10 +72,11 @@ test("command enters mode auto without a routing runner or second dispatch", asy
     assert.match(body, /^      mode: auto$/m);
     assert.match(body, /github\.event_name == 'issue_comment'/);
     assert.match(body, /github\.event_name == 'pull_request_review_comment'/);
+    assert.match(body, /inputs\.verify_app_credentials/);
     assert.match(body, /repository\.ownerLogins/);
     assert.doesNotMatch(
       body,
-      /repository_dispatch|workflow_dispatch|gh api|actions\/github-script/,
+      /repository_dispatch|gh api|actions\/github-script/,
     );
     assert.equal(
       [
@@ -85,6 +86,24 @@ test("command enters mode auto without a routing runner or second dispatch", asy
       ].length,
       1,
     );
+  }
+});
+
+test("manual dispatch selects maintenance, fix, or the no-mutation credential proof", async () => {
+  for (const source of await callers()) {
+    const fix = job(source, "fix");
+    const maintain = job(source, "maintain");
+    const command = job(source, "command");
+    assert.match(source, /^      issue_number:/m);
+    assert.match(source, /^      verify_app_credentials:/m);
+    assert.match(fix, /inputs\.issue_number != ''/);
+    assert.match(maintain, /inputs\.issue_number == ''/);
+    assert.match(maintain, /!inputs\.verify_app_credentials/);
+    assert.match(command, /^      credential_probe: /m);
+    assert.match(command, /^      verification_id: /m);
+    assert.match(source, /Codekeeper App credential verification/);
+    assert.match(source, /Codekeeper maintenance verification/);
+    assert.match(source, /Codekeeper manual fix/);
   }
 });
 

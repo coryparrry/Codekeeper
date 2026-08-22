@@ -46,9 +46,10 @@ const effectiveModes = Object.freeze({
   maintain: "audit",
 });
 const genericRuntime = await workflow("runtime");
-const wrappersActive = /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/.test(
-  await workflow("review"),
-);
+const wrappersActive =
+  /uses: \.\/\.github\/workflows\/codekeeper-runtime\.yml/.test(
+    await workflow("review"),
+  );
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -335,8 +336,14 @@ test("App private keys and App-token creation stay in publication jobs", async (
     const compute = jobSection(genericRuntime, "compute", "validate");
     const validate = jobSection(genericRuntime, "validate", "publish");
     const publish = jobSection(genericRuntime, "publish");
-    assert.doesNotMatch(compute, /secrets\.app_private_key|create-github-app-token/);
-    assert.doesNotMatch(validate, /secrets\.app_private_key|create-github-app-token/);
+    assert.doesNotMatch(
+      compute,
+      /secrets\.app_private_key|create-github-app-token/,
+    );
+    assert.doesNotMatch(
+      validate,
+      /secrets\.app_private_key|create-github-app-token/,
+    );
     assert.match(publish, /secrets\.app_private_key/);
     assert.match(publish, /create-github-app-token/);
     return;
@@ -375,8 +382,14 @@ test("provider, trace, and workspace credentials remain in their stage boundarie
     assert.match(compute, /secrets\.workspace_api_key/);
     assert.match(compute, /secrets\.model_api_key/);
     assert.match(compute, /secrets\.trace_api_key/);
-    assert.doesNotMatch(validate, /secrets\.(?:workspace_api_key|model_api_key|trace_api_key|app_private_key)/);
-    assert.doesNotMatch(publish, /secrets\.(?:workspace_api_key|model_api_key|trace_api_key)/);
+    assert.doesNotMatch(
+      validate,
+      /secrets\.(?:workspace_api_key|model_api_key|trace_api_key|app_private_key)/,
+    );
+    assert.doesNotMatch(
+      publish,
+      /secrets\.(?:workspace_api_key|model_api_key|trace_api_key)/,
+    );
     return;
   }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
@@ -491,7 +504,10 @@ test("workspace jobs close their instruction and credential isolation boundary",
     assert.match(compute, /QUARANTINE/);
     assert.match(compute, /WORKSPACE_USER/);
     assert.match(compute, /stage compute \\\n\s+--operation workspace/);
-    assert.ok(compute.indexOf("--operation workspace") < compute.indexOf("--operation analyze"));
+    assert.ok(
+      compute.indexOf("--operation workspace") <
+        compute.indexOf("--operation analyze"),
+    );
     return;
   }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
@@ -551,9 +567,25 @@ test("every runner verifies its exact package and relevant handoff before instal
   if (wrappersActive) {
     const jobs = sections(genericRuntime);
     for (const [name, source] of Object.entries(jobs)) {
-      assert.match(source, /name: Acquire exact Codekeeper package/, `${name} acquires package`);
-      assert.match(source, /name: Install exact Codekeeper runtime/, `${name} installs runtime`);
-      assert.ok(source.indexOf("Acquire exact Codekeeper package") < source.indexOf("Install exact Codekeeper runtime"));
+      assert.match(
+        source,
+        /name: Acquire exact Codekeeper package/,
+        `${name} acquires package`,
+      );
+      if (name === "credential-probe") {
+        assert.doesNotMatch(source, /name: Install exact Codekeeper runtime/);
+        assert.match(source, /src\/app-permissions\.mjs/);
+        continue;
+      }
+      assert.match(
+        source,
+        /name: Install exact Codekeeper runtime/,
+        `${name} installs runtime`,
+      );
+      assert.ok(
+        source.indexOf("Acquire exact Codekeeper package") <
+          source.indexOf("Install exact Codekeeper runtime"),
+      );
     }
     return;
   }
@@ -674,8 +706,14 @@ test("publication does not execute validation, lifecycle hooks, or arbitrary can
 test("coordinators run only after workspace teardown and workflows have no writable cross-run cache", async () => {
   if (wrappersActive) {
     const compute = jobSection(genericRuntime, "compute", "validate");
-    assert.ok(compute.indexOf("--operation workspace") < compute.indexOf("--operation analyze"));
-    assert.doesNotMatch(genericRuntime, /actions\/cache|save-always|github\.run_attempt/);
+    assert.ok(
+      compute.indexOf("--operation workspace") <
+        compute.indexOf("--operation analyze"),
+    );
+    assert.doesNotMatch(
+      genericRuntime,
+      /actions\/cache|save-always|github\.run_attempt/,
+    );
     return;
   }
   assertMeasurementClassifiers();
@@ -712,8 +750,14 @@ test("coordinators run only after workspace teardown and workflows have no writa
 test("sealing completes before App-token creation", async () => {
   if (wrappersActive) {
     const publish = jobSection(genericRuntime, "publish");
-    assert.ok(publish.indexOf("--operation seal") < publish.indexOf("secrets.app_private_key"));
-    assert.ok(publish.indexOf("secrets.app_private_key") < publish.indexOf("create-github-app-token"));
+    assert.ok(
+      publish.indexOf("--operation seal") <
+        publish.indexOf("secrets.app_private_key"),
+    );
+    assert.ok(
+      publish.indexOf("secrets.app_private_key") <
+        publish.indexOf("create-github-app-token"),
+    );
     return;
   }
   for (const [mode, workflowName] of Object.entries(workflowFiles)) {
@@ -797,7 +841,10 @@ test("callers pass explicit named secrets and never inherit the caller secret se
 test("review gate always runs and fails closed when analysis, sealing, or publication is incomplete", async () => {
   if (wrappersActive) {
     const publish = jobSection(genericRuntime, "publish");
-    assert.match(publish, /name: \$\{\{ \(inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'\) && 'Codekeeper review gate'/);
+    assert.match(
+      publish,
+      /name: \$\{\{ \(inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'\) && 'Codekeeper review gate'/,
+    );
     assert.match(publish, /if: >-\n\s+always\(\)/);
     assert.match(publish, /Fail closed when review compute did not complete/);
     assert.match(publish, /Enforce the required review gate/);

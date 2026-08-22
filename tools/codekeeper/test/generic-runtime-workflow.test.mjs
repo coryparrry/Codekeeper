@@ -31,6 +31,8 @@ test("generic runtime declares the complete reusable workflow interface", async 
     "dry_run",
     "automation_bot_login",
     "app_client_id",
+    "credential_probe",
+    "verification_id",
   ]) {
     assert.match(source, new RegExp(`^      ${input}:`, "m"));
   }
@@ -50,8 +52,8 @@ test("generic runtime declares the complete reusable workflow interface", async 
     /app_(?:contents|issues|pull_requests)_permission/,
   );
   assert.deepEqual(
-    [...source.matchAll(/^  ([a-z]+):\n/gm)].map((match) => match[1]),
-    ["compute", "validate", "publish"],
+    [...source.matchAll(/^  ([a-z-]+):\n/gm)].map((match) => match[1]),
+    ["compute", "validate", "publish", "credential-probe"],
   );
 });
 
@@ -59,8 +61,11 @@ test("generic runtime keeps validation conditional and publication fail-closed",
   const source = await workflow();
   const compute = section(source, "compute", "validate");
   const validate = section(source, "validate", "publish");
-  const publish = section(source, "publish");
-  assert.match(compute, /^    if: inputs\.enabled$/m);
+  const publish = section(source, "publish", "credential-probe");
+  assert.match(
+    compute,
+    /^    if: inputs\.enabled && !inputs\.credential_probe$/m,
+  );
   assert.match(validate, /needs: compute/);
   assert.match(
     validate,
@@ -98,7 +103,7 @@ test("every runner acquires and installs the exact package before its stage", as
   const source = await workflow();
   assert.equal(
     [...source.matchAll(/name: Acquire exact Codekeeper package/g)].length,
-    3,
+    4,
   );
   assert.equal(
     [...source.matchAll(/name: Install exact Codekeeper runtime/g)].length,
@@ -181,7 +186,7 @@ test("validation is credential-free and publication seals before App credentials
   const source = await workflow();
   const compute = section(source, "compute", "validate");
   const validate = section(source, "validate", "publish");
-  const publish = section(source, "publish");
+  const publish = section(source, "publish", "credential-probe");
   assert.match(compute, /secrets\.model_api_key/);
   assert.match(compute, /secrets\.openai_api_key/);
   assert.match(compute, /secrets\.deepseek_api_key/);
@@ -245,13 +250,36 @@ test("validation is credential-free and publication seals before App credentials
   );
 });
 
+test("credential proof uses the verified package and App key without a model or repository mutation", async () => {
+  const source = await workflow();
+  const probe = section(source, "credential-probe");
+  assert.match(probe, /^    name: Codekeeper App credential verification$/m);
+  assert.match(probe, /^    if: inputs\.enabled && inputs\.credential_probe$/m);
+  assert.match(probe, /name: Acquire exact Codekeeper package/);
+  assert.match(probe, /registrationAppPermissions/);
+  assert.match(probe, /secrets\.app_private_key/);
+  assert.match(probe, /actions\/create-github-app-token@[0-9a-f]{40}/);
+  assert.match(
+    probe,
+    /Prove App identity, installation, and repository access/,
+  );
+  assert.doesNotMatch(probe, /model_api_key|workspace_api_key|trace_api_key/);
+  assert.doesNotMatch(
+    probe,
+    /stage (?:compute|validate|publish)|git push|gh pr|gh issue/,
+  );
+});
+
 test("auto owner commands resolve once and preserve deterministic credential boundaries", async () => {
   const source = await workflow();
   const compute = section(source, "compute", "validate");
   const validate = section(source, "validate", "publish");
   const publish = section(source, "publish");
   assert.match(compute, /--operation owner-command-context/);
-  assert.match(compute, /owner_context_args=\(--command-context "\$COMMAND_CONTEXT"\)/);
+  assert.match(
+    compute,
+    /owner_context_args=\(--command-context "\$COMMAND_CONTEXT"\)/,
+  );
   assert.doesNotMatch(compute, /--owner-command-context/);
   assert.match(compute, /--mode "\$REQUESTED_MODE"/);
   assert.match(compute, /--command "\$command" --surface "\$surface"/);

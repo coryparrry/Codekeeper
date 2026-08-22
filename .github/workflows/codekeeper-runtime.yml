@@ -39,6 +39,16 @@ on:
         required: false
         default: review,maintain,issues,fix
         type: string
+      credential_probe:
+        description: Prove the stored App key without running a model or mutating the repository.
+        required: false
+        default: false
+        type: boolean
+      verification_id:
+        description: UUID used to correlate an installer credential probe.
+        required: false
+        default: ""
+        type: string
     secrets:
       model_api_key:
         description: Compatibility key for an explicitly selected legacy mode.
@@ -77,7 +87,7 @@ concurrency:
 jobs:
   compute:
     name: Codekeeper generic compute
-    if: inputs.enabled
+    if: inputs.enabled && !inputs.credential_probe
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -818,3 +828,93 @@ jobs:
               exit 1
               ;;
           esac
+
+  credential-probe:
+    name: Codekeeper App credential verification
+    if: inputs.enabled && inputs.credential_probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          path: repository
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Acquire exact Codekeeper package
+        id: codekeeper-package
+        uses: ./repository/.github/codekeeper/actions/acquire-package
+        with:
+          package_version: ${{ inputs.package_version }}
+          package_integrity: ${{ inputs.package_integrity }}
+
+      - name: Validate the probe and derive registered permissions
+        id: permissions
+        env:
+          VERIFICATION_ID: ${{ inputs.verification_id }}
+          INSTALLED_MODES: ${{ inputs.installed_modes }}
+          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+        run: |
+          set -euo pipefail
+          [[ "$VERIFICATION_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || {
+            echo "Invalid Codekeeper verification correlation ID" >&2
+            exit 1
+          }
+          node --input-type=module - <<'NODE'
+          import { appendFileSync, readFileSync } from "node:fs";
+          import { pathToFileURL } from "node:url";
+          const modulePath = `${process.env.GITHUB_WORKSPACE}/tooling/tools/codekeeper/src/app-permissions.mjs`;
+          const { registrationAppPermissions } = await import(pathToFileURL(modulePath));
+          const policy = JSON.parse(readFileSync(process.env.CONFIG, "utf8"));
+          const modes = process.env.INSTALLED_MODES.split(",").filter(Boolean);
+          const permissions = registrationAppPermissions({
+            modes,
+            capabilities: {
+              reviewRepair: policy.review?.autoRepair === true,
+              repair: policy.audit?.repair?.enabled === true,
+              issueImplementation: policy.issues?.allowAiImplementation === true,
+              autoMerge: policy.merge?.enabled === true,
+            },
+            ownerRequests: policy.automation?.ownerRequests === true,
+          });
+          appendFileSync(process.env.GITHUB_OUTPUT, [
+            `contents=${permissions.contents}`,
+            `issues=${permissions.issues}`,
+            `pull_requests=${permissions.pullRequests}`,
+            "",
+          ].join("\n"));
+          NODE
+
+      - name: Create repository-scoped GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ inputs.app_client_id }}
+          private-key: ${{ secrets.app_private_key }}
+          permission-contents: ${{ steps.permissions.outputs.contents }}
+          permission-issues: ${{ steps.permissions.outputs.issues }}
+          permission-pull-requests: ${{ steps.permissions.outputs.pull_requests }}
+
+      - name: Prove App identity, installation, and repository access
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+          AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
+        run: |
+          set -euo pipefail
+          expected_slug="${AUTOMATION_BOT_LOGIN%\[bot\]}"
+          test -n "$expected_slug"
+          test "$APP_SLUG" = "$expected_slug"
+          [[ "$INSTALLATION_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .full_name)" = "$GITHUB_REPOSITORY"

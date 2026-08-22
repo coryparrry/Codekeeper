@@ -35,7 +35,10 @@ export function jobSection(source, name, nextName) {
   assert.notEqual(start, -1, `missing ${name} job`);
   const next = nextName
     ? source.indexOf(`  ${nextName}:\n`, start + 1)
-    : source.length;
+    : (() => {
+        const match = /^  [a-z][a-z0-9-]*:\n/m.exec(source.slice(start + 1));
+        return match ? start + 1 + match.index : source.length;
+      })();
   assert.notEqual(next, -1, `missing ${nextName} job after ${name}`);
   return source.slice(start, next);
 }
