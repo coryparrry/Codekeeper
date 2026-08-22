@@ -280,6 +280,23 @@ test("provider-compatible schema projection preserves strict structure while rep
   assert.deepEqual(source, original);
 });
 
+test("provider-compatible schema projection omits uniqueItems from OpenAI structured output", () => {
+  const source = {
+    type: "array",
+    items: { type: "string" },
+    minItems: 1,
+    maxItems: 8,
+    uniqueItems: true
+  };
+  assert.deepEqual(providerCompatibleJsonSchema(source), {
+    type: "array",
+    items: { type: "string" },
+    minItems: 1,
+    maxItems: 8
+  });
+  assert.equal(source.uniqueItems, true);
+});
+
 test("provider-compatible schema projection rejects unsupported or contradictory const values", () => {
   assert.throws(() => providerCompatibleJsonSchema({ const: {} }), /only JSON primitive const values/);
   assert.throws(() => providerCompatibleJsonSchema({ const: [] }), /only JSON primitive const values/);
