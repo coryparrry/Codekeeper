@@ -276,3 +276,51 @@ test("the CLI owner-command-context stage writes the closed context", async () =
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("the CLI accepts the workflow command-context flag for model preparation", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-owner-prepare-cli-"),
+  );
+  try {
+    const commandContextPath = path.join(directory, "context.json");
+    await writeFile(commandContextPath, "{}\n");
+    const outcome = await new Promise((resolve, reject) => {
+      const child = spawn(
+        "node",
+        [
+          cliPath,
+          "stage",
+          "compute",
+          "--operation",
+          "prepare",
+          "--mode",
+          "review",
+          "--config",
+          repositoryConfigPath,
+          "--directory",
+          path.join(directory, "bundle"),
+          "--mode-plan",
+          path.join(directory, "missing-plan.json"),
+          "--command-context",
+          commandContextPath,
+        ],
+        {
+          cwd: repositoryRoot,
+          env: { ...process.env, GITHUB_EVENT_NAME: "issue_comment" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stderr = "";
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      child.once("error", reject);
+      child.once("close", (code) => resolve({ code, stderr }));
+    });
+    assert.equal(outcome.code, 1);
+    assert.doesNotMatch(outcome.stderr, /Unknown argument/);
+    assert.match(outcome.stderr, /missing-plan\.json|ENOENT/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

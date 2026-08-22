@@ -388,7 +388,7 @@ test("direct owner implementation and review-thread repair bind their live targe
     };
     installGithubFixture(t, {
       liveComment: repairComment,
-      targetIssue: issue({ pullRequest: true }),
+      targetIssue: { ...issue({ pullRequest: true }), labels: ["codekeeper:paused"] },
       targetPull: pull(),
       threads: [thread],
     });

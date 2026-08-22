@@ -159,7 +159,7 @@ test("the shared runtime retains three runner stages and the protected review ga
   assert.deepEqual(jobNames(generic), ["compute", "validate", "publish"]);
   assert.match(
     generic,
-    /name: \$\{\{ inputs\.mode == 'review' && 'Codekeeper review gate' \|\| 'Codekeeper trusted publication' \}\}/,
+    /name: \$\{\{ \(inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'\) && 'Codekeeper review gate' \|\| 'Codekeeper trusted publication' \}\}/,
   );
   for (const mode of MODE_IDS) {
     assert.equal(MODES[mode].runtime.sourcePath, wrapperPaths[mode].pathname.replace(repositoryRoot.pathname, ""));

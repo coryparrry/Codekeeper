@@ -36,6 +36,9 @@ test("generic runtime declares the complete reusable workflow interface", async 
   }
   for (const secret of [
     "model_api_key",
+    "openai_api_key",
+    "deepseek_api_key",
+    "openrouter_api_key",
     "workspace_api_key",
     "trace_api_key",
     "app_private_key",
@@ -65,7 +68,7 @@ test("generic runtime keeps validation conditional and publication fail-closed",
   );
   assert.match(publish, /needs: \[compute, validate\]/);
   assert.match(publish, /always\(\)/);
-  assert.match(publish, /inputs\.mode == 'review'/);
+  assert.match(publish, /needs\.compute\.outputs\.required_gate == 'true'/);
   assert.match(publish, /Fail closed when review compute did not complete/);
   assert.match(publish, /needs\.compute\.result != 'success'/);
   assert.match(publish, /needs\.compute\.result == 'success'/);
@@ -81,7 +84,11 @@ test("generic runtime keeps validation conditional and publication fail-closed",
   assert.match(publish, /inputs\.dry_run/);
   assert.match(
     publish,
-    /name: \$\{\{ inputs\.mode == 'review' && 'Codekeeper review gate'/,
+    /name: \$\{\{ \(inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'\) && 'Codekeeper review gate'/,
+  );
+  assert.match(
+    publish,
+    /if: \(inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'\) && needs\.compute\.result != 'success'/,
   );
   assert.match(publish, /name: Enforce the required review gate/);
   assert.match(publish, /PUBLISH_DISPOSITION/);
@@ -140,7 +147,7 @@ test("compute delegates all four mode adapters and transports one run-stable han
   assert.match(compute, /github\.event\.client_payload\.head_sha/);
   assert.match(
     compute,
-    /execution_sha: context\.pullRequest\?\.headSha \?\? context\.baseSha/,
+    /execution_sha: context\?\.pullRequest\?\.headSha \?\? context\?\.baseSha/,
   );
   assert.match(compute, /CODEKEEPER_AUTOMATION_BOT_LOGIN:/);
   assert.match(compute, /CODEKEEPER_APP_CLIENT_ID:/);
@@ -176,6 +183,9 @@ test("validation is credential-free and publication seals before App credentials
   const validate = section(source, "validate", "publish");
   const publish = section(source, "publish");
   assert.match(compute, /secrets\.model_api_key/);
+  assert.match(compute, /secrets\.openai_api_key/);
+  assert.match(compute, /secrets\.deepseek_api_key/);
+  assert.match(compute, /secrets\.openrouter_api_key/);
   assert.match(compute, /secrets\.workspace_api_key/);
   assert.match(compute, /secrets\.trace_api_key/);
   assert.doesNotMatch(compute, /secrets\.app_private_key/);
@@ -208,7 +218,7 @@ test("validation is credential-free and publication seals before App credentials
   );
   assert.match(
     publish,
-    /!inputs\.dry_run \|\| needs\.compute\.outputs\.required_gate == 'true'/,
+    /!inputs\.dry_run \|\| inputs\.mode == 'review' \|\| needs\.compute\.outputs\.required_gate == 'true'/,
   );
   assert.ok(
     publish.indexOf("name: Seal the candidate before App credentials") <
@@ -233,4 +243,32 @@ test("validation is credential-free and publication seals before App credentials
     publish,
     /secrets\.(?:model_api_key|workspace_api_key|trace_api_key)/,
   );
+});
+
+test("auto owner commands resolve once and preserve deterministic credential boundaries", async () => {
+  const source = await workflow();
+  const compute = section(source, "compute", "validate");
+  const validate = section(source, "validate", "publish");
+  const publish = section(source, "publish");
+  assert.match(compute, /--operation owner-command-context/);
+  assert.match(compute, /owner_context_args=\(--command-context "\$COMMAND_CONTEXT"\)/);
+  assert.doesNotMatch(compute, /--owner-command-context/);
+  assert.match(compute, /--mode "\$REQUESTED_MODE"/);
+  assert.match(compute, /--command "\$command" --surface "\$surface"/);
+  assert.match(compute, /resolved_mode: plan\.resolvedMode/);
+  assert.match(compute, /command_execution_kind:/);
+  assert.match(compute, /--operation command-candidate/);
+  assert.match(compute, /MODEL_PROVIDER/);
+  assert.match(compute, /unset LEGACY_MODEL_API_KEY OPENAI_MODEL_API_KEY/);
+  assert.doesNotMatch(
+    validate,
+    /secrets\.(?:openai|deepseek|openrouter)_api_key/,
+  );
+  assert.match(publish, /operation=command-seal/);
+  assert.match(publish, /--operation command/);
+  assert.ok(
+    publish.indexOf("operation=command-seal") <
+      publish.indexOf("name: Create the short-lived GitHub App token"),
+  );
+  assert.doesNotMatch(publish, /repository_dispatch/);
 });

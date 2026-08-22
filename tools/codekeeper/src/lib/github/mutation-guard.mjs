@@ -81,7 +81,8 @@ export const mutationGuardMethods = {
     target,
     policy,
     repairEvidencePolicy,
-    rejectPaused = false
+    rejectPaused = false,
+    allowPausedResume = false,
   }) {
     this.assertNoMutationGuard();
     if (repository !== this.repository) throw new Error("Conditional pull repair repository does not match the GitHub client");
@@ -112,6 +113,7 @@ export const mutationGuardMethods = {
         subjectSha256: target.subjectSha256,
         reviewThreadIds: [...target.reviewThreadIds],
         rejectPaused: rejectPaused === true,
+        allowPausedResume: allowPausedResume === true,
         repairEvidencePolicy: structuredClone(repairEvidencePolicy)
       }
     };
@@ -405,7 +407,10 @@ export const mutationGuardMethods = {
     ]);
     this.assertPullMutationIdentity(pull);
     const currentLabels = labelNames(pull);
-    if (hasPauseGuard(currentLabels)) {
+    if (
+      hasPauseGuard(currentLabels) &&
+      expected.repair?.allowPausedResume !== true
+    ) {
       const error = new Error(`PR #${pull.number} is paused; publication will not mutate GitHub`);
       if (expected.repair?.rejectPaused) error.code = "CODEKEEPER_PAUSED";
       throw error;

@@ -5,10 +5,15 @@ import { sanitizeMarkdown } from "../render.mjs";
 import { loadArtifact } from "./artifacts.mjs";
 import { expectedAutomationIdentity } from "./common.mjs";
 import { publishPatchPullRequest } from "./repair-pr.mjs";
+import {
+  isDirectOwnerFix,
+  resumeDirectOwnerFix,
+} from "./owner-command.mjs";
 
 export async function publishFix({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource = agentProfilePath ? "repository" : "package", agentProfileSourceSha, token, dryRun = false, prRepairGit }) {
   const { manifest, context, result } = await loadArtifact(artifactDirectory, "fix", config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource, agentProfileSourceSha);
   const github = new GitHubClient({ token, repository: context.repository });
+  const directOwnerFix = isDirectOwnerFix(context);
   if (context.target?.kind === "pull_request") {
     return publishPullRequestRepair({
       github,
@@ -18,6 +23,7 @@ export async function publishFix({ artifactDirectory, config, configSha256, expe
       result,
       config,
       automationIdentity: expectedAutomationIdentity(),
+      resumePaused: directOwnerFix,
       dryRun,
       ...(prRepairGit ? { gitOperations: prRepairGit } : {})
     });
@@ -28,8 +34,11 @@ export async function publishFix({ artifactDirectory, config, configSha256, expe
   if (context.issue?.number !== context.target.number) {
     throw new Error("Frozen issue fix context does not match its target");
   }
+  const resumedTarget = await resumeDirectOwnerFix(github, context);
   const issue = await github.beginIssueMutation({
-    issue: context.issue,
+    issue: resumedTarget
+      ? { ...context.issue, updatedAt: resumedTarget.updated_at }
+      : context.issue,
     rejectPaused: context.authorizationMode === "policy"
   });
 

@@ -662,7 +662,10 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
       throw new Error(`PR #${targetNumber} moved from ${boundExpectedHead} to ${pull.head?.sha}; stale repair will not start`);
     }
     const liveLabels = labelNames(issue.labels);
-    if (liveLabels.includes("codekeeper:paused") || liveLabels.includes("paused")) {
+    if (
+      liveLabels.includes("paused") ||
+      (liveLabels.includes("codekeeper:paused") && !ownerContext)
+    ) {
       throw new Error(`PR #${targetNumber} is paused`);
     }
     if (authorizationMode === "policy") {

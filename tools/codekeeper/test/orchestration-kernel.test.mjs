@@ -13,8 +13,13 @@ import {
   createValidationArtifactHandoff,
   verifyArtifactHandoff,
 } from "../src/lib/orchestration/artifact-handoff.mjs";
+import {
+  createCommandArtifactHandoff,
+  sealCommandArtifact,
+} from "../src/lib/orchestration/command-artifact.mjs";
 import { runCompute } from "../src/lib/orchestration/compute.mjs";
 import { runPublish } from "../src/lib/orchestration/publish.mjs";
+import { sha256 } from "../src/lib/markers.mjs";
 import {
   assertCredentialBoundary,
   resolveAutomationBot,
@@ -464,6 +469,116 @@ test("artifact stages bind the PR3 handoff manifest to candidate and validation 
       config,
       toolingSha: sourceCommit,
     });
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("deterministic owner commands are digest-bound and sealed without credentials", async () => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-command-handoff-"),
+  );
+  const candidateDirectory = path.join(root, "candidate");
+  const artifactDirectory = path.join(root, "sealed");
+  const sourceCommit = "d".repeat(40);
+  const plan = resolveModePlan({
+    requestedMode: "auto",
+    event: {
+      eventName: "issue_comment",
+      command: "status",
+      surface: "issue",
+      targetNumber: 42,
+    },
+  });
+  const config = {
+    repository: { defaultBranch: "main" },
+    ai: { agents: { issue: { workspace: { enabled: false } } } },
+  };
+  const commandContext = {
+    schemaVersion: 1,
+    eventName: "issue_comment",
+    repository: "owner/repository",
+    actor: "owner",
+    association: "OWNER",
+    command: "status",
+    canonicalCommand: "status",
+    surface: "issue",
+    targetNumber: 42,
+    commentId: 99,
+    commentSha256: "e".repeat(64),
+    executionKind: "deterministic",
+  };
+  const planPath = path.join(root, "mode-plan.json");
+  const configPath = path.join(root, "config.json");
+  await writeFile(planPath, `${JSON.stringify(plan)}\n`);
+  await writeFile(configPath, `${JSON.stringify(config)}\n`);
+  const configSha256 = sha256(await readFile(configPath));
+  const previous = Object.fromEntries(
+    [
+      "CODEKEEPER_PACKAGE_VERSION",
+      "CODEKEEPER_PACKAGE_INTEGRITY",
+      "GITHUB_EVENT_NAME",
+      "GITHUB_REPOSITORY",
+      "GITHUB_RUN_ID",
+      "GITHUB_ACTOR",
+    ].map((key) => [key, process.env[key]]),
+  );
+  Object.assign(process.env, {
+    CODEKEEPER_PACKAGE_VERSION: "0.4.0",
+    CODEKEEPER_PACKAGE_INTEGRITY:
+      "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    GITHUB_EVENT_NAME: "issue_comment",
+    GITHUB_REPOSITORY: "owner/repository",
+    GITHUB_RUN_ID: "command-run",
+    GITHUB_ACTOR: "owner",
+  });
+  try {
+    const candidate = await createCommandArtifactHandoff({
+      artifactDirectory: candidateDirectory,
+      commandContext,
+      modePlanPath: planPath,
+      configPath,
+      config,
+      toolingSha: sourceCommit,
+      configSha256,
+    });
+    assert.match(candidate.candidateSha256, /^[a-f0-9]{64}$/);
+    assert.match(candidate.contextSha256, /^[a-f0-9]{64}$/);
+    assert.match(candidate.handoffManifestSha256, /^[a-f0-9]{64}$/);
+    const sealed = await sealCommandArtifact({
+      candidateDirectory,
+      artifactDirectory,
+      expectedCandidateSha256: candidate.candidateSha256,
+      expectedContextSha256: candidate.contextSha256,
+      expectedHandoffManifestSha256: candidate.handoffManifestSha256,
+      modePlanPath: planPath,
+      configPath,
+      config,
+      toolingSha: sourceCommit,
+      configSha256,
+    });
+    assert.equal(sealed.manifest.sealed, true);
+    assert.equal(sealed.manifest.kind, "owner-command");
+    await writeFile(path.join(candidateDirectory, "context.json"), "{}\n");
+    await assert.rejects(
+      sealCommandArtifact({
+        candidateDirectory,
+        artifactDirectory: path.join(root, "tampered-seal"),
+        expectedCandidateSha256: candidate.candidateSha256,
+        expectedContextSha256: candidate.contextSha256,
+        expectedHandoffManifestSha256: candidate.handoffManifestSha256,
+        modePlanPath: planPath,
+        configPath,
+        config,
+        toolingSha: sourceCommit,
+        configSha256,
+      }),
+      /baseSha|digest|inventory|stale|changed/i,
+    );
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
