@@ -131,9 +131,13 @@ export const commentMethods = {
     return mutation;
   },
 
-  async createOwnedIssueComment(number, body, authorIdentity) {
+  async createOwnedIssueComment(number, body, authorIdentity, marker = null) {
     const expectedAuthor = normalizeAutomationIdentity(authorIdentity);
     if (!expectedAuthor) throw new Error("A configured GitHub App bot identity is required for issue comments");
+    if (marker !== null) {
+      if (typeof marker !== "string" || marker.length === 0) throw new Error("An issue comment marker must be a non-empty string");
+      return this.upsertOwnedIssueMarker(number, marker, body, expectedAuthor);
+    }
     const mutation = await this.createComment(number, body);
     if (this.issueMutation?.number === number) {
       const normalized = issueMutationComment(mutation, number);

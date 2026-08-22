@@ -234,28 +234,17 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
     },
     async upsertMarkerComment(_number, marker, body) {
       calls.push("marker");
-      updatedAt = "2026-08-05T10:01:00Z";
+      const id = comments.some((comment) => comment.id === 70) ? 71 : 70;
+      updatedAt = id === 70 ? "2026-08-05T10:01:00Z" : "2026-08-05T10:01:30Z";
       const mutation = {
-        id: 70,
+        id,
         body: `${body}\n${marker}`,
         created_at: updatedAt,
         updated_at: updatedAt,
         user: { id: Number(identity.id), login: identity.login, type: "Bot" }
       };
-      comments = [mutation];
-      return mutation;
-    },
-    async createComment(_number, body) {
-      calls.push("duplicate-comment");
-      updatedAt = "2026-08-05T10:01:30Z";
-      const mutation = {
-        id: 71,
-        body,
-        created_at: updatedAt,
-        updated_at: updatedAt,
-        user: { id: Number(identity.id), login: identity.login, type: "Bot" }
-      };
-      comments.push(mutation);
+      if (id === 70) comments = [mutation];
+      else comments.push(mutation);
       return mutation;
     },
     async updateIssue() {
@@ -276,7 +265,7 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
       ...integrity,
       token: "unused"
     });
-    assert.deepEqual(calls, ["marker", "duplicate-comment", "close"]);
+    assert.deepEqual(calls, ["marker", "marker", "close"]);
 
     updatedAt = context.issue.updatedAt;
     labels = [];
@@ -316,7 +305,7 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
       }),
       /comments changed|changed while Codekeeper reconciled comments/
     );
-    assert.deepEqual(calls, ["marker", "duplicate-comment"]);
+    assert.deepEqual(calls, ["marker", "marker"]);
   } finally {
     restoreEnvironment();
     restoreGitHub();

@@ -784,7 +784,28 @@ test("issue triage with a skipped workspace handoff runs the coordinator", async
   await Promise.all([
     writeFile(path.join(directory, "prompt.md"), "Classify the issue.\n"),
     writeFile(path.join(directory, "schema.json"), JSON.stringify(schema)),
-    writeFile(path.join(directory, "context.json"), JSON.stringify({ mode: "issue", baseSha: trustedHeadSha, agentProfile: metadata })),
+    writeFile(path.join(directory, "context.json"), JSON.stringify({
+      mode: "issue",
+      repository: "owner/repository",
+      runId: "7007",
+      runUrl: "https://github.com/owner/repository/actions/runs/7007",
+      toolingSha: trustedSourceSha,
+      configSha256: "b".repeat(64),
+      baseSha: trustedHeadSha,
+      triageMode: "automatic",
+      issue: {
+        number: 7,
+        title: "Zero-percent discounts should leave the original price unchanged",
+        body: "Treat a zero-percent discount as a no-op.",
+        author: "reporter",
+        updatedAt: "2026-08-22T19:00:00Z",
+        previousTriage: null
+      },
+      duplicateCandidates: [],
+      openPullRequests: [],
+      resolvedByPullRequest: null,
+      agentProfile: metadata
+    })),
     writeFile(path.join(directory, AGENT_PROFILE_BUNDLE_FILE), profile),
     writeFile(path.join(directory, "workspace-result.json"), "{\"skipped\":true}\n")
   ]);

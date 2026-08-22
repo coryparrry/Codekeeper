@@ -12,6 +12,9 @@ import {
   trustedPublicationRunUrl
 } from "./common.mjs";
 
+const ISSUE_RESOLUTION_MARKER = "<!-- codekeeper:issue-resolution -->";
+const ISSUE_DUPLICATE_CLOSURE_MARKER = "<!-- codekeeper:issue-duplicate-closure -->";
+
 export async function publishIssue({ artifactDirectory, config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource = agentProfilePath ? "repository" : "package", agentProfileSourceSha, token, dryRun = false }) {
   const { context, result } = await loadArtifact(artifactDirectory, "issue", config, configSha256, expectedManifestSha256, agentProfilePath, agentProfileSource, agentProfileSourceSha);
   const github = new GitHubClient({ token, repository: context.repository });
@@ -104,12 +107,22 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
       ? `#${resolvedByPullRequest.number}`
       : `${resolvedByPullRequest.repository}#${resolvedByPullRequest.number}`;
     const resolvedBody = `Closing as completed because merged pull request [${pullReference}](${resolvedByPullRequest.url}) resolves this issue.`;
-    await github.createOwnedIssueComment(issue.number, resolvedBody, automationIdentity);
+    await github.createOwnedIssueComment(
+      issue.number,
+      resolvedBody,
+      automationIdentity,
+      ISSUE_RESOLUTION_MARKER
+    );
     await github.verifyIssueMutation();
     await github.updateIssue(issue.number, { state: "closed", state_reason: "completed" });
   } else if (closingDuplicate) {
     const duplicateBody = `Closing as a duplicate of #${duplicate.number}.`;
-    await github.createOwnedIssueComment(issue.number, duplicateBody, automationIdentity);
+    await github.createOwnedIssueComment(
+      issue.number,
+      duplicateBody,
+      automationIdentity,
+      ISSUE_DUPLICATE_CLOSURE_MARKER
+    );
     await github.verifyIssueMutation();
     await github.updateIssue(issue.number, { state: "closed", state_reason: "not_planned" });
   }
