@@ -1,0 +1,41 @@
+name: Run Codekeeper Fixer sandbox finalizer
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-codekeeper-fixer-sandbox
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: github.event.pull_request.head.ref == 'fix/codex-sandbox-prerequisites'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/codex-sandbox-prerequisites
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Execute the reviewed finalizer payload
+        env:
+          HEAD_BRANCH: fix/codex-sandbox-prerequisites
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/fixer-sandbox-finalizer.sh"
+          ruby -ryaml -e '
+            workflow = YAML.load_file(ARGV.fetch(0))
+            step = workflow.fetch("jobs").fetch("finalize").fetch("steps").find do |item|
+              item["name"] == "Apply sandbox prerequisite repair and regression contracts"
+            end
+            abort("reviewed finalizer payload was not found") unless step
+            print step.fetch("run")
+          ' .github/workflows/codekeeper-fixer-sandbox-finalizer-temp.yml > "$payload"
+          rm .github/workflows/codekeeper-fixer-sandbox-pr-finalizer-temp.yml
+          bash "$payload"
