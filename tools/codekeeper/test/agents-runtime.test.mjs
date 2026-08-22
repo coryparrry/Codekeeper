@@ -297,6 +297,19 @@ test("provider-compatible schema projection omits uniqueItems from OpenAI struct
   assert.equal(source.uniqueItems, true);
 });
 
+test("provider-compatible schema projection omits lookaround regex patterns", () => {
+  const source = {
+    type: "string",
+    minLength: 1,
+    pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+  };
+  assert.deepEqual(providerCompatibleJsonSchema(source), {
+    type: "string",
+    minLength: 1
+  });
+  assert.match(source.pattern, /\(\?!/);
+});
+
 test("provider-compatible schema projection rejects unsupported or contradictory const values", () => {
   assert.throws(() => providerCompatibleJsonSchema({ const: {} }), /only JSON primitive const values/);
   assert.throws(() => providerCompatibleJsonSchema({ const: [] }), /only JSON primitive const values/);
