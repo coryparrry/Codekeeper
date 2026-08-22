@@ -19,6 +19,35 @@ const COMMANDS = new Set(OWNER_COMMANDS);
 const ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const MODES = new Set(["review", "maintain", "issues", "fix"]);
 const ALL_MODES = Object.freeze([...MODES]);
+const OWNER_COMMAND_CONTEXT_KEYS = Object.freeze([
+  "schemaVersion",
+  "eventName",
+  "repository",
+  "actor",
+  "association",
+  "command",
+  "canonicalCommand",
+  "surface",
+  "targetNumber",
+  "commentId",
+  "commentSha256",
+  "executionKind",
+]);
+const MODE_EXECUTION_COMMANDS = new Set([
+  "review",
+  "rerun",
+  "triage",
+  "implement",
+  "repair",
+  "fix",
+]);
+const DETERMINISTIC_EXECUTION_COMMANDS = new Set([
+  "help",
+  "status",
+  "pause",
+  "stop",
+  "defer",
+]);
 
 function labels(issue) {
   return (issue.labels ?? []).map((label) =>
@@ -83,6 +112,172 @@ export function authorizeOwnerCommand({ event, config, automationLogin }) {
     config,
     command: parseOwnerCommand(event.comment?.body, automationLogin),
   });
+}
+
+function normalizedLogin(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\[bot\]$/i, "")
+    .toLowerCase();
+}
+
+function positiveInteger(value, label) {
+  const number =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^[1-9][0-9]*$/.test(value)
+        ? Number(value)
+        : NaN;
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return number;
+}
+
+function executionKindForCommand(command) {
+  if (MODE_EXECUTION_COMMANDS.has(command)) return "mode";
+  if (DETERMINISTIC_EXECUTION_COMMANDS.has(command)) return "deterministic";
+  throw new Error(`Unsupported Codekeeper owner command: ${command}`);
+}
+
+function freezeOwnerCommandContext(context) {
+  return Object.freeze({ ...context });
+}
+
+/**
+ * Validate the closed, runner-owned owner-command context before it crosses a
+ * workflow stage boundary. This deliberately accepts no routing or authority
+ * fields beyond the immutable command request record.
+ */
+export function assertOwnerCommandContext(context) {
+  if (!context || typeof context !== "object" || Array.isArray(context)) {
+    throw new TypeError("Owner-command context must be an object");
+  }
+  const keys = Object.keys(context).sort();
+  const expected = [...OWNER_COMMAND_CONTEXT_KEYS].sort();
+  if (
+    keys.length !== expected.length ||
+    keys.some((key, index) => key !== expected[index])
+  ) {
+    throw new TypeError("Owner-command context contains an unexpected shape");
+  }
+  if (context.schemaVersion !== 1) {
+    throw new TypeError("Unsupported owner-command context schema version");
+  }
+  for (const [name, value] of [
+    ["actor", context.actor],
+    ["association", context.association],
+    ["command", context.command],
+    ["canonicalCommand", context.canonicalCommand],
+    ["surface", context.surface],
+    ["commentSha256", context.commentSha256],
+    ["executionKind", context.executionKind],
+  ]) {
+    if (typeof value !== "string" || !value.trim()) {
+      throw new TypeError(`Owner-command context ${name} is invalid`);
+    }
+  }
+  if (context.eventName !== null && typeof context.eventName !== "string") {
+    throw new TypeError("Owner-command context eventName is invalid");
+  }
+  if (
+    context.repository !== null &&
+    (typeof context.repository !== "string" || !context.repository.trim())
+  ) {
+    throw new TypeError("Owner-command context repository is invalid");
+  }
+  if (!ASSOCIATIONS.has(context.association)) {
+    throw new Error("Owner-command context association is not trusted");
+  }
+  if (!ownerCommandAvailableOnSurface(context.command, context.surface)) {
+    throw new Error(
+      `/${context.command} is not available on this ${context.surface}`,
+    );
+  }
+  if (normalizeOwnerCommand(context.command) !== context.canonicalCommand) {
+    throw new Error("Owner-command context canonical command does not match");
+  }
+  if (executionKindForCommand(context.command) !== context.executionKind) {
+    throw new Error("Owner-command context execution kind does not match");
+  }
+  positiveInteger(context.targetNumber, "Owner-command context targetNumber");
+  positiveInteger(context.commentId, "Owner-command context commentId");
+  if (!/^[a-f0-9]{64}$/.test(context.commentSha256)) {
+    throw new Error("Owner-command context comment SHA-256 is invalid");
+  }
+  return context;
+}
+
+/**
+ * Parse and authorize the original event without a GitHub token. The result
+ * is intentionally closed and immutable so later stages cannot replace the
+ * actor, target, surface, or command after authorization.
+ */
+export function resolveOwnerCommandContext({
+  event,
+  config,
+  automationLogin,
+  eventName = process.env.GITHUB_EVENT_NAME ?? null,
+}) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) {
+    throw new TypeError("Owner-command event must be an object");
+  }
+  if (!String(automationLogin ?? "").trim()) {
+    throw new Error("Configured automation bot login is required");
+  }
+  const authorization = authorizeOwnerCommand({
+    event,
+    config,
+    automationLogin,
+  });
+  if (authorization.skipped || !authorization.command) {
+    throw new Error("No supported Codekeeper owner command was found");
+  }
+  const actor = String(authorization.actor ?? "").trim();
+  if (normalizedLogin(actor) === normalizedLogin(automationLogin)) {
+    throw new Error(
+      "The configured Codekeeper automation bot cannot issue owner commands",
+    );
+  }
+  const association = String(event.comment?.author_association ?? "").trim();
+  if (!ASSOCIATIONS.has(association)) {
+    throw new Error("Owner-command association is not trusted");
+  }
+  const command = String(authorization.command).trim().toLowerCase();
+  const canonicalCommand = normalizeOwnerCommand(command);
+  const surface = ownerCommandSurface(event);
+  if (!ownerCommandAvailableOnSurface(command, surface)) {
+    throw new Error(`/${command} is not available on this ${surface}`);
+  }
+  const targetNumber = positiveInteger(
+    authorization.number,
+    "Owner-command target",
+  );
+  const commentId = positiveInteger(
+    event.comment?.id,
+    "Owner-command comment ID",
+  );
+  const repository =
+    event.repository?.full_name ?? process.env.GITHUB_REPOSITORY ?? null;
+  const context = freezeOwnerCommandContext({
+    schemaVersion: 1,
+    eventName:
+      typeof eventName === "string" && eventName.trim()
+        ? eventName.trim()
+        : null,
+    repository: repository ? String(repository) : null,
+    actor,
+    association,
+    command,
+    canonicalCommand,
+    surface,
+    targetNumber,
+    commentId,
+    commentSha256: sha256(String(event.comment?.body ?? "")),
+    executionKind: executionKindForCommand(command),
+  });
+  assertOwnerCommandContext(context);
+  return context;
 }
 
 function requireInstalledMode(command, issue, installedModes) {
@@ -281,14 +476,38 @@ async function dispatchIssueOwnerCommand({
   return identity;
 }
 
+/** Execute deterministic commands through the established command path while
+ * refusing every command that belongs to a model mode before GitHub access. */
+export async function runDeterministicOwnerCommand(options) {
+  const event = options.event ?? (await readJson(options.eventPath));
+  const context = resolveOwnerCommandContext({
+    event,
+    eventName: options.eventName,
+    config: options.config,
+    automationLogin: options.automationIdentity?.login,
+  });
+  if (context.executionKind !== "deterministic") {
+    throw new Error(
+      `Direct deterministic execution refuses mode command /codekeeper ${context.command}; mode commands require the generic runtime`,
+    );
+  }
+  return runOwnerCommand({
+    ...options,
+    event,
+    deterministicOnly: true,
+  });
+}
+
 export async function runOwnerCommand({
   eventPath,
+  event: suppliedEvent,
   config,
   token,
   automationIdentity,
   installedModes = ALL_MODES,
+  deterministicOnly = false,
 }) {
-  const event = await readJson(eventPath);
+  const event = suppliedEvent ?? (await readJson(eventPath));
   const authorization = authorizeOwnerCommand({
     event,
     config,
@@ -297,6 +516,14 @@ export async function runOwnerCommand({
   if (authorization.skipped) return authorization;
   const { actor, command, number } = authorization;
   const canonicalCommand = normalizeOwnerCommand(command);
+  if (
+    deterministicOnly &&
+    executionKindForCommand(command) !== "deterministic"
+  ) {
+    throw new Error(
+      `Direct deterministic execution refuses mode command /codekeeper ${command}; mode commands require the generic runtime`,
+    );
+  }
   const repository =
     event.repository?.full_name ?? process.env.GITHUB_REPOSITORY;
   const github = new GitHubClient({ token, repository });
