@@ -8,10 +8,10 @@ import {
   runnerWasAllocated,
   timestamp,
 } from "../../../scripts/measure-codekeeper-runs.mjs";
-import { renderWorkflow } from "../../../packages/codekeeper/src/assets.mjs";
+import { renderUnifiedWorkflow } from "../../../packages/codekeeper/src/assets.mjs";
 import {
   MODE_IDS,
-  MODES,
+  UNIFIED_CALLER_WORKFLOW,
 } from "../../../packages/codekeeper/src/constants.mjs";
 import { completionGuidance } from "../../../packages/codekeeper/src/plan.mjs";
 import {
@@ -264,30 +264,37 @@ test("the committed fixture matches the current production job graphs", async ()
   assert.match(updateGuidance.closing, /After merge, run codekeeper verify/i);
 
   const bundle = await loadVerifiedAssets();
-  for (const mode of MODE_IDS) {
-    const rendered = renderWorkflow(bundle.contents[MODES[mode].asset], {
+  const rendered = renderUnifiedWorkflow(
+    bundle.contents[UNIFIED_CALLER_WORKFLOW.asset],
+    {
       packageRelease: TEST_PACKAGE_RELEASE,
-      mode,
-      preset: "openai",
-    });
-    assert.match(
-      rendered,
+      ownerRequests: true,
+      automationBotLogin: "codekeeper-acme[bot]",
+      modes: MODE_IDS,
+    },
+  );
+  assert.equal(
+    (rendered.match(
       new RegExp(
         `package_version: "${escapeRegExp(TEST_PACKAGE_RELEASE.version)}"`,
+        "g",
       ),
-      `${mode} caller must retain the exact package version while an update PR is pending`,
-    );
-    assert.match(
-      rendered,
-      new RegExp(escapeRegExp(TEST_PACKAGE_RELEASE.integrity)),
-      `${mode} caller must retain the exact package integrity while an update PR is pending`,
-    );
-    assert.doesNotMatch(
-      rendered,
-      /(?:@latest|package_version:\s*latest|npm\s+(?:install|exec)[^\n]*latest)/i,
-      `${mode} caller must not use a dynamic latest package reference`,
-    );
-  }
+    ) ?? []).length,
+    5,
+    "unified caller must retain the exact package version for every runtime job while an update PR is pending",
+  );
+  assert.equal(
+    (rendered.match(
+      new RegExp(escapeRegExp(TEST_PACKAGE_RELEASE.integrity), "g"),
+    ) ?? []).length,
+    5,
+    "unified caller must retain the exact package integrity for every runtime job while an update PR is pending",
+  );
+  assert.doesNotMatch(
+    rendered,
+    /(?:@latest|package_version:\s*latest|npm\s+(?:install|exec)[^\n]*latest)/i,
+    "unified caller must not use a dynamic latest package reference",
+  );
 });
 
 test("job dependencies preserve the staged state-machine order", async () => {

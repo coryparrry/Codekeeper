@@ -139,7 +139,6 @@ export async function assertRequiredCandidatePaths(root) {
     await requireRegularFile(path.join(root, ...relativePath.split("/")), relativePath);
   }
   const yamlFiles = await collectYamlFiles(root);
-  if (yamlFiles.length < 11) fail("candidate is missing packaged or generated workflow YAML");
   return yamlFiles;
 }
 

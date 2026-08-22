@@ -8,7 +8,6 @@ export const repositoryRoot = path.resolve(scriptDirectory, "../../..");
 export const TARGETS = Object.freeze([
   "examples/workflows/codekeeper-assistant.yml.example",
   "examples/workflows/codekeeper-review.yml.example",
-  "packages/codekeeper/assets/workflows/review.yml",
   ".github/workflows/codekeeper-review.yml",
   ".github/workflows/codekeeper-issues.yml",
 ]);
@@ -82,7 +81,7 @@ export function renderSource(source, relativePath) {
   if (relativePath.startsWith(".github/workflows/")) {
     return renderReviewCondition(source, relativePath);
   }
-  if (relativePath.endsWith("codekeeper-review.yml.example") || relativePath.endsWith("assets/workflows/review.yml")) {
+  if (relativePath.endsWith("codekeeper-review.yml.example")) {
     return renderReviewCondition(source, relativePath);
   }
   return renderActionList(source, relativePath);
