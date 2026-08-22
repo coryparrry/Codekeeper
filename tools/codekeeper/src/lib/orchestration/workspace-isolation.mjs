@@ -149,6 +149,16 @@ async function commandAsUser({ user, node, cliPath, args, environment, cwd }) {
   );
 }
 
+async function assertUserProcessesStopped(user) {
+  try {
+    await exec("sudo", ["pgrep", "-u", user]);
+  } catch (error) {
+    if (error?.code === 1) return;
+    throw error;
+  }
+  throw new Error("Isolated workspace process survived cleanup");
+}
+
 export async function runIsolatedWorkspaceAgent({
   mode,
   directory,
@@ -334,14 +344,7 @@ export async function runIsolatedWorkspaceAgent({
         await exec("sudo", ["pkill", "-KILL", "-u", workspaceUser]).catch(
           () => {},
         );
-        try {
-          await exec("sudo", ["pgrep", "-u", workspaceUser]);
-          throw new Error("Isolated workspace process survived cleanup");
-        } catch (error) {
-          if (error?.message === "Isolated workspace process survived cleanup")
-            throw error;
-          if (error?.code !== 1) throw error;
-        }
+        await assertUserProcessesStopped(workspaceUser);
         if (workspaceAccess === "write") {
           await exec("sudo", [
             "chown",
