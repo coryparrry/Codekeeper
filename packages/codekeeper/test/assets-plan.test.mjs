@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -10,6 +9,7 @@ import {
   sha256
 } from "../src/assets.mjs";
 import { applyPolicyPreset } from "../../../tools/codekeeper/presets/catalogue.mjs";
+import { buildDistributionMetadata } from "../src/distribution.mjs";
 import {
   AGENT_PROFILE_IDS,
   AGENT_PROFILES,
@@ -23,7 +23,6 @@ import {
   RECOMMENDED_MODES,
   RECOMMENDED_PRESET,
   RELEASE_MANIFEST_TARGET,
-  SOURCE_COMMIT,
   SOURCE_REPOSITORY,
   TRACE_SECRET,
   UNIFIED_CALLER_WORKFLOW
@@ -48,8 +47,8 @@ import {
   assertInstallerCode,
   HEAD_SHA,
   loadVerifiedAssets,
+  git,
   PACKAGE_ROOT,
-  PINNED_COMMIT,
   REPOSITORY_ROOT,
   TEST_PACKAGE_RELEASE
 } from "./helpers.mjs";
@@ -102,9 +101,9 @@ function answers(overrides = {}) {
 
 test("the bundled asset inventory and metadata match their canonical source bytes", async () => {
   const bundle = await loadVerifiedAssets();
+  const head = git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim();
   assert.equal(bundle.metadata.source.repository, SOURCE_REPOSITORY);
-  assert.equal(bundle.metadata.source.commit, SOURCE_COMMIT);
-  assert.equal(SOURCE_COMMIT, PINNED_COMMIT);
+  assert.equal(bundle.metadata.source.commit, head);
   assert.deepEqual(Object.keys(bundle.metadata.assets).sort(), ASSET_KEYS);
   assert.deepEqual(Object.keys(bundle.contents).sort(), ASSET_KEYS);
   for (const key of ASSET_KEYS) {
@@ -113,12 +112,7 @@ test("the bundled asset inventory and metadata match their canonical source byte
     const checkpointPath = key.startsWith("agents/") ? `tools/codekeeper/${key}` : CHECKPOINT_PATHS[key];
     if (checkpointPath) assert.equal(record.sourcePath, checkpointPath, `${key} source path`);
     const [sourcePath, preset] = (checkpointPath ?? record.sourcePath).split("#preset=");
-    const baseSource = checkpointPath
-      ? execFileSync("git", ["show", `${PINNED_COMMIT}:${sourcePath}`], {
-          cwd: REPOSITORY_ROOT,
-          encoding: "utf8"
-        })
-      : await readFile(path.join(REPOSITORY_ROOT, ...sourcePath.split("/")), "utf8");
+    const baseSource = await readFile(path.join(REPOSITORY_ROOT, ...sourcePath.split("/")), "utf8");
     const source = preset
       ? `${JSON.stringify(applyPolicyPreset(JSON.parse(baseSource), preset), null, 2)}\n`
       : baseSource;
@@ -130,42 +124,35 @@ test("the bundled asset inventory and metadata match their canonical source byte
   assert.ok(Object.isFrozen(bundle.metadata.assets));
 });
 
-test("the pinned runtime accepts the policy version emitted by this installer", async () => {
+test("the current runtime accepts the policy version emitted by this installer", async () => {
   const bundle = await loadVerifiedAssets();
   const emittedVersion = JSON.parse(renderPolicy(bundle.contents["policies/openai.json"], {
     displayName: "Widget",
     defaultBranch: "main",
     ownerLogins: ["coryparrry"]
   })).version;
-  const pinnedValidator = execFileSync("git", ["show", `${SOURCE_COMMIT}:tools/codekeeper/src/lib/policy-validator.mjs`], {
-    cwd: REPOSITORY_ROOT,
-    encoding: "utf8"
-  });
+  const validator = await readFile(path.join(REPOSITORY_ROOT, "tools/codekeeper/src/lib/policy-validator.mjs"), "utf8");
   assert.equal(emittedVersion, 3);
-  assert.match(pinnedValidator, /config\.version === 3/);
+  assert.match(validator, /config\.version === 3/);
 });
 
-test("bundled provenance is byte-for-byte metadata from the pinned source release", async () => {
+test("bundled provenance is byte-for-byte metadata from the current source tree", async () => {
   const bundle = await loadVerifiedAssets();
   assert.deepEqual(Object.keys(bundle.metadata.provenance).sort(), Object.keys(CHECKPOINT_PROVENANCE_PATHS).sort());
   for (const [name, sourcePath] of Object.entries(CHECKPOINT_PROVENANCE_PATHS)) {
-    const source = execFileSync("git", ["show", `${PINNED_COMMIT}:${sourcePath}`], {
-      cwd: REPOSITORY_ROOT,
-      encoding: "utf8"
-    });
+    const source = await readFile(path.join(REPOSITORY_ROOT, ...sourcePath.split("/")), "utf8");
     assert.equal(bundle.metadata.provenance[name].sha256, sha256(source), `${name} SHA-256`);
     assert.equal(bundle.metadata.provenance[name].bytes, Buffer.byteLength(source), `${name} bytes`);
   }
 });
 
-test("bundled starter profiles remain byte-for-byte pinned until the runtime checkpoint is released", async () => {
+test("bundled starter profiles match the current runtime agent files", async () => {
   const bundle = await loadVerifiedAssets();
   for (const profile of AGENT_PROFILE_IDS) {
     const definition = AGENT_PROFILES[profile];
-    const canonical = execFileSync(
-      "git",
-      ["show", `${PINNED_COMMIT}:tools/codekeeper/agents/${profile}.md`],
-      { cwd: REPOSITORY_ROOT, encoding: "utf8" },
+    const canonical = await readFile(
+      path.join(REPOSITORY_ROOT, "tools/codekeeper/agents", `${profile}.md`),
+      "utf8",
     );
     assert.equal(bundle.contents[definition.asset], canonical, definition.target);
   }
@@ -182,27 +169,31 @@ test("bundled starter profiles define evidence-first role boundaries", async () 
 
 test("asset verification rejects an altered inventory or a single changed byte", async () => {
   const metadataPath = path.join(PACKAGE_ROOT, "assets", "metadata.json");
-  const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+  const metadata = await buildDistributionMetadata({
+    repositoryRoot: REPOSITORY_ROOT,
+    sourceCommit: git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim(),
+  });
   const extra = structuredClone(metadata);
   extra.assets["workflows/codekeeper-extra.yml"] = extra.assets["workflows/codekeeper.yml"];
+  const fileStat = await lstat(path.join(PACKAGE_ROOT, "package.json"));
   await assert.rejects(
     loadVerifiedAssets({
       packageRoot: PACKAGE_ROOT,
       fsImpl: {
-        lstat,
+        lstat: async (target) => target === metadataPath ? fileStat : lstat(target),
         readFile: async (target) => target === metadataPath ? Buffer.from(JSON.stringify(extra)) : readFile(target)
       }
     }),
     assertInstallerCode(assert, "ASSET_INVENTORY_INVALID")
   );
 
-  const reviewPath = path.join(PACKAGE_ROOT, "assets", "workflows", "codekeeper.yml");
+  const callerPath = path.join(REPOSITORY_ROOT, "examples", "workflows", "codekeeper.yml.example");
   await assert.rejects(
     loadVerifiedAssets({
       packageRoot: PACKAGE_ROOT,
       fsImpl: {
         lstat,
-        readFile: async (target) => target === reviewPath ? Buffer.concat([await readFile(target), Buffer.from("x")]) : readFile(target)
+        readFile: async (target) => target === callerPath ? Buffer.concat([await readFile(target), Buffer.from("x")]) : readFile(target)
       }
     }),
     assertInstallerCode(assert, "ASSET_DIGEST_MISMATCH")

@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { formatNpmPackReport, normalizeNpmPackReport, packCodekeeperPackage, verifyReleaseAuthority } from "../../../scripts/pack-codekeeper-package.mjs";
 import { createCommandRunner, requireSuccess, sanitizedEnvironment } from "../src/command-runner.mjs";
 import { PACKAGE_NAME } from "../src/package-identity.mjs";
-import { git, PACKAGE_ROOT, PINNED_COMMIT, REPOSITORY_ROOT, temporaryDirectory, VERSION } from "./helpers.mjs";
+import { git, PACKAGE_ROOT, REPOSITORY_ROOT, temporaryDirectory, VERSION } from "./helpers.mjs";
 
 const RUNTIME_PACKAGE_ROOT = path.join(PACKAGE_ROOT, "runtime-package");
 
@@ -69,7 +69,6 @@ test("pack destination rejects an ancestor symlink into the source repository", 
   });
   await writeFile(path.join(repositoryRoot, "package.json"), JSON.stringify({ packageManager: "npm@12.0.2" }));
   await writeFile(path.join(repositoryRoot, "packages", "codekeeper", "package.json"), JSON.stringify({ version: "0.2.0" }));
-  await writeFile(path.join(repositoryRoot, "packages", "codekeeper", "assets", "metadata.json"), JSON.stringify({ source: { commit: "0".repeat(40) } }));
   const redirectedParent = path.join(fixture, "redirected-parent");
   await symlink(repositoryRoot, redirectedParent);
 
@@ -385,7 +384,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   const expectedIntegrity = `sha512-${createHash("sha512").update(tarballBytes).digest("base64")}`;
   assert.deepEqual(installedPackage.bin, expectedBins);
   assert.deepEqual(installedPackage.dependencies, packageManifest.dependencies);
-  assert.deepEqual([...new Set(installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? [])], [PINNED_COMMIT]);
+  assert.equal((installedReadme.match(/\b[0-9a-f]{40}\b/g) ?? []).length, 0);
   const testHome = path.join(npmInstallRoot, "home");
   const shimEnvironment = Object.fromEntries(
     Object.entries({
@@ -502,7 +501,7 @@ test("one npm tarball installs a lightweight CLI then its copied runtime graph e
   const packagedProfile = await installedAgentProfiles.loadTrustedAgentProfile({
     mode: "review",
     source: installedAgentProfiles.AGENT_PROFILE_SOURCES.package,
-    sourceSha: PINNED_COMMIT
+    sourceSha: git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim()
   });
   assert.equal(packagedProfile.metadata.source, "package");
   assert.equal(packagedProfile.metadata.path, "runtime/agents/pr-reviewer.md");

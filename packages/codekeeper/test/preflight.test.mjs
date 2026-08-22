@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256 } from "../src/assets.mjs";
-import { SOURCE_COMMIT, SOURCE_REPOSITORY } from "../src/constants.mjs";
+import { SOURCE_REPOSITORY } from "../src/constants.mjs";
 import { buildInstallPlan } from "../src/plan.mjs";
 import {
   assertNodeVersion,
@@ -33,7 +33,7 @@ const OTHER_SHA = "b".repeat(40);
 function installedWorkflow(source) {
   return source
     .replaceAll("OWNER/REPOSITORY", SOURCE_REPOSITORY)
-    .replaceAll("FULL_COMMIT_SHA", SOURCE_COMMIT);
+    .replaceAll("FULL_COMMIT_SHA", HEAD_SHA);
 }
 
 function unifiedWorkflow(bundle, modes = ["review"]) {
@@ -59,9 +59,9 @@ function legacyWorkflow(mode, {
     ...(schedule ? [`  - cron: "${schedule}"`] : []),
     "jobs:",
     "  codekeeper:",
-    `    uses: ${SOURCE_REPOSITORY}/tools/codekeeper@${SOURCE_COMMIT}`,
+    `    uses: ${SOURCE_REPOSITORY}/tools/codekeeper@${HEAD_SHA}`,
     "  runtime:",
-    `    uses: ${SOURCE_REPOSITORY}/.github/workflows/codekeeper-${mode}.yml@${SOURCE_COMMIT}`,
+    `    uses: ${SOURCE_REPOSITORY}/.github/workflows/codekeeper-${mode}.yml@${HEAD_SHA}`,
     "",
   ].join("\n");
 }
@@ -310,7 +310,7 @@ test("release manifests admit only digest-bound retired Codekeeper workflows", a
   const manifest = {
     version: 1,
     package: { name: "@coryparry/codekeeper", version: "0.2.0" },
-    source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+    source: { repository: SOURCE_REPOSITORY, commit: HEAD_SHA },
     managedFiles: { [retiredTarget]: sha256(retiredSource) }
   };
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -342,7 +342,7 @@ test("release-owned Markdown is accepted only at its exact digest-bound catalog 
   const manifest = {
     version: 2,
     package: bundle.packageRelease,
-    source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+    source: { repository: SOURCE_REPOSITORY, commit: HEAD_SHA },
     managedFiles: { [target]: sha256(source) },
   };
   await mkdir(path.join(root, ".github", "codekeeper"), { recursive: true });
@@ -420,7 +420,7 @@ test("edited caller workflows retain semantic validation across catalog renames 
       const manifest = {
         version: 2,
         package: bundle.packageRelease,
-        source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+        source: { repository: SOURCE_REPOSITORY, commit: HEAD_SHA },
         managedFiles: { [target]: sha256(label === "retired" ? legacySource : installedSource) },
       };
       await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
@@ -496,7 +496,7 @@ test("installation inspection retains edited legacy callers while blocking their
   const manifest = {
     version: 2,
     package: bundle.packageRelease,
-    source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+    source: { repository: SOURCE_REPOSITORY, commit: HEAD_SHA },
     managedFiles: { [previousTarget]: sha256(installedSource) },
   };
   await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
@@ -573,7 +573,7 @@ test("existing generated files with every optional profile missing are recognize
     `${JSON.stringify({
       version: 2,
       package: bundle.packageRelease,
-      source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+      source: { repository: SOURCE_REPOSITORY, commit: HEAD_SHA },
       managedFiles: { ".github/workflows/codekeeper.yml": sha256(unifiedSource) },
     }, null, 2)}\n`,
   );
@@ -640,7 +640,7 @@ test("existing generated files with every optional profile missing are recognize
     `${JSON.stringify({
       version: 2,
       package: bundle.packageRelease,
-      source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+      source: { repository: SOURCE_REPOSITORY, commit: HEAD_SHA },
       managedFiles: { ".github/workflows/codekeeper.yml": sha256(issuesSource) },
     }, null, 2)}\n`,
   );
@@ -682,7 +682,7 @@ test("legacy callers remain inspectable when their retired targets are recorded 
     `${JSON.stringify({
       version: 2,
       package: bundle.packageRelease,
-      source: { repository: SOURCE_REPOSITORY, commit: SOURCE_COMMIT },
+      source: { repository: SOURCE_REPOSITORY, commit: HEAD_SHA },
       managedFiles: Object.fromEntries(Object.entries(legacyFiles).map(([target, source]) => [target, sha256(source)])),
     }, null, 2)}\n`,
   );

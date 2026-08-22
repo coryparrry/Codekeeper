@@ -256,12 +256,6 @@ export async function packCodekeeperPackage({
       "utf8",
     ),
   );
-  const packageMetadata = JSON.parse(
-    await readFile(
-      path.join(repositoryRoot, "packages/codekeeper/assets/metadata.json"),
-      "utf8",
-    ),
-  );
   const requiredNpmVersion = packageManagerVersion(
     repositoryManifest.packageManager,
   );
@@ -279,7 +273,7 @@ export async function packCodekeeperPackage({
   if (requireClean) {
     verifyReleaseAuthority(repositoryRoot, {
       releaseCommit,
-      pinnedSourceCommit: packageMetadata.source?.commit,
+      pinnedSourceCommit: releaseCommit,
     });
   }
   destination = await requirePackDestination(

@@ -51,7 +51,7 @@ The same product crosses several independently fallible boundaries:
 
 ```text
 runtime source and policies
-        |  tooling manifest, source pin, mirrored helper
+        |  tooling manifest, generated distribution, mirrored helper
         v
 installer assets and generated workflow callers
         |  package stage and release/manifest.json
@@ -81,20 +81,20 @@ named in its “also verify” column.
 
 | Touched surface | Typical breaking point | Required local verification | Also verify |
 |---|---|---|---|
-| `tools/codekeeper/src/**`, agents, presets, schemas, provider code | Runtime behavior, provider routing, output schemas, retries, timeouts, cancellation, workspace isolation, or mutation authority changes without a matching packaged/runtime contract | `cd tools/codekeeper && npm run check`; run the focused runtime, provider, schema, isolation, and audit tests | tooling manifest, installer source pin, policy-validator copy, embedded runtime, workflow execution |
+| `tools/codekeeper/src/**`, agents, presets, schemas, provider code | Runtime behavior, provider routing, output schemas, retries, timeouts, cancellation, workspace isolation, or mutation authority changes without a matching packaged/runtime contract | `cd tools/codekeeper && npm run check`; run the focused runtime, provider, schema, isolation, and audit tests | tooling manifest, generated package distribution, policy-validator copy, embedded runtime, workflow execution |
 | `.github/codekeeper.json` and policy validators | Closed-schema rejection, invalid provider/model settings, capability accidentally enabled, owner/label drift, or a trusted policy read from the wrong ref | `node tools/codekeeper/src/cli.mjs check-config --config .github/codekeeper.json`; focused policy/config tests | default-branch policy checkout, profile provenance, workflow authorization, App permissions |
 | `packages/codekeeper/src/**` and installer CLI/TUI | Installer plans the wrong files, overwrites adopter-owned content, changes settings authority, breaks `doctor`, `verify`, update, or clean-room setup | `cd packages/codekeeper && npm run check`; focused installer, preflight, TUI, package-acquisition, and repository-artifact tests | stage, tarball, exact-version install, clean adopter repository |
-| `packages/codekeeper/assets/**` or `metadata.json` | Packaged agent profiles, policies, workflow templates, digests, source paths, or release metadata diverge from canonical source | package asset/plan/contract tests; `npm run package:stage:check` | package stage, release verifier, YAML parse, rendered adopter files |
+| `packages/codekeeper/assets/**` or generated `metadata.json` | Packaged agent profiles, policies, workflow templates, digests, source paths, or release metadata diverge from canonical source | package asset/plan/contract tests; `npm run package:stage:check` | package stage, release verifier, YAML parse, rendered adopter files |
 | `tools/codekeeper/src/lib/label-ownership.mjs` or other mirrored helper | Canonical runtime and published installer helper implement different authorization or ownership rules | `npm run helpers:check`; mirrored-helper tests | installer package and runtime behavior |
-| `tools/codekeeper/src/lib/policy-validator.mjs` or pinned runtime input | Installer copy no longer matches the reviewed source checkpoint | `node scripts/sync-policy-validator.mjs --check`; package policy-validator tests | source pin reachability and exact checkpoint contents |
+| `tools/codekeeper/src/lib/policy-validator.mjs` or installer policy copy | Installer copy no longer matches the current runtime validator | `node scripts/sync-policy-validator.mjs --check`; package policy-validator tests | packaged runtime contents |
 | `tools/codekeeper/tooling-manifest.json` or runtime payload | Generated inventory is stale, incomplete, or records a different source payload | `cd tools/codekeeper && node scripts/generate-tooling-manifest.mjs --check`; runtime check | package runtime contents and release provenance |
 | `.github/workflows/**`, action files, or `examples/workflows/**` | Trigger, input, secret, permission, job dependency, checkout ref, action pin, runner, or caller/reusable-workflow contract breaks | root `npm run check`; actionlint; Ruby/Psych YAML parsing; workflow contract tests | packaged workflow assets, rendered adopter workflows, protected live checks |
 | Review or `pull_request_target` caller | Untrusted pull-request code is checked out or executed on a privileged runner, or required review authority is bypassed | workflow contract tests plus static inspection of checkout refs and job permissions | a controlled same-repository adopter PR |
 | Runtime workflow consumer | One isolated job fails to acquire/reverify the exact package, install the locked runtime, or transfer a frozen artifact | workflow package-contract tests; candidate verifier | workflow run evidence and exact package receipt |
 | `scripts/build-*`, `pack-*`, release verifier, or release lifecycle | Source, stage, tarball, manifest, receipt, or installed runtime describes different bytes; candidate mode reaches publication | `npm run package:stage:check`; release-candidate tests; pack and verify an exact candidate | protected release workflow and registry receipt |
 | `package.json`, package lockfiles, runtime lockfile, Node/npm versions | Lifecycle scripts, bundled Ink/React dependencies, nested runtime, or supported Node line changes without reproducible installs | clean `npm ci --ignore-scripts --no-audit --no-fund` on Node 22 and 24; package checks | exact npm 12.0.2 pack and install canary |
-| `SOURCE_COMMIT`, release metadata, or source repository identity | Installer points to a stale, unreachable, future, self-referential, or wrong-owner checkpoint | package contract tests; verify full SHA and default-branch ancestry | inspect exact checkpoint contents, not ancestry alone |
-| `MANIFEST.sha256`, release docs, or tracked files | Source archive no longer represents the reviewed tracked tree | `bash scripts/release-source.sh --verify` from a clean final commit | archive receipt and release tag |
+| Generated package source commit or source repository identity | Installer records a stale, unreachable, future, self-referential, or wrong-owner commit | package contract and distribution tests; verify full SHA and default-branch ancestry for release packs | inspect the exact build commit contents, not ancestry alone |
+| `MANIFEST.sha256` (compatibility-only), release docs, or tracked files | Source archive no longer represents the reviewed tracked tree | `bash scripts/release-source.sh --verify` from a clean final commit | archive receipt and release tag |
 | Acceptance harness, evals, fixtures, or test oracles | A fixture passes while the real workflow, package, App identity, or mutation boundary is broken; failure is converted into success | `cd acceptance && npm run check`; `cd tools/codekeeper && npm run eval:offline`; inspect assertions and skips | private live adopter acceptance where authorized |
 | Release governance, ruleset, release workflow, or npm workflow | Checked-in protection is not applied live; required checks, npm environment, public visibility, token, tag, or registry state is wrong | `npm run governance:check`; `node scripts/repository-governance.mjs --check-remote` | live rulesets, required checks, tag immutability, npm receipt, GitHub Release |
 | Documentation, README, examples, or version-facing copy | Users follow commands, package names, versions, paths, or workflows that no longer exist | relevant documentation contract tests and root `npm run check` | clean package install and published package README |
@@ -191,18 +191,17 @@ npm run package:stage:check
 ```
 
 If a runtime payload changed, generate the tooling manifest before committing
-the source change. If a mirrored or pinned helper changed, regenerate the
-published copy from its canonical source. Never hand-edit generated hashes.
+the source change. If a mirrored helper changed, regenerate the published copy
+from its canonical source. Never hand-edit generated hashes, workflow copies, or
+package source commits. `node scripts/generate-codekeeper-distribution.mjs`
+writes those into a package stage; do not commit them.
 
-Verify the source pin as an exact content checkpoint:
+A release pack binds `assets/metadata.json` to clean `HEAD`. A candidate pack
+binds it to the explicitly supplied candidate commit. The root `MANIFEST.sha256`
+inventory is compatibility-only for remaining source-pinned installations; do
+not extend it.
 
-```bash
-git cat-file -e <FULL_SOURCE_COMMIT>^{commit}
-git merge-base --is-ancestor <FULL_SOURCE_COMMIT> origin/main
-git show --stat --oneline <FULL_SOURCE_COMMIT>
-```
-
-Then confirm that the checkpoint contains the intended runtime and embedded
+Confirm the recorded package commit contains the intended runtime and embedded
 workflow contents. An ancestor can still be the wrong release checkpoint.
 
 ### Gate E — exact package boundary
@@ -376,9 +375,8 @@ For runtime or packaged-source changes, use this order:
 
 If any later tracked-file edit occurs, repeat the manifest refresh and final
 source verification sequence. A version bump, tag, or npm publication does not
-automatically justify advancing `SOURCE_COMMIT`; advance it only after the
-intended runtime checkpoint is merged, inspected, and copied to every pin
-surface.
+replace the pack-time source commit; that commit is generated from the exact
+build `HEAD` or candidate SHA.
 
 ## 8. Scope and support boundary
 

@@ -53,6 +53,12 @@ test("package stage contains one release with separate closed installer and runt
   assert.equal(manifest.package.name, "@coryparry/codekeeper");
   assert.match(manifest.package.version, /^\d+\.\d+\.\d+/);
   assert.match(manifest.source.commit, /^[0-9a-f]{40}$/);
+  const stagedMetadata = JSON.parse(
+    await readFile(path.join(destination, "assets", "metadata.json"), "utf8"),
+  );
+  assert.equal(stagedMetadata.source.commit, manifest.source.commit);
+  assert.ok(paths.includes("assets/metadata.json"));
+  assert.ok(paths.includes("assets/workflows/codekeeper.yml"));
   assert.equal(paths.includes("runtime/action.yml"), false);
 
   for (const requiredPath of [

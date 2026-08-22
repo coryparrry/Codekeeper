@@ -14,9 +14,13 @@ import {
   PACKAGE_NAME,
   RELEASE_MANIFEST_TARGET,
   RELEASE_PACKAGE_ASSETS,
-  SOURCE_COMMIT,
   SOURCE_REPOSITORY
 } from "./constants.mjs";
+import {
+  buildDistributionMetadata,
+  distributionMetadataSource,
+  SOURCE_RESOLVED_ASSETS,
+} from "./distribution.mjs";
 import {
   activeRepositoryArtifacts,
   ASSET_KEYS,
@@ -32,6 +36,7 @@ const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BOT_LOGIN = /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,99}))\[bot\]$/;
 const DISABLED_BOT_MENTION = "@_codekeeper_owner_commands_disabled_";
 const RELEASE_PACKAGE_ASSET_MAP = new Map(RELEASE_PACKAGE_ASSETS.map((asset) => [asset.asset, asset]));
+const SOURCE_ASSET_MAP = new Map(SOURCE_RESOLVED_ASSETS.map((asset) => [asset.asset, asset]));
 const APP_PERMISSION_VALUE_SET = new Set(APP_PERMISSION_VALUES);
 
 export function sha256(value) {
@@ -74,6 +79,30 @@ async function hasRegularFile(fsImpl, filePath, label) {
   }
 }
 
+function resolveAssetFilePath(assetKey, { packageRoot, assetsRoot, stagedPackage }) {
+  const sourceAsset = SOURCE_ASSET_MAP.get(assetKey);
+  if (sourceAsset) {
+    if (stagedPackage) return path.join(packageRoot, ...sourceAsset.packagePath.split("/"));
+    if (packageRoot === DEFAULT_PACKAGE_ROOT) {
+      return path.resolve(packageRoot, "..", "..", ...sourceAsset.sourcePath.split("/"));
+    }
+  }
+  return path.join(assetsRoot, ...assetKey.split("/"));
+}
+
+async function loadAssetMetadataBytes({ packageRoot, assetsRoot, stagedPackage, fsImpl }) {
+  const metadataPath = path.join(assetsRoot, "metadata.json");
+  if (await hasRegularFile(fsImpl, metadataPath, "Asset metadata")) {
+    return readRegularFile(fsImpl, metadataPath, "Asset metadata");
+  }
+  if (!stagedPackage && packageRoot === DEFAULT_PACKAGE_ROOT) {
+    return distributionMetadataSource(await buildDistributionMetadata({
+      repositoryRoot: path.resolve(packageRoot, "..", ".."),
+    }));
+  }
+  throw new InstallerError("Asset metadata must be a regular, non-symlink file.", { code: "ASSET_TYPE_INVALID" });
+}
+
 export async function loadVerifiedAssets({
   packageRoot = DEFAULT_PACKAGE_ROOT,
   fsImpl = { readFile, lstat },
@@ -81,7 +110,8 @@ export async function loadVerifiedAssets({
   environment = process.env
 } = {}) {
   const assetsRoot = path.join(packageRoot, "assets");
-  const metadataBytes = await readRegularFile(fsImpl, path.join(assetsRoot, "metadata.json"), "Asset metadata");
+  const stagedPackage = await hasRegularFile(fsImpl, path.join(packageRoot, "release", "manifest.json"), "Package release manifest");
+  const metadataBytes = await loadAssetMetadataBytes({ packageRoot, assetsRoot, stagedPackage, fsImpl });
   let metadata;
   try {
     metadata = JSON.parse(metadataBytes.toString("utf8"));
@@ -95,11 +125,21 @@ export async function loadVerifiedAssets({
   if (!REPOSITORY.test(metadata.source.repository ?? "") || !FULL_SHA.test(metadata.source.commit ?? "")) {
     throw new InstallerError("Asset metadata has invalid source provenance.", { code: "ASSET_METADATA_INVALID" });
   }
-  if (metadata.source.repository !== SOURCE_REPOSITORY || metadata.source.commit !== SOURCE_COMMIT) {
-    throw new InstallerError("Asset metadata does not match this installer's pinned source release.", { code: "ASSET_METADATA_INVALID" });
+  if (metadata.source.repository !== SOURCE_REPOSITORY) {
+    throw new InstallerError("Asset metadata does not match this installer's source repository.", { code: "ASSET_METADATA_INVALID" });
+  }
+  if (stagedPackage) {
+    let releaseManifest;
+    try {
+      releaseManifest = JSON.parse((await readRegularFile(fsImpl, path.join(packageRoot, "release", "manifest.json"), "Package release manifest")).toString("utf8"));
+    } catch (cause) {
+      throw new InstallerError("Package release manifest is not valid JSON.", { code: "ASSET_METADATA_INVALID", cause });
+    }
+    if (releaseManifest?.source?.commit !== metadata.source.commit) {
+      throw new InstallerError("Asset metadata does not match this package's recorded source commit.", { code: "ASSET_METADATA_INVALID" });
+    }
   }
   exactKeys(Object.keys(metadata.assets), ASSET_KEYS, "Asset");
-  const stagedPackage = await hasRegularFile(fsImpl, path.join(packageRoot, "release", "manifest.json"), "Package release manifest");
 
   const contents = {};
   for (const assetKey of ASSET_KEYS) {
@@ -111,13 +151,7 @@ export async function loadVerifiedAssets({
     if (releaseAsset && (record.sourcePath !== releaseAsset.sourcePath || record.packagePath !== releaseAsset.packagePath)) {
       throw new InstallerError(`Asset metadata is invalid for ${assetKey}.`, { code: "ASSET_METADATA_INVALID" });
     }
-    const assetPath = releaseAsset
-      ? stagedPackage
-        ? path.join(packageRoot, ...releaseAsset.packagePath.split("/"))
-        : packageRoot === DEFAULT_PACKAGE_ROOT
-          ? path.resolve(packageRoot, "..", "..", ...releaseAsset.sourcePath.split("/"))
-          : path.join(assetsRoot, ...assetKey.split("/"))
-      : path.join(assetsRoot, ...assetKey.split("/"));
+    const assetPath = resolveAssetFilePath(assetKey, { packageRoot, assetsRoot, stagedPackage });
     const bytes = await readRegularFile(fsImpl, assetPath, `Asset ${assetKey}`);
     if (bytes.byteLength !== record.bytes || sha256(bytes) !== record.sha256) {
       throw new InstallerError(`Bundled asset verification failed for ${assetKey}.`, { code: "ASSET_DIGEST_MISMATCH" });

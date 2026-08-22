@@ -1,40 +1,28 @@
-import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SOURCE_COMMIT } from "../packages/codekeeper/src/constants.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
 const command = process.argv[2] ?? "--check";
-const runtimeRoot = "tools/codekeeper/src/lib";
+const runtimeRoot = path.join(repositoryRoot, "tools/codekeeper/src/lib");
 const installerRoot = path.join(repositoryRoot, "packages/codekeeper/src");
 
-function readPinnedRuntimeFile(file) {
+async function readCanonicalRuntimeFile(file) {
   try {
-    return execFileSync(
-      "git",
-      ["show", `${SOURCE_COMMIT}:${runtimeRoot}/${file}`],
-      {
-        cwd: repositoryRoot,
-        maxBuffer: 2 * 1024 * 1024,
-      },
-    );
+    return await readFile(path.join(runtimeRoot, file));
   } catch (cause) {
-    throw new Error(
-      `Could not load ${file} from pinned source commit ${SOURCE_COMMIT}`,
-      { cause },
-    );
+    throw new Error(`Could not load canonical runtime ${file}`, { cause });
   }
 }
 
-const validator = readPinnedRuntimeFile("policy-validator.mjs");
+const validator = await readCanonicalRuntimeFile("policy-validator.mjs");
 const mirroredFiles = [
   ["policy-validator.mjs", validator],
   ...(validator.includes('from "./label-ownership.mjs"')
-    ? [["label-ownership.mjs", readPinnedRuntimeFile("label-ownership.mjs")]]
+    ? [["label-ownership.mjs", await readCanonicalRuntimeFile("label-ownership.mjs")]]
     : []),
 ];
 
@@ -47,7 +35,7 @@ if (command === "--write") {
     const installer = await readFile(path.join(installerRoot, file));
     if (!installer.equals(canonical)) {
       throw new Error(
-        `The installer ${file} does not match pinned source commit ${SOURCE_COMMIT}; run scripts/sync-policy-validator.mjs --write`,
+        `The installer ${file} does not match tools/codekeeper/src/lib/${file}; run scripts/sync-policy-validator.mjs --write`,
       );
     }
   }
