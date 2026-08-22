@@ -651,6 +651,8 @@ test("review grants its isolated user read-only traversal to the installed runti
     "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",
   );
 
+  assert.match(isolate, /export function ancestorDirectories/);
+  assert.match(isolate, /grantWorldTraverse/);
   assert.match(isolate, /chmod[\s\S]*a\+x,go-w[\s\S]*workspaceRoot/);
   assert.match(
     isolate,
@@ -658,11 +660,15 @@ test("review grants its isolated user read-only traversal to the installed runti
   );
   assert.match(
     isolate,
-    /chmod[\s\S]*a\+r,go-w[\s\S]*configPath[\s\S]*modePlanPath/,
+    /chmod[\s\S]*a\+r,go-w[\s\S]*configPath[\s\S]*modePlanPath[\s\S]*cliPath/,
   );
   assert.match(
     isolate,
     /--user[\s\S]*workspaceUser[\s\S]*test[\s\S]*-r[\s\S]*cliPath/,
+  );
+  assert.ok(
+    isolate.indexOf("grantWorldTraverse") < isolate.indexOf('"test"'),
+    "ancestor traverse must be granted before the isolated user reads the CLI",
   );
 });
 

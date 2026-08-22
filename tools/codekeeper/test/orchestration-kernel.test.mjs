@@ -25,7 +25,10 @@ import {
   resolveAutomationBot,
   validateAppPermissionInputs,
 } from "../src/lib/orchestration/credential-boundaries.mjs";
-import { runIsolatedWorkspaceAgent } from "../src/lib/orchestration/workspace-isolation.mjs";
+import {
+  ancestorDirectories,
+  runIsolatedWorkspaceAgent,
+} from "../src/lib/orchestration/workspace-isolation.mjs";
 
 const modeEvents = {
   review: { eventName: "pull_request" },
@@ -239,6 +242,28 @@ test("publish stage requires the verified plan before adapter execution", async 
       pullRequestsPermission: "write",
     }),
     /Mode plan must be a plain object/,
+  );
+});
+
+test("workspace isolation grants world execute on ancestor directories of the installed CLI", () => {
+  assert.deepEqual(
+    ancestorDirectories(
+      "/home/runner/work/repo/repo/tooling/codekeeper-runtime/src/cli.mjs",
+    ),
+    [
+      "/home/runner/work/repo/repo/tooling/codekeeper-runtime/src",
+      "/home/runner/work/repo/repo/tooling/codekeeper-runtime",
+      "/home/runner/work/repo/repo/tooling",
+      "/home/runner/work/repo/repo",
+      "/home/runner/work/repo",
+      "/home/runner/work",
+      "/home/runner",
+      "/home",
+    ],
+  );
+  assert.doesNotMatch(
+    ancestorDirectories("/home/runner/work/repo/repo").join("\n"),
+    /^\/$/m,
   );
 });
 

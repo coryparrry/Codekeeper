@@ -38,6 +38,38 @@ async function absent(pathname, name) {
   }
 }
 
+export function ancestorDirectories(pathname) {
+  if (
+    typeof pathname !== "string" ||
+    !pathname.trim() ||
+    pathname.includes("\0")
+  ) {
+    throw new Error("pathname is invalid");
+  }
+  const resolved = path.resolve(pathname);
+  const root = path.parse(resolved).root;
+  const ancestors = [];
+  let current = path.dirname(resolved);
+  while (current !== root) {
+    ancestors.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return ancestors;
+}
+
+async function grantWorldTraverse(pathnames) {
+  const seen = new Set();
+  for (const pathname of pathnames.filter(Boolean)) {
+    for (const ancestor of ancestorDirectories(pathname)) {
+      if (seen.has(ancestor)) continue;
+      seen.add(ancestor);
+      await exec("sudo", ["chmod", "a+x,go-w", ancestor]);
+    }
+  }
+}
+
 export async function prepareTrustedConfig({
   source,
   destination,
@@ -253,6 +285,15 @@ export async function runIsolatedWorkspaceAgent({
         workspaceUser,
       ]);
       accountCreated = true;
+      await grantWorldTraverse([
+        required(workspaceRoot, "GITHUB_WORKSPACE"),
+        repositoryPath,
+        directory,
+        toolingPath,
+        cliPath,
+        configPath,
+        modePlanPath,
+      ]);
       await exec("sudo", [
         "chmod",
         "a+x,go-w",
@@ -264,7 +305,13 @@ export async function runIsolatedWorkspaceAgent({
         "a+rX,go-w",
         ...[repositoryPath, directory, toolingPath].filter(Boolean),
       ]);
-      await exec("sudo", ["chmod", "a+r,go-w", configPath, modePlanPath]);
+      await exec("sudo", [
+        "chmod",
+        "a+r,go-w",
+        configPath,
+        modePlanPath,
+        cliPath,
+      ]);
       for (const evidence of [
         resultPath,
         path.join(path.dirname(resultPath), "workspace-runtime-metadata.json"),
