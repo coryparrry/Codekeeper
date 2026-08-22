@@ -521,7 +521,7 @@ export async function prepareAudit({ directory, config, toolingSha, configSha256
   return context;
 }
 
-export async function prepareIssue({ eventPath, actor, triageMode, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
+export async function prepareIssue({ eventPath, eventName = process.env.GITHUB_EVENT_NAME, targetNumber, actor, triageMode, directory, config, token, toolingSha, configSha256, agentProfilePath, agentProfileSourceSha, agentProfileSource }) {
   const agentProfile = await trustedAgentProfile("issue", agentProfilePath, agentProfileSourceSha, agentProfileSource);
   if (triageMode !== "automatic" && triageMode !== "manual") {
     throw new Error("Issue triage mode must be automatic or manual");
@@ -549,6 +549,15 @@ export async function prepareIssue({ eventPath, actor, triageMode, directory, co
       actor,
       allowedCommands: ["review", "triage"]
     });
+  } else if (!event.issue && eventName === "workflow_dispatch") {
+    const inputNumber = Number(event.inputs?.issue_number);
+    if (!Number.isSafeInteger(targetNumber) || targetNumber <= 0 || inputNumber !== targetNumber) {
+      throw new Error("Manual issue triage has no valid bound issue number");
+    }
+    if (triageMode !== "manual") {
+      throw new Error("Manual issue triage requires manual triage mode");
+    }
+    event.issue = await github.getIssue(targetNumber);
   }
   const commentTriggered = event.action === "created" && Boolean(event.comment);
   const continuation = commentTriggered

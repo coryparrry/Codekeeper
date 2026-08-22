@@ -187,7 +187,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "3c53b190a6e057d57545a319f8d697495985fa1166f64e8b220fe12cc47b906c"
+      "sha256": "1a79f693e1d80cc8d6a381c77933becd29d833c7c409cde1dfae9e7163d2a2e4"
     },
     {
       "path": "src/lib/process-supervisor.mjs",
