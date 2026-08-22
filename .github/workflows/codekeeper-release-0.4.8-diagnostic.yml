@@ -1,0 +1,33 @@
+name: Inspect Codekeeper 0.4.8 publisher
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inspect:
+    if: github.event.pull_request.head.ref == 'diag/release-0.4.8'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Print release workflow state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runs="$RUNNER_TEMP/release-runs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/codekeeper-release.yml/runs?per_page=20" > "$runs"
+          echo 'RELEASE_WORKFLOW_RUNS'
+          jq -r '.workflow_runs[] | [.id, .event, .status, (.conclusion // ""), (.head_branch // ""), .head_sha, .display_title, .created_at, .updated_at, .html_url] | @tsv' "$runs"
+          run_id="$(jq -r '[.workflow_runs[] | select((.head_branch // "") == "codekeeper-v0.4.8" or (.display_title // "" | contains("0.4.8")))][0].id // empty' "$runs")"
+          test -n "$run_id" || { echo 'Codekeeper 0.4.8 release run was not found' >&2; exit 1; }
+          echo "SELECTED_RUN_ID=$run_id"
+          echo 'RELEASE_JOBS'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" --jq '.jobs[] | [.id, .name, .status, (.conclusion // ""), (.started_at // ""), (.completed_at // ""), .html_url] | @tsv'
+          echo 'PENDING_DEPLOYMENTS'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/pending_deployments" --jq '.[] | [.environment.id, .environment.name, .wait_timer, (.current_user_can_approve // false)] | @tsv' || true
