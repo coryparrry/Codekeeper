@@ -576,6 +576,10 @@ export function validateFixResult(result, target) {
     assertExactKeys(test, ["command", "result"], `testsRun[${index}]`);
     assertString(test.command, `testsRun[${index}].command`, { maxLength: LIMITS.command });
     assertString(test.result, `testsRun[${index}].result`, { maxLength: LIMITS.result });
+  assert(
+    !/^did not run(?:\b|:)/i.test(test.result.trim()),
+    `testsRun[${index}].result must describe a command that actually ran`,
+  );
   }
   assertUniqueStrings(result.resolvedReviewThreadIds, "resolvedReviewThreadIds", { maximum: 128, itemMaximum: LIMITS.key });
   const allowedReviewThreadIds = new Set(target?.reviewThreadIds ?? []);
