@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.5](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.4...codekeeper-v0.4.5) (2026-08-22)
+
+
+### Bug Fixes
+
+* **runtime:** omit uniqueItems from OpenAI structured-output schemas ([3680523](https://github.com/coryparrry/Codekeeper/commit/3680523abea7addc12a4c414b3f4638c01ae5f52))
+* **runtime:** omit uniqueItems from OpenAI structured-output schemas ([7749b37](https://github.com/coryparrry/Codekeeper/commit/7749b37b13f44aab6cb998f66a301994e6b8a177))
+
 ## [0.4.4](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.3...codekeeper-v0.4.4) (2026-08-22)
 
 
