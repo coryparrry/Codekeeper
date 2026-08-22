@@ -171,7 +171,7 @@
     },
     {
       "path": "src/lib/orchestration/workspace-isolation.mjs",
-      "sha256": "68e5dda7bf5b2203621f12e02bc7447047296442989ff5635d9dd0062274585b"
+      "sha256": "4294c2daab8d9b532fe7be27b1af7000fc32b2d77ea93ccc7387dba3b8d995fa"
     },
     {
       "path": "src/lib/owner-command-prepare.mjs",
@@ -271,7 +271,7 @@
     },
     {
       "path": "src/lib/schemas.mjs",
-      "sha256": "9eaf72ad17d3117da587651346ffa9e55453d083d64955d91205e96bbe658acb"
+      "sha256": "3f63b6a20b5263b07dbca94497cd1265da3b98ae239e445363670bb6219f388f"
     },
     {
       "path": "src/lib/security-containment.mjs",

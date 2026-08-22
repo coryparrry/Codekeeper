@@ -289,13 +289,13 @@ export async function runIsolatedWorkspaceAgent({
     }
   }
   if (workspaceUser) {
-  // Current GitHub-hosted Ubuntu images can block Codex's Bubblewrap
-  // user namespace before any repository command starts. Enable the
-  // same ephemeral-runner prerequisites as OpenAI's codex-action,
-  // then retain the normal read-only or workspace-write sandbox.
-  await prepareCodexLinuxSandbox();
-}
-let accountCreated = false;
+    // Current GitHub-hosted Ubuntu images can block Codex's Bubblewrap
+    // user namespace before any repository command starts. Enable the
+    // same ephemeral-runner prerequisites as OpenAI's codex-action,
+    // then retain the normal read-only or workspace-write sandbox.
+    await prepareCodexLinuxSandbox();
+  }
+  let accountCreated = false;
   try {
     await mkdir(isolation.codexHome, { recursive: true, mode: 0o700 });
     await mkdir(isolation.quarantine, { recursive: true, mode: 0o700 });
