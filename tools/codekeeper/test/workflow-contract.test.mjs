@@ -36,10 +36,7 @@ test("workflow owner-command lists stay synchronized with the canonical definiti
   );
   const reviewRuntime = await workflow("review");
 
-  assert.match(
-    reviewCaller,
-    new RegExp(escapeRegExp(expectedCondition)),
-  );
+  assert.match(reviewCaller, new RegExp(escapeRegExp(expectedCondition)));
   assert.equal(packagedReviewCaller, reviewCaller);
   assert.match(reviewRuntime, new RegExp(escapeRegExp(expectedActions)));
 });
@@ -66,8 +63,6 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
   for (const mode of stagedModes) {
     const source = await workflow(mode);
     const repairMode = mode === "maintain" || mode === "fix";
-    const effectiveMode =
-      mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode;
     const workspace = jobSection(source, "workspace", "analyze");
     const analyze = jobSection(
       source,
@@ -80,13 +75,16 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
 
     assert.match(workspace, /codekeeper-bundle/);
     assert.match(workspace, /codekeeper-config\.json/);
-    assert.match(workspace, /cp "\$SOURCE_CONFIG" "\$CONFIG"/);
+    assert.match(workspace, /--source-config "\$SOURCE_CONFIG"/);
+    assert.match(workspace, /--default-branch "\$DEFAULT_BRANCH"/);
     assert.match(
       workspace,
-      /Configured default branch does not match the repository default branch/,
+      new RegExp(`stage compute --operation prepare --mode ${mode}`),
     );
-    assert.match(workspace, new RegExp(`prepare-${effectiveMode}`));
-    assert.match(workspace, /run-workspace-agent/);
+    assert.match(
+      workspace,
+      new RegExp(`stage compute --operation workspace --mode ${mode}`),
+    );
     assert.match(workspace, /--result "\$BUNDLE\/workspace-result\.json"/);
     assert.match(
       workspace,
@@ -104,8 +102,7 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
       );
     }
     if (repairMode) {
-      assert.match(workspace, /capture-workspace-patch/);
-      assert.match(workspace, /workspace\.patch/);
+      assert.match(workspace, /--patch "\$BUNDLE\/workspace\.patch"/);
     } else {
       assert.doesNotMatch(
         workspace,
@@ -122,28 +119,32 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
     assert.match(analyze, /needs: workspace/);
     assert.match(analyze, /codekeeper-bundle/);
     assert.match(analyze, /codekeeper-config\.json/);
-    assert.match(analyze, /cp "\$SOURCE_CONFIG" "\$CONFIG"/);
+    assert.match(analyze, /--source-config "\$SOURCE_CONFIG"/);
+    assert.match(analyze, /--default-branch "\$DEFAULT_BRANCH"/);
+    assert.match(analyze, /codekeeper-candidate/);
     assert.match(
       analyze,
-      /Configured default branch does not match the repository default branch/,
+      new RegExp(`stage compute --operation prepare --mode ${mode}`),
     );
-    assert.match(analyze, /codekeeper-candidate/);
-    assert.match(analyze, new RegExp(`prepare-${effectiveMode}`));
-    assert.match(analyze, new RegExp(`validate-${effectiveMode}`));
+    assert.match(
+      analyze,
+      new RegExp(`stage validate --operation candidate --mode ${mode}`),
+    );
     assert.match(analyze, /download-artifact@/);
     assert.match(
       analyze,
       /--workspace-result "\$WORKSPACE\/workspace-result\.json"/,
     );
-    assert.match(analyze, /Bind workspace evidence to frozen context/);
-    assert.match(analyze, /needs\.workspace\.outputs\.context_sha256/);
-    assert.match(analyze, /steps\.prepare\.outputs\.context_sha256/);
-    assert.ok(
-      analyze.indexOf("Bind workspace evidence to frozen context") <
-        analyze.indexOf("run-agent"),
+    assert.match(
+      analyze,
+      /--expected-context-sha "\$\{\{ needs\.workspace\.outputs\.context_sha256 \}\}"/,
     );
+    assert.match(analyze, /steps\.prepare\.outputs\.context_sha256/);
     if (repairMode) {
-      assert.match(analyze, /apply-workspace-patch/);
+      assert.match(
+        analyze,
+        /--workspace-patch "\$WORKSPACE\/workspace\.patch"/,
+      );
     } else {
       assert.doesNotMatch(analyze, /apply-workspace-patch|workspace\.patch/);
     }
@@ -175,7 +176,10 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
     }
 
     if (verify) {
-      assert.match(verify, new RegExp(`verify-${effectiveMode}`));
+      assert.match(
+        verify,
+        new RegExp(`stage validate --operation verify --mode ${mode}`),
+      );
       assert.match(verify, /expected-candidate-sha/);
       assert.match(verify, /without OpenAI or App credentials/);
       assert.doesNotMatch(
@@ -188,7 +192,10 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
 
     assert.match(seal, /codekeeper-candidate/);
     assert.match(seal, /codekeeper-artifact/);
-    assert.match(seal, new RegExp(`seal-${effectiveMode}`));
+    assert.match(
+      seal,
+      new RegExp(`stage validate --operation seal --mode ${mode}`),
+    );
     assert.match(
       seal,
       /manifest_sha256: \$\{\{ steps\.seal\.outputs\.manifest_sha256 \}\}/,
@@ -212,14 +219,14 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
     assert.match(publish, /CODEKEEPER_AUTOMATION_BOT_LOGIN/);
     assert.match(publish, /CODEKEEPER_AUTOMATION_BOT_ID/);
     assert.match(publish, /steps\.app-token\.outputs\.app-slug/);
-    assert.match(publish, /curl --globoff/);
-    assert.match(publish, /\$GITHUB_API_URL\/users\/\$\{APP_SLUG\}\[bot\]/);
-    assert.doesNotMatch(publish, /\$GITHUB_API_URL\/user(?:["']|\))/);
+    assert.match(publish, /stage publish --operation bot/);
+    assert.match(publish, /--app-slug "\$APP_SLUG"/);
+    assert.doesNotMatch(publish, /curl --globoff|\/user(?:["']|\))/);
     assert.match(publish, /codekeeper-artifact/);
     if (mode === "issues") {
       assert.match(
         publish,
-        /node codekeeper-runtime\/src\/cli\.mjs publish-issue/,
+        /node codekeeper-runtime\/src\/cli\.mjs stage publish --operation publish --mode issues/,
       );
       assert.doesNotMatch(
         publish,
@@ -309,7 +316,7 @@ test("workflow handoff artifacts survive failed-job reruns and producers replace
     );
     const replaceableUploads = [
       ...source.matchAll(
-        /uses: actions\/upload-artifact@[^\n]+\n\s+with:\n\s+name: (codekeeper-[^\n]+)\n\s+path: [^\n]+\n\s+retention-days: 1\n\s+if-no-files-found: error\n\s+overwrite: true/g,
+        /uses: actions\/upload-artifact@[^\n]+\n\s+with:\n\s+name: (codekeeper-[^\n]+)\n[\s\S]*?\n\s+retention-days: 1\n\s+if-no-files-found: error\n\s+overwrite: true/g,
       ),
     ].map((match) => match[1]);
     assert.deepEqual(
@@ -323,6 +330,18 @@ test("workflow handoff artifacts survive failed-job reruns and producers replace
       ],
       `${mode} must replace each run-stable handoff when every job is rerun`,
     );
+    if (repairMode) {
+      assert.match(
+        source,
+        /name: codekeeper-(?:fix|maintenance)-validation-receipt-\$\{\{ github\.run_id \}\}\n\s+path: \|\n\s+\$\{\{ runner\.temp \}\}\/codekeeper-candidate\/validation-receipt\.json\n\s+\$\{\{ runner\.temp \}\}\/codekeeper-candidate\/envelope\.json\n\s+\$\{\{ runner\.temp \}\}\/codekeeper-candidate\/handoff\.json/,
+        `${mode} must serialize the validation receipt with its updated envelope and manifest`,
+      );
+      assert.match(
+        source,
+        /name: codekeeper-(?:fix|maintenance)-validation-receipt-\$\{\{ github\.run_id \}\}\n\s+path: \$\{\{ runner\.temp \}\}\/codekeeper-candidate/,
+        `${mode} must overlay the complete validation handoff before sealing`,
+      );
+    }
   }
 });
 
@@ -344,7 +363,7 @@ test("issue preparation can read pull requests in every caller and job that invo
     jobSection(source, "workspace", "analyze"),
     jobSection(source, "analyze", "seal"),
   ]) {
-    assert.match(section, /prepare-issue/);
+    assert.match(section, /stage compute --operation prepare --mode issues/);
     assert.match(
       section,
       /permissions:\n\s+contents: read\n\s+issues: read\n\s+pull-requests: read/,
@@ -372,18 +391,14 @@ test("maintenance and fix dry runs do not require App credentials, but publicati
       source,
       /if: needs\.seal\.result == 'success' && !inputs\.dry_run/,
     );
-    assert.match(publish, /name: Require GitHub App publication credentials/);
+    assert.match(publish, /stage publish --operation preconditions/);
     assert.match(publish, /APP_CLIENT_ID: \$\{\{ inputs\.app_client_id \}\}/);
     assert.match(
       publish,
       /APP_PRIVATE_KEY: \$\{\{ secrets\.app_private_key \}\}/,
     );
-    assert.match(publish, /test -n "\$APP_CLIENT_ID"/);
-    assert.match(publish, /test -n "\$APP_PRIVATE_KEY"/);
-    assert.match(publish, /app_client_id is required when dry_run=false/);
-    assert.match(publish, /app_private_key is required when dry_run=false/);
     assert.ok(
-      publish.indexOf("Require GitHub App publication credentials") <
+      publish.indexOf("stage publish --operation preconditions") <
         publish.indexOf("create-github-app-token"),
       `${mode} must check credentials before minting an App token`,
     );
@@ -565,7 +580,10 @@ test("review uses a direct caller and a two-runner PR-native fail-closed gate", 
     /cancel-in-progress: \$\{\{ github\.actor != inputs\.automation_bot_login \}\}/,
   );
   assert.match(gate, /name: Codekeeper review gate/);
-  assert.match(gate, /if: always\(\) && needs\.analyze\.outputs\.route != 'false'/);
+  assert.match(
+    gate,
+    /if: always\(\) && needs\.analyze\.outputs\.route != 'false'/,
+  );
   assert.match(gate, /timeout-minutes: 15/);
   assert.match(gate, /fails closed/);
   assert.match(gate, /exit 1/);
@@ -589,10 +607,7 @@ test("review uses a direct caller and a two-runner PR-native fail-closed gate", 
     /owner_command:\n\s+description:[^\n]*\n\s+required: false\n\s+default: false\n\s+type: boolean/,
   );
   assert.match(analyze, /AUTO_REVIEW: \$\{\{ inputs\.auto_review \}\}/);
-  assert.match(
-    analyze,
-    /FEEDBACK_TRIAGE: \$\{\{ inputs\.feedback_triage \}\}/,
-  );
+  assert.match(analyze, /FEEDBACK_TRIAGE: \$\{\{ inputs\.feedback_triage \}\}/);
   assert.match(analyze, /OWNER_COMMAND: \$\{\{ inputs\.owner_command \}\}/);
   assert.match(
     analyze,
@@ -631,10 +646,7 @@ test("review uses a direct caller and a two-runner PR-native fail-closed gate", 
   const expectedOwnerCommandCondition = `contains(fromJSON('${JSON.stringify(
     OWNER_COMMANDS.map((command) => `/codekeeper ${command}`),
   )}'), github.event.comment.body)`;
-  assert.match(
-    caller,
-    new RegExp(escapeRegExp(expectedOwnerCommandCondition)),
-  );
+  assert.match(caller, new RegExp(escapeRegExp(expectedOwnerCommandCondition)));
   assert.match(
     gate,
     /Codekeeper-authored review feedback is intentionally ignored/,
@@ -647,7 +659,10 @@ test("review uses a direct caller and a two-runner PR-native fail-closed gate", 
     caller,
     /review:\n[\s\S]*?uses: \.\/\.github\/workflows\/codekeeper-runtime-review\.yml/,
   );
-  assert.match(caller, /Deterministic no-op feedback is filtered without allocating a runner/);
+  assert.match(
+    caller,
+    /Deterministic no-op feedback is filtered without allocating a runner/,
+  );
   assert.doesNotMatch(
     source,
     /publish-review-status|on:\n\s+pull_request_target|state="success"/,
@@ -696,8 +711,14 @@ test("issue triage can start enabled issue implementation while owner PR repair 
     issue,
     /codekeeper_issue[\s\S]*github\.actor == inputs\.automation_bot_login/,
   );
-  assert.match(issue, /prepare-issue[\s\S]*--actor "\$REQUESTED_BY"/);
-  assert.match(issue, /prepare-issue[\s\S]*--triage-mode "\$TRIAGE_MODE"/);
+  assert.match(
+    issue,
+    /stage compute --operation prepare --mode issues[\s\S]*--actor "\$REQUESTED_BY"/,
+  );
+  assert.match(
+    issue,
+    /stage compute --operation prepare --mode issues[\s\S]*--triage-mode "\$TRIAGE_MODE"/,
+  );
   assert.match(
     caller,
     /issues:\n\s+types: \[opened, reopened, edited, closed\]\n\s+issue_comment:\n\s+types: \[created\]/,
@@ -852,10 +873,9 @@ test("Fixer repository dispatches retain their target and explicit policy author
     analyze,
     /EVENT_ISSUE: \$\{\{ github\.event\.issue\.number \|\| github\.event\.client_payload\.number \}\}/,
   );
-  assert.match(
-    workspace,
-    /prepare-fix[\s\S]*agent-settings[\s\S]*--mode fix \\\n\s+--mutation-authorized true/,
-  );
+  assert.match(workspace, /stage compute --operation prepare --mode fix/);
+  assert.match(workspace, /stage compute --operation workspace --mode fix/);
+  assert.match(workspace, /--mutation-authorized true/);
   assert.match(
     publisher,
     /createRepositoryDispatch\("codekeeper_fix", \{[\s\S]*authorization_mode: "policy"/,
@@ -915,7 +935,7 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
     assert.match(workspace, /bin\/install-runtime\.mjs/);
     assert.match(
       workspace,
-      new RegExp(`agent-settings[\\s\\S]*--mode ${effectiveMode}`),
+      new RegExp(`stage compute --operation workspace --mode ${mode}`),
     );
     assert.match(
       workspace,
@@ -929,24 +949,22 @@ test("Agents SDK coordinators use pinned dependencies and isolated credentials",
       workspace,
       /CODEX_HOME: \$\{\{ github\.workspace \}\}\/codekeeper-codex-home/,
     );
-    assert.match(workspace, /project_doc_max_bytes = 0/);
-    assert.match(workspace, /project_doc_fallback_filenames = \[\]/);
-    assert.match(workspace, /include_instructions = false/);
-    assert.match(workspace, /bundled = \{ enabled = false \}/);
-    assert.match(workspace, /\[shell_environment_policy\]/);
-    assert.match(workspace, /inherit = "core"/);
-    assert.match(workspace, /ignore_default_excludes = false/);
-    assert.match(workspace, /Refusing symlinked \.agents instruction root/);
-    assert.match(workspace, /Refusing symlinked \.codex instruction root/);
-    assert.match(workspace, /\.agents\/skills \.codex\/skills/);
-    assert.match(
-      workspace,
-      /if \[ -e "\$surface" \] \|\| \[ -L "\$surface" \]; then[\s\S]*contaminated=true[\s\S]*if \[ -e "\$QUARANTINE\/\$surface" \]/,
+    const isolation = await repositoryFile(
+      "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",
     );
-    assert.match(workspace, /run-workspace-agent/);
+    assert.match(isolation, /include_instructions = false/);
+    assert.match(isolation, /bundled = \{ enabled = false \}/);
+    assert.match(isolation, /\[shell_environment_policy\]/);
+    assert.match(
+      isolation,
+      /Refusing symlinked \$\{surface\} instruction root/,
+    );
+    assert.match(isolation, /contaminated = true/);
+    assert.match(isolation, /\.agents\/skills.*\.codex\/skills/);
+    assert.match(workspace, /stage compute --operation workspace/);
     assert.doesNotMatch(workspace, /prompt-file: .*\/prompt\.md/);
     assert.match(analyze, /bin\/install-runtime\.mjs/);
-    assert.match(analyze, /run-agent/);
+    assert.match(analyze, /stage compute --operation analyze/);
     assert.match(
       analyze,
       /CODEKEEPER_MODEL_API_KEY: \$\{\{ secrets\.model_api_key \}\}/,
@@ -1014,7 +1032,7 @@ test("pull request repair runs reviewer then one-pass fixer roles", async () => 
   );
   assert.match(
     jobSection(source, "workspace", "analyze"),
-    /fixer\.md[\s\S]*run-workspace-agent/,
+    /fixer\.md[\s\S]*stage compute --operation workspace/,
   );
   assert.match(
     jobSection(source, "analyze", "verify"),
