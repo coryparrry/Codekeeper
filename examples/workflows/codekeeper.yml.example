@@ -46,8 +46,13 @@ on:
         type: boolean
         default: false
 
+# Nested reusable-workflow jobs request contents, issues, and pull-requests
+# read. GitHub rejects the call when this caller ceiling is narrower, even for
+# jobs that would be skipped. Mutations still use the App token, not GITHUB_TOKEN.
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 jobs:
   review:

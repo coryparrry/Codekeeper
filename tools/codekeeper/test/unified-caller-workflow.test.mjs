@@ -185,6 +185,17 @@ test("review preserves protected gate admission and event compatibility", async 
   }
 });
 
+test("caller GITHUB_TOKEN ceiling covers nested reusable-workflow job permissions", async () => {
+  for (const source of await callers()) {
+    const header = source.slice(0, source.indexOf("\njobs:\n"));
+    assert.match(
+      header,
+      /permissions:\n  contents: read\n  issues: read\n  pull-requests: read\n/,
+    );
+    assert.doesNotMatch(header, /:\s+write\b/);
+  }
+});
+
 test("every job passes release identity, installed modes, and named secrets", async () => {
   for (const source of await callers()) {
     for (const id of expectedJobs) {
