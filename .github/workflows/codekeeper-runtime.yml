@@ -280,8 +280,7 @@ jobs:
               contents_permission: plan.appPermissions.contents,
               issues_permission: plan.appPermissions.issues,
               pull_requests_permission: plan.appPermissions.pullRequests,
-              execution_sha: context?.pullRequest?.headSha ?? context?.baseSha \
-                ?? process.env.GITHUB_SHA,
+              execution_sha: context?.pullRequest?.headSha ?? context?.baseSha ?? process.env.GITHUB_SHA,
             };
             if (!/^[a-f0-9]{40}$/.test(String(values.execution_sha ?? ""))) {
               throw new Error("Frozen execution SHA is missing or invalid");

@@ -152,8 +152,9 @@ test("compute delegates all four mode adapters and transports one run-stable han
   assert.match(compute, /github\.event\.client_payload\.head_sha/);
   assert.match(
     compute,
-    /execution_sha: context\?\.pullRequest\?\.headSha \?\? context\?\.baseSha/,
+    /execution_sha: context\?\.pullRequest\?\.headSha \?\? context\?\.baseSha \?\? process\.env\.GITHUB_SHA,/,
   );
+  assert.doesNotMatch(compute, /baseSha \\\n/);
   assert.match(compute, /CODEKEEPER_AUTOMATION_BOT_LOGIN:/);
   assert.match(compute, /CODEKEEPER_APP_CLIENT_ID:/);
   assert.doesNotMatch(compute, /^          AUTOMATION_BOT_LOGIN:/m);
