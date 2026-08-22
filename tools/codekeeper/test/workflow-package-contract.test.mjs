@@ -142,7 +142,10 @@ test("callers authorize one exact package and use only adopter-local reusable wo
         `uses: \\.\\/\\.github\\/workflows\\/codekeeper-runtime-${mode}\\.yml`,
       ),
     );
-    assert.doesNotMatch(template, /package_manifest_sha256|package_source_commit/);
+    assert.doesNotMatch(
+      template,
+      /package_manifest_sha256|package_source_commit/,
+    );
     assert.doesNotMatch(
       template,
       /uses:\s+[^.\s][^\n]*codekeeper|@latest|@[~^*]|OWNER\/REPOSITORY|FULL_COMMIT_SHA/,
@@ -174,11 +177,19 @@ test("reusable workflows acquire one exact package and reverify it in every isol
     );
     const policyAcquisitionCount = mode === "fix" ? 2 : 0;
     assert.equal(
-      [...source.matchAll(/uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/g)].length,
+      [
+        ...source.matchAll(
+          /uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/g,
+        ),
+      ].length,
       count - policyAcquisitionCount,
     );
     assert.equal(
-      [...source.matchAll(/uses: \.\/policy\/\.github\/codekeeper\/actions\/acquire-package/g)].length,
+      [
+        ...source.matchAll(
+          /uses: \.\/policy\/\.github\/codekeeper\/actions\/acquire-package/g,
+        ),
+      ].length,
       policyAcquisitionCount,
     );
     if (mode !== "assistant") {
@@ -219,19 +230,26 @@ test("reusable workflows acquire one exact package and reverify it in every isol
       );
     } else {
       assert.equal(
-        [...source.matchAll(/name: Upload verified Codekeeper package/g)].length,
+        [...source.matchAll(/name: Upload verified Codekeeper package/g)]
+          .length,
         1,
       );
       assert.equal(
-        [...source.matchAll(/name: Download verified Codekeeper package/g)].length,
+        [...source.matchAll(/name: Download verified Codekeeper package/g)]
+          .length,
         count - 1,
       );
       assert.equal(
-        [...source.matchAll(/name: Verify downloaded Codekeeper package/g)].length,
+        [...source.matchAll(/name: Verify downloaded Codekeeper package/g)]
+          .length,
         count - 1,
       );
       assert.equal(
-        [...source.matchAll(/name: codekeeper-tooling-\$\{\{ github\.run_id \}\}/g)].length,
+        [
+          ...source.matchAll(
+            /name: codekeeper-tooling-\$\{\{ github\.run_id \}\}/g,
+          ),
+        ].length,
         count,
       );
       assert.match(
@@ -285,31 +303,59 @@ test("reusable workflows acquire one exact package and reverify it in every isol
       const checkout = job.indexOf("path: repository");
       const install = job.indexOf("name: Install exact Codekeeper runtime");
       assert.ok(checkout >= 0, `${mode}.${jobName} checks out repository`);
-      assert.ok(node > checkout, `${mode}.${jobName} sets up Node after checkout`);
+      assert.ok(
+        node > checkout,
+        `${mode}.${jobName} sets up Node after checkout`,
+      );
       if (index === 0) {
         const acquire = job.indexOf(
           `uses: ./${actionCheckout}/.github/codekeeper/actions/acquire-package`,
         );
         const upload = job.indexOf("name: Upload verified Codekeeper package");
-        assert.ok(acquire > node, `${mode}.${jobName} acquires after Node setup`);
+        assert.ok(
+          acquire > node,
+          `${mode}.${jobName} acquires after Node setup`,
+        );
         if (mode !== "assistant") {
-          assert.ok(upload > acquire, `${mode}.${jobName} uploads only after acquisition`);
-          assert.ok(install > upload, `${mode}.${jobName} installs after upload`);
+          assert.ok(
+            upload > acquire,
+            `${mode}.${jobName} uploads only after acquisition`,
+          );
+          assert.ok(
+            install > upload,
+            `${mode}.${jobName} installs after upload`,
+          );
         } else {
-          assert.ok(install > acquire, `${mode}.${jobName} installs after acquisition`);
+          assert.ok(
+            install > acquire,
+            `${mode}.${jobName} installs after acquisition`,
+          );
         }
       } else {
-        const download = job.indexOf("name: Download verified Codekeeper package");
-        const verify = job.indexOf("name: Verify downloaded Codekeeper package");
-        assert.ok(download >= 0, `${mode}.${jobName} downloads the run package`);
-        assert.ok(verify > node, `${mode}.${jobName} verifies after Node setup`);
+        const download = job.indexOf(
+          "name: Download verified Codekeeper package",
+        );
+        const verify = job.indexOf(
+          "name: Verify downloaded Codekeeper package",
+        );
+        assert.ok(
+          download >= 0,
+          `${mode}.${jobName} downloads the run package`,
+        );
+        assert.ok(
+          verify > node,
+          `${mode}.${jobName} verifies after Node setup`,
+        );
         assert.match(
           job.slice(verify),
           new RegExp(
             `uses: \\.\\/${actionCheckout}\\/\\.github\\/codekeeper\\/actions\\/acquire-package[\\s\\S]*package_source: artifact`,
           ),
         );
-        assert.ok(install > verify, `${mode}.${jobName} installs only after verification`);
+        assert.ok(
+          install > verify,
+          `${mode}.${jobName} installs only after verification`,
+        );
         assert.match(job, /needs: \[[^\]]*workspace[^\]]*\]|needs: workspace/);
       }
     }
@@ -322,26 +368,59 @@ test("review package verification is consolidated across two trusted boundaries"
   const gate = jobSection(source, "gate");
 
   assert.equal([...source.matchAll(/^\s+runs-on: ubuntu-latest$/gm)].length, 2);
-  assert.equal([...source.matchAll(/name: Acquire exact Codekeeper package/g)].length, 1);
-  assert.equal([...source.matchAll(/name: Verify downloaded Codekeeper package/g)].length, 1);
-  assert.equal([...source.matchAll(/name: Install exact Codekeeper runtime/g)].length, 2);
   assert.equal(
-    [...source.matchAll(/run: node "\$GITHUB_WORKSPACE\/tooling\/tools\/codekeeper\/bin\/install-runtime\.mjs"/g)].length,
+    [...source.matchAll(/name: Acquire exact Codekeeper package/g)].length,
+    1,
+  );
+  assert.equal(
+    [...source.matchAll(/name: Verify downloaded Codekeeper package/g)].length,
+    1,
+  );
+  assert.equal(
+    [...source.matchAll(/name: Install exact Codekeeper runtime/g)].length,
     2,
   );
   assert.equal(
-    [...source.matchAll(/uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/g)].length,
+    [
+      ...source.matchAll(
+        /run: node "\$GITHUB_WORKSPACE\/tooling\/tools\/codekeeper\/bin\/install-runtime\.mjs"/g,
+      ),
+    ].length,
     2,
   );
-  assert.equal([...source.matchAll(/uses: actions\/upload-artifact@/g)].length, 1);
-  assert.equal([...source.matchAll(/uses: actions\/download-artifact@/g)].length, 1);
   assert.equal(
-    [...source.matchAll(/name: codekeeper-review-publication-\$\{\{ github\.run_id \}\}/g)].length,
+    [
+      ...source.matchAll(
+        /uses: \.\/repository\/\.github\/codekeeper\/actions\/acquire-package/g,
+      ),
+    ].length,
+    2,
+  );
+  assert.equal(
+    [...source.matchAll(/uses: actions\/upload-artifact@/g)].length,
+    1,
+  );
+  assert.equal(
+    [...source.matchAll(/uses: actions\/download-artifact@/g)].length,
+    1,
+  );
+  assert.equal(
+    [
+      ...source.matchAll(
+        /name: codekeeper-review-publication-\$\{\{ github\.run_id \}\}/g,
+      ),
+    ].length,
     2,
   );
   assert.doesNotMatch(source, /codekeeper-tooling-\$\{\{ github\.run_id \}\}/);
-  assert.match(analyze, /package_manifest_sha256: \$\{\{ steps\.codekeeper-package\.outputs\.package_manifest_sha256 \}\}/);
-  assert.match(analyze, /package_source_commit: \$\{\{ steps\.codekeeper-package\.outputs\.source_commit \}\}/);
+  assert.match(
+    analyze,
+    /package_manifest_sha256: \$\{\{ steps\.codekeeper-package\.outputs\.package_manifest_sha256 \}\}/,
+  );
+  assert.match(
+    analyze,
+    /package_source_commit: \$\{\{ steps\.codekeeper-package\.outputs\.source_commit \}\}/,
+  );
   assert.match(gate, /package_source: artifact/);
   assert.match(
     gate,
@@ -358,6 +437,29 @@ test("review package verification is consolidated across two trusted boundaries"
   assert.doesNotMatch(analyze, /mv "\$GITHUB_WORKSPACE\/tooling"/);
 });
 
+test("artifact boundaries receive each runner's verified package source identity", async () => {
+  for (const mode of modes) {
+    const source = await workflow(mode);
+    const lines = source.split("\n");
+    const commands = lines
+      .map((line, index) => ({ line, index }))
+      .filter(
+        ({ line }) =>
+          line.includes("stage validate --operation") ||
+          line.includes("stage publish --operation publish"),
+      );
+    assert.ok(commands.length > 0, `${mode} has artifact boundary commands`);
+    for (const { line, index } of commands) {
+      const block = lines.slice(index, index + 16).join("\n");
+      assert.match(
+        block,
+        /--tooling-sha "\$\{\{ steps\.codekeeper-package\.outputs\.source_commit \}\}"/,
+        `${mode} ${line.trim()} binds the independently verified source commit`,
+      );
+    }
+  }
+});
+
 test("product workflows require fresh GitHub-hosted Ubuntu runners", async () => {
   for (const mode of ["assistant", "maintain", "fix", "issues", "review"]) {
     const source = await workflow(mode);
@@ -371,7 +473,9 @@ test("product workflows require fresh GitHub-hosted Ubuntu runners", async () =>
 
     const jobRunners = source.match(/^\s+runs-on: .*$/gm) ?? [];
     assert.ok(jobRunners.length > 0);
-    assert.ok(jobRunners.every((line) => line.trim() === "runs-on: ubuntu-latest"));
+    assert.ok(
+      jobRunners.every((line) => line.trim() === "runs-on: ubuntu-latest"),
+    );
 
     const callerRunners = caller.match(/^\s+runs-on: .*$/gm) ?? [];
     assert.ok(
@@ -401,18 +505,13 @@ test("workspace workflows run pinned Codex through the Agents SDK without runner
       workspace,
       /name: Install exact Codekeeper runtime\n\s+run: node "\$GITHUB_WORKSPACE\/tooling\/tools\/codekeeper\/bin\/install-runtime\.mjs"/,
     );
-    assert.match(workspace, /name: .*Codex through the Agents SDK/);
+    assert.match(workspace, /stage compute --operation workspace/);
     assert.match(
       workspace,
       /CODEKEEPER_WORKSPACE_API_KEY: \$\{\{ secrets\.workspace_api_key \|\| secrets\.openai_api_key \}\}/,
     );
-    assert.match(workspace, /run-workspace-agent/);
-    assert.match(
-      workspace,
-      new RegExp(
-        `--mode ${mode === "maintain" ? "audit" : mode === "issues" ? "issue" : mode}`,
-      ),
-    );
+    assert.doesNotMatch(workspace, /run-workspace-agent/);
+    assert.match(workspace, new RegExp(`--mode ${mode}`));
     assert.match(workspace, /--result "\$BUNDLE\/workspace-result\.json"/);
     assert.match(
       workspace,
@@ -441,17 +540,24 @@ test("review closes its temporary workspace user before coordinator credentials 
     "examples/workflows/codekeeper-review.yml.example",
   );
   const analyze = jobSection(source, "analyze", "gate");
+  const isolation = await repositoryFile(
+    "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",
+  );
 
   assert.doesNotMatch(source, /codex_safety_strategy|openai\/codex-action@/);
-  assert.doesNotMatch(caller, /CODEKEEPER_CODEX_SAFETY_STRATEGY|codex_safety_strategy/);
-  assert.match(analyze, /sudo useradd --system/);
-  assert.match(analyze, /sudo --user "\$WORKSPACE_USER" -- env -i/);
+  assert.doesNotMatch(
+    caller,
+    /CODEKEEPER_CODEX_SAFETY_STRATEGY|codex_safety_strategy/,
+  );
+  assert.match(analyze, /stage compute --operation workspace --mode review/);
+  assert.match(isolation, /useradd[\s\S]*--system/);
+  assert.match(isolation, /["']env["'], \[?"-i"/);
   assert.match(analyze, /CODEKEEPER_WORKSPACE_API_KEY/);
-  assert.match(analyze, /sudo pkill -TERM -u "\$WORKSPACE_USER"/);
-  assert.match(analyze, /sudo pkill -KILL -u "\$WORKSPACE_USER"/);
-  assert.match(analyze, /sudo userdel "\$WORKSPACE_USER"/);
+  assert.match(isolation, /pkill.*-TERM/);
+  assert.match(isolation, /pkill.*-KILL/);
+  assert.match(isolation, /userdel/);
   assert.ok(
-    analyze.indexOf("Close the workspace isolation boundary") <
+    analyze.indexOf("stage compute --operation workspace") <
       analyze.indexOf("Finalize review with configured Agents SDK model"),
   );
   assert.match(analyze, /CODEKEEPER_MODEL_API_KEY/);
@@ -461,24 +567,23 @@ test("review closes its temporary workspace user before coordinator credentials 
 });
 
 test("review grants its isolated user read-only traversal to the installed runtime", async () => {
-  const source = await workflow("review");
-  const analyze = jobSection(source, "analyze", "gate");
-  const isolate = analyze.slice(
-    analyze.indexOf("Isolate the workspace specialist from later credentials"),
-    analyze.indexOf("Review with isolated Codex through the Agents SDK"),
+  const isolate = await repositoryFile(
+    "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",
   );
 
-  assert.match(isolate, /chmod a\+x,go-w "\$GITHUB_WORKSPACE"/);
+  assert.match(isolate, /chmod[\s\S]*a\+x,go-w[\s\S]*workspaceRoot/);
   assert.match(
     isolate,
-    /chmod -R a\+rX,go-w "\$REPOSITORY_PATH" "\$BUNDLE" "\$TOOLING_PATH"/,
+    /chmod[\s\S]*a\+rX,go-w[\s\S]*repositoryPath[\s\S]*directory[\s\S]*toolingPath/,
   );
-  assert.match(isolate, /chmod a\+r,go-w "\$CONFIG"/);
   assert.match(
     isolate,
-    /sudo --user "\$WORKSPACE_USER" -- test -r "\$TOOLING_PATH\/codekeeper-runtime\/src\/cli\.mjs"/,
+    /chmod[\s\S]*a\+r,go-w[\s\S]*configPath[\s\S]*modePlanPath/,
   );
-  assert.doesNotMatch(isolate, /chmod -R a\+rX,go-w "\$GITHUB_WORKSPACE"/);
+  assert.match(
+    isolate,
+    /--user[\s\S]*workspaceUser[\s\S]*test[\s\S]*-r[\s\S]*cliPath/,
+  );
 });
 
 test("package acquisition validates tarball SRI before deriving package provenance", async () => {
@@ -514,13 +619,20 @@ test("package acquisition validates tarball SRI before deriving package provenan
       source.indexOf('tar -tzf "$CODEKEEPER_TARBALL"'),
   );
   assert.match(source, /tar -tzf "\$CODEKEEPER_TARBALL"/);
-  assert.match(source, /types\.some\(\(line\) => !new Set\(\["-", "d"\]\)\.has\(line\[0\]\)\)/);
-  assert.match(source, /tar -xzf "\$CODEKEEPER_TARBALL" --strip-components=1 --no-same-owner --no-same-permissions/);
+  assert.match(
+    source,
+    /types\.some\(\(line\) => !new Set\(\["-", "d"\]\)\.has\(line\[0\]\)\)/,
+  );
+  assert.match(
+    source,
+    /tar -xzf "\$CODEKEEPER_TARBALL" --strip-components=1 --no-same-owner --no-same-permissions/,
+  );
   assert.doesNotMatch(source, /npm install --prefix "\$install_root"/);
   assert.match(source, /const manifestSha256 = digest\(manifestBytes\)/);
   assert.ok(
-    source.indexOf("manifestSha256 !== process.env.CODEKEEPER_EXPECTED_MANIFEST_SHA256") <
-      source.indexOf('node "$tooling_root/bin/verify-package.mjs"'),
+    source.indexOf(
+      "manifestSha256 !== process.env.CODEKEEPER_EXPECTED_MANIFEST_SHA256",
+    ) < source.indexOf('node "$tooling_root/bin/verify-package.mjs"'),
   );
   assert.ok(
     source.indexOf("digest(verifierBytes) !== verifier.sha256") <

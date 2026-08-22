@@ -154,6 +154,7 @@ jobs:
           CODEKEEPER_TOOLING_SHA: ${{ steps.codekeeper-package.outputs.source_commit }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
+          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -163,14 +164,15 @@ jobs:
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
           CODEKEEPER_APP_CLIENT_ID: ${{ inputs.app_client_id }}
         run: |
-          [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
-          cp "$SOURCE_CONFIG" "$CONFIG"
-          [[ "$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).repository.defaultBranch)' "$CONFIG")" == "$DEFAULT_BRANCH" ]] || {
-            echo "Configured default branch does not match the repository default branch"
-            exit 1
-          }
-          node ../tooling/codekeeper-runtime/src/cli.mjs prepare-issue \
+          mkdir -p "$(dirname "$MODE_PLAN")"
+          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
+            --mode issues --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$SOURCE_CONFIG" > "$MODE_PLAN"
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation prepare --mode issues \
             --config "$CONFIG" \
+            --source-config "$SOURCE_CONFIG" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --mode-plan "$MODE_PLAN" \
             --directory "$BUNDLE" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
@@ -178,94 +180,21 @@ jobs:
             --actor "$REQUESTED_BY" \
             --triage-mode "$TRIAGE_MODE" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
-          {
-            echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
-          } >> "$GITHUB_OUTPUT"
-      - name: Resolve issue agent settings
-        id: settings
-        working-directory: repository
-        env:
-          CONFIG: ${{ runner.temp }}/codekeeper-config.json
-        run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs agent-settings \
-            --config "$CONFIG" \
-            --mode issue
-      - name: Require optional workspace specialist key
-        if: steps.settings.outputs.workspace_enabled == 'true'
-        env:
-          WORKSPACE_API_KEY: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
-        run: |
-          test -n "$WORKSPACE_API_KEY" || {
-            echo "workspace_api_key is required because ai.agents.issue.workspace.enabled=true"
-            exit 1
-          }
-      - name: Isolate Codex from repository instruction surfaces
-        if: steps.settings.outputs.workspace_enabled == 'true'
-        working-directory: repository
-        env:
-          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
-          QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
-          REPOSITORY_PATH: ${{ github.workspace }}/repository
-        run: |
-          test ! -e "$CODEX_HOME" || { echo "Isolated Codex home already exists"; exit 1; }
-          test ! -e "$QUARANTINE" || { echo "Repository skill quarantine already exists"; exit 1; }
-          test ! -L .agents || { echo "Refusing symlinked .agents instruction root"; exit 1; }
-          test ! -L .codex || { echo "Refusing symlinked .codex instruction root"; exit 1; }
-          install -d -m 700 "$CODEX_HOME" "$QUARANTINE"
-          {
-            echo 'project_doc_max_bytes = 0'
-            echo 'project_doc_fallback_filenames = []'
-            echo
-            echo '[skills]'
-            echo 'include_instructions = false'
-            echo 'bundled = { enabled = false }'
-            echo
-            echo '[shell_environment_policy]'
-            echo 'inherit = "core"'
-            echo 'ignore_default_excludes = false'
-            echo
-            printf '[projects.%s]\n' "$(node -p 'JSON.stringify(process.env.REPOSITORY_PATH)')"
-            echo 'trust_level = "untrusted"'
-          } > "$CODEX_HOME/config.toml"
-          for surface in .agents/skills .codex/skills; do
-            if [ -e "$surface" ] || [ -L "$surface" ]; then
-              mkdir -p "$QUARANTINE/$(dirname "$surface")"
-              mv -- "$surface" "$QUARANTINE/$surface"
-            fi
-          done
-      - name: Inspect issue with Codex through the Agents SDK
-        if: steps.settings.outputs.workspace_enabled == 'true'
+      - name: Run issue workspace stage
         working-directory: repository
         env:
           CODEKEEPER_WORKSPACE_API_KEY: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
+          QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
+          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
         run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs run-workspace-agent \
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation workspace --mode issues \
             --config "$CONFIG" \
             --directory "$BUNDLE" \
-            --mode issue \
+            --mode-plan "$MODE_PLAN" \
             --result "$BUNDLE/workspace-result.json"
-      - name: Restore quarantined repository skills
-        if: always() && steps.settings.outputs.workspace_enabled == 'true'
-        working-directory: repository
-        env:
-          QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
-        run: |
-          contaminated=false
-          for surface in .agents/skills .codex/skills; do
-            if [ -e "$surface" ] || [ -L "$surface" ]; then
-              mkdir -p "$QUARANTINE/generated/$(dirname "$surface")"
-              mv -- "$surface" "$QUARANTINE/generated/$surface"
-              contaminated=true
-            fi
-            if [ -e "$QUARANTINE/$surface" ] || [ -L "$QUARANTINE/$surface" ]; then
-              mkdir -p "$(dirname "$surface")"
-              mv -- "$QUARANTINE/$surface" "$surface"
-            fi
-          done
-          [ "$contaminated" = false ] || { echo "Codex created a quarantined instruction surface"; exit 1; }
       - name: Upload untrusted workspace evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -287,6 +216,7 @@ jobs:
       pull-requests: read
     outputs:
       candidate_sha256: ${{ steps.validate.outputs.candidate_sha256 }}
+      handoff_manifest_sha256: ${{ steps.validate.outputs.handoff_manifest_sha256 }}
       context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
     steps:
       - name: Download verified Codekeeper package
@@ -330,6 +260,7 @@ jobs:
           CODEKEEPER_TOOLING_SHA: ${{ needs.workspace.outputs.package_source_commit }}
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -339,14 +270,15 @@ jobs:
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
           CODEKEEPER_APP_CLIENT_ID: ${{ inputs.app_client_id }}
         run: |
-          [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
-          cp "$SOURCE_CONFIG" "$CONFIG"
-          [[ "$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).repository.defaultBranch)' "$CONFIG")" == "$DEFAULT_BRANCH" ]] || {
-            echo "Configured default branch does not match the repository default branch"
-            exit 1
-          }
-          node ../tooling/codekeeper-runtime/src/cli.mjs prepare-issue \
+          mkdir -p "$(dirname "$MODE_PLAN")"
+          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
+            --mode issues --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$SOURCE_CONFIG" > "$MODE_PLAN"
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation prepare --mode issues \
             --config "$CONFIG" \
+            --source-config "$SOURCE_CONFIG" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --mode-plan "$MODE_PLAN" \
             --directory "$BUNDLE" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
@@ -354,20 +286,6 @@ jobs:
             --actor "$REQUESTED_BY" \
             --triage-mode "$TRIAGE_MODE" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
-          {
-            echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
-          } >> "$GITHUB_OUTPUT"
-      - name: Bind workspace evidence to frozen context
-        env:
-          WORKSPACE_CONTEXT_SHA256: ${{ needs.workspace.outputs.context_sha256 }}
-          COORDINATOR_CONTEXT_SHA256: ${{ steps.prepare.outputs.context_sha256 }}
-        run: |
-          test -n "$WORKSPACE_CONTEXT_SHA256" || { echo "Workspace context digest is missing"; exit 1; }
-          test -n "$COORDINATOR_CONTEXT_SHA256" || { echo "Coordinator context digest is missing"; exit 1; }
-          [[ "$WORKSPACE_CONTEXT_SHA256" == "$COORDINATOR_CONTEXT_SHA256" ]] || {
-            echo "Workspace evidence does not match the frozen coordinator context"
-            exit 1
-          }
       - name: Triage issue with configured Agents SDK model
         working-directory: repository
         env:
@@ -376,26 +294,34 @@ jobs:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
           WORKSPACE: ${{ runner.temp }}/codekeeper-workspace
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
         run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs run-agent \
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation analyze --mode issues \
             --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
             --mode issue \
             --directory "$BUNDLE" \
             --workspace-result "$WORKSPACE/workspace-result.json" \
+            --expected-context-sha "${{ needs.workspace.outputs.context_sha256 }}" \
             --result "$BUNDLE/agent-result.json"
       - name: Validate untrusted issue candidate
         id: validate
         working-directory: repository
         env:
           BUNDLE: ${{ runner.temp }}/codekeeper-bundle
+          WORKSPACE: ${{ runner.temp }}/codekeeper-workspace
           CANDIDATE: ${{ runner.temp }}/codekeeper-candidate
           CONFIG: ${{ runner.temp }}/codekeeper-config.json
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
         run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs validate-issue \
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage validate --operation candidate --mode issues \
             --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
             --directory "$BUNDLE" \
             --context "$BUNDLE/context.json" \
             --result "$BUNDLE/agent-result.json" \
+            --workspace-result "$WORKSPACE/workspace-result.json" \
+            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
             --artifact "$CANDIDATE"
       - name: Upload untrusted issue candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -455,14 +381,23 @@ jobs:
           ARTIFACT: ${{ runner.temp }}/codekeeper-artifact
           CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           CANDIDATE_SHA256: ${{ needs.analyze.outputs.candidate_sha256 }}
+          HANDOFF_MANIFEST_SHA256: ${{ needs.analyze.outputs.handoff_manifest_sha256 }}
           CONTEXT_SHA256: ${{ needs.analyze.outputs.context_sha256 }}
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
         run: |
-          node tooling/codekeeper-runtime/src/cli.mjs seal-issue \
+          mkdir -p "$(dirname "$MODE_PLAN")"
+          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
+            --mode issues --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$CONFIG" > "$MODE_PLAN"
+          node tooling/codekeeper-runtime/src/cli.mjs stage validate --operation seal --mode issues \
             --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
             --candidate "$CANDIDATE" \
             --artifact "$ARTIFACT" \
             --expected-candidate-sha "$CANDIDATE_SHA256" \
-            --expected-context-sha "$CONTEXT_SHA256"
+            --expected-context-sha "$CONTEXT_SHA256" \
+            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
+            --expected-handoff-manifest-sha "$HANDOFF_MANIFEST_SHA256"
       - name: Upload sealed issue artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -480,19 +415,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Validate GitHub App permission inputs
-        env:
-          APP_CONTENTS_PERMISSION: ${{ inputs.app_contents_permission }}
-          APP_ISSUES_PERMISSION: ${{ inputs.app_issues_permission }}
-          APP_PULL_REQUESTS_PERMISSION: ${{ inputs.app_pull_requests_permission }}
-        run: |
-          for permission in "$APP_CONTENTS_PERMISSION" "$APP_ISSUES_PERMISSION" "$APP_PULL_REQUESTS_PERMISSION"; do
-            case "$permission" in
-              read|write) ;;
-              *) echo "Invalid GitHub App permission: $permission"; exit 1 ;;
-            esac
-          done
-
       - name: Download verified Codekeeper package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -523,6 +445,22 @@ jobs:
 
       - name: Install exact Codekeeper runtime
         run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
+      - name: Validate GitHub App permissions through the mode plan
+        working-directory: repository
+        env:
+          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
+        run: |
+          mkdir -p "$(dirname "$MODE_PLAN")"
+          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
+            --mode issues --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$CONFIG" > "$MODE_PLAN"
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage publish --operation permissions --mode issues \
+            --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
+            --app-contents-permission "${{ inputs.app_contents_permission }}" \
+            --app-issues-permission "${{ inputs.app_issues_permission }}" \
+            --app-pull-requests-permission "${{ inputs.app_pull_requests_permission }}"
       - name: Download sealed issue artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -542,10 +480,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
+          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
         run: |
-          identity="$(curl --globoff --fail-with-body --silent --show-error --header "Authorization: Bearer $GITHUB_TOKEN" --header "Accept: application/vnd.github+json" "$GITHUB_API_URL/users/${APP_SLUG}[bot]")"
-          echo "login=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).login))')" >> "$GITHUB_OUTPUT"
-          echo "id=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).id))')" >> "$GITHUB_OUTPUT"
+          node tooling/codekeeper-runtime/src/cli.mjs stage publish --operation bot --mode issues \
+            --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
+            --token "$GITHUB_TOKEN" \
+            --app-slug "$APP_SLUG" \
+            --api-url "$GITHUB_API_URL"
       - name: Publish sealed issue triage
         working-directory: tooling
         env:
@@ -556,10 +499,13 @@ jobs:
           CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/issue-triager.md
           MANIFEST_SHA256: ${{ needs.seal.outputs.manifest_sha256 }}
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
         run: |
-          node codekeeper-runtime/src/cli.mjs publish-issue \
+          node codekeeper-runtime/src/cli.mjs stage publish --operation publish --mode issues \
             --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
+            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"

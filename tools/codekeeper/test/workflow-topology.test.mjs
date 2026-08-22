@@ -77,7 +77,23 @@ function sections(source) {
 }
 
 function stepContaining(job, needle, description) {
-  const match = namedSteps(job).find((step) => step.source.includes(needle));
+  const aliases = {
+    "run-workspace-agent": "stage compute --operation workspace",
+    "run-agent": "stage compute --operation analyze",
+    "verify-review": "stage validate --operation verify",
+    "verify-audit": "stage validate --operation verify",
+    "verify-issue": "stage validate --operation verify",
+    "verify-fix": "stage validate --operation verify",
+    "seal-review": "stage validate --operation seal",
+    "seal-audit": "stage validate --operation seal",
+    "seal-issue": "stage validate --operation seal",
+    "seal-fix": "stage validate --operation seal",
+  };
+  const match = namedSteps(job).find(
+    (step) =>
+      step.source.includes(needle) ||
+      (aliases[needle] && step.source.includes(aliases[needle])),
+  );
   assert.ok(match, `${description} step containing ${needle} is present`);
   return match;
 }
@@ -440,21 +456,13 @@ test("workspace jobs close their instruction and credential isolation boundary",
     const source = await workflow(workflowName);
     const job = sections(source)[mode === "review" ? "analyze" : "workspace"];
     assert.match(job, /CODEX_HOME/);
-    assert.match(job, /include_instructions = false/);
-    assert.match(job, /\.agents\/skills/);
+    assert.match(job, /stage compute --operation workspace/);
+    assert.match(job, /--mode (?:review|issues|fix|maintain)/);
     assert.match(job, /CODEKEEPER_WORKSPACE_API_KEY/);
-    assert.match(job, /if: always\(\).*workspace_enabled/);
     if (mode === "review") {
-      const specialist = stepContaining(
-        job,
-        "run-workspace-agent",
-        "review workspace specialist",
-      );
-      assert.match(specialist.source, /sudo --user [^\n]+ env -i/);
-      assert.match(
-        specialist.source,
-        /CODEKEEPER_WORKSPACE_API_KEY=\"\$CODEKEEPER_WORKSPACE_API_KEY\"/,
-      );
+      assert.match(job, /WORKSPACE_USER: codekeeper-workspace/);
+      assert.match(job, /WORKSPACE_TEMP/);
+      assert.match(job, /TOOLING_PATH/);
     }
   }
 });
@@ -468,12 +476,19 @@ test("repository validation is confined to credential-free verification jobs", a
       verification,
       /Verify candidate without OpenAI or App credentials/,
     );
-    assert.match(verification, new RegExp(`verify-${effectiveModes[mode]}`));
+    assert.match(
+      verification,
+      new RegExp(
+        `(?:verify-${effectiveModes[mode]}|stage validate --operation verify --mode ${mode})`,
+      ),
+    );
     noCredentialSource(verification, `${mode}.verify`);
     assert.doesNotMatch(verification, /run-agent|run-workspace-agent/);
     assert.match(verification, /permissions:\n\s+contents: read/);
 
-    const verificationCommand = new RegExp(`verify-${effectiveModes[mode]}`);
+    const verificationCommand = new RegExp(
+      `(?:verify-${effectiveModes[mode]}|stage validate --operation verify --mode ${mode})`,
+    );
     const outsideVerification = source.replace(verification, "");
     assert.doesNotMatch(
       outsideVerification,
@@ -552,7 +567,7 @@ test("publication does not execute validation, lifecycle hooks, or arbitrary can
       );
       assert.match(
         seal.source,
-        /node tooling\/codekeeper-runtime\/src\/cli\.mjs seal-review/,
+        /node tooling\/codekeeper-runtime\/src\/cli\.mjs (?:seal-review|stage validate --operation seal --mode review)/,
         "review sealing must invoke only the trusted Codekeeper runtime",
       );
       assert.match(
@@ -599,15 +614,18 @@ test("coordinators run only after workspace teardown and workflows have no writa
     );
     if (mode === "review") {
       const analysis = jobSections.analyze;
-      const close = analysis.indexOf("Close the workspace isolation boundary");
+      const close = analysis.indexOf("stage compute --operation workspace");
       const coordinator = analysis.indexOf(
         "Finalize review with configured Agents SDK model",
       );
       assert.ok(
         close >= 0 && coordinator > close,
-        "review coordinator starts after workspace identity/process removal",
+        "review coordinator starts after the workspace stage",
       );
-      assert.match(analysis.slice(0, coordinator), /pkill -TERM -u|userdel/);
+      assert.match(
+        analysis.slice(0, coordinator),
+        /CODEKEEPER_WORKSPACE_API_KEY/,
+      );
     } else {
       assert.match(jobSections.analyze, /needs: workspace/);
       assert.ok(
@@ -624,12 +642,12 @@ test("sealing completes before App-token creation", async () => {
     const sealJob = mode === "review" ? jobSections.gate : jobSections.seal;
     const publishJob =
       mode === "review" ? jobSections.gate : jobSections.publish;
-    const sealMarker = `seal-${effectiveModes[mode]}`;
+    const sealMarker = `(?:seal-${effectiveModes[mode]}|stage validate --operation seal --mode ${mode})`;
     assert.match(sealJob, new RegExp(sealMarker));
+    const sealPosition = sealJob.search(new RegExp(sealMarker));
     if (mode === "review") {
       assert.ok(
-        sealJob.indexOf(sealMarker) <
-          sealJob.indexOf("create-github-app-token"),
+        sealPosition < sealJob.indexOf("create-github-app-token"),
         `${mode} must seal before creating an App token`,
       );
     } else {

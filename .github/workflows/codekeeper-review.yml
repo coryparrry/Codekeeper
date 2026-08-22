@@ -101,6 +101,7 @@ jobs:
       owner_command: ${{ steps.intent.outputs.owner_command }}
       execute: ${{ steps.intent.outputs.execute }}
       candidate_sha256: ${{ steps.validate.outputs.candidate_sha256 }}
+      handoff_manifest_sha256: ${{ steps.validate.outputs.handoff_manifest_sha256 }}
       context_sha256: ${{ steps.prepare.outputs.context_sha256 }}
       package_manifest_sha256: ${{ steps.codekeeper-package.outputs.package_manifest_sha256 }}
       package_source_commit: ${{ steps.codekeeper-package.outputs.source_commit }}
@@ -209,26 +210,27 @@ jobs:
           CODEKEEPER_TOOLING_SHA: ${{ steps.codekeeper-package.outputs.source_commit }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CONFIG: ${{ github.workspace }}/codekeeper-config.json
+          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
           SOURCE_CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITHUB_TOKEN: ${{ github.token }}
           CODEKEEPER_AUTOMATION_BOT_LOGIN: ${{ inputs.automation_bot_login }}
         run: |
-          [[ ! -e "$CONFIG" ]] || { echo "Frozen config already exists"; exit 1; }
-          cp "$SOURCE_CONFIG" "$CONFIG"
-          [[ "$(node -e 'const fs=require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1])).repository.defaultBranch)' "$CONFIG")" == "$DEFAULT_BRANCH" ]] || {
-            echo "Configured default branch does not match the repository default branch"
-            exit 1
-          }
-          node ../tooling/codekeeper-runtime/src/cli.mjs prepare-review \
+          mkdir -p "$(dirname "$MODE_PLAN")"
+          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
+            --mode review --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$SOURCE_CONFIG" > "$MODE_PLAN"
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation prepare --mode review \
             --config "$CONFIG" \
+            --source-config "$SOURCE_CONFIG" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --mode-plan "$MODE_PLAN" \
             --directory "$BUNDLE" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
             --event "$GITHUB_EVENT_PATH" \
             --tooling-sha "$CODEKEEPER_TOOLING_SHA"
-          echo "context_sha256=$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Resolve review agent settings
         if: steps.intent.outputs.execute == 'true'
@@ -241,166 +243,25 @@ jobs:
             --config "$CONFIG" \
             --mode review
 
-      - name: Require optional workspace specialist key
-        if: steps.intent.outputs.execute == 'true' && steps.settings.outputs.workspace_enabled == 'true'
-        env:
-          WORKSPACE_API_KEY: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
-        run: |
-          test -n "$WORKSPACE_API_KEY" || {
-            echo "workspace_api_key is required because ai.agents.review.workspace.enabled=true"
-            exit 1
-          }
-
-      - name: Isolate the workspace specialist from later credentials
-        if: steps.intent.outputs.execute == 'true' && steps.settings.outputs.workspace_enabled == 'true'
-        working-directory: worktree
-        env:
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
-          CONFIG: ${{ github.workspace }}/codekeeper-config.json
-          QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
-          REPOSITORY_PATH: ${{ github.workspace }}/worktree
-          TOOLING_PATH: ${{ github.workspace }}/tooling
-          WORKSPACE_TEMP: ${{ github.workspace }}/codekeeper-workspace-tmp
-          WORKSPACE_USER: codekeeper-workspace
-        run: |
-          set -euo pipefail
-          test ! -e "$CODEX_HOME" || { echo "Isolated Codex home already exists"; exit 1; }
-          test ! -e "$WORKSPACE_TEMP" || { echo "Workspace temporary directory already exists"; exit 1; }
-          test ! -e "$QUARANTINE" || { echo "Repository skill quarantine already exists"; exit 1; }
-          test ! -L .agents || { echo "Refusing symlinked .agents instruction root"; exit 1; }
-          test ! -L .codex || { echo "Refusing symlinked .codex instruction root"; exit 1; }
-          ! id -u "$WORKSPACE_USER" >/dev/null 2>&1 || { echo "Workspace account already exists"; exit 1; }
-          sudo useradd --system --no-create-home --user-group --shell /usr/sbin/nologin "$WORKSPACE_USER"
-          install -d -m 700 "$CODEX_HOME" "$WORKSPACE_TEMP" "$QUARANTINE"
-          chmod a+x,go-w "$GITHUB_WORKSPACE"
-          chmod -R a+rX,go-w "$REPOSITORY_PATH" "$BUNDLE" "$TOOLING_PATH"
-          chmod a+r,go-w "$CONFIG"
-          install -m 600 /dev/null "$BUNDLE/workspace-result.json"
-          install -m 600 /dev/null "$BUNDLE/workspace-runtime-metadata.json"
-          {
-            echo '[safe]'
-            printf '\tdirectory = %s\n' "$REPOSITORY_PATH"
-          } > "$CODEX_HOME/.gitconfig"
-          chmod 600 "$CODEX_HOME/.gitconfig"
-          {
-            echo 'project_doc_max_bytes = 0'
-            echo 'project_doc_fallback_filenames = []'
-            echo
-            echo '[skills]'
-            echo 'include_instructions = false'
-            echo 'bundled = { enabled = false }'
-            echo
-            echo '[shell_environment_policy]'
-            echo 'inherit = "core"'
-            echo 'ignore_default_excludes = false'
-            echo
-            printf '[projects.%s]\n' "$(node -p 'JSON.stringify(process.env.REPOSITORY_PATH)')"
-            echo 'trust_level = "untrusted"'
-          } > "$CODEX_HOME/config.toml"
-          for surface in .agents/skills .codex/skills; do
-            if [ -e "$surface" ] || [ -L "$surface" ]; then
-              mkdir -p "$QUARANTINE/$(dirname "$surface")"
-              mv -- "$surface" "$QUARANTINE/$surface"
-            fi
-          done
-          sudo chown -R "$WORKSPACE_USER:$WORKSPACE_USER" "$CODEX_HOME" "$WORKSPACE_TEMP"
-          sudo chown "$WORKSPACE_USER:$WORKSPACE_USER" \
-            "$BUNDLE/workspace-result.json" \
-            "$BUNDLE/workspace-runtime-metadata.json"
-          sudo --user "$WORKSPACE_USER" -- test -r "$TOOLING_PATH/codekeeper-runtime/src/cli.mjs"
-
-      - name: Review with isolated Codex through the Agents SDK
+      - name: Run review workspace stage
         if: steps.intent.outputs.execute == 'true' && steps.settings.outputs.workspace_enabled == 'true'
         working-directory: worktree
         env:
           CODEKEEPER_WORKSPACE_API_KEY: ${{ secrets.workspace_api_key || secrets.openai_api_key }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
-          CONFIG: ${{ github.workspace }}/codekeeper-config.json
-          WORKSPACE_TEMP: ${{ github.workspace }}/codekeeper-workspace-tmp
-          WORKSPACE_USER: codekeeper-workspace
-        run: |
-          set -euo pipefail
-          NODE_BIN="$(command -v node)"
-          sudo --user "$WORKSPACE_USER" -- env -i \
-            CI=true \
-            HOME="$CODEX_HOME" \
-            LANG="${LANG:-C.UTF-8}" \
-            PATH="$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin" \
-            SHELL=/bin/bash \
-            USER="$WORKSPACE_USER" \
-            LOGNAME="$WORKSPACE_USER" \
-            TMPDIR="$WORKSPACE_TEMP" \
-            CODEX_HOME="$CODEX_HOME" \
-            CODEKEEPER_WORKSPACE_API_KEY="$CODEKEEPER_WORKSPACE_API_KEY" \
-            "$NODE_BIN" "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" run-workspace-agent \
-              --config "$CONFIG" \
-              --directory "$BUNDLE" \
-              --mode review \
-              --result "$BUNDLE/workspace-result.json"
-
-      - name: Close the workspace isolation boundary
-        if: always() && steps.intent.outputs.execute == 'true' && steps.settings.outputs.workspace_enabled == 'true'
-        working-directory: worktree
-        env:
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          CODEX_HOME: ${{ github.workspace }}/codekeeper-codex-home
           QUARANTINE: ${{ runner.temp }}/codekeeper-repository-skills
+          CONFIG: ${{ github.workspace }}/codekeeper-config.json
+          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
           WORKSPACE_TEMP: ${{ github.workspace }}/codekeeper-workspace-tmp
           WORKSPACE_USER: codekeeper-workspace
+          TOOLING_PATH: ${{ github.workspace }}/tooling
         run: |
-          set -euo pipefail
-          if id -u "$WORKSPACE_USER" >/dev/null 2>&1; then
-            sudo pkill -TERM -u "$WORKSPACE_USER" >/dev/null 2>&1 || true
-            for _ in $(seq 1 20); do
-              pgrep -u "$WORKSPACE_USER" >/dev/null 2>&1 || break
-              sleep 0.1
-            done
-            sudo pkill -KILL -u "$WORKSPACE_USER" >/dev/null 2>&1 || true
-            ! pgrep -u "$WORKSPACE_USER" >/dev/null 2>&1 || {
-              echo "Isolated workspace process survived cleanup"
-              exit 1
-            }
-            for evidence in "$BUNDLE/workspace-result.json" "$BUNDLE/workspace-runtime-metadata.json"; do
-              test -f "$evidence" && test ! -L "$evidence" || {
-                echo "Isolated workspace evidence is not a regular file"
-                exit 1
-              }
-            done
-            sudo chown "$(id -u):$(id -g)" \
-              "$BUNDLE/workspace-result.json" \
-              "$BUNDLE/workspace-runtime-metadata.json"
-            sudo rm -rf "$CODEX_HOME" "$WORKSPACE_TEMP"
-            sudo userdel "$WORKSPACE_USER"
-          fi
-          contaminated=false
-          for surface in .agents/skills .codex/skills; do
-            if [ -e "$surface" ] || [ -L "$surface" ]; then
-              mkdir -p "$QUARANTINE/generated/$(dirname "$surface")"
-              mv -- "$surface" "$QUARANTINE/generated/$surface"
-              contaminated=true
-            fi
-            if [ -e "$QUARANTINE/$surface" ] || [ -L "$QUARANTINE/$surface" ]; then
-              chmod u+w "$(dirname "$surface")" 2>/dev/null || true
-              mkdir -p "$(dirname "$surface")"
-              mv -- "$QUARANTINE/$surface" "$surface"
-            fi
-          done
-          [ "$contaminated" = false ] || { echo "Codex created a quarantined instruction surface"; exit 1; }
-
-      - name: Verify the frozen context survived workspace inspection
-        if: steps.intent.outputs.execute == 'true'
-        env:
-          BUNDLE: ${{ github.workspace }}/codekeeper-bundle
-          EXPECTED_CONTEXT_SHA256: ${{ steps.prepare.outputs.context_sha256 }}
-        run: |
-          test -n "$EXPECTED_CONTEXT_SHA256" || { echo "Frozen context digest is missing"; exit 1; }
-          ACTUAL_CONTEXT_SHA256="$(sha256sum "$BUNDLE/context.json" | awk '{print $1}')"
-          [[ "$ACTUAL_CONTEXT_SHA256" == "$EXPECTED_CONTEXT_SHA256" ]] || {
-            echo "Workspace inspection changed the frozen review context"
-            exit 1
-          }
+          node "$GITHUB_WORKSPACE/tooling/codekeeper-runtime/src/cli.mjs" stage compute --operation workspace --mode review \
+            --config "$CONFIG" \
+            --directory "$BUNDLE" \
+            --mode-plan "$MODE_PLAN" \
+            --result "$BUNDLE/workspace-result.json"
 
       - name: Finalize review with configured Agents SDK model
         if: steps.intent.outputs.execute == 'true'
@@ -410,12 +271,15 @@ jobs:
           CODEKEEPER_TRACE_API_KEY: ${{ secrets.trace_api_key }}
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CONFIG: ${{ github.workspace }}/codekeeper-config.json
+          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
         run: |
-          node ../tooling/codekeeper-runtime/src/cli.mjs run-agent \
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage compute --operation analyze --mode review \
             --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
             --mode review \
             --directory "$BUNDLE" \
             --workspace-result "$BUNDLE/workspace-result.json" \
+            --expected-context-sha "${{ steps.prepare.outputs.context_sha256 }}" \
             --result "$BUNDLE/agent-result.json"
 
       - name: Validate untrusted review candidate
@@ -426,15 +290,19 @@ jobs:
           BUNDLE: ${{ github.workspace }}/codekeeper-bundle
           CANDIDATE: ${{ github.workspace }}/codekeeper-private/candidate
           CONFIG: ${{ github.workspace }}/codekeeper-config.json
+          MODE_PLAN: ${{ github.workspace }}/codekeeper-mode-plan/plan.json
         run: |
           PRIVATE_ROOT="$(dirname "$CANDIDATE")"
           test ! -e "$PRIVATE_ROOT" || { echo "Coordinator output directory already exists"; exit 1; }
           install -d -m 700 "$PRIVATE_ROOT"
-          node ../tooling/codekeeper-runtime/src/cli.mjs validate-review \
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage validate --operation candidate --mode review \
             --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
             --directory "$BUNDLE" \
             --context "$BUNDLE/context.json" \
             --result "$BUNDLE/agent-result.json" \
+            --workspace-result "$BUNDLE/workspace-result.json" \
+            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
             --artifact "$CANDIDATE"
 
       - name: Stage one review publication handoff
@@ -468,20 +336,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Validate GitHub App permission inputs
-        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
-        env:
-          APP_CONTENTS_PERMISSION: ${{ inputs.app_contents_permission }}
-          APP_ISSUES_PERMISSION: ${{ inputs.app_issues_permission }}
-          APP_PULL_REQUESTS_PERMISSION: ${{ inputs.app_pull_requests_permission }}
-        run: |
-          for permission in "$APP_CONTENTS_PERMISSION" "$APP_ISSUES_PERMISSION" "$APP_PULL_REQUESTS_PERMISSION"; do
-            case "$permission" in
-              read|write) ;;
-              *) echo "Invalid GitHub App permission: $permission"; exit 1 ;;
-            esac
-          done
-
       - name: Download review publication handoff
         if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -533,6 +387,23 @@ jobs:
       - name: Install exact Codekeeper runtime
         if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
         run: node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/install-runtime.mjs"
+      - name: Validate GitHub App permissions through the mode plan
+        if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
+        working-directory: repository
+        env:
+          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
+        run: |
+          mkdir -p "$(dirname "$MODE_PLAN")"
+          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
+            --mode review --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$CONFIG" > "$MODE_PLAN"
+          node ../tooling/codekeeper-runtime/src/cli.mjs stage publish --operation permissions --mode review \
+            --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
+            --app-contents-permission "${{ inputs.app_contents_permission }}" \
+            --app-issues-permission "${{ inputs.app_issues_permission }}" \
+            --app-pull-requests-permission "${{ inputs.app_pull_requests_permission }}"
 
       - name: Seal review artifact without repository execution
         if: needs.analyze.result == 'success' && needs.analyze.outputs.execute == 'true'
@@ -542,14 +413,23 @@ jobs:
           ARTIFACT: ${{ runner.temp }}/codekeeper-artifact
           CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           CANDIDATE_SHA256: ${{ needs.analyze.outputs.candidate_sha256 }}
+          HANDOFF_MANIFEST_SHA256: ${{ needs.analyze.outputs.handoff_manifest_sha256 }}
           CONTEXT_SHA256: ${{ needs.analyze.outputs.context_sha256 }}
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
         run: |
-          node tooling/codekeeper-runtime/src/cli.mjs seal-review \
+          mkdir -p "$(dirname "$MODE_PLAN")"
+          node "$GITHUB_WORKSPACE/tooling/tools/codekeeper/bin/resolve-mode-plan.mjs" \
+            --mode review --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --policy-config "$CONFIG" > "$MODE_PLAN"
+          node tooling/codekeeper-runtime/src/cli.mjs stage validate --operation seal --mode review \
             --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
             --candidate "$CANDIDATE" \
             --artifact "$ARTIFACT" \
             --expected-candidate-sha "$CANDIDATE_SHA256" \
-            --expected-context-sha "$CONTEXT_SHA256"
+            --expected-context-sha "$CONTEXT_SHA256" \
+            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
+            --expected-handoff-manifest-sha "$HANDOFF_MANIFEST_SHA256"
 
       - name: Create short-lived GitHub App token
         if: steps.seal.outcome == 'success'
@@ -568,13 +448,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
+          CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
         run: |
-          identity="$(curl --globoff --fail-with-body --silent --show-error \
-            --header "Authorization: Bearer $GITHUB_TOKEN" \
-            --header "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/users/${APP_SLUG}[bot]")"
-          echo "login=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).login))')" >> "$GITHUB_OUTPUT"
-          echo "id=$(printf '%s' "$identity" | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk).on("end", () => console.log(JSON.parse(input).id))')" >> "$GITHUB_OUTPUT"
+          node tooling/codekeeper-runtime/src/cli.mjs stage publish --operation bot --mode review \
+            --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
+            --token "$GITHUB_TOKEN" \
+            --app-slug "$APP_SLUG" \
+            --api-url "$GITHUB_API_URL"
 
       - name: Publish sealed review decision
         if: steps.seal.outcome == 'success'
@@ -588,11 +470,14 @@ jobs:
           CONFIG: ${{ github.workspace }}/repository/.github/codekeeper.json
           AGENT_PROFILE: ${{ github.workspace }}/repository/.github/codekeeper/agents/pr-reviewer.md
           MANIFEST_SHA256: ${{ steps.seal.outputs.manifest_sha256 }}
+          MODE_PLAN: ${{ runner.temp }}/codekeeper-mode-plan/plan.json
         run: |
-          node codekeeper-runtime/src/cli.mjs publish-review \
+          node codekeeper-runtime/src/cli.mjs stage publish --operation publish --mode review \
             --config "$CONFIG" \
+            --mode-plan "$MODE_PLAN" \
             --agent-profile "$AGENT_PROFILE" \
             --agent-profile-source-sha "$(git -C "$GITHUB_WORKSPACE/repository" rev-parse HEAD)" \
+            --tooling-sha "${{ steps.codekeeper-package.outputs.source_commit }}" \
             --artifact "$RUNNER_TEMP/codekeeper-artifact" \
             --expected-manifest-sha "$MANIFEST_SHA256"
 
