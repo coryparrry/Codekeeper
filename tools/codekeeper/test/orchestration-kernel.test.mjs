@@ -27,6 +27,7 @@ import {
 } from "../src/lib/orchestration/credential-boundaries.mjs";
 import {
   ancestorDirectories,
+  environmentAssignments,
   runIsolatedWorkspaceAgent,
 } from "../src/lib/orchestration/workspace-isolation.mjs";
 
@@ -264,6 +265,23 @@ test("workspace isolation grants world execute on ancestor directories of the in
   assert.doesNotMatch(
     ancestorDirectories("/home/runner/work/repo/repo").join("\n"),
     /^\/$/m,
+  );
+});
+
+test("workspace isolation passes env -i KEY=VALUE assignments to the isolated user", () => {
+  assert.deepEqual(
+    environmentAssignments({
+      CI: "true",
+      HOME: "/home/runner/work/repo/repo/codekeeper-codex-home",
+    }),
+    [
+      "CI=true",
+      "HOME=/home/runner/work/repo/repo/codekeeper-codex-home",
+    ],
+  );
+  assert.throws(
+    () => environmentAssignments({ "CI true": "1" }),
+    /Invalid environment name/,
   );
 });
 
