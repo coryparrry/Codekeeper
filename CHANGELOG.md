@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.7...codekeeper-v0.4.0) (2026-08-22)
+
+
+### Features
+
+* **installer:** add canonical mode registry ([#269](https://github.com/coryparrry/Codekeeper/issues/269)) ([af85f59](https://github.com/coryparrry/Codekeeper/commit/af85f596e046983a88fc155b28bbe665a50d1366))
+* **installer:** generate package provenance at pack time ([dc6c647](https://github.com/coryparrry/Codekeeper/commit/dc6c6479647860963393475f931d5047f8e3e25c))
+* **installer:** generate package provenance at pack time ([e38fb0a](https://github.com/coryparrry/Codekeeper/commit/e38fb0a11309c89f50320425dee62f81d65ed12d))
+* **installer:** install unified runtime caller ([0995922](https://github.com/coryparrry/Codekeeper/commit/0995922618cecb558166e94b527087e7b3193c3c))
+* **installer:** install unified runtime caller ([2653f7f](https://github.com/coryparrry/Codekeeper/commit/2653f7f190a32816a76adde241468246bd845648))
+* **installer:** ship a prebuilt runtime archive ([9017d7e](https://github.com/coryparrry/Codekeeper/commit/9017d7e7712c8e1261a81414261258580ec4eec9))
+* **installer:** ship a prebuilt runtime archive ([84b9db8](https://github.com/coryparrry/Codekeeper/commit/84b9db87429037bb04af95bedfb37280105235ed))
+* **runtime:** add App credential probe path ([7f10d46](https://github.com/coryparrry/Codekeeper/commit/7f10d46f15b6dbb172febc9ce578cc4cc145e090))
+* **runtime:** add App credential probe path ([67f2ee0](https://github.com/coryparrry/Codekeeper/commit/67f2ee04caeee2f50bd0f7c9a988a705db7dad72))
+* **runtime:** add generic execution kernel ([#273](https://github.com/coryparrry/Codekeeper/issues/273)) ([6b35750](https://github.com/coryparrry/Codekeeper/commit/6b35750d243428c6be0acc5e329ccc1878ff8a37))
+* **runtime:** route modes through generic workflow ([#279](https://github.com/coryparrry/Codekeeper/issues/279)) ([cd4c6b4](https://github.com/coryparrry/Codekeeper/commit/cd4c6b4ec73a69bbe319653d32e18f158e3b0d24))
+* **runtime:** route owner commands through trusted stages ([#283](https://github.com/coryparrry/Codekeeper/issues/283)) ([48d3d14](https://github.com/coryparrry/Codekeeper/commit/48d3d14d7b0181da40b874a7ddfa1396a3dc5bbb))
+
+
+### Bug Fixes
+
+* **installer:** match Runtime v2 nested verification jobs ([558e914](https://github.com/coryparrry/Codekeeper/commit/558e914f9e14f868183d8267e54236482e53f71c))
+* **installer:** match Runtime v2 nested verification jobs ([c73c7ab](https://github.com/coryparrry/Codekeeper/commit/c73c7ab22d47580244fed5bb8b2f1483e3f35bd8))
+
 ## [0.3.7](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.3.6...codekeeper-v0.3.7) (2026-08-21)
 
 
