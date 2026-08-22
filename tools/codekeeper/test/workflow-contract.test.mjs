@@ -70,11 +70,7 @@ test("staged modes isolate untrusted candidate creation, tokenless sealing, and 
       repairMode ? "verify" : "seal",
     );
     const verify = repairMode ? jobSection(source, "verify", "seal") : null;
-    const seal = jobSection(
-      source,
-      "seal",
-      mode === "review" ? "gate" : "publish",
-    );
+    const seal = jobSection(source, "seal", mode === "review" ? "gate" : "publish");
     const publish = jobSection(source, "publish");
 
     assert.match(workspace, /codekeeper-bundle/);
