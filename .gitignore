@@ -16,3 +16,7 @@ openwiki/
 *.trace
 *.xcresult
 *.dSYM/
+
+# Generated at pack time; do not commit hashes or copied caller workflows.
+/packages/codekeeper/assets/metadata.json
+/packages/codekeeper/assets/workflows/*.yml

@@ -27,6 +27,10 @@ import {
   writeGeneratedRuntimeArchive,
 } from "../packages/codekeeper/src/prebuilt-runtime.mjs";
 import {
+  generateCodekeeperDistribution,
+  isGeneratedAssetRelativePath,
+} from "../packages/codekeeper/src/distribution.mjs";
+import {
   RELEASE_MANIFEST_PATH,
   verifyCodekeeperRelease,
 } from "../packages/codekeeper/src/release-verifier.mjs";
@@ -177,6 +181,9 @@ export async function buildCodekeeperPackageStage({
     for (const [sourceDirectory, stageDirectory] of RELEASE_DIRECTORY_MAPPINGS) {
       const sourceRoot = path.join(repositoryRoot, sourceDirectory);
       for (const relativePath of await collectDirectoryFiles(sourceRoot)) {
+        if (sourceDirectory === "packages/codekeeper/assets" && isGeneratedAssetRelativePath(relativePath)) {
+          continue;
+        }
         files.push(
           await copyProductFile({
             repositoryRoot,
@@ -198,6 +205,12 @@ export async function buildCodekeeperPackageStage({
         }),
       );
     }
+    const distribution = await generateCodekeeperDistribution({
+      repositoryRoot,
+      destination: temporaryDestination,
+      sourceCommit: commit,
+    });
+    files.push(...distribution.files);
     const archive = await buildPrebuiltRuntimeArchive({
       stagedRuntimeRoot: path.join(temporaryDestination, "runtime"),
       ...(installRuntimeDependencies ? { installRuntimeDependencies } : {}),

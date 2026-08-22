@@ -22,7 +22,6 @@ export {
   RUNTIME_WORKFLOWS,
 } from "./mode-registry.mjs";
 export const MINIMUM_NODE_MAJOR = 22;
-export const SOURCE_COMMIT = "0995922618cecb558166e94b527087e7b3193c3c";
 export const SETUP_BRANCH = "codekeeper/setup";
 export const SETUP_COMMIT_MESSAGE = "chore(codekeeper): add setup";
 export const SETUP_PR_TITLE = "chore(codekeeper): add setup";
@@ -51,6 +50,7 @@ export const UNIFIED_CALLER_WORKFLOW = Object.freeze({
   target: ".github/workflows/codekeeper.yml",
   asset: "workflows/codekeeper.yml",
   sourcePath: "examples/workflows/codekeeper.yml.example",
+  packagePath: "assets/workflows/codekeeper.yml",
   description: "Routes every automatic and owner-command event directly into the generic staged runtime."
 });
 export const RELEASE_PACKAGE_ASSETS = Object.freeze([

@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
-import { SOURCE_COMMIT } from "../src/constants.mjs";
 import { PACKAGE_SOURCE_REPOSITORY, PACKAGE_SOURCE_REPOSITORY_URL } from "../src/package-identity.mjs";
+import { buildDistributionMetadata } from "../src/distribution.mjs";
 import { git, REPOSITORY_ROOT, temporaryDirectory } from "./helpers.mjs";
 
 const SOURCE_DEFAULT_BRANCH = "main";
-const REVIEWED_SOURCE_CHECKPOINT = "0995922618cecb558166e94b527087e7b3193c3c";
 const PRODUCTION_SOURCE_PATHS = [
   "tools/codekeeper",
   "examples/workflows/codekeeper.yml.example",
+  ".github/codekeeper/actions/acquire-package/action.yml",
   ".github/workflows/codekeeper.yml",
   ".github/workflows/codekeeper-runtime.yml",
 ];
@@ -114,6 +114,7 @@ test("release packaging uses npm 12 with bundled installer dependencies and a lo
   assert.equal(rootPackage.packageManager, "npm@12.0.2");
   assert.equal(rootPackage.scripts["package:pack"], "node scripts/pack-codekeeper-package.mjs");
   assert.equal(rootPackage.scripts["package:stage"], "node scripts/build-codekeeper-package.mjs");
+  assert.equal(rootPackage.scripts["package:distribution"], "node scripts/generate-codekeeper-distribution.mjs");
   assert.match(rootPackage.scripts["package:stage:check"], /package-stage\.test\.mjs/);
   assert.equal(selfTestWorkflow.match(/npm install --global npm@12\.0\.2 --ignore-scripts --no-audit --no-fund/g)?.length, 3);
   assert.ok(packageManifest.files.includes("release/"));
@@ -138,7 +139,10 @@ test("release identity uses the current personal repository everywhere", async (
   assert.equal(PACKAGE_SOURCE_REPOSITORY, "coryparrry/Codekeeper");
   assert.equal(PACKAGE_SOURCE_REPOSITORY_URL, "https://github.com/coryparrry/Codekeeper");
   const surfaces = await Promise.all([
-    readFile(new URL("../assets/metadata.json", import.meta.url), "utf8"),
+    buildDistributionMetadata({
+      repositoryRoot: REPOSITORY_ROOT,
+      sourceCommit: git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim(),
+    }).then((metadata) => JSON.stringify(metadata)),
     readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../../../.github/codekeeper/actions/acquire-package/action.yml", import.meta.url), "utf8"),
     readFile(new URL("../../../tools/codekeeper/src/lib/render.mjs", import.meta.url), "utf8"),
@@ -148,14 +152,22 @@ test("release identity uses the current personal repository everywhere", async (
   assert.ok(surfaces.every((contents) => contents.includes("coryparrry/Codekeeper")));
 });
 
-test("installer source pin is a full reviewed checkpoint reachable from the repository default branch", () => {
-  assert.match(SOURCE_COMMIT, /^[0-9a-f]{40}$/);
-  assert.equal(SOURCE_COMMIT, REVIEWED_SOURCE_CHECKPOINT);
-  const defaultBranchRef = resolveDefaultBranchRef(REPOSITORY_ROOT, SOURCE_DEFAULT_BRANCH);
-  git(REPOSITORY_ROOT, ["merge-base", "--is-ancestor", SOURCE_COMMIT, defaultBranchRef]);
+test("installer constants do not keep a hand-edited source commit", async () => {
+  const source = await readFile(new URL("../src/constants.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /export const SOURCE_COMMIT/);
 });
 
-test("installer source pin includes the latest production workflow checkpoint on the default branch", () => {
+test("generated distribution metadata binds the exact supplied build commit", async () => {
+  const sourceCommit = git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim();
+  const metadata = await buildDistributionMetadata({
+    repositoryRoot: REPOSITORY_ROOT,
+    sourceCommit,
+  });
+  assert.equal(metadata.source.repository, PACKAGE_SOURCE_REPOSITORY);
+  assert.equal(metadata.source.commit, sourceCommit);
+});
+
+test("release authority still requires the build commit to contain the latest production workflow checkpoint", () => {
   const defaultBranchRef = resolveDefaultBranchRef(REPOSITORY_ROOT, SOURCE_DEFAULT_BRANCH);
   const latestProductionCheckpoint = git(REPOSITORY_ROOT, [
     "rev-list",
@@ -164,10 +176,11 @@ test("installer source pin includes the latest production workflow checkpoint on
     "--",
     ...PRODUCTION_SOURCE_PATHS,
   ]).trim();
+  const head = git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).trim();
   assert.match(latestProductionCheckpoint, /^[0-9a-f]{40}$/);
   assert.doesNotThrow(
-    () => git(REPOSITORY_ROOT, ["merge-base", "--is-ancestor", latestProductionCheckpoint, SOURCE_COMMIT]),
-    "Installer source pin is stale; publish a follow-up checkpoint update after production workflow changes land on the default branch",
+    () => git(REPOSITORY_ROOT, ["merge-base", "--is-ancestor", latestProductionCheckpoint, head]),
+    "This branch is missing the latest production workflow checkpoint on the default branch",
   );
 });
 

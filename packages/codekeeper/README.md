@@ -117,7 +117,8 @@ scheduled maintenance, tracing, and automatic merge **off**.
 - [Architecture](https://github.com/coryparrry/Codekeeper/blob/main/docs/ARCHITECTURE.md)
 - [Support](https://github.com/coryparrry/Codekeeper/blob/main/SUPPORT.md)
 
-Bundled source checkpoint: `0995922618cecb558166e94b527087e7b3193c3c`.
+The installer records the exact Git commit of a package build in generated
+asset metadata. Do not hand-edit that commit.
 
 ## Security
 

@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const MANIFEST_PATH = "MANIFEST.sha256";
+// Compatibility-only source-archive inventory for remaining source-pinned
+// installations. Do not extend it; generate package provenance at pack time.
 const VALID_MODES = new Set(["100644", "100755"]);
 
 function fail(message) {
