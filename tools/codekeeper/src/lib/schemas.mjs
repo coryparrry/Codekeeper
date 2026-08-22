@@ -47,7 +47,8 @@ function providerConstSchema(source) {
 
 // The Codex workspace action consumes this file through its provider's strict
 // output-schema API. The local validators continue to use the source schemas;
-// this creates only the provider-wire representation it requires.
+// this creates only the provider-wire representation it requires. OpenAI
+// structured outputs reject uniqueItems, so uniqueness stays a local check.
 export function providerCompatibleJsonSchema(value) {
   if (Array.isArray(value)) return value.map((item) => providerCompatibleJsonSchema(item));
   if (!isPlainObject(value)) return cloneJson(value);
@@ -55,6 +56,7 @@ export function providerCompatibleJsonSchema(value) {
   const projected = hasConst ? providerConstSchema(value) : {};
   for (const [key, item] of Object.entries(value)) {
     if (hasConst && (key === "const" || key === "enum" || key === "type")) continue;
+    if (key === "uniqueItems") continue;
     projected[key] = providerCompatibleJsonSchema(item);
   }
   return projected;

@@ -271,7 +271,7 @@
     },
     {
       "path": "src/lib/schemas.mjs",
-      "sha256": "079e00bbc9e23c35742c6659d92a9426abde260a2540dc5bade7d6d6f3e16c87"
+      "sha256": "7858ac79cecd7475afa60222cf3c70201e502cbb0179c9e9dab42e4ec3bcfd4a"
     },
     {
       "path": "src/lib/security-containment.mjs",

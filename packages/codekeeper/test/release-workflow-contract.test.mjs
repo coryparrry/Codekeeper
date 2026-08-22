@@ -525,6 +525,12 @@ test("packaged runtime grants the isolated user execute on ancestor directories 
   assert.ok(isolate.indexOf("grantWorldTraverse") < isolate.indexOf('"test"'));
 });
 
+test("packaged runtime omits uniqueItems from provider structured-output schemas", async () => {
+  const source = await repositoryFile("tools/codekeeper/src/lib/schemas.mjs");
+  assert.match(source, /if \(key === "uniqueItems"\) continue/);
+  assert.match(source, /uniqueItems: true/);
+});
+
 test("packaged runtime passes env -i KEY=VALUE assignments to the isolated user", async () => {
   const isolate = await repositoryFile(
     "tools/codekeeper/src/lib/orchestration/workspace-isolation.mjs",
