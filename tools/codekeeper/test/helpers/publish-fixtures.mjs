@@ -13,10 +13,11 @@ import {
   publishIssue as publishIssueProduction,
   publishReview as publishReviewProduction
 } from "../../src/lib/publish.mjs";
+import { normalizeLivePolicy } from "../../src/lib/policy-normalization.mjs";
 
-export const config = JSON.parse(
+export const config = normalizeLivePolicy(JSON.parse(
   await readFile(new URL("../../../../.github/codekeeper.json", import.meta.url), "utf8")
-);
+));
 const profileFixtureRoot = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-domain-profiles-"));
 export const profilePaths = {};
 export const profileBytes = {};

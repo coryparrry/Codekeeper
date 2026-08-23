@@ -7,6 +7,7 @@ import { AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { automaticRepairMarker, deferredReviewMarker, deferredReviewFingerprint, reviewFeedbackReplyMarker, sha256 } from "../src/lib/markers.mjs";
 import { completeReviewFeedback } from "../src/lib/review-feedback.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
+import { LABELS } from "../src/lib/label-ownership.mjs";
 import {
   publishIssue as publishIssueProduction,
   reconcileAutoMerge,
@@ -165,7 +166,7 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
 
   const created = await upsertDeferredReviewFeedback(input);
   assert.deepEqual(created.map((item) => item.state), ["created"]);
-  assert.deepEqual(calls.created[0].labels, ["codekeeper:deferred", "codekeeper:type-testing"]);
+  assert.deepEqual(calls.created[0].labels, [LABELS.DEFERRED, LABELS.TESTING]);
   assert.match(calls.created[0].body, /pull\/7#discussion_r41/);
   assert.match(calls.created[0].body, new RegExp(deferredReviewMarker(fingerprint)));
   assert.equal(calls.replies[0].commentId, 41);
@@ -732,7 +733,7 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
     });
     assert.equal(retried.automaticRepair.dispatched, true);
     assert.equal(dispatches, 1);
-    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), true);
+    assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;
@@ -789,8 +790,8 @@ test("fix-now feedback blocks auto-merge even when repair dispatch is disabled",
   });
   assert.equal(decision.eligible, false);
   assert.match(decision.reasons.join("\n"), /fix-now review feedback/);
-  assert.ok(reviewLabels(result).includes("codekeeper:blocked"));
-  assert.ok(!reviewLabels(result).includes("codekeeper:auto-merge"));
+  assert.ok(reviewLabels(result).includes(LABELS.CHANGES_REQUIRED));
+  assert.ok(!reviewLabels(result).includes(LABELS.MERGE_READY));
 });
 
 test("a completed automatic repair consumes the pass after the pull request head changes", async () => {
@@ -803,7 +804,7 @@ test("a completed automatic repair consumes the pass after the pull request head
     assert.equal(publication.automaticRepair.consumed, true);
     assert.equal(publication.automaticRepair.pending, false);
 
-    pull.labels = [{ name: "codekeeper:auto-repaired" }];
+    pull.labels = [];
     const repeated = await fixture.publish();
     assert.equal(repeated.autoMerge.eligible, false);
     assert.match(repeated.autoMerge.reasons.join("\n"), /repair pass is already consumed/i);
@@ -884,12 +885,10 @@ test("a pending repair marker consumes only its matching active lease", async ()
     repair.state = `Automatic repair is pending for head ${headSha}.`;
     repair.head = headSha;
     repair.comments = [leaseComment("active")];
-    pull.labels = [{ name: "codekeeper:auto-repaired" }];
     const pendingRepair = await fixture.publish();
     assert.equal(pendingRepair.automaticRepair.consumed, true);
     assert.equal(pendingRepair.automaticRepair.eligible, false);
     assert.equal(pendingRepair.automaticRepair.pending, true);
-    assert.equal(pendingRepair.automaticRepair.staleMarker, false);
 
     for (const leaseState of ["failed", "released"]) {
       repair.comments = [leaseComment(leaseState)];
@@ -897,7 +896,6 @@ test("a pending repair marker consumes only its matching active lease", async ()
       assert.equal(retryable.automaticRepair.consumed, false);
       assert.equal(retryable.automaticRepair.eligible, true);
       assert.equal(retryable.automaticRepair.pending, true);
-      assert.equal(retryable.automaticRepair.staleMarker, true);
     }
 
     repair.state = `Automatic repair is pending for head ${headSha}. Extra`;
@@ -906,7 +904,6 @@ test("a pending repair marker consumes only its matching active lease", async ()
     assert.equal(inexactMarker.automaticRepair.consumed, false);
     assert.equal(inexactMarker.automaticRepair.eligible, true);
     assert.equal(inexactMarker.automaticRepair.pending, false);
-    assert.equal(inexactMarker.automaticRepair.staleMarker, true);
   } finally {
     await fixture.cleanup();
   }
@@ -1126,11 +1123,11 @@ test("review publication activates auto-merge last and falls back safely", async
     assert.equal(publication.autoMerge.eligible, false);
     assert.equal(publication.autoMergeResult.enabled, false);
     assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "labels", "comment"]);
-    assert.ok(provisioned.desiredLabels.includes("codekeeper:auto-merge"));
-    assert.ok(provisioned.desiredLabels.includes("codekeeper:manual-review"));
-    assert.ok(labelCalls[0].desiredLabels.includes("codekeeper:auto-merge"));
-    assert.ok(labels.desiredLabels.includes("codekeeper:manual-review"));
-    assert.ok(!labels.desiredLabels.includes("codekeeper:auto-merge"));
+    assert.ok(provisioned.desiredLabels.includes(LABELS.MERGE_READY));
+    assert.ok(provisioned.desiredLabels.includes(LABELS.REVIEW_NEEDED));
+    assert.ok(labelCalls[0].desiredLabels.includes(LABELS.MERGE_READY));
+    assert.ok(labels.desiredLabels.includes(LABELS.REVIEW_NEEDED));
+    assert.ok(!labels.desiredLabels.includes(LABELS.MERGE_READY));
     assert.match(comment.comment, /Ready for maintainer review/);
     assert.match(comment.comment, /Auto-merge is not active: GitHub rejected enablement/);
     assert.doesNotMatch(comment.comment, /Ready to merge/);
@@ -1330,7 +1327,7 @@ test("issue publication closes a GitHub-linked merged pull request resolution as
     try {
       const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
       const published = await publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token" });
-      assert.deepEqual(published.desiredLabels.sort(), ["codekeeper:type-bug", "codekeeper:priority-p3"].sort());
+      assert.deepEqual(published.desiredLabels.sort(), [LABELS.BUG].sort());
       assert.equal(mutationOptions.allowClosed, true);
       assert.match(closingComment, /merged pull request \[#12\]/);
       assert.deepEqual(update, { state: "closed", state_reason: "completed" });
@@ -1680,7 +1677,7 @@ test("publication reloads the packaged default recorded during preparation", asy
     });
     assert.deepEqual(published, {
       issue: 7,
-      desiredLabels: ["codekeeper:type-bug", "codekeeper:priority-p3"],
+      desiredLabels: [LABELS.BUG],
       dryRun: true
     });
   } finally {

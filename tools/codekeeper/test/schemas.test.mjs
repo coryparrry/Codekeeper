@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fixSchema, reviewSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "../src/lib/schemas.mjs";
+import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
 
-const config = JSON.parse(
+const config = normalizeLivePolicy(JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
-);
+));
 
 test("review validator keeps Mermaid optional for ordinary changes", () => {
   const result = validateReviewResult({
@@ -190,7 +191,7 @@ test("review validator allows a low-severity introduced contract failure to bloc
     mode: "review",
     summary: "The changed expiry boundary violates the documented cache contract.",
     risk: "medium",
-    labels: [config.review.allowedLabels[0]],
+    labels: [],
     blockingFindings: [{
       title: "Cache entry expires at its still-valid boundary",
       explanation: "The changed comparison evicts the entry when now equals expiresAt.",
@@ -233,7 +234,7 @@ test("audit validator binds a requested repair to a finding", () => {
           owningPath: "README.md",
           problemKey: "readme-command-drift",
           proposedAction: "Remove the obsolete command.",
-          labels: [config.review.allowedLabels[0]]
+          labels: []
         }
       ],
       repair: {

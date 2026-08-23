@@ -1,12 +1,87 @@
+import { LABELS } from "./label-ownership.mjs";
+import {
+  applyLabelCatalog,
+  applyManagedLabelSets,
+  applyRepairDefaults,
+  ISSUE_MANAGED_LABELS,
+  LABEL_DEFINITIONS,
+  LEGACY_ISSUE_MANAGED_LABELS,
+  LEGACY_REQUIRED_LABELS,
+  LEGACY_REVIEW_MANAGED_LABELS,
+  REPAIR_ALLOWED_PATHS,
+  REPAIR_LIMITS,
+  REPAIR_PROTECTED_PATHS,
+  REVIEW_MANAGED_LABELS,
+  legacyLabelDefinition
+} from "./policy-normalization.mjs";
+
 export const POLICY_VERSION = 3;
 
 const POLICY_AGENT_IDS = Object.freeze(["review", "audit", "issue", "fix"]);
+
+export {
+  ISSUE_MANAGED_LABELS,
+  LABEL_DEFINITIONS,
+  REPAIR_ALLOWED_PATHS,
+  REPAIR_LIMITS,
+  REPAIR_PROTECTED_PATHS,
+  REVIEW_MANAGED_LABELS
+};
+
+const LEGACY_LABEL_NAMES = Object.freeze({
+  "codekeeper:reviewed": null,
+  "codekeeper:maintenance": LABELS.AUTOMATED_MAINTENANCE,
+  "codekeeper:ready": LABELS.READY_FOR_FIX,
+  "codekeeper:blocked": LABELS.CHANGES_REQUIRED,
+  "codekeeper:manual-review": LABELS.REVIEW_NEEDED,
+  "codekeeper:paused": LABELS.PAUSED,
+  "codekeeper:auto-repaired": null,
+  "codekeeper:auto-merge": LABELS.MERGE_READY,
+  "codekeeper:duplicate-candidate": LABELS.POSSIBLE_DUPLICATE,
+  "codekeeper:deferred": LABELS.DEFERRED,
+  "codekeeper:needs-information": LABELS.NEEDS_INFORMATION,
+  "codekeeper:needs-tests": LABELS.NEEDS_TESTS,
+  "codekeeper:priority-p1": LABELS.URGENT,
+  "codekeeper:priority-p2": LABELS.HIGH_PRIORITY,
+  "codekeeper:priority-p3": null,
+  "codekeeper:risk-low": null,
+  "codekeeper:risk-medium": null,
+  "codekeeper:risk-high": null,
+  "codekeeper:type-bug": LABELS.BUG,
+  "codekeeper:type-enhancement": LABELS.ENHANCEMENT,
+  "codekeeper:type-documentation": LABELS.DOCUMENTATION,
+  "codekeeper:type-question": LABELS.QUESTION,
+  "codekeeper:type-maintenance": LABELS.MAINTENANCE,
+  "codekeeper:type-security": LABELS.SECURITY,
+  "codekeeper:type-testing": LABELS.TESTING,
+  reviewed: null,
+  ready: LABELS.READY_FOR_FIX,
+  blocked: LABELS.CHANGES_REQUIRED,
+  "manual review": LABELS.REVIEW_NEEDED,
+  "auto repaired": null,
+  "auto merge": LABELS.MERGE_READY,
+  duplicate: LABELS.POSSIBLE_DUPLICATE,
+  "priority p1": LABELS.URGENT,
+  "priority p2": LABELS.HIGH_PRIORITY,
+  "priority p3": null,
+  "risk low": null,
+  "risk medium": null
+});
 
 export const RELEASE_OWNED_POLICY_PATHS = Object.freeze([
   "repository.automationBranchPrefix",
   "ai.providers",
   "ai.tracing.includeSensitiveData",
+  "audit.repair.allowedPaths",
   "audit.repair.protectedPaths",
+  "audit.repair.allowAdd",
+  "audit.repair.maximumFiles",
+  "audit.repair.maximumChangedLines",
+  "audit.repair.maximumPatchBytes",
+  "audit.repair.maximumFileBytes",
+  "review.allowedLabels",
+  "review.managedLabels",
+  "issues.managedLabels",
   "merge.allowUserPullRequests",
   "merge.blockedPaths",
   ...POLICY_AGENT_IDS.flatMap((agentId) => [
@@ -58,17 +133,12 @@ export const OPENROUTER_PROVIDER = Object.freeze({
   supportsReasoningEffort: false
 });
 
-export const DEFERRED_LABEL = Object.freeze({
-  color: "C5DEF5",
-  description: "Verified work deferred from a pull request"
-});
-
 export const REVIEW_REASONING_ESCALATION_DEFAULTS = Object.freeze({
   enabled: true,
   provider: "openai",
   model: "gpt-5.6-luna",
   effort: "max",
-  labels: Object.freeze(["security", "risk high"]),
+  labels: Object.freeze([LABELS.SECURITY, "risk high"]),
   pathPatterns: Object.freeze([
     ".github/actions/**",
     ".github/codekeeper.json",
@@ -96,68 +166,30 @@ export const REVIEW_REASONING_ESCALATION_DEFAULTS = Object.freeze({
   minimumSingleFileChangedLines: 1000
 });
 
-const LEGACY_LABEL_NAMES = Object.freeze({
-  reviewed: "codekeeper:reviewed",
-  ready: "codekeeper:ready",
-  blocked: "codekeeper:blocked",
-  "manual review": "codekeeper:manual-review",
-  paused: "codekeeper:paused",
-  "auto repaired": "codekeeper:auto-repaired",
-  "auto merge": "codekeeper:auto-merge",
-  duplicate: "codekeeper:duplicate-candidate",
-  deferred: "codekeeper:deferred",
-  "needs tests": "codekeeper:needs-tests",
-  "priority p1": "codekeeper:priority-p1",
-  "priority p2": "codekeeper:priority-p2",
-  "priority p3": "codekeeper:priority-p3",
-  "risk low": "codekeeper:risk-low",
-  "risk medium": "codekeeper:risk-medium",
-  "risk high": "codekeeper:risk-high",
-  bug: "codekeeper:type-bug",
-  enhancement: "codekeeper:type-enhancement",
-  documentation: "codekeeper:type-documentation",
-  question: "codekeeper:type-question",
-  maintenance: "codekeeper:type-maintenance",
-  security: "codekeeper:type-security",
-  testing: "codekeeper:type-testing"
-});
-
-const OWNED_LABEL_DESCRIPTIONS = Object.freeze({
-  "codekeeper:reviewed": "Reviewed by Codekeeper",
-  "codekeeper:maintenance": "Created or managed by Codekeeper",
-  "codekeeper:paused": "Automatic work is paused",
-  "codekeeper:auto-repaired": "Automatically repaired by Codekeeper",
-  "codekeeper:type-maintenance": "Repository maintenance"
-});
-
-function ownedLabelName(name) {
-  return LEGACY_LABEL_NAMES[name] ?? name;
+function migrateLabelList(labels) {
+  return [...new Set(labels
+    .map((name) => Object.hasOwn(LEGACY_LABEL_NAMES, name) ? LEGACY_LABEL_NAMES[name] : name)
+    .filter(Boolean))];
 }
 
-function ownedLabelList(labels) {
-  return [...new Set(labels.map(ownedLabelName))];
+function legacyLabelDefinitionForMigration(name) {
+  const current = LEGACY_LABEL_NAMES[name];
+  if (current && LABEL_DEFINITIONS[current]) return structuredClone(LABEL_DEFINITIONS[current]);
+  return legacyLabelDefinition();
 }
 
-function migrateLegacyLabels(policy) {
-  policy.labels ??= {};
-  for (const [legacyName, ownedName] of Object.entries(LEGACY_LABEL_NAMES)) {
-    if (policy.labels[legacyName] && !policy.labels[ownedName]) {
-      policy.labels[ownedName] = structuredClone(policy.labels[legacyName]);
+function migrateLabels(policy) {
+  for (const [legacyName, currentName] of Object.entries(LEGACY_LABEL_NAMES)) {
+    if (!Object.hasOwn(policy.labels, legacyName)) continue;
+    if (currentName && !Object.hasOwn(policy.labels, currentName)) {
+      policy.labels[currentName] = structuredClone(policy.labels[legacyName]);
     }
   }
-  if (policy.labels.maintenance && !policy.labels["codekeeper:maintenance"]) {
-    policy.labels["codekeeper:maintenance"] = structuredClone(policy.labels.maintenance);
+  applyLabelCatalog(policy);
+  for (const name of LEGACY_REQUIRED_LABELS) {
+    policy.labels[name] ??= legacyLabelDefinitionForMigration(name);
   }
-  for (const [name, description] of Object.entries(OWNED_LABEL_DESCRIPTIONS)) {
-    if (policy.labels[name]) policy.labels[name].description = description;
-  }
-  const legacyIssueMaintenance = policy.issues.managedLabels.includes("maintenance");
-  policy.review.allowedLabels = ownedLabelList(policy.review.allowedLabels);
-  policy.review.managedLabels = ownedLabelList(policy.review.managedLabels);
-  policy.issues.managedLabels = ownedLabelList(policy.issues.managedLabels);
-  if (legacyIssueMaintenance && !policy.issues.managedLabels.includes("codekeeper:maintenance")) {
-    policy.issues.managedLabels.unshift("codekeeper:maintenance");
-  }
+  applyManagedLabelSets(policy);
 }
 
 export function upgradePolicy(input) {
@@ -170,13 +202,13 @@ export function upgradePolicy(input) {
     policy.automation = { ...AUTOMATION_DEFAULTS };
     policy.review.createDeferredIssues ??= false;
     policy.ai.providers.openrouter ??= structuredClone(OPENROUTER_PROVIDER);
-    policy.labels["deferred"] ??= structuredClone(DEFERRED_LABEL);
-    if (!policy.issues.managedLabels.includes("deferred")) {
-      policy.issues.managedLabels.push("deferred");
-    }
   }
-  migrateLegacyLabels(policy);
   policy.review.reasoningEscalation ??= structuredClone(REVIEW_REASONING_ESCALATION_DEFAULTS);
   policy.issues.closeResolvedIssues ??= true;
+  policy.review.allowedLabels = migrateLabelList(policy.review.allowedLabels ?? []);
+  policy.review.managedLabels = migrateLabelList(policy.review.managedLabels ?? []);
+  policy.issues.managedLabels = migrateLabelList(policy.issues.managedLabels ?? []);
+  migrateLabels(policy);
+  applyRepairDefaults(policy);
   return policy;
 }

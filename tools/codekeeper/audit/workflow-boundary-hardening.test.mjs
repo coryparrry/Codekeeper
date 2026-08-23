@@ -38,7 +38,7 @@ test("workspace and analyze resolve repository-dispatch repair targets identical
 });
 
 test("automatic review repair dispatch carries policy authorization", () => {
-  const dispatchBlock = section(publishSource, "  if (automaticRepair.eligible) {", "\nexport async function publishReview");
+  const dispatchBlock = section(publishSource, "async function dispatchAutomaticReviewRepair", "\nexport async function publishReview");
   assertContains(dispatchBlock, /authorization_mode:\s*["']policy["']/u, "automatic repair omits policy authorization");
   assertContains(dispatchBlock, /requested_by:/u, "automatic repair omits requester provenance");
 });

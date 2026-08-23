@@ -5,6 +5,7 @@ import path from "node:path";
 import { currentResumeCommand, parseCliArgs, runCli as runProductionCli, USAGE } from "../src/cli.mjs";
 import { createCommandRunner } from "../src/command-runner.mjs";
 import { buildInstallPlan, completionGuidance } from "../src/plan.mjs";
+import { upgradePolicy } from "../src/policy.mjs";
 import { formatCommand } from "../src/shell-command.mjs";
 import { createRecordingRunner, git, HEAD_SHA, loadVerifiedAssets, result, temporaryDirectory, testPackageEnvironment, textSink, VERSION } from "./helpers.mjs";
 
@@ -977,7 +978,7 @@ test("update advances release-owned files while preserving adopter configuration
     }
   });
   assert.equal(configurationPlan.operation, "configuration-update");
-  assert.deepEqual(configurationPlan.policy.audit.repair.protectedPaths, ["adopter-stale-release-boundary"]);
+  assert.deepEqual(configurationPlan.policy.audit.repair.protectedPaths, upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"])).audit.repair.protectedPaths);
   assert.equal(configurationPlan.policy.ai.providers.openai.baseUrl, "https://stale-provider.example.test/v1");
   assert.equal(configurationPlan.policy.ai.agents.review.workspace.allowWrites, false);
   assert.equal(configurationPlan.policy.ai.agents.review.maxTurns, 1);
@@ -1020,7 +1021,7 @@ test("update advances release-owned files while preserving adopter configuration
   assert.deepEqual(reviewedPlan.modes, ["review", "maintain"]);
   assert.deepEqual(reviewedPlan.variables, []);
   assert.deepEqual(reviewedPlan.secrets, []);
-  assert.deepEqual(reviewedPlan.policy.audit.repair.protectedPaths, JSON.parse(bundle.contents["policies/openai.json"]).audit.repair.protectedPaths);
+  assert.deepEqual(reviewedPlan.policy.audit.repair.protectedPaths, upgradePolicy(JSON.parse(bundle.contents["policies/openai.json"])).audit.repair.protectedPaths);
   assert.deepEqual(reviewedPlan.policy.ai.providers, JSON.parse(bundle.contents["policies/openai.json"]).ai.providers);
   assert.equal(reviewedPlan.policy.ai.agents.review.workspace.allowWrites, false);
   assert.equal(reviewedPlan.policy.ai.agents.review.maxTurns, 1);

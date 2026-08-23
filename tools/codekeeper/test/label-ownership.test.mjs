@@ -2,17 +2,19 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { GitHubClient } from "../src/lib/github.mjs";
+import { LABELS } from "../src/lib/label-ownership.mjs";
+import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
 import { validatePolicy } from "../src/lib/policy-validator.mjs";
 import { findingLabels, issueTypeLabel, reviewLabels } from "../src/lib/policy.mjs";
 
-const source = JSON.parse(
+const source = normalizeLivePolicy(JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8"),
-);
+));
 
-test("Codekeeper emits canonical namespaced labels", () => {
+test("Codekeeper emits concise review and issue labels", () => {
   const labels = reviewLabels({
     risk: "high",
-    labels: ["codekeeper:type-security"],
+    labels: [LABELS.SECURITY],
     tests: { missingTest: true },
     blockingFindings: [],
     nonBlockingFindings: [],
@@ -21,41 +23,35 @@ test("Codekeeper emits canonical namespaced labels", () => {
   });
 
   assert.deepEqual(new Set(labels), new Set([
-    "codekeeper:reviewed",
-    "codekeeper:risk-high",
-    "codekeeper:type-security",
-    "codekeeper:needs-tests",
-    "codekeeper:manual-review",
+    LABELS.NEEDS_TESTS,
+    LABELS.REVIEW_NEEDED,
   ]));
-  assert.equal(issueTypeLabel("security"), "codekeeper:type-security");
+  assert.equal(issueTypeLabel("security"), LABELS.SECURITY);
   assert.deepEqual(findingLabels({ category: "security", labels: [] }), [
-    "codekeeper:maintenance",
-    "codekeeper:type-security",
+    LABELS.AUTOMATED_MAINTENANCE,
+    LABELS.SECURITY,
   ]);
 });
 
 test("policy validation rejects generic labels from Codekeeper-managed sets", () => {
   const config = structuredClone(source);
   config.labels["risk high"] = { color: "B60205", description: "Repository taxonomy label" };
-  config.review.managedLabels = ["codekeeper:reviewed", "risk high"];
+  config.review.managedLabels = [LABELS.REVIEW_NEEDED, "risk high"];
   assert.throws(
     () => validatePolicy(config),
     /review may only emit Codekeeper-owned labels: risk high/,
   );
 });
 
-test("label reconciliation preserves generic labels and only deletes Codekeeper labels", async () => {
+test("label reconciliation removes only Codekeeper-owned labels", async () => {
   const originalFetch = globalThis.fetch;
   const deletes = [];
   const issue = {
     number: 7,
     labels: [
-      { name: "bug" },
-      { name: "security" },
-      { name: "ready" },
-      { name: "paused" },
+      { name: "external-taxonomy" },
       { name: "risk high" },
-      { name: "codekeeper:reviewed" },
+      { name: LABELS.REVIEW_NEEDED },
       { name: "codekeeper:risk-high" },
     ],
   };
@@ -75,20 +71,16 @@ test("label reconciliation preserves generic labels and only deletes Codekeeper 
     const github = new GitHubClient({ token: "token", repository: "owner/repository" });
     await github.replaceManagedLabels(
       7,
-      ["codekeeper:reviewed"],
-      ["codekeeper:reviewed", "codekeeper:risk-high"],
+      [LABELS.REVIEW_NEEDED],
+      [LABELS.REVIEW_NEEDED, "codekeeper:risk-high"],
     );
     await assert.rejects(
-      github.replaceManagedLabels(7, ["ready"], ["ready"]),
-      /outside Codekeeper ownership: ready/,
+      github.replaceManagedLabels(7, ["external-taxonomy"], ["external-taxonomy"]),
+      /outside Codekeeper ownership: external-taxonomy/,
     );
     await assert.rejects(
-      github.removeLabel(7, "paused"),
-      /outside Codekeeper ownership: paused/,
-    );
-    await assert.rejects(
-      github.rollbackPullLabel(7, "ready"),
-      /outside Codekeeper ownership: ready/,
+      github.rollbackPullLabel(7, "external-taxonomy"),
+      /outside Codekeeper ownership: external-taxonomy/,
     );
   } finally {
     globalThis.fetch = originalFetch;

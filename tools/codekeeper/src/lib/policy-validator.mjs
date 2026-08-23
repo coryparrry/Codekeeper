@@ -1,4 +1,9 @@
 import { isCodekeeperOwnedLabel } from "./label-ownership.mjs";
+import {
+  ISSUE_MANAGED_LABELS,
+  REQUIRED_RUNTIME_LABELS,
+  REVIEW_MANAGED_LABELS
+} from "./policy-normalization.mjs";
 
 export const AGENT_MODES = Object.freeze(["review", "audit", "issue", "fix"]);
 const PROVIDER_APIS = new Set(["responses", "chat_completions"]);
@@ -231,67 +236,6 @@ function validateAutomationBranchPrefix(value) {
   );
   return value;
 }
-
-const REQUIRED_RUNTIME_LABELS = [
-  "codekeeper:reviewed",
-  "codekeeper:maintenance",
-  "codekeeper:ready",
-  "codekeeper:blocked",
-  "codekeeper:manual-review",
-  "codekeeper:paused",
-  "codekeeper:auto-repaired",
-  "codekeeper:auto-merge",
-  "codekeeper:duplicate-candidate",
-  "codekeeper:deferred",
-  "codekeeper:needs-information",
-  "codekeeper:needs-tests",
-  "codekeeper:priority-p1",
-  "codekeeper:priority-p2",
-  "codekeeper:priority-p3",
-  "codekeeper:risk-low",
-  "codekeeper:risk-medium",
-  "codekeeper:risk-high",
-  "codekeeper:type-bug",
-  "codekeeper:type-documentation",
-  "codekeeper:type-enhancement",
-  "codekeeper:type-maintenance",
-  "codekeeper:type-question",
-  "codekeeper:type-security",
-  "codekeeper:type-testing"
-];
-
-const REVIEW_MANAGED_LABELS = [
-  "codekeeper:reviewed",
-  "codekeeper:blocked",
-  "codekeeper:manual-review",
-  "codekeeper:auto-merge",
-  "codekeeper:needs-tests",
-  "codekeeper:risk-low",
-  "codekeeper:risk-medium",
-  "codekeeper:risk-high"
-];
-
-const ISSUE_MANAGED_LABELS = [
-  "codekeeper:maintenance",
-  "codekeeper:ready",
-  "codekeeper:manual-review",
-  "codekeeper:duplicate-candidate",
-  "codekeeper:deferred",
-  "codekeeper:needs-information",
-  "codekeeper:priority-p1",
-  "codekeeper:priority-p2",
-  "codekeeper:priority-p3",
-  "codekeeper:risk-low",
-  "codekeeper:risk-medium",
-  "codekeeper:risk-high",
-  "codekeeper:type-bug",
-  "codekeeper:type-documentation",
-  "codekeeper:type-enhancement",
-  "codekeeper:type-maintenance",
-  "codekeeper:type-question",
-  "codekeeper:type-security",
-  "codekeeper:type-testing"
-];
 
 function validateWriteAuthorityValidationCommands(config) {
   const writeAuthority = config.review.autoRepair || config.audit.repair.enabled || config.issues.allowAiImplementation;

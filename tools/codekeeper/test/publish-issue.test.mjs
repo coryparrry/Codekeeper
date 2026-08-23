@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { deferredReviewMarker } from "../src/lib/markers.mjs";
+import { isCodekeeperOwnedLabel, LABELS } from "../src/lib/label-ownership.mjs";
 import {
   config,
   identity,
@@ -120,7 +121,7 @@ ${deferredReviewMarker("f".repeat(64))}`, state: "open", updated_at: updatedAt,
     async ensureLabels() {},
     async replaceManagedLabels(_number, desiredLabels) {
       labels = [
-        ...labels.filter((label) => !label.name.startsWith("codekeeper:")),
+        ...labels.filter((label) => !isCodekeeperOwnedLabel(label.name)),
         ...desiredLabels.map((name) => ({ name })),
       ];
       updatedAt = "2026-08-05T10:01:00Z";
@@ -137,9 +138,8 @@ ${deferredReviewMarker("f".repeat(64))}`, state: "open", updated_at: updatedAt,
       "external",
       "priority p1",
       "deferred",
-      "codekeeper:type-bug",
-      "codekeeper:priority-p3",
-      "codekeeper:ready",
+      LABELS.BUG,
+      LABELS.READY_FOR_FIX,
     ].sort());
   } finally {
     restoreGitHub();
@@ -180,7 +180,7 @@ test("issue publication adds the managed needs-information label from triage", a
     process.env.CODEKEEPER_AUTOMATION_BOT_ID = identity.id;
     const integrity = await writeSealedArtifact(artifactDirectory, { mode: "issue", context, result, configSha256 });
     const published = await publishIssue({ artifactDirectory, config, configSha256, ...integrity, token: "token", dryRun: true });
-    assert.ok(published.desiredLabels.includes("codekeeper:needs-information"));
+    assert.ok(published.desiredLabels.includes(LABELS.NEEDS_INFORMATION));
   } finally {
     restoreGitHub();
     if (previousLogin === undefined) delete process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN;

@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
+import { LABELS } from "../src/label-ownership.mjs";
 import {
   renderInstallFiles,
   renderPolicy,
   renderUnifiedWorkflow,
   sha256
 } from "../src/assets.mjs";
+import { LABEL_DEFINITIONS, REPAIR_PROTECTED_PATHS, upgradePolicy } from "../src/policy.mjs";
 import { applyPolicyPreset } from "../../../tools/codekeeper/presets/catalogue.mjs";
 import { buildDistributionMetadata } from "../src/distribution.mjs";
 import {
@@ -42,7 +44,6 @@ import {
   setupPullRequestBody,
   workflowMap
 } from "../src/plan.mjs";
-import { upgradePolicy } from "../src/policy.mjs";
 import {
   assertInstallerCode,
   HEAD_SHA,
@@ -323,11 +324,14 @@ test("policy reruns add newly required labels without replacing adopter customiz
   );
   assert.deepEqual(
     rendered.labels["codekeeper:paused"],
-    bundledPolicy.labels["codekeeper:paused"],
+    {
+      color: "CFD3D7",
+      description: "Legacy Codekeeper label retained only for automatic cleanup"
+    },
   );
-  assert.deepEqual(
-    rendered.labels["codekeeper:auto-repaired"],
-    bundledPolicy.labels["codekeeper:auto-repaired"],
+  assert.match(
+    rendered.labels["codekeeper:auto-repaired"].description,
+    /Legacy Codekeeper label retained only for automatic cleanup/,
   );
 });
 
@@ -625,16 +629,16 @@ test("legacy policies keep deferred issue publication off until the publisher is
   assert.equal(upgradePolicy(legacy).review.createDeferredIssues, false);
 });
 
-test("policy upgrades namespace Codekeeper-owned labels without erasing repository taxonomy", async () => {
+test("policy upgrades concise labels while retaining legacy cleanup aliases", async () => {
   const bundle = await loadVerifiedAssets();
   const legacy = JSON.parse(bundle.contents["policies/openai.json"]);
   const upgraded = upgradePolicy(legacy);
 
-  assert.ok(upgraded.review.managedLabels.every((label) => label.startsWith("codekeeper:")));
-  assert.ok(upgraded.issues.managedLabels.every((label) => label.startsWith("codekeeper:")));
+  assert.ok(upgraded.review.managedLabels.includes(LABELS.CHANGES_REQUIRED));
+  assert.ok(upgraded.review.managedLabels.includes("codekeeper:reviewed"));
+  assert.ok(upgraded.issues.managedLabels.includes(LABELS.AUTOMATED_MAINTENANCE));
   assert.ok(upgraded.issues.managedLabels.includes("codekeeper:maintenance"));
-  assert.ok(upgraded.issues.managedLabels.includes("codekeeper:type-maintenance"));
-  assert.deepEqual(upgraded.labels.security, legacy.labels.security);
+  assert.deepEqual(upgraded.labels[LABELS.SECURITY], LABEL_DEFINITIONS[LABELS.SECURITY]);
   assert.deepEqual(upgradePolicy(upgraded), upgraded);
 });
 

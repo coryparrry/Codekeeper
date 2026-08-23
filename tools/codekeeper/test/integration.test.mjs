@@ -12,14 +12,14 @@ import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
 import { issueDispatchReceipt } from "../src/lib/commands.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges, runValidationCommands, validationEnvironment } from "../src/lib/git.mjs";
 import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
+import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
 import { validateFrozenReviewFeedback } from "../src/lib/validate.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "../../..");
 const cli = path.join(projectRoot, "tools/codekeeper/src/cli.mjs");
 const configSource = path.join(projectRoot, ".github/codekeeper.json");
-const templateConfig = JSON.parse(await readFile(configSource, "utf8"));
-const documentationLabel = templateConfig.review.allowedLabels.find((label) => label.includes("documentation"));
+const templateConfig = normalizeLivePolicy(JSON.parse(await readFile(configSource, "utf8")));
 
 function run(command, args, cwd, env = {}) {
   return execFileSync(command, args, {
@@ -100,7 +100,7 @@ function auditResult({ repair = false } = {}) {
         owningPath: "README.md",
         problemKey: "readme-guidance-drift",
         proposedAction: "Add current guidance.",
-        labels: [documentationLabel]
+        labels: []
       }]
       : [],
     repair: repair

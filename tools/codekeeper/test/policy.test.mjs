@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { validatePatch, evaluateAutoMerge, evaluateReviewEligibility, reviewLabels } from "../src/lib/policy.mjs";
+import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
+import { LABELS } from "../src/lib/label-ownership.mjs";
 
-const source = JSON.parse(
+const source = normalizeLivePolicy(JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
-);
+));
 const config = structuredClone(source);
 config.merge.enabled = true;
 config.audit.repair.maximumPatchBytes ??= 1024;
@@ -74,11 +76,11 @@ test("review labels distinguish missing coverage from unknown evidence", () => {
     tests: { adequate: false, notes: "External evidence is unavailable.", missingTest: null }
   };
 
-  assert.equal(reviewLabels(result).includes("codekeeper:needs-tests"), false);
+  assert.equal(reviewLabels(result).includes(LABELS.NEEDS_TESTS), false);
   assert.equal(reviewLabels({
     ...result,
     tests: { ...result.tests, missingTest: "Add a dispatch test and expect one durable run name." }
-  }).includes("codekeeper:needs-tests"), true);
+  }).includes(LABELS.NEEDS_TESTS), true);
 });
 
 test("patch policy accepts bounded source changes but rejects protected paths", () => {

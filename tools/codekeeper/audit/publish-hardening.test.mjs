@@ -511,7 +511,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       removals: removalAttempts - removalsBeforeConcurrentRun,
       fulfilled: concurrent.filter((outcome) => outcome.status === "fulfilled").length
     }, {
-      markerPresent: true,
+      markerPresent: false,
       dispatches: 1,
       removals: 0,
       fulfilled: 2
@@ -530,7 +530,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
       removals: removalAttempts - removalsBeforeCompletionFailure
     }, {
-      markerPresent: true,
+      markerPresent: false,
       removals: 0
     });
 
@@ -551,7 +551,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       markerPresent: pull.labels.some((label) => label.name === "codekeeper:auto-repaired"),
       dispatches: dispatchAttempts - dispatchesBeforeAmbiguousAdd
     }, {
-      markerPresent: true,
+      markerPresent: false,
       dispatches: 1
     });
     assert.equal(recoveredAdd.automaticRepair.dispatched, true);

@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { getAgentRuntimeSettings, loadConfig, reviewReasoningEscalation, validatePolicy } from "../src/lib/config.mjs";
+import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
+import { LABELS } from "../src/lib/label-ownership.mjs";
 
-const source = JSON.parse(
+const source = normalizeLivePolicy(JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
-);
+));
 
 async function writeConfig(value) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codekeeper-config-test-"));
@@ -28,14 +30,10 @@ test("policy validation is a shared boundary independent of file loading", () =>
 });
 
 test("configuration validator rejects unsafe or incomplete policy values", async () => {
-  await assert.rejects(
-    loadConfig(await writeConfig({
-      ...source,
-      audit: {
-        ...source.audit,
-        repair: { ...source.audit.repair, maximumPatchBytes: 0 }
-      }
-    })),
+  const invalidRepairLimit = structuredClone(source);
+  invalidRepairLimit.audit.repair.maximumPatchBytes = 0;
+  assert.throws(
+    () => validatePolicy(invalidRepairLimit),
     /audit\.repair\.maximumPatchBytes must be a positive integer/
   );
 
@@ -46,26 +44,24 @@ test("configuration validator rejects unsafe or incomplete policy values", async
     /review\.reasoningEscalation references undefined label undefined-label/
   );
 
-  await assert.rejects(
-    loadConfig(await writeConfig({
-      ...source,
-      review: { ...source.review, allowedLabels: [...source.review.allowedLabels, "undefined-label"] }
-    })),
+  const invalidAllowed = structuredClone(source);
+  invalidAllowed.review.allowedLabels = ["undefined-label"];
+  assert.throws(
+    () => validatePolicy(invalidAllowed),
     /review references undefined label undefined-label/
   );
 
   const missingRuntimeLabel = structuredClone(source);
-  delete missingRuntimeLabel.labels["codekeeper:ready"];
-  await assert.rejects(
-    loadConfig(await writeConfig(missingRuntimeLabel)),
-    /runtime requires undefined label codekeeper:ready/
+  delete missingRuntimeLabel.labels[LABELS.READY_FOR_FIX];
+  assert.throws(
+    () => validatePolicy(missingRuntimeLabel),
+    /runtime requires undefined label ready for fix/
   );
 
-  await assert.rejects(
-    loadConfig(await writeConfig({
-      ...source,
-      issues: { ...source.issues, managedLabels: ["undefined-label"] }
-    })),
+  const invalidIssueLabels = structuredClone(source);
+  invalidIssueLabels.issues.managedLabels = ["undefined-label"];
+  assert.throws(
+    () => validatePolicy(invalidIssueLabels),
     /issues references undefined label undefined-label/
   );
 
@@ -243,9 +239,11 @@ test("configuration rejects resource limits above global ceilings and accepts th
   for (const setExcessiveLimit of excessiveLimits) {
     const invalid = structuredClone(source);
     setExcessiveLimit(invalid);
-    await assert.rejects(loadConfig(await writeConfig(invalid)), /must be at most/);
+    assert.throws(() => validatePolicy(invalid), /must be at most/);
   }
-  await assert.doesNotReject(loadConfig(await writeConfig(structuredClone(source))));
+  await assert.doesNotReject(loadConfig(await writeConfig(structuredClone(JSON.parse(
+    await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
+  )))));
 });
 
 test("policy v3 exposes autonomous defaults and OpenRouter without changing workspace ownership", async () => {

@@ -16,6 +16,10 @@ const LABEL_OWNERSHIP = Object.freeze({
   canonical: "tools/codekeeper/src/lib/label-ownership.mjs",
   published: "packages/codekeeper/src/label-ownership.mjs",
 });
+const POLICY_NORMALIZATION = Object.freeze({
+  canonical: "tools/codekeeper/src/lib/policy-normalization.mjs",
+  published: "packages/codekeeper/src/policy-normalization.mjs",
+});
 
 async function fixture(files) {
   const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-mirrored-helpers-"));
@@ -31,14 +35,14 @@ async function fixture(files) {
   return root;
 }
 
-test("default inventory is the proven label-ownership helper pair", () => {
-  assert.deepEqual(MIRRORED_HELPERS, [LABEL_OWNERSHIP]);
-  assert.deepEqual(validateMirroredHelperInventory(MIRRORED_HELPERS), [LABEL_OWNERSHIP]);
+test("default inventory is the proven helper mirror pairs", () => {
+  assert.deepEqual(MIRRORED_HELPERS, [LABEL_OWNERSHIP, POLICY_NORMALIZATION]);
+  assert.deepEqual(validateMirroredHelperInventory(MIRRORED_HELPERS), [LABEL_OWNERSHIP, POLICY_NORMALIZATION]);
 });
 
 test("current worktree copies stay byte-identical", async () => {
   const result = await checkMirroredHelpers();
-  assert.deepEqual(result, { valid: true, helpersChecked: 1 });
+  assert.deepEqual(result, { valid: true, helpersChecked: 2 });
 });
 
 test("published installer helper remains a physical copy", async () => {
@@ -56,6 +60,8 @@ test("check fails when a published helper drifts", async (context) => {
   const root = await fixture({
     [LABEL_OWNERSHIP.canonical]: "export const canonical = true;\n",
     [LABEL_OWNERSHIP.published]: "export const drifted = true;\n",
+    [POLICY_NORMALIZATION.canonical]: "export const canonical = true;\n",
+    [POLICY_NORMALIZATION.published]: "export const drifted = true;\n",
   });
   context.after(() => rm(root, { recursive: true, force: true }));
 
@@ -70,11 +76,13 @@ test("write restores a drifted published helper from the runtime copy", async (c
   const root = await fixture({
     [LABEL_OWNERSHIP.canonical]: canonical,
     [LABEL_OWNERSHIP.published]: "export const drifted = true;\n",
+    [POLICY_NORMALIZATION.canonical]: "export const normalized = true;\n",
+    [POLICY_NORMALIZATION.published]: "export const drifted = true;\n",
   });
   context.after(() => rm(root, { recursive: true, force: true }));
 
-  assert.deepEqual(await writeMirroredHelpers({ root }), { written: 1 });
-  assert.deepEqual(await checkMirroredHelpers({ root }), { valid: true, helpersChecked: 1 });
+  assert.deepEqual(await writeMirroredHelpers({ root }), { written: 2 });
+  assert.deepEqual(await checkMirroredHelpers({ root }), { valid: true, helpersChecked: 2 });
 });
 
 test("missing helpers fail closed", async (context) => {

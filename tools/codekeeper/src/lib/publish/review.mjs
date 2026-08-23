@@ -1,5 +1,6 @@
 import { GitHubClient, isAmbiguousGitHubMutationError, isOwnedMarkerComment } from "../github.mjs";
 import { log, warn } from "../io.mjs";
+import { LABELS } from "../label-ownership.mjs";
 import { REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, reviewFeedbackReplyMarker, sha256 } from "../markers.mjs";
 import { evaluateAutoMerge, evaluateReviewEligibility, issueTypeLabel, reviewLabels } from "../policy.mjs";
 import { normalizeReleaseOwnedPinReview, renderDeferredIssue, renderReviewComment, sanitizeMarkdown, sanitizePublicTitle } from "../render.mjs";
@@ -309,11 +310,10 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const repairFeedback = result.reviewFeedback.filter((feedback) =>
     feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
   );
-  const repairRequested = automationMutationEligible && defaultBaseTarget && (blocking || repairFeedback.length > 0) && config.review.autoRepair
-    && !existingLabels.has("codekeeper:paused") && !existingLabels.has("paused");
-  const repairMarked = automationMutationEligible && defaultBaseTarget && existingLabels.has("codekeeper:auto-repaired");
+  const paused = existingLabels.has(LABELS.PAUSED) || existingLabels.has("codekeeper:paused");
+  const repairRequested = automationMutationEligible && defaultBaseTarget && (blocking || repairFeedback.length > 0) && config.review.autoRepair && !paused;
   let repairState = { consumed: false, pending: false };
-  if (repairRequested || repairMarked) {
+  if (repairRequested) {
     repairState = ownedAutomaticRepairState(
       await github.listIssueComments(pull.number),
       expectedAutomationIdentity(),
@@ -326,7 +326,6 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     eligible: repairRequested && !repairState.consumed,
     consumed: repairState.consumed,
     pending: repairRequested && repairState.pending,
-    staleMarker: repairMarked && !repairState.consumed,
     dispatched: false
   };
   const suspendAutoMergeForRepair = (decision) => {
@@ -340,14 +339,15 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   };
   const publicationState = (autoMerge) => {
     const desiredSet = new Set(reviewLabels(result));
-    desiredSet.delete("codekeeper:auto-merge");
-    desiredSet.delete("codekeeper:manual-review");
+    desiredSet.delete(LABELS.MERGE_READY);
+    desiredSet.delete(LABELS.REVIEW_NEEDED);
+    desiredSet.delete(LABELS.CHANGES_REQUIRED);
     if (blocking) {
-      desiredSet.add("codekeeper:blocked");
+      desiredSet.add(LABELS.CHANGES_REQUIRED);
     } else if (autoMerge.eligible) {
-      desiredSet.add("codekeeper:auto-merge");
+      desiredSet.add(LABELS.MERGE_READY);
     } else {
-      desiredSet.add("codekeeper:manual-review");
+      desiredSet.add(LABELS.REVIEW_NEEDED);
     }
     return {
       desiredLabels: [...desiredSet],
@@ -383,10 +383,6 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     };
   }
   let reconciledPull = pull;
-  if (automaticRepair.staleMarker) {
-    await github.removeLabel(pull.number, "codekeeper:auto-repaired");
-    reconciledPull = await github.getPull(pull.number);
-  }
   const suspension = defaultBaseTarget
     ? await suspendAutoMerge(github, reconciledPull)
     : { pullRequest: reconciledPull, disabled: false };
@@ -536,7 +532,7 @@ export async function replyToReviewFeedback({ github, context, result, automatio
 export async function upsertDeferredReviewFeedback({ github, context, result, config, automationIdentity, dryRun = false, ownerRequested = false }) {
   const deferred = result.reviewFeedback?.filter((item) => item.disposition === "defer") ?? [];
   if (!ownerRequested && !config.review.createDeferredIssues) return [];
-  const existing = await github.listMaintenanceIssues("codekeeper:deferred");
+  const existing = await github.listMaintenanceIssues(LABELS.DEFERRED);
   const sourcesByKey = new Map((context.pullRequest.reviewFeedback ?? []).map((source) => [source.sourceKey, source]));
   const published = [];
   const deferredSources = deferred.flatMap((feedback) =>
@@ -582,7 +578,7 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
       botId: automationIdentity.id
     }));
     const sources = [sourcesByKey.get(sourceKey)].filter(Boolean);
-    const labels = ["codekeeper:deferred", issueTypeLabel(feedback.type)];
+    const labels = [LABELS.DEFERRED, issueTypeLabel(feedback.type)];
     const title = sanitizePublicTitle(
       `[Deferred from PR #${context.pullRequest.number}] ${feedback.explanation}`,
       256
