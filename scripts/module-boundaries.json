@@ -38,7 +38,7 @@
       "maxBytes": 64635
     },
     "packages/codekeeper/test/cli.test.mjs": {
-      "maxLines": 1471,
+      "maxLines": 1472,
       "maxBytes": 54700
     },
     "packages/codekeeper/test/tui.test.mjs": {

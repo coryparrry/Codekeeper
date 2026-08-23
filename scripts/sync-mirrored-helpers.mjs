@@ -12,6 +12,10 @@ export const MIRRORED_HELPERS = Object.freeze([
     canonical: "tools/codekeeper/src/lib/label-ownership.mjs",
     published: "packages/codekeeper/src/label-ownership.mjs",
   }),
+  Object.freeze({
+    canonical: "tools/codekeeper/src/lib/policy-normalization.mjs",
+    published: "packages/codekeeper/src/policy-normalization.mjs",
+  }),
 ]);
 
 function fail(message) {

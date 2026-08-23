@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { validatePolicy } from "../src/lib/policy-validator.mjs";
+import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
 
-const source = JSON.parse(
+const source = normalizeLivePolicy(JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8"),
-);
+));
 
 const writeAuthorityControls = [
   ["review.autoRepair", (config) => { config.review.autoRepair = true; }],

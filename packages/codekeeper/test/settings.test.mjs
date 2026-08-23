@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { AGENT_PROFILE_IDS, AGENT_PROFILES, MODES, UNIFIED_CALLER_WORKFLOW } from "../src/constants.mjs";
 import { buildInstallPlan } from "../src/plan.mjs";
+import { LABELS } from "../src/label-ownership.mjs";
 import { upgradePolicy } from "../src/policy.mjs";
 import { editProfileWithEditor } from "../src/settings-tui.mjs";
 import {
@@ -301,18 +302,18 @@ test("settings reject runtime-incompatible model settings and managed-label remo
 
   const missingReviewLabel = structuredClone(settings);
   missingReviewLabel.policy.review.managedLabels = missingReviewLabel.policy.review.managedLabels
-    .filter((label) => label !== "codekeeper:reviewed");
+    .filter((label) => label !== LABELS.CHANGES_REQUIRED);
   assert.throws(
     () => validateEditableSettings(missingReviewLabel, policy),
-    /review must explicitly manage emitted label codekeeper:reviewed/
+    /review\.managedLabels is a read-only safety boundary/
   );
 
   const missingIssueLabel = structuredClone(settings);
   missingIssueLabel.policy.issues.managedLabels = missingIssueLabel.policy.issues.managedLabels
-    .filter((label) => label !== "codekeeper:ready");
+    .filter((label) => label !== LABELS.READY_FOR_FIX);
   assert.throws(
     () => validateEditableSettings(missingIssueLabel, policy),
-    /issues must explicitly manage emitted label codekeeper:ready/
+    /issues\.managedLabels is a read-only safety boundary/
   );
 });
 

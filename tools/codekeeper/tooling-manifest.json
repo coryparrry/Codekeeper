@@ -63,7 +63,7 @@
     },
     {
       "path": "src/lib/config.mjs",
-      "sha256": "c7e171fcd1dca07443b7233095b404fe874ff4fcf0f348230b51e88b2c35c9aa"
+      "sha256": "7aefa1589f1c3018be9aa1cafbbf2dfab149670ee8050500f903096f80e79f5b"
     },
     {
       "path": "src/lib/git.mjs",
@@ -123,7 +123,7 @@
     },
     {
       "path": "src/lib/label-ownership.mjs",
-      "sha256": "917052598afb535233bbef73e7a8f1014ffd44a7fc1fb82fb3a706c3396ee230"
+      "sha256": "bed083f1e803fd1dc079942dab31c5735b7f82294a69fe37b243c26b20f753ee"
     },
     {
       "path": "src/lib/markers.mjs",
@@ -182,12 +182,16 @@
       "sha256": "63812bf8310f85b6a28fdcb78f5eaf3bf1166a8065bad55ed733dcaf178f6d7a"
     },
     {
+      "path": "src/lib/policy-normalization.mjs",
+      "sha256": "5a2ec1a0cb38e0e5ece9c64c78a999f5f24d6ea12670fba0753cac7f400fe431"
+    },
+    {
       "path": "src/lib/policy-validator.mjs",
-      "sha256": "21ed5e92f3044e046353f9074efd5fe35fe1d3d6b1ba69414b59a8e28ed0cb4b"
+      "sha256": "557f4a7d36e2f0d9c2bf9d7d6aa22368c2bcff8d19d52781f0105731a92922a6"
     },
     {
       "path": "src/lib/policy.mjs",
-      "sha256": "1b1bc94687c3fd7ddabfd1adc882380baf2a659a871a17984434bfc5cb6c7abf"
+      "sha256": "d317169dcaa1096b6376ac6e494ea1098eefa32f3452a2ad70a301b9cdceada9"
     },
     {
       "path": "src/lib/pr-repair.mjs",
@@ -211,7 +215,7 @@
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "a82bd4bf6720805191403099a0d81e2b98e69e8580946b934fc7e628d8d281e1"
+      "sha256": "3dba58023379416e48290302e11b03c3f01bdcd7d5cfb2b4fc6aac152be2f353"
     },
     {
       "path": "src/lib/publish/artifacts.mjs",
@@ -219,7 +223,7 @@
     },
     {
       "path": "src/lib/publish/audit.mjs",
-      "sha256": "49505366ce8ad03d4305b0ad39c9944a723dd943d0ee75f24fed28b0329f1a53"
+      "sha256": "2aa612ac0f7078a1b7d44a3f81223b5a6c109703583173908809f2143b62f1fb"
     },
     {
       "path": "src/lib/publish/common.mjs",
@@ -235,7 +239,7 @@
     },
     {
       "path": "src/lib/publish/issue.mjs",
-      "sha256": "0b50a4751588afd698bcaaad058b677f9e95161804177ca7ce56e2cf84d4934a"
+      "sha256": "0d99d4dbac557565b7c99e634df6db21240be69664986cc8cdab737a220b79c1"
     },
     {
       "path": "src/lib/publish/owner-command.mjs",
@@ -243,11 +247,11 @@
     },
     {
       "path": "src/lib/publish/repair-pr.mjs",
-      "sha256": "409a01f5d65030a622e46bcfa3afe7d39a5bd383f7913cfc994866782abf37a8"
+      "sha256": "58a4a0360a19bc2b1be2ed9a64b56651213effc125d1228255da5ee577d3cc15"
     },
     {
       "path": "src/lib/publish/review.mjs",
-      "sha256": "913d3bf0341ebe5080484beb7a918d560e892f1591706b20d0ed93418941bc2f"
+      "sha256": "d3352f6926d0c49764401def8c4a969daa676498e1e06fd703b359e799f0c32f"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",
