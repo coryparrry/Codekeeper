@@ -6,6 +6,7 @@ import test from "node:test";
 import { GitHubClient } from "../src/lib/github.mjs";
 import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent-profiles.mjs";
 import { automaticRepairMarker, sha256 } from "../src/lib/markers.mjs";
+import { automaticRepairDispatchDetails, repairItemsFromReviewResult } from "../src/lib/repair-objectives.mjs";
 import { acquireAutomaticRepairLease, publishIssue, publishReview } from "../src/lib/publish.mjs";
 
 const config = JSON.parse(await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8"));
@@ -70,6 +71,7 @@ test("an expired automatic-repair lease cannot block a later run", async () => {
 
   assert.equal(lease.acquired, true);
   assert.match(comments[0].body, /repair-lease-expired=/);
+  assert.match(comments[1].body, /claiming this pull request for automatic repair/);
 });
 
 async function writeSealedArtifact(artifactDirectory, {
@@ -464,6 +466,10 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     }
     markerPresentAfterFirstAttempt = pull.labels.some((label) => label.name === "codekeeper:auto-repaired");
     const retry = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, agentProfilePath: profilePaths.review, ...integrity, token: "unused" });
+    const dispatchDetails = automaticRepairDispatchDetails(
+      context.pullRequest.headSha,
+      repairItemsFromReviewResult(result)
+    );
     assert.deepEqual({
       firstError: firstError?.message,
       markerPresentAfterFirstAttempt,
@@ -478,19 +484,19 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
       repairMarkerCalls: [
         {
           marker: automaticRepairMarker(context.pullRequest.headSha),
-          body: `Automatic repair dispatch is pending for head ${context.pullRequest.headSha}.`
+          body: `Automatic repair dispatch is pending for head ${context.pullRequest.headSha}.${dispatchDetails}`
         },
         {
           marker: automaticRepairMarker(context.pullRequest.headSha),
-          body: `Automatic repair dispatch failed for head ${context.pullRequest.headSha}.`
+          body: `Automatic repair dispatch failed for head ${context.pullRequest.headSha}.${dispatchDetails}`
         },
         {
           marker: automaticRepairMarker(context.pullRequest.headSha),
-          body: `Automatic repair dispatch is pending for head ${context.pullRequest.headSha}.`
+          body: `Automatic repair dispatch is pending for head ${context.pullRequest.headSha}.${dispatchDetails}`
         },
         {
           marker: automaticRepairMarker(context.pullRequest.headSha),
-          body: `Automatic repair was dispatched for head ${context.pullRequest.headSha}.`
+          body: `Automatic repair was dispatched for head ${context.pullRequest.headSha}.${dispatchDetails}`
         }
       ]
     });
@@ -574,7 +580,7 @@ test("a failed automatic repair dispatch does not consume its retry marker", asy
     });
     assert.equal(
       repairMarkerCalls.at(-1).body,
-      `Automatic repair dispatch is ambiguous for head ${context.pullRequest.headSha}.`
+      `Automatic repair dispatch is ambiguous for head ${context.pullRequest.headSha}.${dispatchDetails}`
     );
   } finally {
     restoreEnvironment();

@@ -16,8 +16,18 @@ import {
 const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
 const AUTOMATIC_REPAIR_LEASE_MAX_AGE_MS = 15 * 60 * 1000;
 
+function automaticRepairLeaseVisibleText(state) {
+  if (state === "active") return "Codekeeper is claiming this pull request for automatic repair.";
+  if (state === "completed") return "Codekeeper finished the automatic repair claim for this pull request.";
+  if (state === "expired") return "The automatic repair claim for this pull request expired.";
+  if (state === "released") return "Codekeeper released the automatic repair claim for this pull request.";
+  if (state === "failed") return "Codekeeper could not claim this pull request for automatic repair.";
+  if (state === "ambiguous") return "The automatic repair claim for this pull request is unresolved.";
+  return "Codekeeper recorded an automatic repair claim for this pull request.";
+}
+
 function automaticRepairLeaseBody(state, scope, marker) {
-  return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${marker}`;
+  return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${automaticRepairLeaseVisibleText(state)}\n${marker}`;
 }
 
 function automaticRepairLeaseScope(repository, pullNumber, headSha) {
@@ -470,7 +480,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     config,
     automationIdentity,
     repairFeedback,
-    automaticRepair
+    automaticRepair,
+    result
   });
 
   await github.assertMutationCurrent();

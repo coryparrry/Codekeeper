@@ -1,6 +1,7 @@
 import { isAmbiguousGitHubMutationError } from "./github.mjs";
 import { warn } from "./io.mjs";
 import { automaticRepairMarker } from "./markers.mjs";
+import { automaticRepairDispatchDetails, repairItemsFromReviewResult } from "./repair-objectives.mjs";
 import {
   acquireAutomaticRepairLease,
   publishReview as publishReviewImpl,
@@ -30,7 +31,8 @@ async function dispatchAutomaticReviewRepair({
   context,
   automationIdentity,
   repairFeedback,
-  automaticRepair
+  automaticRepair,
+  result
 }) {
   if (!automaticRepair.eligible) return;
 
@@ -40,13 +42,14 @@ async function dispatchAutomaticReviewRepair({
     return;
   }
 
+  const details = automaticRepairDispatchDetails(pull.head.sha, repairItemsFromReviewResult(result));
   let dispatchAttempted = false;
   let dispatchSucceeded = false;
   try {
     await github.upsertMarkerComment(
       pull.number,
       automaticRepairMarker(pull.head.sha),
-      `Automatic repair dispatch is pending for head ${pull.head.sha}.`,
+      `Automatic repair dispatch is pending for head ${pull.head.sha}.${details}`,
       automationIdentity
     );
     dispatchAttempted = true;
@@ -62,7 +65,7 @@ async function dispatchAutomaticReviewRepair({
     await github.upsertMarkerComment(
       pull.number,
       automaticRepairMarker(pull.head.sha),
-      `Automatic repair was dispatched for head ${pull.head.sha}.`,
+      `Automatic repair was dispatched for head ${pull.head.sha}.${details}`,
       automationIdentity
     );
     await releaseAutomaticRepairLease(github, lease, "completed");
@@ -75,8 +78,8 @@ async function dispatchAutomaticReviewRepair({
           pull.number,
           automaticRepairMarker(pull.head.sha),
           ambiguousDispatch
-            ? `Automatic repair dispatch is ambiguous for head ${pull.head.sha}.`
-            : `Automatic repair dispatch failed for head ${pull.head.sha}.`,
+            ? `Automatic repair dispatch is ambiguous for head ${pull.head.sha}.${details}`
+            : `Automatic repair dispatch failed for head ${pull.head.sha}.${details}`,
           automationIdentity
         );
       } catch (cause) {

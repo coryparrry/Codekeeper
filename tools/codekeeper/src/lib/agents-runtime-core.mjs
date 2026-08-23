@@ -5,6 +5,7 @@ import { getAgentRuntimeSettings } from "./config.mjs";
 import { readJson, readOptionalRegularJson, writeJson } from "./io.mjs";
 import { CODEX_BIN } from "./runtime-paths.mjs";
 import { assertNoPublicSecurityFindings, isSecurityFindingWithheld } from "./security-containment.mjs";
+import { assignedRepairClusterPrompt, mergeFixWorkspaceResults } from "./repair-objectives.mjs";
 import { validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "./schemas.mjs";
 import {
   authenticateCodexCli,
@@ -123,7 +124,8 @@ export function validateWorkspaceRuntimeMetadata(metadata, mode, config, context
   if (!metadata || metadata.version !== 1 || metadata.mode !== mode || !Array.isArray(metadata.passes)) {
     throw new Error("Workspace runtime metadata is missing or invalid");
   }
-  if (metadata.passes.length < 1 || metadata.passes.length > 2) {
+  const maxPasses = mode === "fix" ? 4 : 2;
+  if (metadata.passes.length < 1 || metadata.passes.length > maxPasses) {
     throw new Error("Workspace runtime metadata has an invalid pass count");
   }
   for (const pass of metadata.passes) {
@@ -149,6 +151,13 @@ export function validateWorkspaceRuntimeMetadata(metadata, mode, config, context
     || firstPass.model !== settings.workspaceModel
     || firstPass.effort !== settings.workspaceEffort) {
     throw new Error("Workspace runtime metadata does not match the frozen first-pass route");
+  }
+  if (mode === "fix") {
+    for (const pass of metadata.passes.slice(1)) {
+      if (pass.tier !== firstPass.tier || pass.model !== firstPass.model || pass.effort !== firstPass.effort) {
+        throw new Error("Workspace runtime metadata has an invalid clustered fixer pass");
+      }
+    }
   }
   if (!Number.isFinite(metadata.totalDurationMs) || metadata.totalDurationMs < 0) {
     throw new Error("Workspace runtime metadata has an invalid total duration");
@@ -302,12 +311,31 @@ export async function runWorkspaceAgentFromBundle({
         `Codekeeper ${mode} workspace ${tier} pass failed after ${attemptsUsed} attempt(s): ${lastError?.message ?? lastError}`,
       );
     };
-    let output = await runPass({
-      passPrompt: prompt,
+    const clusters = mode === "fix" && Array.isArray(context.repairClusters)
+      ? context.repairClusters.filter((cluster) => Array.isArray(cluster?.items) && cluster.items.length > 0)
+      : [];
+    const clusterRuns = clusters.length > 1 ? clusters : null;
+    const firstPassRoute = {
       model: settings.workspaceModel,
       effort: settings.workspaceEffort,
       tier: settings.reasoningEscalation?.escalated ? "pre-routed-max" : "configured"
-    });
+    };
+    let output;
+    if (clusterRuns) {
+      const outputs = [];
+      for (const [index, cluster] of clusterRuns.entries()) {
+        outputs.push(await runPass({
+          passPrompt: `${prompt}\n\n${assignedRepairClusterPrompt(cluster, index, clusterRuns.length)}`,
+          ...firstPassRoute
+        }));
+      }
+      output = validateOutput(mergeFixWorkspaceResults(outputs, context.target));
+    } else {
+      output = await runPass({
+        passPrompt: prompt,
+        ...firstPassRoute
+      });
+    }
     let postReviewEscalation = null;
     const escalationPolicy = config.review?.reasoningEscalation;
     const escalationWorkspace = escalationPolicy?.workspace ?? {
@@ -336,7 +364,12 @@ export async function runWorkspaceAgentFromBundle({
       totalDurationMs: passes.reduce((total, pass) => total + pass.durationMs, 0)
     };
     await writeJson(path.join(path.dirname(resultPath), "workspace-runtime-metadata.json"), workspaceMetadata);
-    return { completed: true, passes: passes.length, postReviewEscalated: postReviewEscalation !== null };
+    return {
+      completed: true,
+      passes: passes.length,
+      postReviewEscalated: postReviewEscalation !== null,
+      ...(clusterRuns ? { fixerAgents: clusterRuns.length } : {})
+    };
   } catch (error) {
     if (isSecurityFindingWithheld(error)) securityWithholdingError = error;
     throw error;

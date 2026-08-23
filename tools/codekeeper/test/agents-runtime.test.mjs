@@ -514,12 +514,12 @@ test("trusted profiles reject missing files, symlinks, wrong-mode paths, and abb
 });
 
 test("each coordinator loads its versioned profile into the shared security instructions", async () => {
-  const versions = { review: 8, issue: 5, audit: 4, fix: 2 };
+  const versions = { review: 8, issue: 5, audit: 4, fix: 3 };
   const contracts = {
     review: [/Pull request reviewer profile/, /Evidence order/, /adequate deterministic tests/i, /rootCauseTags/, /reproductionTest/],
     issue: [/Issue triager profile/, /Triage procedure/, /Duplicate rule/],
     audit: [/Repository auditor profile/, /stable `problemKey`/i, /Repair gate/],
-    fix: [/Fixer profile/, /Preflight/, /smallest complete/i]
+    fix: [/Fixer profile/, /Preflight/, /smallest complete/i, /repairClusters/, /Independent clusters/]
   };
   for (const [mode, expectations] of Object.entries(contracts)) {
     const profile = await loadCoordinatorProfile(mode);

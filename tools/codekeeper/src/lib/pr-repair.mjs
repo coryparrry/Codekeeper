@@ -279,6 +279,18 @@ export async function publishPullRequestRepair({
       reviewThreadWarning = `The repair commit was pushed, but review-thread reconciliation was incomplete: ${sanitizeMarkdown(error.message)}`;
     }
     publication.phase = REPAIR_PUBLICATION_PHASE.THREADS_RECONCILED;
+    const appliedObjectives = Array.isArray(context.repairClusters)
+      ? context.repairClusters.flatMap((cluster) => cluster.items ?? []).map((item) => item.title).filter(Boolean)
+      : [];
+    const appliedSummary = appliedObjectives.length > 0
+      ? appliedObjectives.slice(0, 8).map((title) => `- ${sanitizeMarkdown(title)}`).join("\n")
+      : (result.changedSummary ? sanitizeMarkdown(result.changedSummary).slice(0, 1500) : "See the repair commit.");
+    await github.upsertMarkerComment(
+      target.number,
+      fixRunMarker(context.runId),
+      `Codekeeper applied automatic repair \`${commitSha}\` on this pull request.\n\n${appliedSummary}`,
+      automationIdentity
+    );
     publication.phase = REPAIR_PUBLICATION_PHASE.COMPLETE;
     return {
       updated: true,
