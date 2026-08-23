@@ -3,8 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { applyPatch, collectWorkingTreeChanges, configureAutomationIdentity, createBranchAndCommit, createPatch, currentHead, ensureClean, gitText, pushBranch } from "../git.mjs";
 import { readRegularFile, warn } from "../io.mjs";
+import { LABELS } from "../label-ownership.mjs";
 import { repairMarker, sha256 } from "../markers.mjs";
-import { findingLabels, validatePatch } from "../policy.mjs";
+import { validatePatch } from "../policy.mjs";
 import { renderRepairPullRequest, sanitizePublicTitle } from "../render.mjs";
 import {
   expectedAutomationIdentity,
@@ -120,8 +121,7 @@ export async function publishPatchPullRequest({
     return { created: false, reason: manifest.patch?.reasons?.join("; ") || "No validated patch" };
   }
 
-  const labels = new Set(["codekeeper:maintenance", `codekeeper:risk-${risk}`, "codekeeper:manual-review"]);
-  if (finding) findingLabels(finding).forEach((label) => labels.add(label));
+  const labels = new Set([LABELS.REVIEW_NEEDED]);
   if (currentHead() !== context.baseSha) {
     return { created: false, reason: `Default branch moved from ${context.baseSha} to ${currentHead()}` };
   }
