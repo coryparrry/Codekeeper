@@ -401,8 +401,8 @@ test("a located Medium high-impact blocker triggers one focused Max pass in the 
   assert.equal(workspaceMetadata.version, 1);
   assert.equal(workspaceMetadata.mode, "review");
   assert.deepEqual(workspaceMetadata.passes, [
-    { tier: "configured", model: "gpt-5.6-luna", effort: "medium", durationMs: 25 },
-    { tier: "focused-max", model: "gpt-5.6-luna", effort: "max", durationMs: 25 }
+    { tier: "configured", model: "gpt-5.6-luna", effort: "medium", attempts: 1, durationMs: 25 },
+    { tier: "focused-max", model: "gpt-5.6-luna", effort: "max", attempts: 1, durationMs: 25 }
   ]);
   assert.deepEqual(workspaceMetadata.postReviewEscalation, {
     reasons: ["blocking-finding:high"],
