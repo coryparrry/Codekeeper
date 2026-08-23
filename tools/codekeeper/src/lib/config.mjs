@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { matchesAny } from "./glob.mjs";
+import { normalizeRuntimePolicy } from "./policy-normalizer.mjs";
 import { AGENT_MODES, validatePolicy } from "./policy-validator.mjs";
 
 export { AGENT_MODES, validatePolicy };
@@ -93,13 +94,14 @@ export function getAgentRuntimeSettings(config, mode, { mutationAuthorized = fal
 
 export async function loadConfig(configPath = ".github/codekeeper.json") {
   const resolved = path.resolve(configPath);
-  let config;
+  let parsed;
   try {
-    config = JSON.parse(await readFile(resolved, "utf8"));
+    parsed = JSON.parse(await readFile(resolved, "utf8"));
   } catch (error) {
     if (error instanceof SyntaxError) throw new Error(`Invalid JSON in ${resolved}: ${error.message}`);
     throw error;
   }
+  const config = normalizeRuntimePolicy(parsed);
   validatePolicy(config);
   return { config, path: resolved };
 }
