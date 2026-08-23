@@ -68,6 +68,15 @@ export function providerCompatibleJsonSchema(value) {
     }
     projected[key] = providerCompatibleJsonSchema(item);
   }
+  if (
+    !hasConst &&
+    Object.hasOwn(projected, "enum") &&
+    !Object.hasOwn(projected, "type") &&
+    Array.isArray(projected.enum) &&
+    projected.enum.every((item) => typeof item === "string")
+  ) {
+    projected.type = "string";
+  }
   return projected;
 }
 
@@ -101,6 +110,14 @@ function object(properties, required = Object.keys(properties)) {
   return { type: "object", additionalProperties: false, properties, required };
 }
 
+function labelArraySchema(labels, maxItems) {
+  return {
+    type: "array",
+    items: { type: "string", enum: labels },
+    maxItems: maxItems ?? labels.length
+  };
+}
+
 function findingSchema(config) {
   return object({
     title: stringSchema({ maxLength: LIMITS.title }),
@@ -110,11 +127,7 @@ function findingSchema(config) {
     owningPath: stringSchema({ maxLength: LIMITS.path }),
     problemKey: stringSchema({ maxLength: LIMITS.key }),
     proposedAction: stringSchema({ maxLength: LIMITS.body }),
-    labels: {
-      type: "array",
-      items: { enum: config.review.allowedLabels },
-      maxItems: 6
-    }
+    labels: labelArraySchema(config.review.allowedLabels, 6)
   });
 }
 
@@ -171,11 +184,7 @@ export function reviewSchema(config) {
       mode: { const: "review" },
       summary: stringSchema({ maxLength: LIMITS.summary }),
       risk: { enum: ["low", "medium", "high"] },
-      labels: {
-        type: "array",
-        items: { enum: config.review.allowedLabels },
-        maxItems: config.review.allowedLabels.length
-      },
+      labels: labelArraySchema(config.review.allowedLabels),
       blockingFindings: {
         type: "array",
         items: reviewFindingSchema(),
@@ -232,11 +241,7 @@ export function issueSchema(config) {
       summary: stringSchema({ maxLength: LIMITS.summary }),
       type: { enum: ["bug", "enhancement", "documentation", "question", "security", "maintenance"] },
       priority: { enum: ["p1", "p2", "p3"] },
-      labels: {
-        type: "array",
-        items: { enum: config.review.allowedLabels },
-        maxItems: config.review.allowedLabels.length
-      },
+      labels: labelArraySchema(config.review.allowedLabels),
       actionable: { type: "boolean" },
       missingInformation: {
         type: "array",

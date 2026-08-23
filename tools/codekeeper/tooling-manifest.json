@@ -183,7 +183,7 @@
     },
     {
       "path": "src/lib/policy-normalization.mjs",
-      "sha256": "5a2ec1a0cb38e0e5ece9c64c78a999f5f24d6ea12670fba0753cac7f400fe431"
+      "sha256": "3c53472261ca2598ae75c8d43d0910f792e27f3e6879502fa5f342e8d37f5a44"
     },
     {
       "path": "src/lib/policy-validator.mjs",
@@ -275,7 +275,7 @@
     },
     {
       "path": "src/lib/schemas.mjs",
-      "sha256": "3f63b6a20b5263b07dbca94497cd1265da3b98ae239e445363670bb6219f388f"
+      "sha256": "034eaf1717b81aa8fd97b527df6fabb236f741e56d6378195552b22ecf2d3094"
     },
     {
       "path": "src/lib/security-containment.mjs",
