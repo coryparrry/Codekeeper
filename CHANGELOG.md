@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.10](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.9...codekeeper-v0.4.10) (2026-08-23)
+
+
+### Bug Fixes
+
+* **runtime:** recover malformed workspace output ([70386fb](https://github.com/coryparrry/Codekeeper/commit/70386fb98748fa3ffff597c1844052440ecdaab6))
+
 ## [0.4.9](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.8...codekeeper-v0.4.9) (2026-08-22)
 
 
