@@ -1,9 +1,9 @@
 name: Temporary branch export
 
 on:
-  push:
+  pull_request:
     branches:
-      - "fix/broaden-fixer-scope-clean-labels"
+      - main
 
 permissions:
   contents: read
@@ -13,13 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check out branch
+      - name: Check out pull request merge
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Export exact branch snapshot
+      - name: Export exact pull request snapshot
         run: git archive --format=tar HEAD -o "$RUNNER_TEMP/codekeeper-branch.tar"
 
       - name: Upload branch snapshot
