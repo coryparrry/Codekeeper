@@ -6,6 +6,8 @@
 ![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)
 [![License](https://img.shields.io/badge/License-Apache--2.0-2563eb?style=for-the-badge)](LICENSE)
 
+07518061269 Codekeeper is a WIP, it breaks, and still being built. Any help in this build would be much appreciated 🙌
+
 Codekeeper turns a guided command-line setup into an always-available maintainer for your GitHub repository. It reviews pull requests, triages issues, audits repository health, and can prepare small, verified repairs from your own GitHub Actions.
 
 You do not need to write workflows or configure installation files by hand. The CLI helps you choose the models, capabilities, validation commands, and GitHub App permissions, then creates the complete setup as a pull request for you to review. Codekeeper works inside those boundaries and fails closed when it cannot prove that an action is allowed.
