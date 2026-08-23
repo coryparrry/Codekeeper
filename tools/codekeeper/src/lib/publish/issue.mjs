@@ -1,7 +1,8 @@
 import { GitHubClient } from "../github.mjs";
 import { log } from "../io.mjs";
+import { LABELS } from "../label-ownership.mjs";
 import { ISSUE_TRIAGE_MARKER, issueTriageStateMarker } from "../markers.mjs";
-import { issueTypeLabel } from "../policy.mjs";
+import { issueTypeLabel, priorityLabel } from "../policy.mjs";
 import { renderIssueTriage } from "../render.mjs";
 import { loadArtifact } from "./artifacts.mjs";
 import {
@@ -46,13 +47,18 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     throw new Error(`Issue #${issue.number} is no longer resolved by the frozen merged pull request`);
   }
 
-  const desired = new Set([issueTypeLabel(result.type), `codekeeper:priority-${result.priority}`, ...result.labels]);
+  const desired = new Set([issueTypeLabel(result.type), priorityLabel(result.priority)].filter(Boolean));
+  if ((result.labels ?? []).some((label) => label === LABELS.NEEDS_TESTS || label === "codekeeper:needs-tests")) {
+    desired.add(LABELS.NEEDS_TESTS);
+  }
+  if (result.decision?.required) desired.add(LABELS.REVIEW_NEEDED);
+
   const automationIdentity = expectedAutomationIdentity();
   const deferredMarker = typeof issue.body === "string"
     ? issue.body.match(/<!-- codekeeper:deferred=[a-f0-9]{64} -->$/)?.[0]
     : null;
   if (
-    issueLabelNames(issue).includes("codekeeper:deferred") &&
+    (issueLabelNames(issue).includes(LABELS.DEFERRED) || issueLabelNames(issue).includes("codekeeper:deferred")) &&
     deferredMarker &&
     isTrustedMaintenanceIssue(issue, {
       marker: deferredMarker,
@@ -60,20 +66,20 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
       botId: automationIdentity.id
     })
   ) {
-    desired.add("codekeeper:deferred");
+    desired.add(LABELS.DEFERRED);
   }
   if (!closingResolved && config.issues.allowAiImplementation && result.implementationRecommendation === "ai-ready") {
-    desired.add("codekeeper:ready");
+    desired.add(LABELS.READY_FOR_FIX);
   }
   if (!closingResolved && result.duplicateOf && result.duplicateConfidence === "high") {
-    desired.add("codekeeper:duplicate-candidate");
+    desired.add(LABELS.POSSIBLE_DUPLICATE);
   }
   if (!closingResolved && !closingDuplicate && result.missingInformation.length > 0) {
-    desired.add("codekeeper:needs-information");
+    desired.add(LABELS.NEEDS_INFORMATION);
   }
   if (closingResolved) {
-    desired.delete("codekeeper:ready");
-    desired.delete("codekeeper:duplicate-candidate");
+    desired.delete(LABELS.READY_FOR_FIX);
+    desired.delete(LABELS.POSSIBLE_DUPLICATE);
   }
   const desiredLabels = [...desired];
   const comment = `${renderIssueTriage(result, runUrl)}\n${issueTriageStateMarker(result)}`;
