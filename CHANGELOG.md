@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.5.0...codekeeper-v0.5.1) (2026-08-23)
+
+
+### Bug Fixes
+
+* **review:** restore provider-valid label schema after normalisation ([dd1905a](https://github.com/coryparrry/Codekeeper/commit/dd1905af573c0b0c69c79873d6a609de4ae73ec7))
+* **review:** restore provider-valid label schema after normalisation ([859696f](https://github.com/coryparrry/Codekeeper/commit/859696f261401170b5de85ae41f81e7c26c39721))
+
 ## [0.5.0](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.10...codekeeper-v0.5.0) (2026-08-23)
 
 
