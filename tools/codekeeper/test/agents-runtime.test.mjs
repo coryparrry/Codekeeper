@@ -31,7 +31,8 @@ import {
   workspaceCodexDeveloperInstructions,
   isSkippedWorkspaceHandoff
 } from "../src/lib/agents-runtime.mjs";
-import { issueSchema, providerCompatibleJsonSchema, validateIssueResult } from "../src/lib/schemas.mjs";
+import { issueSchema, providerCompatibleJsonSchema, reviewSchema, validateIssueResult } from "../src/lib/schemas.mjs";
+import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
 import { sha256 } from "../src/lib/markers.mjs";
 import { evaluateAutoMerge } from "../src/lib/policy.mjs";
 import { CODEX_BIN } from "../src/lib/runtime-paths.mjs";
@@ -279,6 +280,26 @@ test("provider-compatible schema projection preserves strict structure while rep
     required: ["mode", "nested"]
   });
   assert.deepEqual(source, original);
+});
+
+test("provider-compatible schema projection adds string type to enum-only label schemas", () => {
+  assert.deepEqual(providerCompatibleJsonSchema({ enum: ["needs tests", "codekeeper:needs-tests"] }), {
+    type: "string",
+    enum: ["needs tests", "codekeeper:needs-tests"]
+  });
+  assert.deepEqual(providerCompatibleJsonSchema({ enum: [] }), {
+    type: "string",
+    enum: []
+  });
+});
+
+test("review structured output schema stays provider-compatible after live policy normalisation", () => {
+  const normalized = normalizeLivePolicy(config);
+  const schema = reviewSchema(normalized);
+  const wrapped = structuredOutputType("review", schema);
+  assert.equal(wrapped.schema.properties.labels.items.type, "string");
+  assert.ok(Array.isArray(wrapped.schema.properties.labels.items.enum));
+  assert.ok(wrapped.schema.properties.labels.items.enum.length > 0);
 });
 
 test("provider-compatible schema projection omits uniqueItems from OpenAI structured output", () => {

@@ -29,6 +29,10 @@ export const REVIEW_MANAGED_LABELS = Object.freeze([
   LABELS.NEEDS_TESTS
 ]);
 
+export const AGENT_EMITTABLE_LABELS = Object.freeze([
+  LABELS.NEEDS_TESTS
+]);
+
 export const ISSUE_MANAGED_LABELS = Object.freeze([
   LABELS.AUTOMATED_MAINTENANCE,
   LABELS.READY_FOR_FIX,
@@ -150,7 +154,7 @@ export function applyLabelCatalog(policy) {
 }
 
 export function applyManagedLabelSets(policy) {
-  policy.review.allowedLabels = [];
+  policy.review.allowedLabels = [...AGENT_EMITTABLE_LABELS];
   policy.review.managedLabels = [...new Set([
     ...REVIEW_MANAGED_LABELS,
     ...LEGACY_REVIEW_MANAGED_LABELS
