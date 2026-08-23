@@ -1,7 +1,8 @@
 import { currentHead } from "../git.mjs";
 import { GitHubClient, isOwnedMarkerComment } from "../github.mjs";
+import { LABELS } from "../label-ownership.mjs";
 import { findingFingerprint, findingMarker, repairNotificationMarker } from "../markers.mjs";
-import { findingLabels } from "../policy.mjs";
+import { findingLabels, priorityLabel } from "../policy.mjs";
 import { renderMaintenanceIssue, sanitizePublicTitle } from "../render.mjs";
 import { assertNoPublicSecurityFindings } from "../security-containment.mjs";
 import { loadArtifact } from "./artifacts.mjs";
@@ -25,7 +26,7 @@ export function isTrustedMaintenanceFindingIssue(issue, comments, { marker, botL
 
 async function upsertMaintenanceFindings({ github, findings, config, runUrl, dryRun }) {
   const automationIdentity = expectedAutomationIdentity();
-  const existing = await github.listMaintenanceIssues("codekeeper:maintenance");
+  const existing = await github.listMaintenanceIssues(LABELS.AUTOMATED_MAINTENANCE);
   const published = [];
   for (const finding of findings.slice(0, config.audit.maximumIssuesPerRun)) {
     const fingerprint = findingFingerprint(finding);
@@ -43,7 +44,7 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
         break;
       }
     }
-    const labels = [...new Set([...findingLabels(finding), `codekeeper:priority-${finding.priority}`])];
+    const labels = [...new Set([...findingLabels(finding), priorityLabel(finding.priority)].filter(Boolean))];
     const title = sanitizePublicTitle(`[AI maintenance] ${finding.title}`) || "[AI maintenance] Repository finding";
     const body = renderMaintenanceIssue(finding, fingerprint, runUrl);
 
