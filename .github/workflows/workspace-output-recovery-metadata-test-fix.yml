@@ -41,19 +41,21 @@ jobs:
 
           path = Path("tools/codekeeper/test/agents-runtime-workspace.test.mjs")
           content = path.read_text()
-          old = '''  assert.deepEqual(workspaceMetadata.passes, [
-            { tier: "configured", model: "gpt-5.6-luna", effort: "medium", durationMs: 25 },
-            { tier: "focused-max", model: "gpt-5.6-luna", effort: "max", durationMs: 25 }
-          ]);
-          '''
-          new = '''  assert.deepEqual(workspaceMetadata.passes, [
-            { tier: "configured", model: "gpt-5.6-luna", effort: "medium", attempts: 1, durationMs: 25 },
-            { tier: "focused-max", model: "gpt-5.6-luna", effort: "max", attempts: 1, durationMs: 25 }
-          ]);
-          '''
-          if content.count(old) != 1:
-              raise SystemExit(f"expected one focused-Max metadata assertion, found {content.count(old)}")
-          path.write_text(content.replace(old, new))
+          replacements = [
+              (
+                  '{ tier: "configured", model: "gpt-5.6-luna", effort: "medium", durationMs: 25 },',
+                  '{ tier: "configured", model: "gpt-5.6-luna", effort: "medium", attempts: 1, durationMs: 25 },',
+              ),
+              (
+                  '{ tier: "focused-max", model: "gpt-5.6-luna", effort: "max", durationMs: 25 }',
+                  '{ tier: "focused-max", model: "gpt-5.6-luna", effort: "max", attempts: 1, durationMs: 25 }',
+              ),
+          ]
+          for old, new in replacements:
+              if content.count(old) != 1:
+                  raise SystemExit(f"expected one metadata line {old!r}, found {content.count(old)}")
+              content = content.replace(old, new)
+          path.write_text(content)
           PY
 
           rm .github/workflows/workspace-output-recovery-metadata-test-fix.yml
