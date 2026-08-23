@@ -1,0 +1,61 @@
+name: Validate workspace recovery with pinned runtime
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: write
+
+concurrency:
+  group: workspace-output-recovery-v3
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'fix/workspace-output-recovery'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/workspace-output-recovery
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Execute deterministic repair with the pinned runtime installed
+        env:
+          HEAD_BRANCH: fix/workspace-output-recovery
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/workspace-output-recovery-v3.sh"
+          ruby -ryaml -e '
+            workflow = YAML.load_file(ARGV.fetch(0))
+            step = workflow.fetch("jobs").fetch("apply").fetch("steps").find do |item|
+              item["name"] == "Patch runtime, prove recovery, and commit cleanly"
+            end
+            abort("workspace output recovery v2 payload was not found") unless step
+            print step.fetch("run")
+          ' .github/workflows/workspace-output-recovery-v2.yml > "$payload"
+          python3 - "$payload" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          content = path.read_text()
+          needle = "node --check tools/codekeeper/src/lib/agents-runtime-core.mjs\n"
+          if content.count(needle) != 1:
+              raise SystemExit(f"expected one validation insertion point, found {content.count(needle)}")
+          content = content.replace(
+              needle,
+              "npm --prefix tools/codekeeper ci --ignore-scripts --no-audit --no-fund\n" + needle,
+          )
+          path.write_text(content)
+          PY
+          rm .github/workflows/workspace-output-recovery-v3.yml
+          bash "$payload"
