@@ -168,9 +168,9 @@ export function parseAgentOutput(output) {
 }
 
 export function codexMcpOutput(result) {
-  if (typeof result?.structuredContent?.content === "string") {
-    return result.structuredContent.content;
-  }
+  const structuredContent = result?.structuredContent?.content;
+  if (isPlainObject(structuredContent)) return structuredContent;
+  if (typeof structuredContent === "string") return structuredContent;
   const text = (result?.content ?? [])
     .filter((item) => item?.type === "text" && typeof item.text === "string")
     .map((item) => item.text)
