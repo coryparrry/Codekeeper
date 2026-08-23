@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.10...codekeeper-v0.5.0) (2026-08-23)
+
+
+### Features
+
+* broaden repair policy and migrate concise labels ([db11f2e](https://github.com/coryparrry/Codekeeper/commit/db11f2e7b3c72466becf45d493319709d4dbb7bb))
+
+
+### Bug Fixes
+
+* retain legacy label aliases only for cleanup ([b7caa89](https://github.com/coryparrry/Codekeeper/commit/b7caa89654219d9ba444f2eb6854822045636758))
+* share policy normalisation and update label tests ([52cb05c](https://github.com/coryparrry/Codekeeper/commit/52cb05cc5a30db59234f1afb3b72b741d825de13))
+
 ## [0.4.10](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.4.9...codekeeper-v0.4.10) (2026-08-23)
 
 
