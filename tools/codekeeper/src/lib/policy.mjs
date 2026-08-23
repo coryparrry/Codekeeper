@@ -1,4 +1,5 @@
 import { matchesAny } from "./glob.mjs";
+import { LABELS } from "./label-ownership.mjs";
 
 function unsafeRepositoryPath(filePath) {
   const value = String(filePath ?? "").replaceAll("\\", "/");
@@ -126,41 +127,51 @@ function hasFixNowFeedback(result) {
 }
 
 export function reviewLabels(result) {
-  const labels = new Set(["codekeeper:reviewed", `codekeeper:risk-${result.risk}`, ...result.labels]);
-  if (result.tests.missingTest) labels.add("codekeeper:needs-tests");
+  const labels = new Set();
+  if (result.tests.missingTest) labels.add(LABELS.NEEDS_TESTS);
   if (result.blockingFindings.length > 0 || hasCriticalFinding(result) || hasFixNowFeedback(result) || result.mergeRecommendation === "block") {
-    labels.add("codekeeper:blocked");
+    labels.add(LABELS.CHANGES_REQUIRED);
   } else if (result.mergeRecommendation === "auto") {
-    labels.add("codekeeper:auto-merge");
+    labels.add(LABELS.MERGE_READY);
   } else {
-    labels.add("codekeeper:manual-review");
+    labels.add(LABELS.REVIEW_NEEDED);
   }
   return [...labels];
 }
 
 export function issueTypeLabel(type) {
   const map = {
-    bug: "codekeeper:type-bug",
-    enhancement: "codekeeper:type-enhancement",
-    documentation: "codekeeper:type-documentation",
-    question: "codekeeper:type-question",
-    security: "codekeeper:type-security",
-    maintenance: "codekeeper:type-maintenance",
-    testing: "codekeeper:type-testing"
+    bug: LABELS.BUG,
+    enhancement: LABELS.ENHANCEMENT,
+    documentation: LABELS.DOCUMENTATION,
+    question: LABELS.QUESTION,
+    security: LABELS.SECURITY,
+    maintenance: LABELS.MAINTENANCE,
+    testing: LABELS.TESTING
   };
-  return map[type] ?? "codekeeper:type-maintenance";
+  return map[type] ?? LABELS.MAINTENANCE;
+}
+
+export function priorityLabel(priority) {
+  if (priority === "p1") return LABELS.URGENT;
+  if (priority === "p2") return LABELS.HIGH_PRIORITY;
+  return null;
 }
 
 export function findingLabels(finding) {
   const categoryMap = {
-    docs: "codekeeper:type-documentation",
-    dependency: "codekeeper:type-maintenance",
-    cleanup: "codekeeper:type-maintenance",
-    bug: "codekeeper:type-bug",
-    security: "codekeeper:type-security",
-    testing: "codekeeper:type-testing"
+    docs: LABELS.DOCUMENTATION,
+    dependency: LABELS.MAINTENANCE,
+    cleanup: LABELS.MAINTENANCE,
+    bug: LABELS.BUG,
+    security: LABELS.SECURITY,
+    testing: LABELS.TESTING
   };
-  return [...new Set(["codekeeper:maintenance", categoryMap[finding.category], ...finding.labels])];
+  const labels = new Set([LABELS.AUTOMATED_MAINTENANCE, categoryMap[finding.category] ?? LABELS.MAINTENANCE]);
+  if ((finding.labels ?? []).some((label) => label === LABELS.NEEDS_TESTS || label === "codekeeper:needs-tests")) {
+    labels.add(LABELS.NEEDS_TESTS);
+  }
+  return [...labels];
 }
 
 export function evaluateAutoMerge({
@@ -175,7 +186,7 @@ export function evaluateAutoMerge({
   const reasons = [];
   const labels = (pullRequest.labels ?? []).map((label) => typeof label === "string" ? label : label.name);
   if (!policy.enabled) reasons.push("Auto-merge is disabled by policy");
-  if (labels.includes("codekeeper:paused") || labels.includes("paused")) reasons.push("Pull request is paused");
+  if (labels.includes(LABELS.PAUSED) || labels.includes("codekeeper:paused")) reasons.push("Pull request is paused");
   if (pullRequest.draft) reasons.push("Pull request is a draft");
   if (pullRequest.state !== "open") reasons.push(`Pull request state is ${pullRequest.state}`);
   if (pullRequest.head?.repo?.full_name !== pullRequest.base?.repo?.full_name) reasons.push("Pull request comes from a fork");
