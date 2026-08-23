@@ -10,6 +10,11 @@
 
 Codekeeper is a work in progress, it breaks, and its not production ready yet. Its a very early Alpha. Any help appreciated in this build. This was born from my own personal, smaller version. 
 
+PR Review: Working ✔️
+Tagging: ✔️
+PR Fix: ⌛
+PR Issue Triage: ⌛
+
 ## What is Codekeeper? 🤔
 
 Codekeeper turns a guided command-line setup into an always-available maintainer for your GitHub repository. It reviews pull requests, triages issues, audits repository health, and can prepare small, verified repairs from your own GitHub Actions.
