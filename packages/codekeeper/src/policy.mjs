@@ -1,4 +1,4 @@
-import { LABELS, LEGACY_CODEKEEPER_OWNED_LABELS } from "./label-ownership.mjs";
+import { LABELS } from "./label-ownership.mjs";
 
 export const POLICY_VERSION = 3;
 
@@ -50,6 +50,48 @@ export const ISSUE_MANAGED_LABELS = Object.freeze([
   LABELS.MAINTENANCE,
   LABELS.SECURITY,
   LABELS.TESTING
+]);
+
+const LEGACY_REVIEW_MANAGED_LABELS = Object.freeze([
+  "codekeeper:reviewed",
+  "codekeeper:blocked",
+  "codekeeper:manual-review",
+  "codekeeper:auto-merge",
+  "codekeeper:needs-tests",
+  "codekeeper:risk-low",
+  "codekeeper:risk-medium",
+  "codekeeper:risk-high"
+]);
+
+const LEGACY_ISSUE_MANAGED_LABELS = Object.freeze([
+  "codekeeper:maintenance",
+  "codekeeper:ready",
+  "codekeeper:manual-review",
+  "codekeeper:duplicate-candidate",
+  "codekeeper:deferred",
+  "codekeeper:needs-information",
+  "codekeeper:priority-p1",
+  "codekeeper:priority-p2",
+  "codekeeper:priority-p3",
+  "codekeeper:risk-low",
+  "codekeeper:risk-medium",
+  "codekeeper:risk-high",
+  "codekeeper:type-bug",
+  "codekeeper:type-documentation",
+  "codekeeper:type-enhancement",
+  "codekeeper:type-maintenance",
+  "codekeeper:type-question",
+  "codekeeper:type-security",
+  "codekeeper:type-testing"
+]);
+
+const LEGACY_REQUIRED_LABELS = Object.freeze([
+  ...new Set([
+    ...LEGACY_REVIEW_MANAGED_LABELS,
+    ...LEGACY_ISSUE_MANAGED_LABELS,
+    "codekeeper:paused",
+    "codekeeper:auto-repaired"
+  ])
 ]);
 
 export const LABEL_DEFINITIONS = Object.freeze({
@@ -111,8 +153,7 @@ const LEGACY_LABEL_NAMES = Object.freeze({
   "priority p2": LABELS.HIGH_PRIORITY,
   "priority p3": null,
   "risk low": null,
-  "risk medium": null,
-  "risk high": null
+  "risk medium": null
 });
 
 export const RELEASE_OWNED_POLICY_PATHS = Object.freeze([
@@ -219,6 +260,15 @@ function migrateLabelList(labels) {
     .filter(Boolean))];
 }
 
+function legacyLabelDefinition(name) {
+  const current = LEGACY_LABEL_NAMES[name];
+  if (current && LABEL_DEFINITIONS[current]) return structuredClone(LABEL_DEFINITIONS[current]);
+  return {
+    color: "CFD3D7",
+    description: "Legacy Codekeeper label retained only for automatic cleanup"
+  };
+}
+
 function migrateLabels(policy) {
   policy.labels ??= {};
   for (const [legacyName, currentName] of Object.entries(LEGACY_LABEL_NAMES)) {
@@ -226,20 +276,26 @@ function migrateLabels(policy) {
     if (currentName && !Object.hasOwn(policy.labels, currentName)) {
       policy.labels[currentName] = structuredClone(policy.labels[legacyName]);
     }
-    if (legacyName.startsWith("codekeeper:") || LEGACY_CODEKEEPER_OWNED_LABELS.includes(legacyName)) {
-      delete policy.labels[legacyName];
-    }
   }
   for (const [name, definition] of Object.entries(LABEL_DEFINITIONS)) {
     policy.labels[name] = structuredClone(definition);
+  }
+  for (const name of LEGACY_REQUIRED_LABELS) {
+    policy.labels[name] ??= legacyLabelDefinition(name);
   }
   policy.labels["risk high"] ??= {
     color: "B60205",
     description: "Repository-owned high-risk routing label"
   };
   policy.review.allowedLabels = [];
-  policy.review.managedLabels = [...REVIEW_MANAGED_LABELS];
-  policy.issues.managedLabels = [...ISSUE_MANAGED_LABELS];
+  policy.review.managedLabels = [...new Set([
+    ...REVIEW_MANAGED_LABELS,
+    ...LEGACY_REVIEW_MANAGED_LABELS
+  ])];
+  policy.issues.managedLabels = [...new Set([
+    ...ISSUE_MANAGED_LABELS,
+    ...LEGACY_ISSUE_MANAGED_LABELS
+  ])];
 }
 
 function applyRepairDefaults(policy) {
