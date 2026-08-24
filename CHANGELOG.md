@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.5.1...codekeeper-v0.5.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **fixer:** bound review repair execution ([95ceea8](https://github.com/coryparrry/Codekeeper/commit/95ceea837a5eb27de4e067a1ff3bec789fe7f0ea))
+* **fix:** scope automatic repair to trusted review objectives ([334090d](https://github.com/coryparrry/Codekeeper/commit/334090d557ce0d60e2bb30b32af960829904a30d))
+
 ## [0.5.1](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.5.0...codekeeper-v0.5.1) (2026-08-23)
 
 
