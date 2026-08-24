@@ -20,6 +20,8 @@ import {
 export * from "./agents-runtime-provider.mjs";
 
 const DEFAULT_CODEX_MCP_TIMEOUT_SECONDS = 20 * 60;
+const FIX_CODEX_MCP_TIMEOUT_SECONDS = 10 * 60;
+const MAX_CLUSTERED_FIXER_AGENTS = 2;
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -230,6 +232,9 @@ export async function runWorkspaceAgentFromBundle({
   if (!settings.workspaceEnabled) {
     throw new Error(`Codekeeper ${mode} workspace specialist is disabled`);
   }
+  const workspaceTimeoutSeconds = mode === "fix"
+    ? FIX_CODEX_MCP_TIMEOUT_SECONDS
+    : DEFAULT_CODEX_MCP_TIMEOUT_SECONDS;
 
   const childEnvironment = codexMcpEnvironment(environment);
   await codexAuthenticator({
@@ -249,8 +254,8 @@ export async function runWorkspaceAgentFromBundle({
     cwd: process.cwd(),
     env: childEnvironment,
     cacheToolsList: true,
-    clientSessionTimeoutSeconds: DEFAULT_CODEX_MCP_TIMEOUT_SECONDS,
-    timeout: DEFAULT_CODEX_MCP_TIMEOUT_SECONDS * 1000
+    clientSessionTimeoutSeconds: workspaceTimeoutSeconds,
+    timeout: workspaceTimeoutSeconds * 1000
   });
   await server.connect();
   let securityWithholdingError = null;
@@ -314,7 +319,7 @@ export async function runWorkspaceAgentFromBundle({
     const clusters = mode === "fix" && Array.isArray(context.repairClusters)
       ? context.repairClusters.filter((cluster) => Array.isArray(cluster?.items) && cluster.items.length > 0)
       : [];
-    const clusterRuns = clusters.length > 1 ? clusters : null;
+    const clusterRuns = clusters.length > 1 && clusters.length <= MAX_CLUSTERED_FIXER_AGENTS ? clusters : null;
     const firstPassRoute = {
       model: settings.workspaceModel,
       effort: settings.workspaceEffort,

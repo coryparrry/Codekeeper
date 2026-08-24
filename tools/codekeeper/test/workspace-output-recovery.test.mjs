@@ -214,6 +214,41 @@ test("independent fixer clusters launch one workspace agent each", async (t) => 
   assert.match(merged.changedSummary, /expiresAt/);
 });
 
+test("larger fixer plans use one bounded workspace pass until isolation is available", async (t) => {
+  const context = {
+    mode: "fix",
+    target: { kind: "pull_request", number: 74, reviewThreadIds: [] },
+    repairClusters: ["settlement", "idempotency", "ledger"].map((id) => ({
+      id,
+      items: [{
+        kind: "finding",
+        title: `${id} defect`,
+        file: `src/${id}.mjs`,
+        line: 1,
+        explanation: `${id} is wrong.`,
+        validation: `Fix ${id}.`
+      }]
+    }))
+  };
+  const { directory, resultPath } = await writeBundle(context, t);
+  const config = structuredClone(sourceConfig);
+  const calls = [];
+  const metadata = await runWorkspaceAgentFromBundle({
+    mode: "fix",
+    directory,
+    config,
+    resultPath,
+    apiKey: "workspace-secret",
+    environment: { CODEX_HOME: path.join(directory, "codex-home"), PATH: "/usr/bin" },
+    sdkLoader: fakeSdk([JSON.stringify(validFix({ targetKind: "pull_request", targetNumber: 74 }))], calls),
+    codexAuthenticator: async () => {},
+  });
+
+  assert.equal(metadata.passes, 1);
+  assert.equal(metadata.fixerAgents, undefined);
+  assert.equal(calls.length, 1);
+});
+
 test("workspace output recovery remains bounded by the configured attempt limit", async (t) => {
   const { directory, resultPath } = await writeBundle(reviewContext(), t);
   const config = structuredClone(sourceConfig);

@@ -4,6 +4,7 @@ import { LABELS } from "../label-ownership.mjs";
 import { REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, reviewFeedbackReplyMarker, sha256 } from "../markers.mjs";
 import { evaluateAutoMerge, evaluateReviewEligibility, issueTypeLabel, reviewLabels } from "../policy.mjs";
 import { normalizeReleaseOwnedPinReview, renderDeferredIssue, renderReviewComment, sanitizeMarkdown, sanitizePublicTitle } from "../render.mjs";
+import { repairItemsFromReviewResult } from "../repair-objectives.mjs";
 import { loadArtifact } from "./artifacts.mjs";
 import {
   expectedAutomationIdentity,
@@ -306,6 +307,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const automationBotLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
+  const repairObjectives = repairItemsFromReviewResult(result);
   const blocking = result.blockingFindings.length > 0 || critical ||
     result.reviewFeedback.some((feedback) => feedback.disposition === "fix_now") ||
     result.mergeRecommendation === "block";
@@ -321,7 +323,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
   );
   const paused = existingLabels.has(LABELS.PAUSED) || existingLabels.has("codekeeper:paused");
-  const repairRequested = automationMutationEligible && defaultBaseTarget && (blocking || repairFeedback.length > 0) && config.review.autoRepair && !paused;
+  const repairRequested = automationMutationEligible && defaultBaseTarget && repairObjectives.length > 0
+    && (blocking || repairFeedback.length > 0) && config.review.autoRepair && !paused;
   let repairState = { consumed: false, pending: false };
   if (repairRequested) {
     repairState = ownedAutomaticRepairState(

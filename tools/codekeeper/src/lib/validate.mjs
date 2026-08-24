@@ -284,6 +284,23 @@ async function captureWorkspacePatch({ context, config, repairRequested, risk })
   return { patch, patchBytes: valid ? initial.bytes : null };
 }
 
+function assertRepairObjectiveScope(changes, context) {
+  if (!Array.isArray(context.repairClusters)) return;
+  const objectivePaths = new Set(
+    context.repairClusters.flatMap((cluster) => cluster?.items ?? [])
+      .map((item) => typeof item?.file === "string"
+        ? item.file.replaceAll("\\", "/").replace(/^\.\//, "")
+        : null)
+      .filter(Boolean),
+  );
+  const unexpected = changes.files
+    .map((file) => file.path)
+    .filter((file) => !objectivePaths.has(file));
+  if (unexpected.length > 0) {
+    throw new Error(`Fix changed files outside frozen repair objectives: ${unexpected.join(", ")}`);
+  }
+}
+
 export async function validateAudit({ directory, contextPath = path.join(directory, "context.json"), resultPath, artifactDirectory, config, configSha256 }) {
   const context = await readRegularJson(contextPath);
   assertTrustedContext(context, "audit");
@@ -336,6 +353,7 @@ export async function validateFix({ directory, contextPath = path.join(directory
   }
   const result = validateFixResult(await readRegularJson(resultPath), context.target);
   const changes = await collectWorkingTreeChanges();
+  assertRepairObjectiveScope(changes, context);
   const repairRequested = changes.files.length > 0;
   if (!repairRequested && !result.noChangeReason) {
     throw new Error("Fix mode made no changes without explaining noChangeReason");
