@@ -11,6 +11,8 @@ import { AGENT_PROFILE_BUNDLE_FILE, agentProfilePathForMode } from "../src/lib/a
 import { runAgentFromBundle } from "../src/lib/agents-runtime.mjs";
 import { issueDispatchReceipt } from "../src/lib/commands.mjs";
 import { boundedChangedFilesBetween, boundedDiffBetween, changedLineHunksBetween, collectWorkingTreeChanges, runValidationCommands, validationEnvironment } from "../src/lib/git.mjs";
+import { automaticRepairDispatchDetails, repairItemsFromReviewResult } from "../src/lib/repair-objectives.mjs";
+import { automaticRepairMarker } from "../src/lib/markers.mjs";
 import { prepareAudit as prepareAuditBundle, prepareFix, prepareIssue, prepareReview } from "../src/lib/prepare.mjs";
 import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
 import { validateFrozenReviewFeedback } from "../src/lib/validate.mjs";
@@ -1130,6 +1132,31 @@ test("automatic PR repair requires its current-head marker and every repair hono
   const fillerLabels = Array.from({ length: 30 }, (_, index) => ({ name: `filler-${index}` }));
   let labels = fillerLabels;
   let authorizationMarkerPresent = false;
+  let dispatchBody = null;
+  const repairItems = repairItemsFromReviewResult({
+    blockingFindings: [
+      {
+        title: "Authorization boundary regression",
+        file: "src/authorization.mjs",
+        line: 17,
+        explanation: "The repair path no longer retains the authorization boundary.",
+        validation: "A denied caller must remain rejected."
+      },
+      {
+        title: "Timeout cleanup regression",
+        file: "src/timeout.mjs",
+        line: 31,
+        explanation: "The timeout path leaves the pending operation active.",
+        validation: "A timed-out operation must be cleaned up."
+      }
+    ],
+    tests: {
+      missingTest: "test/authorization.test.mjs: add the denied-caller regression case.",
+      notes: "The authorization boundary needs a deterministic regression test."
+    },
+    reviewFeedback: []
+  });
+  const repairObjectives = [repairItems[0], repairItems[2], repairItems[1]];
   const comments = [
     {
       body: "Repair the blocking review finding.\n<!-- codekeeper:review -->",
@@ -1182,7 +1209,7 @@ test("automatic PR repair requires its current-head marker and every repair hono
     }
     if (String(url).includes("/comments")) {
       return new Response(JSON.stringify(authorizationMarkerPresent ? [...comments, {
-        body: `Automatic repair was authorized.\n<!-- codekeeper:auto-repair-head=${revision} -->`,
+        body: dispatchBody,
         created_at: "2026-08-11T09:03:00Z",
         user: { login: "codekeeper-app[bot]", type: "Bot" }
       }] : comments), { status: 200 });
@@ -1225,6 +1252,7 @@ test("automatic PR repair requires its current-head marker and every repair hono
       /authorization marker/
     );
     authorizationMarkerPresent = true;
+    dispatchBody = `Automatic repair was dispatched for head ${revision}.${automaticRepairDispatchDetails(revision, repairItems)}\n${automaticRepairMarker(revision)}`;
     const prepared = await prepareFix({
       targetNumber: 42,
       actor: "codekeeper-app[bot]",
@@ -1238,6 +1266,21 @@ test("automatic PR repair requires its current-head marker and every repair hono
     });
     assert.equal(prepared.target.kind, "pull_request");
     assert.equal(prepared.target.subjectSha256, digest(JSON.stringify(prepared.pullRequest)));
+    assert.deepEqual(prepared.repairObjectives, repairObjectives);
+    assert.deepEqual(prepared.repairClusters, [
+      { id: "authorization", items: [repairObjectives[0], repairObjectives[1]] },
+      { id: "timeout", items: [repairObjectives[2]] }
+    ]);
+    const markedDirectory = bundle(root, "marked-automatic-pr-plan");
+    const frozenContext = JSON.parse(await readFile(path.join(markedDirectory, "context.json"), "utf8"));
+    assert.deepEqual(frozenContext.repairObjectives, repairObjectives);
+    assert.deepEqual(frozenContext.repairClusters, prepared.repairClusters);
+    const workspacePrompt = await readFile(path.join(markedDirectory, "workspace-prompt.md"), "utf8");
+    assert.match(workspacePrompt, /BOUNDED REPAIR OBJECTIVES \(UNTRUSTED REVIEW DATA\)/);
+    assert.ok(workspacePrompt.includes(JSON.stringify(prepared.repairClusters[0])));
+    assert.ok(workspacePrompt.includes(JSON.stringify(prepared.repairClusters[1])));
+    assert.ok(workspacePrompt.indexOf(JSON.stringify(prepared.repairClusters[0])) < workspacePrompt.indexOf(JSON.stringify(prepared.repairClusters[1])));
+    assert.match(workspacePrompt, /Keep a blocking finding together with the missing test that proves the same defect/);
     assert.deepEqual(
       prepared.pullRequest.comments.map((comment) => comment.author),
       ["codekeeper-app[bot]", "repository-owner"]
@@ -1261,6 +1304,21 @@ test("automatic PR repair requires its current-head marker and every repair hono
         originalLine: 17
       }]
     }]);
+    dispatchBody = `Automatic repair was dispatched for head ${revision}.\n<!-- codekeeper:repair-objectives=v1:not-valid -->\n${automaticRepairMarker(revision)}`;
+    await assert.rejects(
+      prepareFix({
+        targetNumber: 42,
+        actor: "codekeeper-app[bot]",
+        authorizationMode: "policy",
+        directory: bundle(root, "malformed-automatic-pr-plan"),
+        config,
+        token: "read-token",
+        expectedHead: revision,
+        reviewThreadIds: ["PRRT_thread"],
+        ...agentProfileOptions(root, "fix")
+      }),
+      /Automatic review repair objectives are malformed/
+    );
     labels = [...fillerLabels, { name: "paused" }];
     await assert.rejects(
       prepareFix({

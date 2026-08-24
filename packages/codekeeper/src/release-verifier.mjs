@@ -188,7 +188,13 @@ export async function verifyCodekeeperRelease({
   }
   await verifyRuntimeArchive(resolvedRoot);
   const packageManifest = parseJson(await readRegularFile(resolvedRoot, "package.json"), "package manifest");
-  if (packageManifest.name !== manifest.package.name || packageManifest.version !== manifest.package.version) {
+  if (
+    !packageManifest ||
+    typeof packageManifest !== "object" ||
+    Array.isArray(packageManifest) ||
+    packageManifest.name !== manifest.package.name ||
+    packageManifest.version !== manifest.package.version
+  ) {
     fail("package manifest identity does not match the release manifest");
   }
   return manifest;

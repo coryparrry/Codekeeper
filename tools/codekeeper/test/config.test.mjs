@@ -74,6 +74,22 @@ test("configuration validator rejects unsafe or incomplete policy values", async
   );
 });
 
+test("configuration reports malformed partial policies as controlled validation failures", async () => {
+  for (const partial of [
+    {},
+    { review: {} },
+    { audit: {} },
+    { review: {}, audit: { repair: {} } },
+    { review: {}, issues: {} },
+    { review: {}, audit: {}, issues: {} }
+  ]) {
+    await assert.rejects(
+      loadConfig(await writeConfig(partial)),
+      /Invalid Codekeeper policy:/
+    );
+  }
+});
+
 test("review reasoning escalates only security, high-risk, and exceptional diffs", () => {
   const context = (overrides = {}) => ({
     mode: "review",

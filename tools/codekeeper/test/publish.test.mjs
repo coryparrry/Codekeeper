@@ -631,12 +631,18 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
     url: "https://github.test/comment/41", state: "commented", threadId: "PRRT_thread",
     rootCommentId: 41, resolved: false, outdated: false, path: "README.md", line: 1
   };
+  const secondFrozenFeedback = {
+    sourceKey: "review_comment:42", kind: "review_comment", author: "reviewer",
+    body: "Keep the related repair in scope.", bodySha256: sha256("Keep the related repair in scope."),
+    url: "https://github.test/comment/42", state: "commented", threadId: frozenFeedback.threadId,
+    rootCommentId: 41, resolved: false, outdated: false, path: "README.md", line: 2
+  };
   const context = {
     mode: "review", repository: "owner/repository", configSha256, runId: "7009",
     runUrl: "https://github.com/owner/repository/actions/runs/7009",
     pullRequest: {
       number: 7, headSha, baseSha, diff: { truncated: false, disabled: false },
-      reviewFeedbackFrozen: true, reviewFeedback: [frozenFeedback]
+      reviewFeedbackFrozen: true, reviewFeedback: [frozenFeedback, secondFrozenFeedback]
     }
   };
   const result = {
@@ -646,6 +652,10 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
       problemKey: "repair-race", disposition: "fix_now", type: "bug",
       explanation: "Repair the current feedback.", validation: "The feedback is still active.",
       sourceKeys: [frozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
+    }, {
+      problemKey: "repair-race-duplicate-thread", disposition: "fix_if_cheap", type: "bug",
+      explanation: "A second objective shares the same review thread.", validation: "The feedback is still active.",
+      sourceKeys: [secondFrozenFeedback.sourceKey], threadIds: [frozenFeedback.threadId]
     }],
     tests: { adequate: true, notes: "Covered.", missingTest: null }, mergeRecommendation: "manual", noActionReason: null
   };
@@ -658,6 +668,7 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
   let resolved = false;
   let dispatches = 0;
   let dispatchAttempts = 0;
+  const dispatchCalls = [];
   const issueComments = [];
   const restoreGitHub = replaceGitHubMethods({
     async getPull() { return structuredClone(pull); },
@@ -670,6 +681,10 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
           databaseId: 41, body: frozenFeedback.body, url: frozenFeedback.url,
           path: frozenFeedback.path, line: frozenFeedback.line, originalLine: frozenFeedback.line,
           author: { login: frozenFeedback.author }
+        }, {
+          databaseId: 42, body: secondFrozenFeedback.body, url: secondFrozenFeedback.url,
+          path: secondFrozenFeedback.path, line: secondFrozenFeedback.line, originalLine: secondFrozenFeedback.line,
+          author: { login: secondFrozenFeedback.author }
         }] }
       }];
     },
@@ -702,8 +717,9 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
     async removeLabel(_number, label) {
       pull.labels = pull.labels.filter((item) => item.name !== label);
     },
-    async createRepositoryDispatch() {
+    async createRepositoryDispatch(eventType, payload) {
       dispatchAttempts += 1;
+      dispatchCalls.push({ eventType, payload: structuredClone(payload) });
       if (dispatchAttempts === 1) resolved = true;
       await this.assertPullMutationCurrent();
       dispatches += 1;
@@ -733,6 +749,16 @@ test("conditional GitHub mutation blocks repair dispatch after feedback changes"
     });
     assert.equal(retried.automaticRepair.dispatched, true);
     assert.equal(dispatches, 1);
+    assert.deepEqual(dispatchCalls.at(-1), {
+      eventType: "codekeeper_fix",
+      payload: {
+        number: pull.number,
+        head_sha: headSha,
+        authorization_mode: "policy",
+        requested_by: identity.login,
+        review_thread_ids: [frozenFeedback.threadId]
+      }
+    });
     assert.equal(pull.labels.some((label) => label.name === "codekeeper:auto-repaired"), false);
   } finally {
     restoreGitHub();
