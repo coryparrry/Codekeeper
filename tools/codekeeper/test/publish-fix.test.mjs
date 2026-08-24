@@ -234,6 +234,7 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
   let reviewThreadBody = "Please preserve this review evidence.";
   let reviewThreadResolved = false;
   const failureComments = [];
+  const appliedComments = [];
   try {
     await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
     git(repository, ["init", "-q", "-b", "feature/repair"]);
@@ -279,6 +280,10 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       },
       async listPullReviewThreads() { return [liveRepairReviewThread(reviewThreadBody, reviewThreadResolved)]; },
       async upsertMarkerComment(number, marker, body, authorIdentity) {
+        if (body.startsWith("Codekeeper applied automatic repair")) {
+          appliedComments.push({ number, marker, body, authorIdentity });
+          return;
+        }
         if (!rejectPush) throw new Error("successful PR repair should not publish a failure comment");
         failureComments.push({ number, marker, body, authorIdentity });
       }
@@ -334,6 +339,8 @@ test("owner-commanded PR repair adds one App commit to the existing head and fai
       assert.deepEqual(repair.resolvedReviewThreadIds, ["PRRT_thread"]);
       assert.equal(repair.previousHeadSha, headSha);
       assert.equal(repair.headSha, liveHead);
+      assert.equal(appliedComments.length, 1);
+      assert.match(appliedComments[0].body, new RegExp(`Codekeeper applied automatic repair \`${liveHead}\``));
       assert.equal(pushes, 1);
       assert.equal(createPullCalls, 0);
       assert.equal(git(repository, ["rev-parse", "HEAD^"]), headSha);

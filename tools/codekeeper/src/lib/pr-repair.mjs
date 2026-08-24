@@ -279,6 +279,18 @@ export async function publishPullRequestRepair({
       reviewThreadWarning = `The repair commit was pushed, but review-thread reconciliation was incomplete: ${sanitizeMarkdown(error.message)}`;
     }
     publication.phase = REPAIR_PUBLICATION_PHASE.THREADS_RECONCILED;
+    const appliedObjectives = Array.isArray(context.repairClusters)
+      ? context.repairClusters.flatMap((cluster) => cluster.items ?? []).map((item) => item.title).filter(Boolean)
+      : [];
+    const appliedSummary = appliedObjectives.length > 0
+      ? appliedObjectives.slice(0, 8).map((title) => `- ${sanitizeMarkdown(title)}`).join("\n")
+      : (result.changedSummary ? sanitizeMarkdown(result.changedSummary).slice(0, 1500) : "See the repair commit.");
+    await github.upsertMarkerComment(
+      target.number,
+      fixRunMarker(context.runId),
+      `Codekeeper applied automatic repair \`${commitSha}\` on this pull request.\n\n${appliedSummary}`,
+      automationIdentity
+    );
     publication.phase = REPAIR_PUBLICATION_PHASE.COMPLETE;
     return {
       updated: true,
@@ -296,8 +308,11 @@ export async function publishPullRequestRepair({
     let reportedError = error;
     if (!dryRun && error.code !== "CODEKEEPER_PAUSED") {
       try {
-        if (publication.phase === REPAIR_PUBLICATION_PHASE.PUSH_CONFIRMED ||
-            publication.phase === REPAIR_PUBLICATION_PHASE.PR_REVALIDATED) {
+        if ([
+          REPAIR_PUBLICATION_PHASE.PUSH_CONFIRMED,
+          REPAIR_PUBLICATION_PHASE.PR_REVALIDATED,
+          REPAIR_PUBLICATION_PHASE.THREADS_RECONCILED,
+        ].includes(publication.phase)) {
           publication.remoteState = await rereadPushedRepairState(github, target);
           reportedError = postPushFailure(error, publication);
         }

@@ -1,10 +1,10 @@
 # Fixer profile
 
-Profile version: 2
+Profile version: 3
 
 ## Mission
 
-Validate one frozen request on the exact authorised target and produce the smallest complete, reviewable patch.
+Validate one frozen request on the exact authorised target and produce the smallest complete, reviewable patch. When trusted repair objectives are present, those items are the complete authorised work.
 
 ## Capability contract
 
@@ -22,6 +22,10 @@ Before editing, confirm all of the following:
 - Relevant deterministic validation is available.
 
 If any condition fails, leave the worktree unchanged and return a specific `noChangeReason`.
+
+## Trusted repair objectives
+
+When the frozen context includes `repairClusters`, implement only those items. Do not repair unrelated defects found while inspecting the checkout. Keep a blocking finding together with the missing test that proves it. Independent clusters are assigned to separate fixer agents in the same run; implement only the assigned cluster.
 
 ## Implementation procedure
 

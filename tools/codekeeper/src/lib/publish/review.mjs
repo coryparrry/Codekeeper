@@ -4,6 +4,7 @@ import { LABELS } from "../label-ownership.mjs";
 import { REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, reviewFeedbackReplyMarker, sha256 } from "../markers.mjs";
 import { evaluateAutoMerge, evaluateReviewEligibility, issueTypeLabel, reviewLabels } from "../policy.mjs";
 import { normalizeReleaseOwnedPinReview, renderDeferredIssue, renderReviewComment, sanitizeMarkdown, sanitizePublicTitle } from "../render.mjs";
+import { repairItemsFromReviewResult } from "../repair-objectives.mjs";
 import { loadArtifact } from "./artifacts.mjs";
 import {
   expectedAutomationIdentity,
@@ -16,8 +17,18 @@ import {
 const DEFERRED_RECONCILED_MARKER = "<!-- codekeeper:deferred-reconciled -->";
 const AUTOMATIC_REPAIR_LEASE_MAX_AGE_MS = 15 * 60 * 1000;
 
+function automaticRepairLeaseVisibleText(state) {
+  if (state === "active") return "Codekeeper is claiming this pull request for automatic repair.";
+  if (state === "completed") return "Codekeeper finished the automatic repair claim for this pull request.";
+  if (state === "expired") return "The automatic repair claim for this pull request expired.";
+  if (state === "released") return "Codekeeper released the automatic repair claim for this pull request.";
+  if (state === "failed") return "Codekeeper could not claim this pull request for automatic repair.";
+  if (state === "ambiguous") return "The automatic repair claim for this pull request is unresolved.";
+  return "Codekeeper recorded an automatic repair claim for this pull request.";
+}
+
 function automaticRepairLeaseBody(state, scope, marker) {
-  return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${marker}`;
+  return `<!-- codekeeper:repair-lease-${state}=${scope} -->\n${automaticRepairLeaseVisibleText(state)}\n${marker}`;
 }
 
 function automaticRepairLeaseScope(repository, pullNumber, headSha) {
@@ -296,6 +307,7 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
   const automationBotLogin = String(process.env.CODEKEEPER_AUTOMATION_BOT_LOGIN ?? "").trim().toLowerCase();
   const reviewContextComplete = context.pullRequest?.diff?.truncated === false && context.pullRequest.diff.disabled !== true;
   const critical = [...result.blockingFindings, ...result.nonBlockingFindings].some((finding) => finding.severity === "critical");
+  const repairObjectives = repairItemsFromReviewResult(result);
   const blocking = result.blockingFindings.length > 0 || critical ||
     result.reviewFeedback.some((feedback) => feedback.disposition === "fix_now") ||
     result.mergeRecommendation === "block";
@@ -311,7 +323,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     feedback.disposition === "fix_now" || feedback.disposition === "fix_if_cheap"
   );
   const paused = existingLabels.has(LABELS.PAUSED) || existingLabels.has("codekeeper:paused");
-  const repairRequested = automationMutationEligible && defaultBaseTarget && (blocking || repairFeedback.length > 0) && config.review.autoRepair && !paused;
+  const repairRequested = automationMutationEligible && defaultBaseTarget && repairObjectives.length > 0
+    && (blocking || repairFeedback.length > 0) && config.review.autoRepair && !paused;
   let repairState = { consumed: false, pending: false };
   if (repairRequested) {
     repairState = ownedAutomaticRepairState(
@@ -470,7 +483,8 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
     config,
     automationIdentity,
     repairFeedback,
-    automaticRepair
+    automaticRepair,
+    result
   });
 
   await github.assertMutationCurrent();

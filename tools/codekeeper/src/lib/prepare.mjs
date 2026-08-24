@@ -3,7 +3,8 @@ import { reviewReasoningEscalation } from "./config.mjs";
 import { boundedChangedFileStatsBetween, boundedDiffBetween, currentHead } from "./git.mjs";
 import { GitHubClient, isOwnedMarkerComment } from "./github.mjs";
 import { readJson } from "./io.mjs";
-import { ISSUE_TRIAGE_MARKER, automaticRepairMarker, parseIssueTriageStateMarker, sha256 } from "./markers.mjs";
+import { ISSUE_TRIAGE_MARKER, parseIssueTriageStateMarker, sha256 } from "./markers.mjs";
+import { authorizedAutomaticRepairPlan } from "./repair-objectives.mjs";
 import { parseOwnerCommand } from "./owner-commands.mjs";
 import { evaluateReviewEligibility } from "./policy.mjs";
 import { normalizeOwnerCommandContext, ownerContextMetadata, verifyOwnerCommandContext } from "./owner-command-prepare.mjs";
@@ -640,6 +641,7 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
   let baseSha;
   let subject;
   let ownerCommandDispatch = null;
+  let repairPlan = null;
   let boundReviewThreadIds = [...reviewThreadIds];
   const boundExpectedHead = expectedHead || ownerContext?.headSha || "";
   if (issue.pull_request) {
@@ -671,22 +673,7 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
     if (authorizationMode === "policy") {
       if (!config.review.autoRepair) throw new Error("Automatic review repair is off in the Codekeeper policy");
       if (!boundExpectedHead) throw new Error("Automatic review repair requires its dispatched head SHA");
-      const normalizedActor = String(actor ?? "")
-        .trim()
-        .toLowerCase();
-      const marker = automaticRepairMarker(boundExpectedHead);
-      const authorized = comments.some(
-        (comment) =>
-          comment?.user?.type === "Bot" &&
-          String(comment?.user?.login ?? "")
-            .trim()
-            .toLowerCase() === normalizedActor &&
-          typeof comment?.body === "string" &&
-          comment.body.endsWith(marker),
-      );
-      if (!authorized) {
-        throw new Error("Automatic review repair requires its current-head authorization marker");
-      }
+      repairPlan = authorizedAutomaticRepairPlan({ comments, actor, headSha: boundExpectedHead });
     }
     if (ownerContext?.surface === "review-thread") {
       const threads = await github.listPullReviewThreads(targetNumber);
@@ -786,6 +773,9 @@ export async function prepareFix({ eventPath = process.env.GITHUB_EVENT_PATH, ta
     target,
     ...subject,
     ownerCommandContext: ownerContextMetadata(ownerContext),
+    ...(repairPlan?.clusters.length
+      ? { repairObjectives: repairPlan.objectives, repairClusters: repairPlan.clusters }
+      : {}),
   };
   await writeBundle({
     directory,

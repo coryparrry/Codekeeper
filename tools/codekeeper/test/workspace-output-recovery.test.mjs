@@ -145,6 +145,110 @@ test("workspace Fixer repairs schema-invalid output without mutating the checkou
   assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), validFix());
 });
 
+test("independent fixer clusters launch one workspace agent each", async (t) => {
+  const context = {
+    mode: "fix",
+    target: { kind: "pull_request", number: 74, reviewThreadIds: [] },
+    repairClusters: [
+      {
+        id: "settlement",
+        items: [{
+          kind: "finding",
+          title: "FX exposure truncation",
+          file: "src/settlement.mjs",
+          line: 65,
+          explanation: "Integer division floors converted exposure.",
+          validation: "Round up."
+        }]
+      },
+      {
+        id: "idempotency",
+        items: [{
+          kind: "finding",
+          title: "TTL counted twice",
+          file: "src/idempotency.mjs",
+          line: 50,
+          explanation: "Expiry adds the TTL twice.",
+          validation: "Expire once."
+        }]
+      }
+    ]
+  };
+  const { directory, resultPath } = await writeBundle(context, t);
+  const config = structuredClone(sourceConfig);
+  const calls = [];
+  const first = validFix({
+    targetKind: "pull_request",
+    targetNumber: 74,
+    summary: "Rounded FX exposure up.",
+    changedSummary: "Use ceiling rounding in settlement."
+  });
+  const second = validFix({
+    targetKind: "pull_request",
+    targetNumber: 74,
+    summary: "Expired idempotency keys once.",
+    changedSummary: "Compare against expiresAt."
+  });
+
+  const metadata = await runWorkspaceAgentFromBundle({
+    mode: "fix",
+    directory,
+    config,
+    resultPath,
+    apiKey: "workspace-secret",
+    environment: { CODEX_HOME: path.join(directory, "codex-home"), PATH: "/usr/bin" },
+    sdkLoader: fakeSdk([JSON.stringify(first), JSON.stringify(second)], calls),
+    codexAuthenticator: async () => {},
+  });
+
+  assert.deepEqual(metadata, { completed: true, passes: 2, postReviewEscalated: false, fixerAgents: 2 });
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].args.prompt, /ASSIGNED REPAIR CLUSTER 1 of 2/);
+  assert.match(calls[0].args.prompt, /FX exposure truncation/);
+  assert.doesNotMatch(calls[0].args.prompt, /TTL counted twice/);
+  assert.match(calls[1].args.prompt, /ASSIGNED REPAIR CLUSTER 2 of 2/);
+  assert.match(calls[1].args.prompt, /TTL counted twice/);
+  const merged = JSON.parse(await readFile(resultPath, "utf8"));
+  assert.equal(merged.readyForReview, true);
+  assert.match(merged.changedSummary, /ceiling rounding/);
+  assert.match(merged.changedSummary, /expiresAt/);
+});
+
+test("larger fixer plans use one bounded workspace pass until isolation is available", async (t) => {
+  const context = {
+    mode: "fix",
+    target: { kind: "pull_request", number: 74, reviewThreadIds: [] },
+    repairClusters: ["settlement", "idempotency", "ledger"].map((id) => ({
+      id,
+      items: [{
+        kind: "finding",
+        title: `${id} defect`,
+        file: `src/${id}.mjs`,
+        line: 1,
+        explanation: `${id} is wrong.`,
+        validation: `Fix ${id}.`
+      }]
+    }))
+  };
+  const { directory, resultPath } = await writeBundle(context, t);
+  const config = structuredClone(sourceConfig);
+  const calls = [];
+  const metadata = await runWorkspaceAgentFromBundle({
+    mode: "fix",
+    directory,
+    config,
+    resultPath,
+    apiKey: "workspace-secret",
+    environment: { CODEX_HOME: path.join(directory, "codex-home"), PATH: "/usr/bin" },
+    sdkLoader: fakeSdk([JSON.stringify(validFix({ targetKind: "pull_request", targetNumber: 74 }))], calls),
+    codexAuthenticator: async () => {},
+  });
+
+  assert.equal(metadata.passes, 1);
+  assert.equal(metadata.fixerAgents, undefined);
+  assert.equal(calls.length, 1);
+});
+
 test("workspace output recovery remains bounded by the configured attempt limit", async (t) => {
   const { directory, resultPath } = await writeBundle(reviewContext(), t);
   const config = structuredClone(sourceConfig);

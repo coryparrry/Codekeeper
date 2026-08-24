@@ -3,7 +3,7 @@
   "files": [
     {
       "path": "agents/fixer.md",
-      "sha256": "6770753275c0df9a6546cfe0453b82e6bae985819ddb57998eeb94b14c6ae38a"
+      "sha256": "d7761bf7e74962ce0b5be774f161a36636c9c7c4e3c6cc71d5a49693a3770b77"
     },
     {
       "path": "agents/issue-triager.md",
@@ -47,7 +47,7 @@
     },
     {
       "path": "src/lib/agents-runtime-core.mjs",
-      "sha256": "8ab1c1b6ba10a02b364ff1407c7a55af6a624316204eb519929d4bc4b8207de2"
+      "sha256": "f4632d99404393084544b5ebea297ebb86886943634b5b01b4723a2dc5771ac5"
     },
     {
       "path": "src/lib/agents-runtime-provider.mjs",
@@ -195,7 +195,7 @@
     },
     {
       "path": "src/lib/pr-repair.mjs",
-      "sha256": "4eca0f3e2bf6caa01c0578d8823cc06117785fe79103eeed8c43ea854f5a6a04"
+      "sha256": "dab7e307afd47192380b6b65e9589bf4c3e1f79a164bfaadc8e2c4d8c69c1c5a"
     },
     {
       "path": "src/lib/prepare-support.mjs",
@@ -203,7 +203,7 @@
     },
     {
       "path": "src/lib/prepare.mjs",
-      "sha256": "c2464b071ca2f6dc9af13b380e03bc81574f8f22c99edd18428fd45794fd2c01"
+      "sha256": "c64893b5b704d5c14d6f1af4f3fe699bdf5af0c47a7650f51ffe9220be5e6c9f"
     },
     {
       "path": "src/lib/process-supervisor.mjs",
@@ -211,11 +211,11 @@
     },
     {
       "path": "src/lib/prompts.mjs",
-      "sha256": "a4be2b329f5ce58ac4fc57361bcfe8d3f2b2fd2dca46f575acb36b2264b5a89a"
+      "sha256": "ea54e12bfcfa91e56020ed5923ff63b341025bcd55c24364325790aa219e89ba"
     },
     {
       "path": "src/lib/publish.mjs",
-      "sha256": "3dba58023379416e48290302e11b03c3f01bdcd7d5cfb2b4fc6aac152be2f353"
+      "sha256": "9929e292872fb94d5f33892db3fcb33c47fbb71d813e7f0e686ed599a043eb38"
     },
     {
       "path": "src/lib/publish/artifacts.mjs",
@@ -251,7 +251,7 @@
     },
     {
       "path": "src/lib/publish/review.mjs",
-      "sha256": "d3352f6926d0c49764401def8c4a969daa676498e1e06fd703b359e799f0c32f"
+      "sha256": "f206494052da393c97d01826b38e92e6839dfbccfc8ac650e94040ef8037874c"
     },
     {
       "path": "src/lib/pull-repair-state.mjs",
@@ -260,6 +260,10 @@
     {
       "path": "src/lib/render.mjs",
       "sha256": "cba4791e6497777c6c9f8c91c902ebbcc57df5694dd84b8a04a979890eca207e"
+    },
+    {
+      "path": "src/lib/repair-objectives.mjs",
+      "sha256": "ce0c400a647638317a28d0f84d81424f7574342f2cd93d83b805a49b9e8179ed"
     },
     {
       "path": "src/lib/repository-context.mjs",
@@ -283,7 +287,7 @@
     },
     {
       "path": "src/lib/validate.mjs",
-      "sha256": "f2defbd3dc94b309dda81abba4787060bf7fbc9513799d948da2da95a04e0b68"
+      "sha256": "93111e3573e77bcf433f34a8ca0653bb30bc42e8a0abf53bae494123ab6ead23"
     },
     {
       "path": "src/lib/workspace.mjs",
