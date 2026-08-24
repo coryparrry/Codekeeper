@@ -229,6 +229,68 @@ test("confirmed repair push reports incomplete final reconciliation with the rem
   );
 });
 
+test("success-comment failure after a push still reports post-push reconciliation", async () => {
+  await withRepairFixture(
+    async ({ artifactDirectory, context, manifest, result }) => {
+      let remoteHead = context.target.headSha;
+      const comments = [];
+      let successCommentAttempted = false;
+      const github = {
+        token: "token",
+        async beginPullRepairMutation() {
+          return livePull(context, remoteHead);
+        },
+        async mutatePullHeadIfCurrent(commitSha, operation) {
+          assert.equal(await operation(), commitSha);
+        },
+        async getPull() {
+          return livePull(context, remoteHead);
+        },
+        async getBranch() {
+          return { commit: { sha: remoteHead } };
+        },
+        async upsertMarkerComment(number, marker, body, identity) {
+          if (body.startsWith("Codekeeper applied automatic repair")) {
+            successCommentAttempted = true;
+            throw new Error("success comment transport failed");
+          }
+          comments.push({ number, marker, body, identity });
+        },
+      };
+
+      await assert.rejects(
+        publishPullRequestRepair({
+          github,
+          artifactDirectory,
+          manifest,
+          context,
+          result,
+          config,
+          automationIdentity,
+          gitOperations: {
+            configureAutomationIdentity() {},
+            createCommitOnCurrentHead,
+            pushHeadToBranch() {
+              remoteHead = git(process.cwd(), ["rev-parse", "HEAD"]);
+              return remoteHead;
+            },
+          },
+        }),
+        (error) => {
+          assert.equal(error.code, "CODEKEEPER_PR_REPAIR_RECONCILIATION_INCOMPLETE");
+          assert.match(error.message, /success comment transport failed/);
+          return true;
+        },
+      );
+
+      assert.equal(successCommentAttempted, true);
+      assert.equal(comments.length, 1);
+      assert.match(comments[0].body, /The repair commit `.*` was pushed/);
+      assert.doesNotMatch(comments[0].body, /did not update this pull request/);
+    },
+  );
+});
+
 test("repair push rejection retains the pre-push failure message without remote reconciliation reads", async () => {
   await withRepairFixture(
     async ({ artifactDirectory, context, manifest, result }) => {

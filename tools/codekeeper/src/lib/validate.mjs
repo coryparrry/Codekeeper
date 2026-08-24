@@ -284,8 +284,32 @@ async function captureWorkspacePatch({ context, config, repairRequested, risk })
   return { patch, patchBytes: valid ? initial.bytes : null };
 }
 
-function assertRepairObjectiveScope(changes, context) {
-  if (!Array.isArray(context.repairClusters)) return;
+function repairPathStem(file) {
+  const normalized = String(file ?? "").replaceAll("\\", "/");
+  const base = normalized.split("/").pop() ?? "";
+  return base.replace(/\.(?:test|spec)\./i, ".").replace(/\.[^.]+$/, "").toLowerCase();
+}
+
+function isSupportingRepairPath(file, objectivePaths) {
+  const normalized = String(file ?? "").replaceAll("\\", "/");
+  const conventionalSupportPath = /(?:^|\/)(?:test|tests|__tests__|fixtures)(?:\/|$)/.test(normalized)
+    || /\.(?:test|spec)\.[^/]+$/.test(normalized);
+  if (!conventionalSupportPath) return false;
+  const stem = repairPathStem(normalized);
+  const segments = normalized.toLowerCase().split("/");
+  return [...objectivePaths].some((objectivePath) => {
+    const objectiveStem = repairPathStem(objectivePath);
+    return objectiveStem && (
+      stem === objectiveStem
+      || stem.startsWith(`${objectiveStem}-`)
+      || stem.startsWith(`${objectiveStem}.`)
+      || segments.includes(objectiveStem)
+    );
+  });
+}
+
+export function repairObjectiveScopeViolations(changes, context) {
+  if (!Array.isArray(context.repairClusters)) return [];
   const objectivePaths = new Set(
     context.repairClusters.flatMap((cluster) => cluster?.items ?? [])
       .map((item) => typeof item?.file === "string"
@@ -295,7 +319,12 @@ function assertRepairObjectiveScope(changes, context) {
   );
   const unexpected = changes.files
     .map((file) => file.path)
-    .filter((file) => !objectivePaths.has(file));
+    .filter((file) => !objectivePaths.has(file) && !isSupportingRepairPath(file, objectivePaths));
+  return unexpected;
+}
+
+function assertRepairObjectiveScope(changes, context) {
+  const unexpected = repairObjectiveScopeViolations(changes, context);
   if (unexpected.length > 0) {
     throw new Error(`Fix changed files outside frozen repair objectives: ${unexpected.join(", ")}`);
   }

@@ -308,8 +308,11 @@ export async function publishPullRequestRepair({
     let reportedError = error;
     if (!dryRun && error.code !== "CODEKEEPER_PAUSED") {
       try {
-        if (publication.phase === REPAIR_PUBLICATION_PHASE.PUSH_CONFIRMED ||
-            publication.phase === REPAIR_PUBLICATION_PHASE.PR_REVALIDATED) {
+        if ([
+          REPAIR_PUBLICATION_PHASE.PUSH_CONFIRMED,
+          REPAIR_PUBLICATION_PHASE.PR_REVALIDATED,
+          REPAIR_PUBLICATION_PHASE.THREADS_RECONCILED,
+        ].includes(publication.phase)) {
           publication.remoteState = await rereadPushedRepairState(github, target);
           reportedError = postPushFailure(error, publication);
         }

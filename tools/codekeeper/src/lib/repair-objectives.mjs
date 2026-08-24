@@ -1,7 +1,9 @@
 import { automaticRepairMarker } from "./markers.mjs";
 
 export const MAX_REPAIR_OBJECTIVE_ITEMS = 24;
-export const MAX_REPAIR_CLUSTERS = 4;
+// Clustered fixers share one checkout. Keep the dispatch plan aligned with the
+// executor's bounded two-pass implementation until isolated workspaces exist.
+export const MAX_REPAIR_CLUSTERS = 2;
 
 const OBJECTIVES_PREFIX = "<!-- codekeeper:repair-objectives=v1:";
 const OBJECTIVES_SUFFIX = " -->";

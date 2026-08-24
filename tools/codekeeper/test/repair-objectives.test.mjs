@@ -11,6 +11,7 @@ import {
   repairItemsFromReviewResult,
   repairObjectivesMarker
 } from "../src/lib/repair-objectives.mjs";
+import { repairObjectiveScopeViolations } from "../src/lib/validate.mjs";
 
 const headSha = "9".repeat(40);
 
@@ -40,7 +41,7 @@ test("a blocking finding and its missing test stay in one fixer cluster", () => 
   assert.deepEqual(clusters[0].items.map((item) => item.kind), ["finding", "missing-test"]);
 });
 
-test("extra independent clusters fold into a remaining fixer agent", () => {
+test("extra independent clusters fold into the second bounded fixer agent", () => {
   const items = ["a", "b", "c", "d", "e"].map((name) => ({
     kind: "finding",
     title: `${name} defect`,
@@ -50,9 +51,9 @@ test("extra independent clusters fold into a remaining fixer agent", () => {
     validation: `Fix ${name}`
   }));
   const clusters = clusterRepairObjectives(items);
-  assert.equal(clusters.length, 4);
+  assert.equal(clusters.length, 2);
   assert.equal(clusters.at(-1).id, "remaining");
-  assert.equal(clusters.at(-1).items.length, 2);
+  assert.equal(clusters.at(-1).items.length, 4);
 });
 
 test("independent source files become separate fixer clusters", () => {
@@ -157,4 +158,30 @@ test("clustered fixer results keep a successful patch when a sibling makes no ch
   assert.equal(merged.noChangeReason, null);
   assert.equal(merged.risk, "medium");
   assert.match(merged.changedSummary, /ceiling rounding/);
+});
+
+test("objective scope permits only source-associated test and fixture support files", () => {
+  const context = {
+    repairClusters: [{
+      id: "settlement",
+      items: [{ file: "src/settlement.mjs" }]
+    }]
+  };
+  const violations = repairObjectiveScopeViolations({
+    files: [
+      { path: "src/settlement.mjs" },
+      { path: "test/settlement.test.mjs" },
+      { path: "test/settlement.integration.test.mjs" },
+      { path: "test/fixtures/settlement.json" },
+      { path: "test/fixtures/settlement.cases.json" },
+      { path: "test/unrelated-auth.test.mjs" },
+      { path: "fixtures/production.json" },
+      { path: "docs/settlement.md" }
+    ]
+  }, context);
+  assert.deepEqual(violations, [
+    "test/unrelated-auth.test.mjs",
+    "fixtures/production.json",
+    "docs/settlement.md"
+  ]);
 });
