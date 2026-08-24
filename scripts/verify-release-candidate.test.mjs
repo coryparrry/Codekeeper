@@ -225,6 +225,187 @@ function candidateValues({ expected, tarball, manifestSha256 } = {}) {
   };
 }
 
+async function runCandidateVerifierCli(args) {
+  try {
+    const result = await execute(
+      process.execPath,
+      [path.join(repositoryRoot, "scripts", "verify-release-candidate.mjs"), ...args],
+      {
+        cwd: repositoryRoot,
+        env: process.env,
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+    return { status: 0, ...result };
+  } catch (error) {
+    return {
+      status: error.code,
+      stdout: error.stdout ?? "",
+      stderr: error.stderr ?? "",
+    };
+  }
+}
+
+test("release candidate CLI derives the tarball from an npm pack report and directory", async (t) => {
+  const fixture = await createCandidateTarball(t);
+  const report = path.join(fixture.root, "pack-report.json");
+  await writeFile(
+    report,
+    `${JSON.stringify({
+      filename: fixture.expected.filename,
+      integrity: fixture.expected.integrity,
+      name: fixture.expected.name,
+      version: fixture.expected.version,
+      files: [],
+    })}\n`,
+  );
+  const manifestSha256 = createHash("sha256")
+    .update(
+      await readFile(
+        path.join(fixture.root, "archive", "package", "release", "manifest.json"),
+      ),
+    )
+    .digest("hex");
+
+  const result = await runCandidateVerifierCli([
+    "--pack-report",
+    report,
+    "--tarball-directory",
+    fixture.root,
+    "--expected-source-commit",
+    fixture.expected.sourceCommit,
+    "--expected-manifest-sha256",
+    manifestSha256,
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^CODEKEEPER_RELEASE_CANDIDATE_VERIFIED /);
+  const receipt = JSON.parse(
+    result.stdout.trim().slice("CODEKEEPER_RELEASE_CANDIDATE_VERIFIED ".length),
+  );
+  assert.deepEqual(receipt, {
+    filename: fixture.expected.filename,
+    integrity: fixture.expected.integrity,
+    manifestSha256,
+    name: fixture.expected.name,
+    sourceCommit: fixture.expected.sourceCommit,
+    version: fixture.expected.version,
+    yamlFiles: 3,
+  });
+  assert.match(receipt.manifestSha256, /^[0-9a-f]{64}$/);
+});
+
+test("release candidate CLI fails closed for malformed pack reports and values", async (t) => {
+  const fixture = await createCandidateTarball(t);
+  const validReport = path.join(fixture.root, "valid-pack-report.json");
+  await writeFile(
+    validReport,
+    `${JSON.stringify({
+      filename: fixture.expected.filename,
+      integrity: fixture.expected.integrity,
+      name: fixture.expected.name,
+      version: fixture.expected.version,
+      files: [],
+    })}\n`,
+  );
+  const cases = [
+    {
+      name: "invalid JSON pack report",
+      report: "not-json\n",
+      expected: /npm pack report is not valid JSON/,
+    },
+    {
+      name: "missing pack-report filename",
+      report: JSON.stringify([
+        {
+          integrity: fixture.expected.integrity,
+          name: fixture.expected.name,
+          version: fixture.expected.version,
+        },
+      ]),
+      expected: /an expected safe tarball filename is required/,
+    },
+    {
+      name: "missing pack-report integrity",
+      report: JSON.stringify([
+        {
+          filename: fixture.expected.filename,
+          name: fixture.expected.name,
+          version: fixture.expected.version,
+        },
+      ]),
+      expected: /an expected SHA-512 integrity is required/,
+    },
+  ];
+
+  for (const entry of cases) {
+    const report = path.join(fixture.root, `${entry.name.replaceAll(" ", "-")}.json`);
+    await writeFile(report, `${entry.report}\n`);
+    const result = await runCandidateVerifierCli([
+      "--pack-report",
+      report,
+      "--tarball-directory",
+      fixture.root,
+      "--expected-source-commit",
+      fixture.expected.sourceCommit,
+    ]);
+    assert.equal(result.status, 1, `${entry.name}: ${result.stderr}`);
+    assert.match(result.stderr, entry.expected, entry.name);
+  }
+
+  for (const entry of [
+    {
+      name: "unknown CLI option",
+      args: ["--unknown", "value"],
+      expected: /unknown argument: --unknown/,
+    },
+    {
+      name: "missing CLI value",
+      args: ["--pack-report"],
+      expected: /every argument requires a flag and value/,
+    },
+    {
+      name: "duplicate CLI option",
+      args: ["--pack-report", "first", "--pack-report", "second"],
+      expected: /duplicate argument: --pack-report/,
+    },
+    {
+      name: "invalid expected manifest SHA-256",
+      args: [
+        "--pack-report",
+        validReport,
+        "--tarball-directory",
+        fixture.root,
+        "--expected-source-commit",
+        fixture.expected.sourceCommit,
+        "--expected-manifest-sha256",
+        "not-a-sha256",
+      ],
+      expected: /expected release manifest SHA-256 is invalid/,
+    },
+    {
+      name: "missing candidate tarball location",
+      args: [
+        "--expected-filename",
+        fixture.expected.filename,
+        "--expected-integrity",
+        fixture.expected.integrity,
+        "--expected-name",
+        fixture.expected.name,
+        "--expected-source-commit",
+        fixture.expected.sourceCommit,
+        "--expected-version",
+        fixture.expected.version,
+      ],
+      expected: /--tarball or --tarball-directory is required/,
+    },
+  ]) {
+    const result = await runCandidateVerifierCli(entry.args);
+    assert.equal(result.status, 1, `${entry.name}: ${result.stderr}`);
+    assert.match(result.stderr, entry.expected, entry.name);
+  }
+});
+
 test("release candidate verification exercises the complete hermetic pipeline", async (t) => {
   const fixture = await createCandidateTarball(t);
   const commandCalls = [];
