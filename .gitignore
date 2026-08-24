@@ -3,6 +3,8 @@ node_modules/
 coverage/
 .worktrees/
 openwiki/
+.codegraph/
+.local/
 .env
 .env.*
 .env.local
