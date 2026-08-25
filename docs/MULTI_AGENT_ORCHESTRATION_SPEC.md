@@ -98,49 +98,39 @@ Workspace work uses the Codex CLI through local MCP. Fix mode can split at most
 two repair clusters, but runs those workspace passes sequentially against one
 checkout and merges their structured results afterward.
 
-The shipped workflow graph is:
+The shipped generic workflow graph is:
 
 ```text
-review:   analyze -> gate
-issue:    workspace -> analyze -> seal -> publish
-fix:      workspace -> analyze -> verify -> seal -> publish
-maintain: workspace -> analyze -> verify -> seal -> publish
+review:   compute -> trusted seal/publish/gate
+issue:    compute -> trusted seal/publish
+fix:      compute -> fresh credential-free validation -> trusted seal/publish
+maintain: compute -> fresh credential-free validation -> trusted seal/publish
 ```
 
 This is a safe staged pipeline, but it is not yet a general multi-agent
 orchestrator. The proposed kernel lives inside compute; it does not replace the
 outer trust pipeline.
 
-### 3.2 Target runner allocations
+### 3.2 Preserved runner allocations
 
 ```mermaid
 flowchart TB
-    subgraph Today["Shipped allocation count"]
-        T1["Review: 2"]
-        T2["Issue: 4"]
-        T3["Fix: 5"]
-        T4["Maintain: 5"]
-    end
-    subgraph Target["Runtime v2 target"]
+    subgraph Preserved["Shipped and required with orchestration"]
         N1["Review: 2"]
         N2["Issue: 2"]
         N3["Fix: 3"]
         N4["Maintain: 3"]
     end
-    T1 --> N1
-    T2 --> N2
-    T3 --> N3
-    T4 --> N4
 ```
 
-| Mode                      | Shipped allocations | Target allocations | Target shape                                                                        |
-| ------------------------- | ------------------: | -----------------: | ----------------------------------------------------------------------------------- |
-| Pull-request review       |                   2 |                  2 | compute; trusted seal/publish/gate                                                  |
-| Issue triage              |                   4 |                  2 | compute; trusted seal/publish                                                       |
-| Pull-request or issue fix |                   5 |                  3 | compute; fresh credential-free validation; trusted seal/publish                     |
-| Repository maintenance    |                   5 |                  3 | compute; fresh credential-free validation when a patch exists; trusted seal/publish |
+| Mode                      | Shipped allocations | Required with orchestration | Preserved shape                                                 |
+| ------------------------- | ------------------: | --------------------------: | --------------------------------------------------------------- |
+| Pull-request review       |                   2 |                           2 | compute; trusted seal/publish/gate                              |
+| Issue triage              |                   2 |                           2 | compute; trusted seal/publish                                   |
+| Pull-request or issue fix |                   3 |                           3 | compute; fresh credential-free validation; trusted seal/publish |
+| Repository maintenance    |                   3 |                           3 | compute; fresh credential-free validation; trusted seal/publish |
 
-The orchestration kernel adds **zero** runner allocations to these target
+The orchestration kernel adds **zero** runner allocations to these preserved
 shapes. A subagent is an in-process logical worker inside compute, not an Actions
 job. Peak runner concurrency for one Codekeeper run remains one because the
 outer stages remain sequential.
@@ -213,6 +203,9 @@ Before model execution, deterministic routing builds a bounded plan:
   "maximumSpecialists": 4,
   "maximumConcurrency": 3,
   "maximumToolCalls": 6,
+  "maximumTokensPerAgent": 32000,
+  "maximumTotalTokens": 96000,
+  "maximumOutputBytes": 262144,
   "maximumRepairRounds": 1,
   "deadlineMs": 900000,
   "scopeDigest": "sha256:..."
@@ -756,9 +749,18 @@ policy shape:
   "ai": {
     "orchestration": {
       "enabled": false,
+      "modes": {
+        "review": false,
+        "issues": false,
+        "fix": false,
+        "maintain": false
+      },
       "maximumSpecialists": 4,
       "maximumConcurrency": 3,
       "maximumToolCalls": 6,
+      "maximumTokensPerAgent": 32000,
+      "maximumTotalTokens": 96000,
+      "maximumOutputBytes": 262144,
       "maximumAutomaticRepairRounds": 1,
       "providerMultiAgent": false
     }
@@ -766,9 +768,11 @@ policy shape:
 }
 ```
 
-Defaults MUST preserve the current single-manager behavior until the relevant
-mode is enabled. Existing installations remain pinned to their current package
-and workflow receipt until an update PR merges.
+The top-level flag is a kill switch. Each closed mode flag controls an
+independent rollout and defaults to false. Defaults MUST preserve the current
+single-manager behavior until the relevant mode is enabled. Existing
+installations remain pinned to their current package and workflow receipt until
+an update PR merges.
 
 The OpenAI Responses API multi-agent capability MAY be evaluated behind
 `providerMultiAgent`. It MUST preserve the same specialist registry, budgets,
@@ -845,7 +849,8 @@ into adopter repositories or exposed to runtime agents.
 ### Phase D — issue triage and deferred seam
 
 - Add conditional read-only issue specialists.
-- Consolidate issue compute while preserving trusted publication.
+- Preserve the shipped two-allocation issue topology and its no-workspace,
+  no-validation mode semantics.
 - Move all issue semantic label decisions to the issue triager.
 - Separate deferred provenance and lifecycle from triager-owned semantics.
 
@@ -853,8 +858,8 @@ into adopter repositories or exposed to runtime agents.
 
 - Add bounded subsystem and trust-boundary audit specialists.
 - Reuse the verifier and isolated repair contracts.
-- Consolidate the outer workflow to the Runtime v2 three-allocation repair
-  shape.
+- Preserve the shipped three-allocation repair topology and fresh
+  credential-free validation boundary.
 
 ### Phase F — provider-side multi-agent experiment
 
@@ -882,7 +887,7 @@ The first implementation is expected to touch these canonical areas:
 | Issue publication       | `tools/codekeeper/src/lib/publish/issue.mjs`           | Keep issue semantic reconciliation exclusively triager-owned.                                                                                          |
 | Deferred publication    | `tools/codekeeper/src/lib/publish/review.mjs`          | Split review provenance and lifecycle from triager-owned issue semantics.                                                                              |
 | GitHub markers          | `tools/codekeeper/src/lib/markers.mjs`                 | Add stable review-lineage, decision, and repair-attempt fingerprints.                                                                                  |
-| Workflows               | reusable runtime workflows and workflow contract tests | Consolidate target allocations without changing credential placement or publication authority.                                                         |
+| Workflows               | reusable runtime workflows and workflow contract tests | Preserve canonical allocations, credential placement, validation, and publication authority while adding in-compute orchestration.                     |
 | Evaluations             | `tools/codekeeper` eval harness and private live suite | Add routing, conflict, drift, loop, ownership, and human-gate cases.                                                                                   |
 
 This table is an impact map, not a requirement to implement the design as one
@@ -925,9 +930,8 @@ or live boundary evidence:
 15. Unresolved specialist conflict results in independent verification,
     conservative publication, or a human decision rather than silent
     overwriting.
-16. Review remains two allocations; target issue becomes two; target fix and
-    maintenance become three, with fresh credential-free validation retained
-    for repository mutation.
+16. Review and issue remain two allocations; fix and maintenance remain three,
+    with fresh credential-free validation retained for repository mutation.
 17. Every changed runtime, workflow, package, and publication boundary passes
     the repository release-safety impact map and is proven at the exact final
     commit.

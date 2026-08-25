@@ -58,64 +58,76 @@ flowchart TD
     O9 --> O10
     O10 --> O11["OA-11 Repair attempt ledger"]
     O3 --> O12["OA-12 Writer isolation"]
+    O5 --> O13["OA-13 Fixer manager"]
     O6 --> O13["OA-13 Fixer manager"]
     O12 --> O13
     O13 --> O14["OA-14 Patch merge and validation"]
     O11 --> O15["OA-15 Repair handback"]
     O14 --> O15
-    O4 --> O16["OA-16 Deferred issue ownership"]
+    O3 --> O16["OA-16 Deferred issue ownership"]
+    O4 --> O16
+    O5 --> O16
     O6 --> O17["OA-17 Issue manager"]
     O16 --> O17
-    O6 --> O18["OA-18 Maintenance manager"]
     O8 --> O18
-    O17 --> O19["OA-19 Issue runner consolidation"]
-    O15 --> O20["OA-20 Repair runner consolidation"]
+    O11 --> O18["OA-18 Maintenance manager"]
+    O14 --> O18
+    O17 --> O19["OA-19 Issue topology regression proof"]
+    O15 --> O20["OA-20 Repair topology regression proof"]
     O18 --> O20
     O7 --> O21["OA-21 Receipts and traces"]
     O13 --> O21
     O17 --> O21
     O18 --> O21
-    O19 --> O22["OA-22 Evals and live rollout"]
-    O20 --> O22
-    O21 --> O22
-    O22 --> O23["OA-23 Provider experiment"]
+    O19 --> O22A["OA-22A Offline evals"]
+    O20 --> O22A
+    O21 --> O22A
+    O22A --> O22B["OA-22B Review/fix rollout"]
+    O22A --> O22C["OA-22C Issue/maintenance rollout"]
+    O22B --> O22D["OA-22D Final qualification"]
+    O22C --> O22D
+    O22D --> O23["OA-23 Provider experiment"]
 ```
 
 ## Backlog summary
 
-| ID    | Task                                                                | Size | Depends on                 | Safe parallel lane                           |
-| ----- | ------------------------------------------------------------------- | ---- | -------------------------- | -------------------------------------------- |
-| OA-01 | Freeze baseline and add disabled orchestration flags                | M    | —                          | Foundation only                              |
-| OA-02 | Add orchestration-plan and budget contracts                         | M    | OA-01                      | Labels and lineage                           |
-| OA-03 | Add evidence and patch ledger contracts                             | M    | OA-02                      | Label ownership                              |
-| OA-04 | Partition PR, issue, lifecycle, and unmanaged labels                | M    | OA-01                      | Plan and ledgers                             |
-| OA-05 | Add frozen PR intent, finding, decision, and attempt lineage        | L    | OA-01                      | Plan and labels                              |
-| OA-06 | Build the bounded specialist registry and scheduler                 | L    | OA-03                      | Writer isolation after OA-03                 |
-| OA-07 | Convert PR review to a manager with initial specialists             | L    | OA-06, OA-05               | Writer isolation                             |
-| OA-08 | Add counter-evidence and independent conflict verification          | M    | OA-07                      | Writer isolation                             |
-| OA-09 | Enforce the human decision gate                                     | M    | OA-04, OA-05               | Scheduler before publication work            |
-| OA-10 | Add head-aware finding re-review and guidance                       | L    | OA-08, OA-09               | Fixer isolation                              |
-| OA-11 | Enforce one automatic repair round                                  | M    | OA-10                      | Fixer manager where files do not overlap     |
-| OA-12 | Isolate patch-producing workers                                     | L    | OA-03                      | Reviewer lane                                |
-| OA-13 | Convert fixer clusters into manager-owned agent tools               | L    | OA-06, OA-12               | Reviewer publication lane                    |
-| OA-14 | Merge patch ledgers deterministically and preserve partial outcomes | L    | OA-13                      | Re-review lane where files do not overlap    |
-| OA-15 | Bind repaired heads back to reviewer re-review                      | L    | OA-11, OA-14               | Issue lane                                   |
-| OA-16 | Split deferred issue provenance from triager semantics              | M    | OA-04                      | Scheduler and writer isolation               |
-| OA-17 | Convert issue triage to a manager with conditional specialists      | L    | OA-06, OA-16               | Maintenance manager                          |
-| OA-18 | Convert maintenance to a manager with audit specialists             | L    | OA-06, OA-08               | Issue manager                                |
-| OA-19 | Consolidate issue triage from four runners to two                   | L    | OA-17                      | Repair semantics                             |
-| OA-20 | Consolidate fix and maintenance from five runners to three          | L    | OA-15, OA-18               | Issue topology                               |
-| OA-21 | Seal redacted orchestration receipts and traces                     | M    | OA-07, OA-13, OA-17, OA-18 | Workflow topology where files do not overlap |
-| OA-22 | Add orchestration evals and controlled live rollout gates           | L    | OA-19, OA-20, OA-21        | Final integration only                       |
-| OA-23 | Evaluate provider-side multi-agent execution                        | M    | OA-22                      | Optional experiment                          |
+| ID     | Task                                                                | Size | Depends on                 | Safe parallel lane                           |
+| ------ | ------------------------------------------------------------------- | ---- | -------------------------- | -------------------------------------------- |
+| OA-01  | Freeze baseline and add disabled orchestration flags                | M    | —                          | Foundation only                              |
+| OA-02  | Add orchestration-plan and budget contracts                         | M    | OA-01                      | Labels and lineage                           |
+| OA-03  | Add evidence and patch ledger contracts                             | M    | OA-02                      | Label ownership                              |
+| OA-04  | Partition PR, issue, lifecycle, and unmanaged labels                | M    | OA-01                      | Plan and ledgers                             |
+| OA-05  | Add frozen PR intent, finding, decision, and attempt lineage        | L    | OA-01                      | Plan and labels                              |
+| OA-06  | Build the bounded specialist registry and scheduler                 | L    | OA-03                      | Writer isolation after OA-03                 |
+| OA-07  | Convert PR review to a manager with initial specialists             | L    | OA-06, OA-05               | Writer isolation                             |
+| OA-08  | Add counter-evidence and independent conflict verification          | M    | OA-07                      | Writer isolation                             |
+| OA-09  | Enforce the human decision gate                                     | M    | OA-04, OA-05               | Scheduler before publication work            |
+| OA-10  | Add head-aware finding re-review and guidance                       | L    | OA-08, OA-09               | Fixer isolation                              |
+| OA-11  | Enforce one automatic repair round                                  | M    | OA-10                      | Fixer manager where files do not overlap     |
+| OA-12  | Isolate patch-producing workers                                     | L    | OA-03                      | Reviewer lane                                |
+| OA-13  | Convert fixer clusters into manager-owned agent tools               | L    | OA-05, OA-06, OA-12        | Reviewer publication lane                    |
+| OA-14  | Merge patch ledgers deterministically and preserve partial outcomes | L    | OA-13                      | Re-review lane where files do not overlap    |
+| OA-15  | Bind repaired heads back to reviewer re-review                      | L    | OA-11, OA-14               | Issue lane                                   |
+| OA-16  | Split deferred issue provenance from triager semantics              | M    | OA-03, OA-04, OA-05        | Scheduler and writer isolation               |
+| OA-17  | Convert issue triage to a manager with conditional specialists      | L    | OA-06, OA-16               | Maintenance manager                          |
+| OA-18  | Convert maintenance to a manager with audit specialists             | L    | OA-08, OA-11, OA-14        | Issue manager                                |
+| OA-19  | Prove issue orchestration preserves the two-allocation topology     | M    | OA-17                      | Repair semantics                             |
+| OA-20  | Prove repair orchestration preserves the three-allocation topology  | M    | OA-15, OA-18               | Issue topology                               |
+| OA-21  | Seal redacted orchestration receipts and traces                     | M    | OA-07, OA-13, OA-17, OA-18 | Workflow topology where files do not overlap |
+| OA-22A | Add offline orchestration eval and trace-grading contracts          | M    | OA-19, OA-20, OA-21        | Final integration only                       |
+| OA-22B | Qualify controlled review and fix rollout                           | M    | OA-22A                     | Issue/maintenance qualification              |
+| OA-22C | Qualify controlled issue and maintenance rollout                    | M    | OA-22A                     | Review/fix qualification                     |
+| OA-22D | Seal final package, installer, and adopter qualification            | M    | OA-22B, OA-22C             | Final qualification only                     |
+| OA-23  | Evaluate provider-side multi-agent execution                        | M    | OA-22D                     | Optional experiment                          |
 
 Sizes are relative implementation risk, not calendar estimates. A large task
 must still stay within one coherent root cause and the repository line limit.
 
 ## Gate A — contracts and ownership
 
-Gate A must ship with orchestration disabled and no changed runtime behavior.
-It creates the deterministic vocabulary every later task consumes.
+Gate A must ship with orchestration disabled. OA-04 intentionally narrows
+deterministic label authority; other single-manager results, runner topology,
+and model-routing behavior remain unchanged.
 
 ### OA-01 — Freeze baseline and add disabled orchestration flags
 
@@ -127,8 +139,9 @@ normalization, installer policy copy, mode planning, and topology fixtures.
 
 **Work:**
 
-- Add a closed `ai.orchestration` object with conservative limits and
-  `enabled: false` by default.
+- Add a closed `ai.orchestration` object with a top-level `enabled: false` kill
+  switch, conservative limits, and closed `review`, `issues`, `fix`, and
+  `maintain` mode flags that each default to false.
 - Keep `maxTurns: 1` for modes without enabled specialist tools.
 - Record current model-call, repair-cluster, and runner-allocation baselines.
 - Reject unknown roles, invalid budgets, and unsupported mode combinations.
@@ -152,14 +165,19 @@ preparation, artifact validation, and orchestration kernel tests.
 **Work:**
 
 - Define manager role, registered specialists, maximum concurrency, turns,
-  calls, output, deadline, retry, and repair-round limits.
-- Bind the plan to mode, policy, package, repository, context, and head digests.
+  calls, per-agent and total token/output budgets, deadline, retry, and
+  repair-round limits.
+- Extend the existing verified mode plan and envelope with one nested
+  orchestration-plan digest rather than creating a competing outer authority.
+- Bind the nested plan to mode, canonical App permissions and credential stage,
+  policy, package, repository, context, and head digests.
 - Canonicalize the plan before hashing and reject unknown or duplicate roles.
 - Make provider settings subordinate to deterministic plan ceilings.
 - Represent manager-only execution as a valid zero-specialist plan.
 
 **Focused verification:** exact-key, bound, digest mutation, stale-context,
-unknown-role, duplicate-role, and manager-only tests.
+unknown-role, duplicate-role, manager-only, tampered App-permission, and
+credential-stage escalation tests.
 
 **Done when:** Every future manager run has an immutable validated plan before
 the Agents SDK is called.
@@ -169,8 +187,9 @@ the Agents SDK is called.
 **Outcome:** Specialist claims and writer outputs use bounded exact-context
 ledgers rather than free-form handoffs.
 
-**Primary surfaces:** new evidence and patch ledger modules, schema validation,
-artifact handoff, sealing, run envelopes, and validation tests.
+**Primary surfaces:** evidence and patch ledger modules, schema validation,
+existing artifact handoff, sealing and run-envelope primitives, and validation
+tests.
 
 **Work:**
 
@@ -181,6 +200,8 @@ artifact handoff, sealing, run envelopes, and validation tests.
 - Preserve immutable claim identity when counter-evidence is added.
 - Canonicalize and hash ledgers for candidate sealing.
 - Allow manager-only claims only under identical evidence rules.
+- Nest ledger digests in the existing handoff and monotonic envelope; do not add
+  a second candidate, sealing, or outer-state authority.
 
 **Focused verification:** malformed ledger matrix, exact-head mutation, path
 traversal, symlink, size, duplicate identity, and seal/reload round trips.
@@ -230,13 +251,15 @@ candidate artifacts, review fixtures, and marker tests.
   effects, provenance, and intent digest.
 - Define stable finding, decision, and repair-attempt identifiers with head
   lineage.
+- Persist first/current heads, App-owned thread IDs, status, evidence changes,
+  and attempt links in digest-bound App-owned lineage state.
 - Prevent fixer-authored commits or model summaries from replacing intent.
 - Bind human answers to decision fingerprint, author authority, and current
   head.
 
 **Focused verification:** title and line movement, root-cause change, head
-change, intent-source change, forged marker, unauthorized author, and fixer-
-regenerated-intent rejection.
+change, intent-source change, persisted lineage reload, evidence retirement,
+forged marker, unauthorized author, and fixer-regenerated-intent rejection.
 
 **Done when:** A finding can be followed across heads without treating wording
 or line movement as a new objective.
@@ -269,9 +292,14 @@ modules, policy mapping, tracing hooks, and provider tests.
 - Give every role a narrow input, output, authority, and uncertainty contract.
 - Enforce concurrency, turns, calls, time, retries, and output outside model
   control.
+- Account for provider-reported per-agent and total token use, including
+  retries, and stop deterministically at the frozen budget.
 - Separate provider retries from semantic repair attempts.
 - Keep manager-only and legacy one-turn fast paths when tools are off.
 - Return bounded timeout, skipped, failed, and completed states per tool.
+- Give read-only specialists a frozen read-only snapshot or bounded evidence
+  facade. Child commands inherit no App, provider, trace, publication, or
+  workspace credential; provider access remains in the trusted host.
 
 **Focused verification:** fake-agent routing, concurrency, timeout, retry,
 cancellation, unknown role, budget breach, manager-only, and trace-parent tests.
@@ -294,6 +322,13 @@ workspace review orchestration, prompts, evidence boundaries, and review evals.
   after the initial roles pass their focused evaluation fixtures.
 - Route simple reviews to the manager alone and independent questions to
   bounded parallel specialists.
+- For manager-only review, expose the same frozen read-only evidence facade and
+  ledger validation used by specialists. Replace the current deterministic
+  no-findings path only when a validated orchestration plan authorizes that
+  facade; otherwise preserve the fail-closed no-workspace result.
+- Adapt the existing workspace-specialist execution path into the registered
+  evidence-tool abstraction. A run uses either that abstraction or the legacy
+  compatibility path, never both; manager-only review executes exactly once.
 - Keep specialists read-only and exclude labels, comments, repair, and merge
   fields from their schemas.
 - Require every adopted finding to cite a validated ledger claim.
@@ -338,16 +373,20 @@ rendering, markers, and publication tests.
 
 **Work:**
 
-- Add decision category, question, rationale, evidence, and options with exactly
-  one recommendation.
+- Add decision category, question, rationale, evidence, and at least two useful
+  options when a real choice exists, with exactly one recommendation.
 - Require manual merge recommendation, review-needed state, disabled auto-merge,
   and ineligible repair.
 - Explicitly reject repair for manual recommendations.
-- Upsert one fingerprinted decision comment without repeated reminders.
+- Upsert one fingerprinted App-owned decision comment without repeated
+  reminders.
+- Resolve human authority from the repository's deterministic authorization
+  policy; reject the App/bot's own response and other unauthorized authors.
 - Revalidate author, answer, fingerprint, and head before resuming.
 
-**Focused verification:** every material-effect category, unused shape,
-multiple recommendations, manual-with-repair, head drift, unauthorized answer,
+**Focused verification:** every material-effect category, unused shape, one
+option, multiple recommendations, required decision plus blocking feedback,
+manual-with-repair, head drift, replay, App-authored or unauthorized answer,
 repeated event, and auto-merge suspension.
 
 **Done when:** No agent can waive or route around a human decision.
@@ -386,13 +425,18 @@ repair-state reconciliation, and idempotency tests.
 **Work:**
 
 - Persist one semantic attempt against lineage, findings, intent, and head.
+- Extend the existing monotonic envelope with the bounded PR-lineage state
+  machine; do not create a competing run-state authority.
+- Persist the attempt through App-owned, digest-bound state and reject markers
+  not authored by the expected App identity.
 - Distinguish provider retries, workflow reruns, stale publication, ambiguous
   dispatch, and semantic repair rounds.
 - Consume the default allowance after dispatch, including unsafe ambiguity.
 - Keep automatic repair false on every post-repair re-review.
 - Require explicit owner action and future opt-in for a second round.
 
-**Focused verification:** duplicate events, job rerun, provider retry, dispatch
+**Focused verification:** duplicate events, skipped state, automatic escape from
+`awaiting-human`, post-dispatch redispatch, job rerun, provider retry, dispatch
 ambiguity, expired lease, changed head, partial repair, and owner follow-up.
 
 **Done when:** The default lineage can dispatch at most one automatic repair
@@ -468,7 +512,8 @@ artifact, publication input, and fixer/publication fixtures.
 
 - Apply accepted patches in stable objective order from one base.
 - Reject unauthorized paths, overlapping conflicts, stale bases, irregular
-  files, oversized growth, and union-scope escapes.
+  files, binary changes outside policy, file/byte/line/diff-growth budget
+  breaches, and union-scope escapes.
 - Allow related tests/fixtures only through an explicit bounded rule.
 - Preserve per-cluster status and no-change reason through publication.
 - Set ready-for-review only when all required objectives and validation pass.
@@ -521,8 +566,10 @@ label helpers, deferred issue tests, and ownership tests.
 
 **Work:**
 
-- Restrict reviewer-created state to source PR, finding fingerprint, evidence,
-  App marker, and deferred lifecycle.
+- Restrict reviewer-created state to source PR, stable finding lineage,
+  evidence, and App marker.
+- Derive deferred or paused lifecycle only from deterministic runtime state;
+  never treat it as reviewer- or triager-owned semantics.
 - Route the created issue through normal triage.
 - Prevent reviewer reruns from overwriting triager-owned labels.
 - Preserve lifecycle markers during semantic reconciliation.
@@ -546,6 +593,10 @@ publication, implementation dispatch, and issue evals.
 
 - Add duplicate, reproduction, scope/priority, and readiness specialists.
 - Keep simple issues on the manager-only path.
+- Preserve the canonical issue mode's `workspaceAccess: "none"` and
+  `validationRequired: false` semantics. Specialists may inspect only the
+  frozen issue record, bounded issue/PR inventory, and other prepared evidence;
+  repository checkout access requires a separately approved topology change.
 - Require specialist claims to enter the evidence ledger.
 - Derive all classification and readiness in the final triager result.
 - Dispatch a separate fix only after validated AI-ready state and policy.
@@ -569,62 +620,69 @@ finding publication, repair selection, and audit evals.
 - Register runtime, workflow, installer, release, security, and test
   specialists behind conditional routing.
 - Deduplicate findings by root cause and owning path.
-- Use the verifier for material cross-subsystem conflict.
+- Use the verifier for material cross-subsystem conflict and independently
+  verify every final maintenance result before publication.
 - Let only the audit manager select a repair candidate.
 - Route authorized repair through the common isolated writer contract.
 
 **Focused verification:** simple audit, routed subsystems, duplicates,
-conflicts, verifier uncertainty, no-repair, and one repair selection.
+conflicts, non-conflicting repair verification, verifier uncertainty or failure,
+no-repair, and one repair selection.
 
 **Done when:** Audit specialists provide evidence but cannot mutate GitHub or
 select repair directly.
 
-### OA-19 — Consolidate issue triage from four runners to two
+### OA-19 — Prove issue orchestration preserves two allocations
 
-**Outcome:** Issue workspace and manager share one safe compute runner followed
-by one trusted seal/publish runner.
+**Outcome:** In-compute issue specialists preserve the shipped compute plus
+trusted seal/publish topology without introducing repository workspace access.
 
-**Primary surfaces:** issue workflow and package consumer, orchestration
-compute/publish adapters, topology, authorization, isolation, and package tests.
+**Primary surfaces:** issue workflow and package consumer, canonical mode
+semantics, orchestration compute/publish adapters, topology, authorization,
+isolation, and package tests.
 
 **Work:**
 
-- Combine issue workspace, manager, and candidate validation inside compute.
-- Transfer only verified package source and validated candidate.
-- Reverify and seal before minting the App token on publish.
+- Keep issue manager and context-only specialists inside the existing compute
+  allocation with no checkout or validation runner.
+- Transfer only verified package source and the validated candidate.
+- Preserve reverification and sealing before App-token creation on publish.
 - Preserve package, policy, context, and issue-state digests.
-- Remove obsolete jobs and artifacts without adding a cache.
+- Reject any orchestration change that adds a job, cache, workspace credential,
+  or validation stage to issue mode.
 
 **Focused verification:** two-job topology, job failure, missing/tampered
 handoff, stale issue, credential placement, reverification, rerun, and package
 parity.
 
-**Done when:** An eligible issue run allocates two runners with all current
-trust invariants preserved.
+**Done when:** Contract tests prove an eligible issue run still allocates two
+runners with all current trust invariants preserved.
 
-### OA-20 — Consolidate fix and maintenance from five runners to three
+### OA-20 — Prove repair orchestration preserves three allocations
 
-**Outcome:** Fix and maintenance use compute, fresh credential-free validation,
-and trusted seal/publish runners.
+**Outcome:** Fix and maintenance orchestration preserves the shipped compute,
+fresh credential-free validation, and trusted seal/publish allocations.
 
 **Primary surfaces:** fix/maintenance workflows and package consumers,
 orchestration adapters, topology, artifact, authorization, and workflow tests.
 
 **Work:**
 
-- Combine workspace and manager stages inside compute without App credentials.
+- Keep manager and specialist execution inside compute without adding a job or
+  exposing App credentials.
 - Keep repository validation on fresh `ubuntu-latest` without model, trace, or
   App credentials.
-- Seal and publish only after valid validation or explicit no-patch state.
+- Run fresh credential-free validation for both patch and no-patch maintenance
+  results; treat no-patch as validated output, never as a validation bypass.
 - Reverify package and handoff on every runner.
-- Preserve failure-closed publication and remove obsolete handoffs.
+- Preserve failure-closed publication and the existing monotonic handoff.
 
 **Focused verification:** three-job topology, no-patch, patch, validation
 failure, compute failure, stale candidate, credentials, reverification, and
 package parity.
 
-**Done when:** Fix and maintenance allocate three sequential runners, review
-remains two, and validation remains independent.
+**Done when:** Contract tests prove fix and maintenance still allocate three
+sequential runners, review remains two, and validation remains independent.
 
 ### Gate D acceptance
 
@@ -659,13 +717,13 @@ worker, redaction, size, seal mismatch, missing receipt, and optional exporter.
 **Done when:** Routing and stopping can be explained from sealed evidence
 without sensitive runtime content.
 
-### OA-22 — Add orchestration evals and controlled live rollout gates
+### OA-22A — Add offline orchestration eval and trace grading
 
-**Outcome:** Each mode is enabled only after quality, safety, ownership, loop,
-and topology criteria pass.
+**Outcome:** Routing, quality, ownership, isolation, and stopping can be graded
+without enabling a live mode.
 
-**Primary surfaces:** offline eval harness, private live suite, trace graders,
-fixtures, reports, release readiness, starter policy, and installer authority UI.
+**Primary surfaces:** offline eval harness, private answer keys, trace graders,
+fixtures, deterministic reports, and eval contract tests.
 
 **Work:**
 
@@ -674,16 +732,84 @@ fixtures, reports, release readiness, starter policy, and installer authority UI
   exact heads.
 - Compare correctness before latency, tokens, or cost.
 - Keep answer keys private and human-gate feedback promotion.
-- Run controlled adopter review, repair, issue, maintenance, stale-state, and
-  retry cases.
-- Enable modes independently only after their gate passes.
+- Produce provider-independent, exact-input reports suitable for later rollout
+  gates.
 
-**Focused verification:** offline suite, trace grading, repeated immutable live
-cases, runner measurements, package candidate, adopter installation proof, and
-installer authority-screen screenshots where policy presentation changes.
+**Focused verification:** offline suite, trace grading, repeatability, private
+answer-key boundary, malformed receipt, and exact-input report digests.
 
-**Done when:** Every enabled mode has repeatable exact-head and live boundary
-evidence.
+**Done when:** Every mode has a repeatable offline gate without changing live
+policy.
+
+### OA-22B — Qualify controlled review and fix rollout
+
+**Outcome:** Review and fix orchestration can be enabled independently after
+their quality, human-gate, loop, isolation, and exact-head criteria pass.
+
+**Primary surfaces:** private review/fix live suite, release readiness, mode
+flags, candidate reports, and controlled adopter receipts.
+
+**Work:**
+
+- Run repeated immutable review, repair, failed-repair, stale-state, retry, and
+  duplicate-event cases.
+- Prove manager-only review, routed fan-out, one repair round, re-review, and
+  fresh validation at exact package and head boundaries.
+- Enable only the qualified `review` and `fix` flags; leave other modes off.
+
+**Focused verification:** package candidate, controlled adopter installation,
+workflow receipts, runner measurements, exact PR heads, and rollback to the
+single-manager path.
+
+**Done when:** Review and fix have independent live evidence and can be enabled
+or disabled without changing issue or maintenance authority.
+
+### OA-22C — Qualify controlled issue and maintenance rollout
+
+**Outcome:** Issue and maintenance orchestration can be enabled independently
+after ownership, context, verification, topology, and exact-head criteria pass.
+
+**Primary surfaces:** private issue/maintenance live suite, release readiness,
+mode flags, candidate reports, and controlled adopter receipts.
+
+**Work:**
+
+- Run repeated immutable issue, deferred-finding, maintenance, stale-state,
+  retry, and specialist-failure cases.
+- Prove context-only issue specialists, triager label ownership, independent
+  maintenance verification, isolated repair, and preserved runner topology.
+- Enable only the qualified `issues` and `maintain` flags; leave other modes
+  unchanged.
+
+**Focused verification:** package candidate, controlled adopter installation,
+workflow receipts, runner measurements, exact issue/head state, and rollback to
+the single-manager path.
+
+**Done when:** Issue and maintenance have independent live evidence and can be
+enabled or disabled without changing review or fix authority.
+
+### OA-22D — Seal final package, installer, and adopter qualification
+
+**Outcome:** The combined independently gated modes are proven at the final
+package, installer, workflow, and adopter boundaries.
+
+**Primary surfaces:** release qualification, starter policy, installer authority
+UI, final reports, package candidate, and controlled adopter installation.
+
+**Work:**
+
+- Re-run affected mode gates against the exact final package and source commit.
+- Verify independent mode defaults, upgrades, rollback, and policy migration.
+- Capture installer authority-screen evidence when policy presentation changes.
+- Seal the final qualification report without embedding private answer keys or
+  adopter secrets.
+
+**Focused verification:** final package candidate, source manifest, installer
+checks and screenshots where applicable, adopter installation proof, workflow
+receipts, and exact-mode policy inspection.
+
+**Done when:** Every enabled mode has repeatable exact-head and live-boundary
+evidence bound to the final qualified package.
 
 ### OA-23 — Evaluate provider-side multi-agent execution
 
@@ -691,7 +817,7 @@ evidence.
 lock-in or security boundary.
 
 **Primary surfaces:** provider adapter/flag, scheduler compatibility, comparison
-evals, and trace reports.
+evals, and trace reports from OA-22A through OA-22D.
 
 **Work:**
 
@@ -714,6 +840,8 @@ orchestration without affecting other providers.
 - Receipts explain every manager/subagent route and stop.
 - Private evals cover all source-specification acceptance criteria.
 - Modes are enabled independently, not as one global authority change.
+- Final package and adopter evidence is bound to the exact qualified source and
+  policy state without exposing private answer keys.
 - Provider-side orchestration remains optional until separately approved.
 
 ## Recommended PR sequence
@@ -731,17 +859,20 @@ PR 09  OA-08
 PR 10  OA-09
 PR 11  OA-10
 PR 12  OA-11
-PR 13  OA-13
+PR 13  OA-13          begins after OA-05, OA-06, and OA-12
 PR 14  OA-14
 PR 15  OA-15
-PR 16  OA-16          may begin after OA-04 if publish/review is not concurrently edited
+PR 16  OA-16          begins after OA-03, OA-04, and OA-05
 PR 17  OA-17
-PR 18  OA-18          parallel with OA-17 after OA-08
-PR 19  OA-19
-PR 20  OA-20
+PR 18  OA-18          begins after OA-08, OA-11, and OA-14
+PR 19  OA-19          issue topology regression proof
+PR 20  OA-20          repair topology regression proof
 PR 21  OA-21          receipt primitives may start earlier; integration completes here
-PR 22  OA-22
-PR 23  OA-23          optional and separately approved
+PR 22  OA-22A         offline eval and trace-grading contracts
+PR 23  OA-22B         review/fix live qualification; parallel with OA-22C
+PR 24  OA-22C         issue/maintenance live qualification; parallel with OA-22B
+PR 25  OA-22D         final package, installer, and adopter qualification
+PR 26  OA-23          optional and separately approved
 ```
 
 Stacked PRs MAY be used for dependent tasks, but each PR must state its base,
@@ -751,29 +882,29 @@ worktree.
 
 ## Specification acceptance mapping
 
-| Specification criterion                                  | Implemented by                    |
-| -------------------------------------------------------- | --------------------------------- |
-| 1. Manager-only path for simple PRs and issues           | OA-06, OA-07, OA-17               |
-| 2. Registered specialists stay within all budgets        | OA-02, OA-06                      |
-| 3. Fan-out adds no runner allocation                     | OA-06, OA-19, OA-20               |
-| 4. Writer sandboxes are exact-head and isolated          | OA-12                             |
-| 5. Patch merge rejects unsafe or stale output            | OA-03, OA-14                      |
-| 6. Every candidate remains digest-bound                  | OA-02, OA-03, OA-05               |
-| 7. Reviewer alone owns PR semantics                      | OA-04, OA-07, OA-10, OA-15        |
-| 8. Triager alone owns issue semantics                    | OA-04, OA-16, OA-17               |
-| 9. Deferred provenance cannot overwrite issue semantics  | OA-04, OA-16                      |
-| 10. Repair needs reviewer resolution proof               | OA-10, OA-15                      |
-| 11. Failed repair guides and stops                       | OA-10, OA-11, OA-15               |
-| 12. Retries and duplicate events cannot loop repair      | OA-11                             |
-| 13. Material unauthorized effects wait for a human       | OA-05, OA-09                      |
-| 14. Agents cannot waive authority boundaries             | OA-03, OA-04, OA-06, OA-09, OA-12 |
-| 15. Specialist conflict is independently adjudicated     | OA-08                             |
-| 16. Runner targets are review 2, issue 2, fix/maintain 3 | OA-19, OA-20                      |
-| 17. Final evidence follows release-safety boundaries     | Every task, completed by OA-22    |
+| Specification criterion                                 | Implemented by                    |
+| ------------------------------------------------------- | --------------------------------- |
+| 1. Manager-only path for simple PRs and issues          | OA-06, OA-07, OA-17               |
+| 2. Registered specialists stay within all budgets       | OA-02, OA-06                      |
+| 3. Fan-out adds no runner allocation                    | OA-06, OA-19, OA-20               |
+| 4. Writer sandboxes are exact-head and isolated         | OA-12                             |
+| 5. Patch merge rejects unsafe or stale output           | OA-03, OA-14                      |
+| 6. Every candidate remains digest-bound                 | OA-02, OA-03, OA-05               |
+| 7. Reviewer alone owns PR semantics                     | OA-04, OA-07, OA-10, OA-15        |
+| 8. Triager alone owns issue semantics                   | OA-04, OA-16, OA-17               |
+| 9. Deferred provenance cannot overwrite issue semantics | OA-04, OA-16                      |
+| 10. Repair needs reviewer resolution proof              | OA-10, OA-15                      |
+| 11. Failed repair guides and stops                      | OA-10, OA-11, OA-15               |
+| 12. Retries and duplicate events cannot loop repair     | OA-11                             |
+| 13. Material unauthorized effects wait for a human      | OA-05, OA-09                      |
+| 14. Agents cannot waive authority boundaries            | OA-03, OA-04, OA-06, OA-09, OA-12 |
+| 15. Specialist conflict is independently adjudicated    | OA-08                             |
+| 16. Runner counts remain review/issue 2, fix/maintain 3 | OA-19, OA-20                      |
+| 17. Final evidence follows release-safety boundaries    | Every task, completed by OA-22D   |
 
 ## Completion definition
 
-The backlog is complete when OA-01 through OA-22 pass their gates, the final
+The backlog is complete when OA-01 through OA-22D pass their gates, the final
 exact package and source commit are verified, controlled live adopter evidence
 exists, and the source specification's 17 acceptance criteria map to passing
 evidence. OA-23 remains optional until a separate product decision promotes
