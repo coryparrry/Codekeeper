@@ -160,6 +160,30 @@ async function rereadPushedRepairState(github, target) {
   return `Direct GitHub re-read: ${remoteReadSummary(pull, "PR")}; ${remoteReadSummary(branch, "branch")}.`;
 }
 
+function hasIncompleteRepairClusters(context, result) {
+  return result?.readyForReview === false
+    && result?.noChangeReason === null
+    && Array.isArray(context?.repairClusters)
+    && context.repairClusters.length > 1;
+}
+
+function repairPublicationBody({ context, result, commitSha }) {
+  if (hasIncompleteRepairClusters(context, result)) {
+    const statusDetails = result.changedSummary || result.summary;
+    const details = statusDetails
+      ? sanitizeMarkdown(statusDetails).slice(0, 6000)
+      : "See the repair commit.";
+    return `Codekeeper applied automatic repair \`${commitSha}\` on this pull request with incomplete cluster readiness. Review the per-cluster outcome before treating every objective as complete.\n\n${details}`;
+  }
+  const appliedObjectives = Array.isArray(context.repairClusters)
+    ? context.repairClusters.flatMap((cluster) => cluster.items ?? []).map((item) => item.title).filter(Boolean)
+    : [];
+  const appliedSummary = appliedObjectives.length > 0
+    ? appliedObjectives.slice(0, 8).map((title) => `- ${sanitizeMarkdown(title)}`).join("\n")
+    : (result.changedSummary ? sanitizeMarkdown(result.changedSummary).slice(0, 1500) : "See the repair commit.");
+  return `Codekeeper applied automatic repair \`${commitSha}\` on this pull request.\n\n${appliedSummary}`;
+}
+
 function postPushFailure(error, publication) {
   const failure = new Error(
     `The repair commit ${publication.commitSha} was pushed, but final GitHub reconciliation is incomplete: ${error.message}`,
@@ -279,16 +303,10 @@ export async function publishPullRequestRepair({
       reviewThreadWarning = `The repair commit was pushed, but review-thread reconciliation was incomplete: ${sanitizeMarkdown(error.message)}`;
     }
     publication.phase = REPAIR_PUBLICATION_PHASE.THREADS_RECONCILED;
-    const appliedObjectives = Array.isArray(context.repairClusters)
-      ? context.repairClusters.flatMap((cluster) => cluster.items ?? []).map((item) => item.title).filter(Boolean)
-      : [];
-    const appliedSummary = appliedObjectives.length > 0
-      ? appliedObjectives.slice(0, 8).map((title) => `- ${sanitizeMarkdown(title)}`).join("\n")
-      : (result.changedSummary ? sanitizeMarkdown(result.changedSummary).slice(0, 1500) : "See the repair commit.");
     await github.upsertMarkerComment(
       target.number,
       fixRunMarker(context.runId),
-      `Codekeeper applied automatic repair \`${commitSha}\` on this pull request.\n\n${appliedSummary}`,
+      repairPublicationBody({ context, result, commitSha }),
       automationIdentity
     );
     publication.phase = REPAIR_PUBLICATION_PHASE.COMPLETE;

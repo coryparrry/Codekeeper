@@ -144,8 +144,13 @@ export async function assertRequiredCandidatePaths(root) {
   return yamlFiles;
 }
 
-async function parseCandidateYaml(root, yamlFiles, environment) {
-  const ruby = await runCommand(
+async function parseCandidateYaml(
+  root,
+  yamlFiles,
+  environment,
+  command = runCommand,
+) {
+  const ruby = await command(
     "ruby",
     [
       "-e",
@@ -162,9 +167,14 @@ async function parseCandidateYaml(root, yamlFiles, environment) {
   requireSuccess(ruby, "Ruby/Psych workflow parsing");
 }
 
-async function extractTarball(tarball, root, environment) {
+async function extractTarball(
+  tarball,
+  root,
+  environment,
+  command = runCommand,
+) {
   await mkdir(root, { recursive: true });
-  const extracted = await runCommand(
+  const extracted = await command(
     "tar",
     ["-xzf", tarball, "--strip-components=1", "-C", root],
     { env: environment },
@@ -180,9 +190,14 @@ async function writeIntegrityReceipt(root, integrity) {
   );
 }
 
-async function runPackagedVerifier(root, expected, environment) {
+async function runPackagedVerifier(
+  root,
+  expected,
+  environment,
+  command = runCommand,
+) {
   await writeIntegrityReceipt(root, expected.integrity);
-  const result = await runCommand(
+  const result = await command(
     process.execPath,
     [
       path.join(root, "bin", "verify-package.mjs"),
@@ -218,10 +233,11 @@ function successfulResult(stdout = "") {
   };
 }
 
-async function exerciseProductionVerificationAdapters({
+export async function exerciseProductionVerificationAdapters({
   candidateRoot,
   adapterStage,
   expected,
+  verifyRelease,
 }) {
   const module = await import(
     `${pathToFileURL(path.join(candidateRoot, "src", "verification-adapters.mjs")).href}?candidate=${expected.integrity.slice(-12)}`
@@ -295,6 +311,7 @@ async function exerciseProductionVerificationAdapters({
         root: path.dirname(adapterStage),
         executable: path.join(adapterStage, "bin", "codekeeper.mjs"),
       }),
+      ...(verifyRelease ? { verifyRelease } : {}),
     },
   );
   if (!packageVerified) fail("production exact-package verification adapter rejected the candidate");
@@ -312,6 +329,17 @@ async function exerciseProductionVerificationAdapters({
     fail("production verification issued a secret or variable mutation command");
   }
 }
+
+const DEFAULT_DEPENDENCIES = Object.freeze({
+  runCommand,
+  runLiteralNpxLifecycle,
+  extractTarball,
+  runPackagedVerifier,
+  parseCandidateYaml,
+  exerciseProductionVerificationAdapters,
+  mkdtemp,
+  rm,
+});
 
 function parseArguments(argv) {
   const values = {};
@@ -370,7 +398,8 @@ async function expectedCandidate(values) {
   return { expected, tarball };
 }
 
-export async function verifyReleaseCandidate({ values }) {
+export async function verifyReleaseCandidate({ values, dependencies = {} }) {
+  const operations = { ...DEFAULT_DEPENDENCIES, ...dependencies };
   const { expected, tarball } = await expectedCandidate(values);
   const verifiedTarball = await verifyTarballReceipt({
     tarball,
@@ -379,14 +408,19 @@ export async function verifyReleaseCandidate({ values }) {
   });
   expected.shasum = createHash("sha1").update(verifiedTarball.bytes).digest("hex");
 
-  const temporaryRoot = await mkdtemp(
+  const temporaryRoot = await operations.mkdtemp(
     path.join(os.tmpdir(), "codekeeper-release-candidate-"),
   );
   const environment = commandEnvironment(temporaryRoot);
   try {
     await writeFile(path.join(temporaryRoot, "empty-npmrc"), "");
     const extractedRoot = path.join(temporaryRoot, "extracted");
-    await extractTarball(verifiedTarball.tarball, extractedRoot, environment);
+    await operations.extractTarball(
+      verifiedTarball.tarball,
+      extractedRoot,
+      environment,
+      operations.runCommand,
+    );
     const yamlFiles = await assertRequiredCandidatePaths(extractedRoot);
     const manifestBytes = await readFile(
       path.join(extractedRoot, "release", "manifest.json"),
@@ -396,13 +430,23 @@ export async function verifyReleaseCandidate({ values }) {
       fail("release manifest SHA-256 does not match the expected build output");
     }
     expected.manifestSha256 = manifestSha256;
-    await runPackagedVerifier(extractedRoot, expected, environment);
-    await parseCandidateYaml(extractedRoot, yamlFiles, environment);
+    await operations.runPackagedVerifier(
+      extractedRoot,
+      expected,
+      environment,
+      operations.runCommand,
+    );
+    await operations.parseCandidateYaml(
+      extractedRoot,
+      yamlFiles,
+      environment,
+      operations.runCommand,
+    );
 
     const packageManifest = JSON.parse(
       await readFile(path.join(extractedRoot, "package.json"), "utf8"),
     );
-    await runLiteralNpxLifecycle({
+    await operations.runLiteralNpxLifecycle({
       bytes: verifiedTarball.bytes,
       expected,
       packageManifest,
@@ -411,7 +455,7 @@ export async function verifyReleaseCandidate({ values }) {
 
     const installRoot = path.join(temporaryRoot, "installed");
     await mkdir(installRoot);
-    const installed = await runCommand(
+    const installed = await operations.runCommand(
       "npm",
       [
         "install",
@@ -430,8 +474,13 @@ export async function verifyReleaseCandidate({ values }) {
       path.join(installRoot, "node_modules", "@coryparry", "codekeeper"),
     );
     await assertRequiredCandidatePaths(installedPackage);
-    await runPackagedVerifier(installedPackage, expected, environment);
-    const runtimeInstall = await runCommand(
+    await operations.runPackagedVerifier(
+      installedPackage,
+      expected,
+      environment,
+      operations.runCommand,
+    );
+    const runtimeInstall = await operations.runCommand(
       "npm",
       ["ci", "--ignore-scripts", "--no-audit", "--no-fund"],
       { cwd: path.join(installedPackage, "runtime"), env: environment },
@@ -439,11 +488,17 @@ export async function verifyReleaseCandidate({ values }) {
     requireSuccess(runtimeInstall, "nested runtime dependency installation");
 
     const adapterStage = path.join(temporaryRoot, "adapter", "package");
-    await extractTarball(verifiedTarball.tarball, adapterStage, environment);
-    await exerciseProductionVerificationAdapters({
+    await operations.extractTarball(
+      verifiedTarball.tarball,
+      adapterStage,
+      environment,
+      operations.runCommand,
+    );
+    await operations.exerciseProductionVerificationAdapters({
       candidateRoot: installedPackage,
       adapterStage,
       expected,
+      verifyRelease: operations.verifyRelease,
     });
     return Object.freeze({
       filename: expected.filename,
@@ -455,7 +510,7 @@ export async function verifyReleaseCandidate({ values }) {
       yamlFiles: yamlFiles.length,
     });
   } finally {
-    await rm(temporaryRoot, { recursive: true, force: true });
+    await operations.rm(temporaryRoot, { recursive: true, force: true });
   }
 }
 

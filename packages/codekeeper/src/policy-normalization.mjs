@@ -166,9 +166,13 @@ export function applyManagedLabelSets(policy) {
 }
 
 export function normalizeLivePolicy(input) {
-  const config = structuredClone(input);
-  applyLabelCatalog(config);
-  applyManagedLabelSets(config);
-  applyRepairDefaults(config);
-  return config;
+  try {
+    const config = structuredClone(input);
+    applyLabelCatalog(config);
+    applyManagedLabelSets(config);
+    applyRepairDefaults(config);
+    return config;
+  } catch (error) {
+    throw new Error(`Invalid Codekeeper policy: ${error.message}`, { cause: error });
+  }
 }

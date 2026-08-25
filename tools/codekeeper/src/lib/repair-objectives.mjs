@@ -4,6 +4,11 @@ export const MAX_REPAIR_OBJECTIVE_ITEMS = 24;
 // Clustered fixers share one checkout. Keep the dispatch plan aligned with the
 // executor's bounded two-pass implementation until isolated workspaces exist.
 export const MAX_REPAIR_CLUSTERS = 2;
+// GitHub limits issue-comment bodies to 65,536 UTF-8 bytes. Dispatch details
+// are appended to a caller-owned status sentence and an authorization marker,
+// so keep an explicit sub-budget for the details themselves.
+export const AUTOMATIC_REPAIR_DISPATCH_DETAILS_MAX_BYTES = 60_000;
+const AUTOMATIC_REPAIR_OBJECTIVES_MARKER_MAX_BYTES = 52_000;
 
 const OBJECTIVES_PREFIX = "<!-- codekeeper:repair-objectives=v1:";
 const OBJECTIVES_SUFFIX = " -->";
@@ -189,9 +194,76 @@ export function renderRepairPlan(clusters) {
   return `${header}\n\n${body}`;
 }
 
+function compactRepairItem(item, percentage) {
+  const compactText = (value) => {
+    const text = String(value ?? "");
+    if (!text || percentage <= 0) return "";
+    return boundedText(text, Math.max(1, Math.floor(text.length * percentage / 100)));
+  };
+  return repairItem(item?.kind, compactText(item?.title), {
+    // Paths are authorization scope, so preserve them while compacting only
+    // explanatory text when the marker needs to fit its reserved budget.
+    file: item?.file,
+    line: item?.line,
+    explanation: compactText(item?.explanation),
+    validation: compactText(item?.validation)
+  });
+}
+
+function fitRepairObjectivesMarker(headSha, items) {
+  const normalized = items.map((item) => repairItem(item?.kind, item?.title, item));
+  const markerAt = (percentage) => repairObjectivesMarker({
+    headSha,
+    items: normalized.map((item) => compactRepairItem(item, percentage))
+  });
+  if (Buffer.byteLength(markerAt(100), "utf8") <= AUTOMATIC_REPAIR_OBJECTIVES_MARKER_MAX_BYTES) {
+    return normalized;
+  }
+
+  let low = 0;
+  let high = 99;
+  while (low < high) {
+    const percentage = Math.ceil((low + high) / 2);
+    if (Buffer.byteLength(markerAt(percentage), "utf8") <= AUTOMATIC_REPAIR_OBJECTIVES_MARKER_MAX_BYTES) {
+      low = percentage;
+    } else {
+      high = percentage - 1;
+    }
+  }
+  return normalized.map((item) => compactRepairItem(item, low));
+}
+
+function truncateUtf8(value, maximumBytes) {
+  if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
+  const characters = [...value];
+  let low = 0;
+  let high = characters.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (Buffer.byteLength(characters.slice(0, middle).join(""), "utf8") <= maximumBytes) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return characters.slice(0, low).join("");
+}
+
 export function automaticRepairDispatchDetails(headSha, items) {
+  if (Array.isArray(items) && items.length > MAX_REPAIR_OBJECTIVE_ITEMS) {
+    throw new Error(`Automatic repair dispatch supports at most ${MAX_REPAIR_OBJECTIVE_ITEMS} objectives`);
+  }
   const clusters = clusterRepairObjectives(items);
-  return `\n\n${renderRepairPlan(clusters)}\n${repairObjectivesMarker({ headSha, items: clusters.flatMap((cluster) => cluster.items) })}`;
+  const markerItems = fitRepairObjectivesMarker(headSha, clusters.flatMap((cluster) => cluster.items));
+  const marker = repairObjectivesMarker({ headSha, items: markerItems });
+  const planBudget = Math.max(
+    0,
+    AUTOMATIC_REPAIR_DISPATCH_DETAILS_MAX_BYTES
+      - Buffer.byteLength(marker, "utf8")
+      - Buffer.byteLength("\n\n\n", "utf8")
+  );
+  const plan = truncateUtf8(renderRepairPlan(clusterRepairObjectives(markerItems)), planBudget);
+  return `\n\n${plan}\n${marker}`;
 }
 
 export function assignedRepairClusterPrompt(cluster, index, total) {
@@ -240,6 +312,25 @@ function boundJoin(values, maximum, separator = " ") {
   return `${text.slice(0, Math.max(0, maximum - 1))}…`;
 }
 
+function mixedClusterOutcome(result, index, maximum) {
+  const changed = result?.noChangeReason === null;
+  const prefix = `Cluster ${index + 1} ${changed ? "changed" : "skipped"}: `;
+  const detailMaximum = Math.max(0, maximum - prefix.length);
+  if (result?.noChangeReason === null) {
+    return `${prefix}${boundJoin([result.summary, result.changedSummary], detailMaximum, " — ")}`;
+  }
+  return `${prefix}${boundJoin([result.noChangeReason], detailMaximum)}`;
+}
+
+function mixedClusterOutcomes(results, maximum) {
+  const separator = "\n\n";
+  const perClusterMaximum = Math.max(
+    1,
+    Math.floor((maximum - separator.length * Math.max(0, results.length - 1)) / results.length)
+  );
+  return results.map((result, index) => mixedClusterOutcome(result, index, perClusterMaximum)).join(separator);
+}
+
 export function mergeFixWorkspaceResults(results, target) {
   if (!Array.isArray(results) || results.length === 0) {
     throw new Error("Clustered fixer results are missing");
@@ -275,6 +366,24 @@ export function mergeFixWorkspaceResults(results, target) {
       resolvedReviewThreadIds,
       readyForReview: false,
       noChangeReason: boundJoin(results.map((result) => result.noChangeReason), 6000)
+    };
+  }
+  if (changed.length < results.length) {
+    // A mixed result is a real patch with incomplete objective coverage. Keep
+    // noChangeReason null so the existing fix schema and workspace validator
+    // continue to describe the shared checkout accurately, while carrying
+    // every cluster's status and reason through the existing public fields.
+    return {
+      mode: "fix",
+      summary: mixedClusterOutcomes(results, 2000),
+      risk,
+      targetKind: target.kind,
+      targetNumber: target.number,
+      changedSummary: mixedClusterOutcomes(results, 6000),
+      testsRun,
+      resolvedReviewThreadIds,
+      readyForReview: false,
+      noChangeReason: null
     };
   }
   return {

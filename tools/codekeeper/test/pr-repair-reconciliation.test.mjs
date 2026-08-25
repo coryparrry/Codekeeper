@@ -10,6 +10,7 @@ import {
 } from "../src/lib/git.mjs";
 import { fixRunMarker, sha256 } from "../src/lib/markers.mjs";
 import { publishPullRequestRepair } from "../src/lib/pr-repair.mjs";
+import { mergeFixWorkspaceResults } from "../src/lib/repair-objectives.mjs";
 
 const config = JSON.parse(
   await readFile(
@@ -145,6 +146,128 @@ async function withRepairFixture(run) {
     await rm(fixture.repository, { recursive: true, force: true });
     await rm(fixture.artifactDirectory, { recursive: true, force: true });
   }
+}
+
+async function assertMixedRepairPublication({ changedFirst, successfulProse = false }) {
+  await withRepairFixture(
+    async ({ artifactDirectory, context, manifest }) => {
+      const changedCluster = {
+        id: "rounding",
+        items: [{ title: "Round FX exposure using the configured ceiling" }],
+      };
+      const skippedCluster = {
+        id: "idempotency",
+        items: [{ title: "Preserve the existing idempotency guard" }],
+      };
+      context.repairClusters = changedFirst
+        ? [changedCluster, skippedCluster]
+        : [skippedCluster, changedCluster];
+      let result;
+      if (successfulProse) {
+        const statusDetails = "All objective changes were applied. Historical note: Cluster 1 skipped: the old baseline context.";
+        result = {
+          mode: "fix",
+          summary: statusDetails,
+          risk: "medium",
+          targetKind: "pull_request",
+          targetNumber: context.target.number,
+          changedSummary: statusDetails,
+          testsRun: [],
+          resolvedReviewThreadIds: [],
+          readyForReview: true,
+          noChangeReason: null,
+        };
+      } else {
+        const changedResult = {
+          mode: "fix",
+          summary: "Rounded FX exposure.",
+          risk: "medium",
+          targetKind: "pull_request",
+          targetNumber: context.target.number,
+          changedSummary: "Use ceiling rounding.",
+          testsRun: [{ command: "node --test", result: "passed" }],
+          resolvedReviewThreadIds: [],
+          readyForReview: true,
+          noChangeReason: null,
+        };
+        const skippedResult = {
+          mode: "fix",
+          summary: "No independent idempotency defect.",
+          risk: "low",
+          targetKind: "pull_request",
+          targetNumber: context.target.number,
+          changedSummary: "",
+          testsRun: [],
+          resolvedReviewThreadIds: [],
+          readyForReview: false,
+          noChangeReason: "The checkout already expires entries once.",
+        };
+        result = mergeFixWorkspaceResults(
+          changedFirst ? [changedResult, skippedResult] : [skippedResult, changedResult],
+          context.target,
+        );
+        assert.equal(result.readyForReview, false);
+        assert.equal(result.noChangeReason, null);
+        const changedClusterNumber = changedFirst ? 1 : 2;
+        const skippedClusterNumber = changedFirst ? 2 : 1;
+        const firstClusterStatus = changedFirst ? "changed" : "skipped";
+        assert.match(result.changedSummary, new RegExp(`^Cluster 1 ${firstClusterStatus}:`));
+        assert.match(result.changedSummary, new RegExp(`Cluster ${changedClusterNumber} changed:`));
+        assert.match(result.changedSummary, new RegExp(`Cluster ${skippedClusterNumber} skipped:`));
+      }
+      let remoteHead = context.target.headSha;
+      const comments = [];
+      const github = {
+        token: "token",
+        async beginPullRepairMutation() {
+          return livePull(context, remoteHead);
+        },
+        async mutatePullHeadIfCurrent(commitSha, operation) {
+          assert.equal(await operation(), commitSha);
+        },
+        async getPull() {
+          return livePull(context, remoteHead);
+        },
+        async upsertMarkerComment(number, marker, body, identity) {
+          comments.push({ number, marker, body, identity });
+        },
+      };
+
+      const publication = await publishPullRequestRepair({
+        github,
+        artifactDirectory,
+        manifest,
+        context,
+        result,
+        config,
+        automationIdentity,
+        gitOperations: {
+          configureAutomationIdentity() {},
+          createCommitOnCurrentHead,
+          pushHeadToBranch() {
+            remoteHead = git(process.cwd(), ["rev-parse", "HEAD"]);
+            return remoteHead;
+          },
+        },
+      });
+
+      assert.equal(publication.updated, true);
+      assert.equal(comments.length, 1);
+      assert.equal(comments[0].number, context.target.number);
+      assert.equal(comments[0].marker, fixRunMarker(context.runId));
+      assert.deepEqual(comments[0].identity, automationIdentity);
+      if (successfulProse) {
+        assert.match(comments[0].body, new RegExp("Codekeeper applied automatic repair `" + remoteHead + "` on this pull request\\.\\n\\n"));
+        assert.doesNotMatch(comments[0].body, /incomplete cluster readiness/);
+        assert.match(comments[0].body, /Round FX exposure using the configured ceiling/);
+        assert.match(comments[0].body, /Preserve the existing idempotency guard/);
+      } else {
+        assert.match(comments[0].body, new RegExp("Codekeeper applied automatic repair `" + remoteHead + "` on this pull request with incomplete cluster readiness\\. Review the per-cluster outcome before treating every objective as complete\\."));
+        assert.match(comments[0].body, new RegExp(result.changedSummary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+        assert.doesNotMatch(comments[0].body, /Preserve the existing idempotency guard/);
+      }
+    },
+  );
 }
 
 test("confirmed repair push reports incomplete final reconciliation with the remote commit", async () => {
@@ -347,4 +470,16 @@ test("repair push rejection retains the pre-push failure message without remote 
       assert.doesNotMatch(comments[0].body, /was pushed/);
     },
   );
+});
+
+test("partial repair publication preserves changed and skipped details when changed cluster comes first", async () => {
+  await assertMixedRepairPublication({ changedFirst: true });
+});
+
+test("partial repair publication preserves changed and skipped details when skipped cluster comes first", async () => {
+  await assertMixedRepairPublication({ changedFirst: false });
+});
+
+test("successful repair prose mentioning a skipped cluster does not change publication status", async () => {
+  await assertMixedRepairPublication({ changedFirst: true, successfulProse: true });
 });

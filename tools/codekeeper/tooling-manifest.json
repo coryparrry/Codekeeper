@@ -183,7 +183,7 @@
     },
     {
       "path": "src/lib/policy-normalization.mjs",
-      "sha256": "3c53472261ca2598ae75c8d43d0910f792e27f3e6879502fa5f342e8d37f5a44"
+      "sha256": "b232309dac0e473a484da8c4a1b28b660360e719b05b30912661c46647b9135a"
     },
     {
       "path": "src/lib/policy-validator.mjs",
@@ -195,7 +195,7 @@
     },
     {
       "path": "src/lib/pr-repair.mjs",
-      "sha256": "dab7e307afd47192380b6b65e9589bf4c3e1f79a164bfaadc8e2c4d8c69c1c5a"
+      "sha256": "7e61b0aaded6a901cb3bb83cc87086c39d456477b99f0d8edc4c98e90914cc59"
     },
     {
       "path": "src/lib/prepare-support.mjs",
@@ -263,7 +263,7 @@
     },
     {
       "path": "src/lib/repair-objectives.mjs",
-      "sha256": "ce0c400a647638317a28d0f84d81424f7574342f2cd93d83b805a49b9e8179ed"
+      "sha256": "532aa789f183bc8f53f8e64a760dd6519a57f0302816765747fb3e20273f4bf2"
     },
     {
       "path": "src/lib/repository-context.mjs",

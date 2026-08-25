@@ -46,6 +46,37 @@ async function cloneStage(t, source, name) {
   return destination;
 }
 
+async function mutateManifestClone(t, source, name, mutation) {
+  const destination = await cloneStage(t, source, name);
+  const manifestPath = path.join(destination, "release", "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const replacement = mutation(manifest);
+  await writeFile(
+    manifestPath,
+    typeof replacement === "string" ? replacement : `${JSON.stringify(replacement)}\n`,
+  );
+  return destination;
+}
+
+async function writeIntegrityReceipt(root, receipt) {
+  await writeFile(
+    path.join(root, ...INTEGRITY_RECEIPT_PATH.split("/")),
+    typeof receipt === "string" ? receipt : `${JSON.stringify(receipt)}\n`,
+  );
+}
+
+async function updatePackageManifestDigest(root, packageManifest) {
+  const packagePath = path.join(root, "package.json");
+  await writeFile(packagePath, `${JSON.stringify(packageManifest)}\n`);
+  const manifestPath = path.join(root, "release", "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const packageEntry = manifest.files.find((entry) => entry.path === "package.json");
+  packageEntry.sha256 = createHash("sha256")
+    .update(await readFile(packagePath))
+    .digest("hex");
+  await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+}
+
 test("package stage contains one release with separate closed installer and runtime dependency graphs", async (t) => {
   const { destination, manifest } = await buildFixtureStage(t);
   const paths = manifest.files.map((entry) => entry.path);
@@ -179,6 +210,160 @@ test("package stage verification rejects omission, addition, tampering, hidden f
   await assert.rejects(verifyCodekeeperPackageStage(linked), /symlink is not allowed/);
 
   await rm(path.join(linked, target), { force: true });
+});
+
+test("release manifest rejects malformed, mismatched, oversized, and unsafe trusted metadata", async (t) => {
+  const { destination, manifest } = await buildFixtureStage(t);
+  const validEntry = manifest.files[0];
+  const cases = [
+    ["invalid JSON", () => "{", /release manifest is not valid JSON/],
+    ["non-object shape", () => null, /release manifest shape is invalid/],
+    ["wrong manifest version", (value) => ({ ...value, version: 2 }), /release manifest shape is invalid/],
+    [
+      "wrong package identity",
+      (value) => ({ ...value, package: { ...value.package, name: "@example/other" } }),
+      /release manifest shape is invalid/,
+    ],
+    [
+      "invalid package version",
+      (value) => ({ ...value, package: { ...value.package, version: "not-a-release" } }),
+      /release manifest shape is invalid/,
+    ],
+    [
+      "wrong source repository",
+      (value) => ({ ...value, source: { ...value.source, repository: "https://example.com/source" } }),
+      /release manifest shape is invalid/,
+    ],
+    [
+      "invalid source commit",
+      (value) => ({ ...value, source: { ...value.source, commit: "A".repeat(40) } }),
+      /release manifest shape is invalid/,
+    ],
+    ["empty files", (value) => ({ ...value, files: [] }), /release manifest shape is invalid/],
+    [
+      "oversized files",
+      (value) => ({
+        ...value,
+        files: Array.from({ length: 501 }, (_, index) => ({
+          ...validEntry,
+          path: `generated/oversized-${index}.txt`,
+        })),
+      }),
+      /release manifest shape is invalid/,
+    ],
+    [
+      "duplicate path",
+      (value) => ({ ...value, files: [...value.files, { ...validEntry }] }),
+      /release manifest contains an invalid file entry/,
+    ],
+    [
+      "traversal path",
+      (value) => ({ ...value, files: [{ ...validEntry, path: "../outside" }] }),
+      /release manifest contains an invalid file entry/,
+    ],
+    [
+      "reserved manifest path",
+      (value) => ({ ...value, files: [{ ...validEntry, path: "release/manifest.json" }] }),
+      /release manifest contains an invalid file entry/,
+    ],
+    [
+      "invalid source path",
+      (value) => ({ ...value, files: [{ ...validEntry, sourcePath: "../outside" }] }),
+      /release manifest contains an invalid file entry/,
+    ],
+    [
+      "invalid role",
+      (value) => ({ ...value, files: [{ ...validEntry, role: "test" }] }),
+      /release manifest contains an invalid file entry/,
+    ],
+    [
+      "invalid digest",
+      (value) => ({ ...value, files: [{ ...validEntry, sha256: "not-a-sha256" }] }),
+      /release manifest contains an invalid file entry/,
+    ],
+  ];
+
+  for (const [label, mutation, expectedMessage] of cases) {
+    const candidate = await mutateManifestClone(t, destination, label.replaceAll(" ", "-"), mutation);
+    await assert.rejects(
+      verifyCodekeeperPackageStage(candidate),
+      expectedMessage,
+      label,
+    );
+  }
+});
+
+test("integrity receipt rejects malformed JSON, shape, SRI, and noncanonical base64", async (t) => {
+  const { destination } = await buildFixtureStage(t);
+  const integrity = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
+  const noncanonicalBase64 = integrity.replace(
+    /^sha512-(.{10})/,
+    (_, prefix) => `sha512-${prefix}=`,
+  );
+  const cases = [
+    ["malformed JSON", "{", integrity, /package integrity receipt is not valid JSON/],
+    ["wrong version", { version: 2, algorithm: "sha512", integrity }, integrity, /receipt does not match/],
+    ["wrong algorithm", { version: 1, algorithm: "sha256", integrity }, integrity, /receipt does not match/],
+    ["missing key", { version: 1, algorithm: "sha512" }, integrity, /receipt does not match/],
+    [
+      "extra key",
+      { version: 1, algorithm: "sha512", integrity, extra: false },
+      integrity,
+      /receipt does not match/,
+    ],
+    [
+      "receipt SRI mismatch",
+      { version: 1, algorithm: "sha512", integrity: `sha512-${Buffer.alloc(64, 8).toString("base64")}` },
+      integrity,
+      /receipt does not match/,
+    ],
+    [
+      "invalid SRI algorithm",
+      { version: 1, algorithm: "sha512", integrity },
+      "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      /expected package integrity is invalid/,
+    ],
+    [
+      "noncanonical base64",
+      { version: 1, algorithm: "sha512", integrity },
+      noncanonicalBase64,
+      /expected package integrity is invalid/,
+    ],
+  ];
+
+  for (const [label, receipt, expectedIntegrity, expectedMessage] of cases) {
+    const candidate = await cloneStage(t, destination, label.replaceAll(" ", "-"));
+    await writeIntegrityReceipt(candidate, receipt);
+    await assert.rejects(
+      verifyCodekeeperRelease({
+        root: candidate,
+        expectedIntegrity,
+      }),
+      expectedMessage,
+      label,
+    );
+  }
+
+});
+
+test("installed package manifest identity must match the trusted release manifest", async (t) => {
+  const { destination, manifest } = await buildFixtureStage(t);
+  const cases = [
+    ["name mismatch", (value) => ({ ...value, name: "@example/other" })],
+    ["version mismatch", (value) => ({ ...value, version: "9.9.9" })],
+    ["null package manifest", () => null],
+  ];
+
+  for (const [label, mutation] of cases) {
+    const candidate = await cloneStage(t, destination, label.replaceAll(" ", "-"));
+    const packageManifest = JSON.parse(await readFile(path.join(candidate, "package.json"), "utf8"));
+    await updatePackageManifestDigest(candidate, mutation(packageManifest));
+    await assert.rejects(
+      verifyCodekeeperPackageStage(candidate),
+      /package manifest identity does not match the release manifest/,
+      label,
+    );
+  }
 });
 
 test("installed-package verifier binds external package identity, integrity receipt, manifest, and source", async (t) => {
