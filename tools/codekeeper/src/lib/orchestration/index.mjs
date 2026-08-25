@@ -16,3 +16,4 @@ export {
   assertWorkspaceEvidence,
   verifyFrozenContext,
 } from "./workspace-isolation.mjs";
+export * from "./lineage.mjs";
