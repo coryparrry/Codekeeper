@@ -8,7 +8,7 @@
 
 ## Disclaimer ⚠️
 
-Codekeeper is a work in progress, it breaks, and its not production ready yet. Its a very early Alpha. Any help appreciated in this build. This was born from my own personal, smaller version. 
+Codekeeper is a work in progress, it breaks, and its not production ready yet. Its a very early Alpha. Any help appreciated in this build. This was born from my own personal, smaller version.
 
 PR Review: Working ✔️
 Tagging: ✔️
@@ -32,6 +32,19 @@ You do not need to write workflows or configure installation files by hand. The 
 | **Owner assistant** | Routes exact commands from configured owners to the installed workflows. | Only configured owners and exact supported commands grant authority. |
 
 Codekeeper complements your existing tests, approvals, security checks, and deployment gates. It does not replace them.
+
+## 🗺️ Roadmap
+
+These are product directions, not delivery commitments. See the full [roadmap](ROADMAP.md) for the current priorities and trust-boundary context.
+
+- **Improve agent flow and orchestration.** Make specialist selection, subagent coordination, and handoffs more effective while keeping authority and evidence boundaries clear.
+- **Make pull-request collaboration more useful.** Add emoji reactions and improve the clarity, relevance, and follow-through of agent responses on pull requests.
+- **Strengthen observability.** Provide better agent monitoring and a local dashboard for understanding active work, results, and failures.
+- **Smooth out installation and updates.** Improve the install flow, safe automatic merging, and branch cleanup after installation and updates.
+- **Optimize for speed without weakening safety.** Reduce unnecessary latency and repeated work while preserving validation, isolation, and fail-closed behavior.
+- **Broaden supported execution models.** Develop safe fork support and better self-hosted deployment options.
+- **Explore hosted operation.** Investigate hosted agents and a Cloudflare-hosted app that can operate independently of GitHub Actions.
+- **Work toward Codex subscription runners.** Explore a runner integration for users' Codex subscriptions, subject to platform support.
 
 ## 🚀 Install
 
