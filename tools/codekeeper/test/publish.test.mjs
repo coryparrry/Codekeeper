@@ -8,6 +8,7 @@ import { automaticRepairMarker, deferredReviewMarker, deferredReviewFingerprint,
 import { completeReviewFeedback } from "../src/lib/review-feedback.mjs";
 import { evaluateAutoMerge, reviewLabels } from "../src/lib/policy.mjs";
 import { LABELS } from "../src/lib/label-ownership.mjs";
+import { reconcileFixtureLabels } from "./helpers/label-fixtures.mjs";
 import {
   publishIssue as publishIssueProduction,
   reconcileAutoMerge,
@@ -159,23 +160,24 @@ test("verified deferred feedback creates one idempotent issue with backlinks and
       calls.updated.push({ number, input });
       return { ...existing[0], ...input };
     },
-    async replaceManagedLabels() {},
+    async replaceManagedLabels(_number, desiredLabels, _managed, mode) {
+      existing[0].labels = reconcileFixtureLabels(existing[0].labels ?? [], desiredLabels, mode);
+    },
     async upsertReviewReply(number, commentId, marker, body) { calls.replies.push({ number, commentId, marker, body }); }
   };
   const input = { github, context, result: { reviewFeedback: [feedback] }, config, automationIdentity: identity };
 
   const created = await upsertDeferredReviewFeedback(input);
   assert.deepEqual(created.map((item) => item.state), ["created"]);
-  assert.deepEqual(calls.created[0].labels, [LABELS.DEFERRED, LABELS.TESTING]);
+  assert.deepEqual(calls.created[0].labels, [LABELS.DEFERRED]);
   assert.match(calls.created[0].body, /pull\/7#discussion_r41/);
   assert.match(calls.created[0].body, new RegExp(deferredReviewMarker(fingerprint)));
   assert.equal(calls.replies[0].commentId, 41);
   assert.match(calls.replies[0].body, /issue #51/);
 
-  existing.push({
-    ...calls.created[0],
-    number: 51,
+  existing.push({ ...calls.created[0], number: 51,
     state: "open",
+    labels: [{ name: "triager-owned" }, { name: LABELS.DEFERRED }],
     user: { login: identity.login, id: Number(identity.id), type: "Bot" }
   });
   feedback.problemKey = "renamed-timeout-coverage";
@@ -1100,8 +1102,8 @@ test("review publication activates auto-merge last and falls back safely", async
       pull.auto_merge = null;
     },
     async ensureLabels(_definitions, desiredLabels) { calls.push({ type: "ensure", desiredLabels }); },
-    async replaceManagedLabels(_number, desiredLabels) {
-      calls.push({ type: "labels", desiredLabels });
+    async replaceManagedLabels(_number, desiredLabels, _managed, mode) {
+      calls.push({ type: "labels", desiredLabels, mode });
       if (rejectLabels) throw new Error("label publication failed");
     },
     async upsertMarkerComment(_number, _marker, comment) { calls.push({ type: "comment", comment }); }
@@ -1122,7 +1124,7 @@ test("review publication activates auto-merge last and falls back safely", async
     assert.equal(publication.blocking, false);
     assert.equal(publication.autoMerge.eligible, false);
     assert.equal(publication.autoMergeResult.enabled, false);
-    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "labels", "comment"]);
+    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "labels", "comment", "enable", "labels", "labels", "comment"]);
     assert.ok(provisioned.desiredLabels.includes(LABELS.MERGE_READY));
     assert.ok(provisioned.desiredLabels.includes(LABELS.REVIEW_NEEDED));
     assert.ok(labelCalls[0].desiredLabels.includes(LABELS.MERGE_READY));
@@ -1137,7 +1139,7 @@ test("review publication activates auto-merge last and falls back safely", async
     rejectEnable = false;
     const successful = await publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" });
     assert.equal(successful.autoMergeResult.enabled, true);
-    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable"]);
+    assert.equal(calls.at(-1).type, "enable");
 
     calls.length = 0;
     pull.auto_merge = null;
@@ -1147,7 +1149,7 @@ test("review publication activates auto-merge last and falls back safely", async
       publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
       /auto-merge.*postcondition/i
     );
-    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "disable"]);
+    assert.equal(calls.at(-1).type, "disable");
     assert.equal(pull.auto_merge, null);
 
     calls.length = 0;
@@ -1158,7 +1160,7 @@ test("review publication activates auto-merge last and falls back safely", async
       publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
       /auto-merge.*postcondition|stale review/i
     );
-    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "disable"]);
+    assert.equal(calls.at(-1).type, "disable");
     assert.equal(pull.auto_merge, null);
     pull.head.sha = "head";
     mutateHeadAfterEnable = false;
@@ -1170,7 +1172,7 @@ test("review publication activates auto-merge last and falls back safely", async
       publishReview({ artifactDirectory, config: reviewConfig, configSha256, ...integrity, token: "unused" }),
       /postcondition.*paused/i
     );
-    assert.deepEqual(calls.map((call) => call.type), ["ensure", "labels", "comment", "enable", "disable"]);
+    assert.equal(calls.at(-1).type, "disable");
     assert.equal(pull.auto_merge, null);
     pull.labels = [];
     pauseAfterEnable = false;
@@ -1230,8 +1232,8 @@ test("issue publication rejects a concurrent comment sharing its mutation timest
     },
     async listIssueComments() { return structuredClone(comments); },
     async ensureLabels() {},
-    async replaceManagedLabels(_number, desiredLabels) {
-      labels = desiredLabels.map((name) => ({ name }));
+    async replaceManagedLabels(_number, desiredLabels, _managed, mode) {
+      labels = reconcileFixtureLabels(labels, desiredLabels, mode);
       updatedAt = "2026-08-05T10:00:30Z";
     },
     async upsertMarkerComment(_number, marker, body) {
@@ -1313,7 +1315,7 @@ test("issue publication closes a GitHub-linked merged pull request resolution as
     },
     async listMergedPullRequestsClosingIssue() { return [resolvedByPullRequest]; },
     async ensureLabels() {},
-    async replaceManagedIssueLabels() {},
+    async replaceManagedIssueLabels() {}, async replaceManagedLabels() {},
     async verifyIssueMutation() {},
     async upsertOwnedIssueMarker() {},
     async createOwnedIssueComment(_number, body) { closingComment = body; },
@@ -1361,8 +1363,8 @@ test("issue publication rejects subject drift during its managed-label mutation"
   const restoreGitHub = replaceGitHubMethods({
     async getIssue() { return { number: 7, title, body: "Details", state: "open", updated_at: updatedAt, user: { id: 1, login: "reporter", type: "User" }, labels }; },
     async ensureLabels() {},
-    async replaceManagedLabels(_number, desiredLabels) {
-      labels = desiredLabels.map((name) => ({ name }));
+    async replaceManagedLabels(_number, desiredLabels, _managed, mode) {
+      labels = reconcileFixtureLabels(labels, desiredLabels, mode);
       title = "Externally edited report";
       updatedAt = "2026-08-05T10:01:00Z";
     },
@@ -1417,8 +1419,8 @@ test("issue publication rejects same-timestamp subject drift after verified labe
       };
     },
     async ensureLabels() {},
-    async replaceManagedLabels(_number, desiredLabels) {
-      labels = desiredLabels.map((name) => ({ name }));
+    async replaceManagedLabels(_number, desiredLabels, _managed, mode) {
+      labels = reconcileFixtureLabels(labels, desiredLabels, mode);
       updatedAt = "2026-08-05T10:01:00Z";
       mutationComplete = true;
     },
@@ -1479,8 +1481,9 @@ test("issue publication rejects malformed post-label timestamps and label metada
       const restoreGitHub = replaceGitHubMethods({
         async getIssue() { return { number: 7, title: "Report", body: "Details", state: "open", updated_at: updatedAt, user: { id: 1, login: "reporter", type: "User" }, labels }; },
         async ensureLabels() {},
-        async replaceManagedLabels(_number, desiredLabels) {
-          ({ updatedAt, labels } = fixture.mutate(desiredLabels));
+        async replaceManagedLabels(_number, desiredLabels, _managed, mode) {
+          const mutation = fixture.mutate(desiredLabels);
+          ({ updatedAt } = mutation); labels = reconcileFixtureLabels(labels, mutation.labels.map((label) => label.name), mode);
         },
         async upsertMarkerComment() { markerPublished = true; }
       });

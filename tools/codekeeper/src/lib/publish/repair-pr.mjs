@@ -9,7 +9,7 @@ import { validatePatch } from "../policy.mjs";
 import { renderRepairPullRequest, sanitizePublicTitle } from "../render.mjs";
 import {
   expectedAutomationIdentity,
-  managedIssueLabels,
+  managedLifecycleLabels,
   matchesAutomationActor,
   normalizeAutomationIdentity
 } from "./common.mjs";
@@ -243,7 +243,12 @@ export async function publishPatchPullRequest({
         github, pull, branch, expectedTreeSha, context, config, fingerprint, automationIdentity
       });
     }
-    await github.replaceManagedLabels(pull.number, [...labels], managedIssueLabels(config));
+    await github.replaceManagedLabels(
+      pull.number,
+      [...labels],
+      managedLifecycleLabels([LABELS.REVIEW_NEEDED]),
+      "lifecycle",
+    );
   }
   return created
     ? {

@@ -341,7 +341,7 @@ async function dispatchAfterUnpausing(
   const wasPaused = labels(issue).includes("codekeeper:paused");
   if (wasPaused) {
     try {
-      await github.removeLabel(number, "codekeeper:paused");
+      await github.removeLabel(number, "codekeeper:paused", "lifecycle");
     } catch (error) {
       if (isAmbiguousGitHubMutationError(error)) {
         try {
@@ -711,7 +711,8 @@ export async function runOwnerCommand({
   } else if (canonicalCommand === "pause") {
     await github.ensureLabels(config.labels, ["codekeeper:paused"]);
     await github.addLabels(number, ["codekeeper:paused"]);
-    await github.removeLabel(number, "codekeeper:ready");
+    if (!issue.pull_request)
+      await github.removeLabel(number, "codekeeper:ready", "issue");
     if (issue.pull_request) {
       const pull = await github.getPull(number);
       if (pull.auto_merge) {

@@ -669,15 +669,17 @@ test("legacy policies keep deferred issue publication off until the publisher is
   });
 });
 
-test("policy upgrades concise labels while retaining legacy cleanup aliases", async () => {
+test("policy upgrades partition semantic labels while retaining safe legacy aliases", async () => {
   const bundle = await loadVerifiedAssets();
   const legacy = JSON.parse(bundle.contents["policies/openai.json"]);
   const upgraded = upgradePolicy(legacy);
 
   assert.ok(upgraded.review.managedLabels.includes(LABELS.CHANGES_REQUIRED));
   assert.ok(upgraded.review.managedLabels.includes("codekeeper:reviewed"));
-  assert.ok(upgraded.issues.managedLabels.includes(LABELS.AUTOMATED_MAINTENANCE));
+  assert.ok(upgraded.issues.managedLabels.includes(LABELS.ISSUE_NEEDS_TESTS));
   assert.ok(upgraded.issues.managedLabels.includes("codekeeper:maintenance"));
+  assert.ok(!upgraded.issues.managedLabels.includes(LABELS.AUTOMATED_MAINTENANCE));
+  assert.deepEqual(upgraded.labels[LABELS.AUTOMATED_MAINTENANCE], LABEL_DEFINITIONS[LABELS.AUTOMATED_MAINTENANCE]);
   assert.deepEqual(upgraded.labels[LABELS.SECURITY], LABEL_DEFINITIONS[LABELS.SECURITY]);
   assert.deepEqual(upgradePolicy(upgraded), upgraded);
 });

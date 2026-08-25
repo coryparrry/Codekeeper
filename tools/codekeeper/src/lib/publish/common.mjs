@@ -1,5 +1,36 @@
+import {
+  LABELS,
+  isCodekeeperIssueLabel,
+  isCodekeeperLifecycleLabel,
+  isCodekeeperPullRequestLabel
+} from "../label-ownership.mjs";
+
+function configuredManagedLabels(config, key, predicate, normalize = (label) => label) {
+  const labels = config?.[key]?.managedLabels;
+  if (!Array.isArray(labels)) throw new Error(`${key}.managedLabels must be an array`);
+  return [...new Set(labels.map(normalize))].filter(predicate);
+}
+
+export function managedPullRequestLabels(config) {
+  return configuredManagedLabels(config, "review", isCodekeeperPullRequestLabel);
+}
+
 export function managedIssueLabels(config) {
-  return config.issues.managedLabels;
+  return configuredManagedLabels(
+    config,
+    "issues",
+    isCodekeeperIssueLabel,
+    (label) => label === LABELS.NEEDS_TESTS ? LABELS.ISSUE_NEEDS_TESTS : label,
+  );
+}
+
+export function managedLifecycleLabels(candidates) {
+  if (!Array.isArray(candidates)) throw new Error("Lifecycle labels must be an array");
+  const labels = [...new Set(candidates)];
+  if (labels.some((label) => !isCodekeeperLifecycleLabel(label))) {
+    throw new Error("Lifecycle labels must be Codekeeper-owned lifecycle labels");
+  }
+  return labels;
 }
 
 export function issueLabelNames(issue) {

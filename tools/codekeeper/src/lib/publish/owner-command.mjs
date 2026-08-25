@@ -38,7 +38,7 @@ export async function resumeDirectOwnerFix(github, context) {
   }
   if (!labelNames(before).includes("codekeeper:paused")) return before;
   try {
-    await github.removeLabel(number, "codekeeper:paused");
+    await github.removeLabel(number, "codekeeper:paused", "lifecycle");
   } catch (error) {
     if (isAmbiguousGitHubMutationError(error)) {
       try {

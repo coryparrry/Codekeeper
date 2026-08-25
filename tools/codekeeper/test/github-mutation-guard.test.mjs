@@ -296,8 +296,15 @@ test("secondary issue mutations reject inventory drift and advance after their o
   await github.updateIssue(9, { body: "Codekeeper update" });
   await github.replaceManagedLabels(
     9,
-    ["codekeeper:deferred", "codekeeper:type-testing"],
-    ["codekeeper:deferred", "codekeeper:type-testing"],
+    ["codekeeper:deferred"],
+    ["codekeeper:deferred"],
+    "lifecycle",
+  );
+  await github.replaceManagedLabels(
+    9,
+    ["codekeeper:type-testing"],
+    ["codekeeper:type-testing"],
+    "issue",
   );
   assert.deepEqual(writes.map(({ method }) => method), ["PATCH", "POST"]);
   assert.deepEqual(state.issue.labels.map(({ name }) => name), [

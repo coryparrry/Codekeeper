@@ -10,6 +10,7 @@ import {
   isTrustedRepairPull,
   repairBranch
 } from "../src/lib/publish.mjs";
+import { isCodekeeperLifecycleLabel, LABELS } from "../src/lib/label-ownership.mjs";
 import {
   config,
   git,
@@ -93,7 +94,7 @@ test("maintenance publication adopts only the issue whose App marker survived re
         number: creates,
         state: "open",
         updated_at: "2026-08-05T10:00:00Z",
-        labels: [],
+        labels: [...input.labels.map((name) => ({ name })), { name: "triager-owned" }],
         body: input.body,
         user: { login: identity.login, id: Number(identity.id), type: "Bot" }
       };
@@ -116,7 +117,14 @@ test("maintenance publication adopts only the issue whose App marker survived re
     async updateIssue(number, changes) {
       Object.assign(issues.find((issue) => issue.number === number), changes);
     },
-    async replaceManagedLabels() {}
+    async replaceManagedLabels(number, desiredLabels, _managed, mode) {
+      assert.equal(mode, "lifecycle");
+      const issue = issues.find((candidate) => candidate.number === number);
+      issue.labels = [
+        ...issue.labels.filter((label) => !isCodekeeperLifecycleLabel(label.name)),
+        ...desiredLabels.map((name) => ({ name })),
+      ];
+    }
   });
   try {
     await writeFile(path.join(repository, "README.md"), "# Example\n", "utf8");
@@ -159,6 +167,10 @@ test("maintenance publication adopts only the issue whose App marker survived re
     assert.deepEqual(retry.findings.map(({ state, issueNumber }) => ({ state, issueNumber })), [
       { state: "updated", issueNumber: 2 }
     ]);
+    assert.deepEqual(issues[1].labels.map(({ name }) => name).sort(), [
+      "triager-owned",
+      LABELS.AUTOMATED_MAINTENANCE,
+    ].sort());
   } finally {
     process.chdir(originalDirectory);
     restoreGitHub();

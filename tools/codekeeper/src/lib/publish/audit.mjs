@@ -2,14 +2,13 @@ import { currentHead } from "../git.mjs";
 import { GitHubClient, isOwnedMarkerComment } from "../github.mjs";
 import { LABELS } from "../label-ownership.mjs";
 import { findingFingerprint, findingMarker, repairNotificationMarker } from "../markers.mjs";
-import { findingLabels, priorityLabel } from "../policy.mjs";
 import { renderMaintenanceIssue, sanitizePublicTitle } from "../render.mjs";
 import { assertNoPublicSecurityFindings } from "../security-containment.mjs";
 import { loadArtifact } from "./artifacts.mjs";
 import {
   expectedAutomationIdentity,
   isRecoverableMaintenanceIssue,
-  managedIssueLabels,
+  managedLifecycleLabels,
   normalizeAutomationIdentity,
   reconcileSecondaryIssue
 } from "./common.mjs";
@@ -44,7 +43,7 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
         break;
       }
     }
-    const labels = [...new Set([...findingLabels(finding), priorityLabel(finding.priority)].filter(Boolean))];
+    const labels = [LABELS.AUTOMATED_MAINTENANCE];
     const title = sanitizePublicTitle(`[AI maintenance] ${finding.title}`) || "[AI maintenance] Repository finding";
     const body = renderMaintenanceIssue(finding, fingerprint, runUrl);
 
@@ -60,7 +59,12 @@ async function upsertMaintenanceFindings({ github, findings, config, runUrl, dry
     if (match) {
       await reconcileSecondaryIssue(github, match, async () => {
         await github.updateIssue(match.number, { title, body });
-        await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
+        await github.replaceManagedLabels(
+          match.number,
+          labels,
+          managedLifecycleLabels([LABELS.AUTOMATED_MAINTENANCE]),
+          "lifecycle",
+        );
       });
       published.push({ fingerprint, state: "updated", issueNumber: match.number });
     } else {

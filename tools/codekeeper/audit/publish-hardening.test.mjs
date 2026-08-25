@@ -8,6 +8,7 @@ import { AGENT_PROFILE_BUNDLE_FILE, AGENT_PROFILE_PATHS } from "../src/lib/agent
 import { automaticRepairMarker, sha256 } from "../src/lib/markers.mjs";
 import { automaticRepairDispatchDetails, repairItemsFromReviewResult } from "../src/lib/repair-objectives.mjs";
 import { acquireAutomaticRepairLease, publishIssue, publishReview } from "../src/lib/publish.mjs";
+import { isCodekeeperIssueLabel, isCodekeeperLifecycleLabel } from "../src/lib/label-ownership.mjs";
 
 const config = JSON.parse(await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8"));
 const profileFixtureRoot = await mkdtemp(path.join(os.tmpdir(), "codekeeper-publish-hardening-profiles-"));
@@ -230,8 +231,12 @@ test("issue duplicate closure accepts owned comments and rejects post-inventory 
       return structuredClone(comments);
     },
     async ensureLabels() {},
-    async replaceManagedLabels(_number, desiredLabels) {
-      labels = desiredLabels.map((name) => ({ name }));
+    async replaceManagedLabels(_number, desiredLabels, _managed, mode) {
+      const owned = mode === "lifecycle" ? isCodekeeperLifecycleLabel : isCodekeeperIssueLabel;
+      labels = [
+        ...labels.filter((label) => !owned(label.name)),
+        ...desiredLabels.map((name) => ({ name })),
+      ];
       updatedAt = "2026-08-05T10:00:30Z";
     },
     async upsertMarkerComment(_number, marker, body) {

@@ -1,15 +1,16 @@
 import { GitHubClient, isAmbiguousGitHubMutationError, isOwnedMarkerComment } from "../github.mjs";
 import { log, warn } from "../io.mjs";
-import { LABELS } from "../label-ownership.mjs";
+import { isCodekeeperLifecycleLabel, isCodekeeperPullRequestLabel, LABELS } from "../label-ownership.mjs";
 import { REVIEW_MARKER, automaticRepairMarker, deferredReviewFingerprint, deferredReviewMarker, reviewFeedbackReplyMarker, sha256 } from "../markers.mjs";
-import { evaluateAutoMerge, evaluateReviewEligibility, issueTypeLabel, reviewLabels } from "../policy.mjs";
+import { evaluateAutoMerge, evaluateReviewEligibility, reviewLabels } from "../policy.mjs";
 import { normalizeReleaseOwnedPinReview, renderDeferredIssue, renderReviewComment, sanitizeMarkdown, sanitizePublicTitle } from "../render.mjs";
 import { repairItemsFromReviewResult } from "../repair-objectives.mjs";
 import { loadArtifact } from "./artifacts.mjs";
 import {
   expectedAutomationIdentity,
   isTrustedMaintenanceIssue,
-  managedIssueLabels,
+  managedLifecycleLabels,
+  managedPullRequestLabels,
   reconcileSecondaryIssue,
   trustedPublicationRunUrl
 } from "./common.mjs";
@@ -408,7 +409,18 @@ export async function publishReview({ artifactDirectory, config, configSha256, e
 
   const writePublicationState = async (decision) => {
     const state = publicationState(decision);
-    await github.replaceManagedLabels(pull.number, state.desiredLabels, config.review.managedLabels);
+    await github.replaceManagedLabels(
+      pull.number,
+      state.desiredLabels.filter(isCodekeeperPullRequestLabel),
+      managedPullRequestLabels(config),
+      "pull-request",
+    );
+    await github.replaceManagedLabels(
+      pull.number,
+      state.desiredLabels.filter(isCodekeeperLifecycleLabel),
+      managedLifecycleLabels([LABELS.REVIEW_NEEDED]),
+      "lifecycle",
+    );
     await github.upsertMarkerComment(
       pull.number,
       REVIEW_MARKER,
@@ -592,7 +604,7 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
       botId: automationIdentity.id
     }));
     const sources = [sourcesByKey.get(sourceKey)].filter(Boolean);
-    const labels = [LABELS.DEFERRED, issueTypeLabel(feedback.type)];
+    const labels = [LABELS.DEFERRED];
     const title = sanitizePublicTitle(
       `[Deferred from PR #${context.pullRequest.number}] ${feedback.explanation}`,
       256
@@ -626,7 +638,12 @@ export async function upsertDeferredReviewFeedback({ github, context, result, co
           body,
           ...(automaticallyReconciled ? { state: "open", state_reason: null } : {})
         });
-        await github.replaceManagedLabels(match.number, labels, managedIssueLabels(config));
+        await github.replaceManagedLabels(
+          match.number,
+          labels,
+          managedLifecycleLabels([LABELS.DEFERRED, "codekeeper:deferred"]),
+          "lifecycle",
+        );
         return updated;
       });
     } else {

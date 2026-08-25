@@ -1,4 +1,12 @@
-import { LABELS, LEGACY_CODEKEEPER_OWNED_LABELS } from "./label-ownership.mjs";
+import {
+  ISSUE_SEMANTIC_LABELS,
+  LABELS,
+  LEGACY_CODEKEEPER_OWNED_LABELS,
+  LEGACY_ISSUE_LABELS,
+  LEGACY_LIFECYCLE_LABELS,
+  LEGACY_PR_LABELS,
+  PR_SEMANTIC_LABELS
+} from "./label-ownership.mjs";
 
 export const REPAIR_ALLOWED_PATHS = Object.freeze(["**"]);
 
@@ -43,75 +51,43 @@ export const ORCHESTRATION_DEFAULTS = Object.freeze({
   providerMultiAgent: false
 });
 
-export const REVIEW_MANAGED_LABELS = Object.freeze([
-  LABELS.CHANGES_REQUIRED,
-  LABELS.REVIEW_NEEDED,
-  LABELS.MERGE_READY,
-  LABELS.NEEDS_TESTS
-]);
+export const REVIEW_MANAGED_LABELS = Object.freeze([...PR_SEMANTIC_LABELS]);
+
+export const ISSUE_NEEDS_TESTS_LABEL = LABELS.ISSUE_NEEDS_TESTS ?? "issue needs tests";
 
 export const AGENT_EMITTABLE_LABELS = Object.freeze([
   LABELS.NEEDS_TESTS
 ]);
 
-export const ISSUE_MANAGED_LABELS = Object.freeze([
-  LABELS.AUTOMATED_MAINTENANCE,
-  LABELS.READY_FOR_FIX,
-  LABELS.REVIEW_NEEDED,
-  LABELS.POSSIBLE_DUPLICATE,
-  LABELS.DEFERRED,
-  LABELS.NEEDS_INFORMATION,
-  LABELS.NEEDS_TESTS,
-  LABELS.URGENT,
-  LABELS.HIGH_PRIORITY,
+// Model-proposed labels are mode inputs, not a shared ownership pool. Review
+// output currently only needs the deterministic test-coverage signal; issue
+// triage retains the older type labels plus that signal for compatibility.
+export const REVIEW_ALLOWED_LABELS = Object.freeze([
+  ...AGENT_EMITTABLE_LABELS
+]);
+
+export const ISSUE_ALLOWED_LABELS = Object.freeze([
   LABELS.BUG,
   LABELS.ENHANCEMENT,
   LABELS.DOCUMENTATION,
   LABELS.QUESTION,
-  LABELS.MAINTENANCE,
   LABELS.SECURITY,
-  LABELS.TESTING
+  LABELS.MAINTENANCE,
+  LABELS.TESTING,
+  ISSUE_NEEDS_TESTS_LABEL
 ]);
 
-export const LEGACY_REVIEW_MANAGED_LABELS = Object.freeze([
-  "codekeeper:reviewed",
-  "codekeeper:blocked",
-  "codekeeper:manual-review",
-  "codekeeper:auto-merge",
-  "codekeeper:needs-tests",
-  "codekeeper:risk-low",
-  "codekeeper:risk-medium",
-  "codekeeper:risk-high"
-]);
+export const ISSUE_MANAGED_LABELS = Object.freeze([...ISSUE_SEMANTIC_LABELS]);
 
-export const LEGACY_ISSUE_MANAGED_LABELS = Object.freeze([
-  "codekeeper:maintenance",
-  "codekeeper:ready",
-  "codekeeper:manual-review",
-  "codekeeper:duplicate-candidate",
-  "codekeeper:deferred",
-  "codekeeper:needs-information",
-  "codekeeper:priority-p1",
-  "codekeeper:priority-p2",
-  "codekeeper:priority-p3",
-  "codekeeper:risk-low",
-  "codekeeper:risk-medium",
-  "codekeeper:risk-high",
-  "codekeeper:type-bug",
-  "codekeeper:type-documentation",
-  "codekeeper:type-enhancement",
-  "codekeeper:type-maintenance",
-  "codekeeper:type-question",
-  "codekeeper:type-security",
-  "codekeeper:type-testing"
-]);
+export const LEGACY_REVIEW_MANAGED_LABELS = Object.freeze([...LEGACY_PR_LABELS]);
+
+export const LEGACY_ISSUE_MANAGED_LABELS = Object.freeze([...LEGACY_ISSUE_LABELS]);
 
 export const LEGACY_REQUIRED_LABELS = Object.freeze([
   ...new Set([
     ...LEGACY_REVIEW_MANAGED_LABELS,
     ...LEGACY_ISSUE_MANAGED_LABELS,
-    "codekeeper:paused",
-    "codekeeper:auto-repaired"
+    ...LEGACY_LIFECYCLE_LABELS
   ])
 ]);
 
@@ -134,7 +110,8 @@ export const LABEL_DEFINITIONS = Object.freeze({
   [LABELS.QUESTION]: Object.freeze({ color: "D876E3", description: "Question or clarification" }),
   [LABELS.MAINTENANCE]: Object.freeze({ color: "C5DEF5", description: "Repository maintenance" }),
   [LABELS.SECURITY]: Object.freeze({ color: "B60205", description: "Security-sensitive work" }),
-  [LABELS.TESTING]: Object.freeze({ color: "BFDADC", description: "Test coverage or test infrastructure" })
+  [LABELS.TESTING]: Object.freeze({ color: "BFDADC", description: "Test coverage or test infrastructure" }),
+  [ISSUE_NEEDS_TESTS_LABEL]: Object.freeze({ color: "D4C5F9", description: "Issue triage needs test coverage" })
 });
 
 export const REQUIRED_RUNTIME_LABELS = Object.freeze([
@@ -189,8 +166,50 @@ export function applyLabelCatalog(policy) {
   };
 }
 
+const LEGACY_ISSUE_ALLOWLIST_MIGRATIONS = Object.freeze({
+  "codekeeper:type-bug": LABELS.BUG,
+  "codekeeper:type-enhancement": LABELS.ENHANCEMENT,
+  "codekeeper:type-documentation": LABELS.DOCUMENTATION,
+  "codekeeper:type-question": LABELS.QUESTION,
+  "codekeeper:type-maintenance": LABELS.MAINTENANCE,
+  "codekeeper:type-security": LABELS.SECURITY,
+  "codekeeper:type-testing": LABELS.TESTING,
+  "codekeeper:needs-tests": ISSUE_NEEDS_TESTS_LABEL,
+  [LABELS.NEEDS_TESTS]: ISSUE_NEEDS_TESTS_LABEL
+});
+
+function migrateIssueAllowedLabels(labels, { filter = false, migrateNeedsTests = false } = {}) {
+  const migrated = [...new Set((labels ?? []).map((label) => {
+    if (!migrateNeedsTests && (label === "codekeeper:needs-tests" || label === LABELS.NEEDS_TESTS)) return label;
+    return LEGACY_ISSUE_ALLOWLIST_MIGRATIONS[label] ?? label;
+  }))];
+  return filter ? migrated.filter((label) => ISSUE_ALLOWED_LABELS.includes(label)) : migrated;
+}
+
 export function applyManagedLabelSets(policy) {
-  policy.review.allowedLabels = [...AGENT_EMITTABLE_LABELS];
+  const legacySharedAllowlist = !Object.hasOwn(policy.issues ?? {}, "allowedLabels");
+  const configuredIssueLabels = policy.issues?.allowedLabels;
+  const configuredReviewLabels = policy.review?.allowedLabels;
+
+  // Policies written before OA-04 used review.allowedLabels for both model
+  // modes. Preserve those values for issue triage while resetting review to
+  // its narrow, deterministic allowlist. Once the new field exists, keep both
+  // mode-specific inputs intact for policy validation.
+  if (legacySharedAllowlist) {
+    policy.issues.allowedLabels = Array.isArray(configuredReviewLabels) && configuredReviewLabels.length > 0
+      ? migrateIssueAllowedLabels(configuredReviewLabels, { filter: true, migrateNeedsTests: true })
+      : [...ISSUE_ALLOWED_LABELS];
+  } else if (Array.isArray(configuredIssueLabels)) {
+    policy.issues.allowedLabels = migrateIssueAllowedLabels(configuredIssueLabels);
+  } else if (!Array.isArray(configuredIssueLabels)) {
+    policy.issues.allowedLabels = [...ISSUE_ALLOWED_LABELS];
+  }
+
+  policy.review.allowedLabels = legacySharedAllowlist
+    ? [...REVIEW_ALLOWED_LABELS]
+    : Array.isArray(configuredReviewLabels)
+      ? [...new Set(configuredReviewLabels)]
+      : [...REVIEW_ALLOWED_LABELS];
   policy.review.managedLabels = [...new Set([
     ...REVIEW_MANAGED_LABELS,
     ...LEGACY_REVIEW_MANAGED_LABELS

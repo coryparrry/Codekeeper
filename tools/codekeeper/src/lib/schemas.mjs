@@ -118,6 +118,12 @@ function labelArraySchema(labels, maxItems) {
   };
 }
 
+function issueAllowedLabels(config) {
+  // Production callers pass a normalized policy. Fail closed for direct
+  // callers that skip normalization instead of falling back to PR labels.
+  return Array.isArray(config?.issues?.allowedLabels) ? config.issues.allowedLabels : [];
+}
+
 function findingSchema(config) {
   return object({
     title: stringSchema({ maxLength: LIMITS.title }),
@@ -241,7 +247,7 @@ export function issueSchema(config) {
       summary: stringSchema({ maxLength: LIMITS.summary }),
       type: { enum: ["bug", "enhancement", "documentation", "question", "security", "maintenance"] },
       priority: { enum: ["p1", "p2", "p3"] },
-      labels: labelArraySchema(config.review.allowedLabels),
+      labels: labelArraySchema(issueAllowedLabels(config)),
       actionable: { type: "boolean" },
       missingInformation: {
         type: "array",
@@ -516,9 +522,10 @@ export function validateIssueResult(result, config) {
   assertString(result.summary, "summary", { maxLength: LIMITS.summary });
   assertEnum(result.type, ["bug", "enhancement", "documentation", "question", "security", "maintenance"], "type");
   assertEnum(result.priority, ["p1", "p2", "p3"], "priority");
+  const allowedIssueLabels = issueAllowedLabels(config);
   assertUniqueStrings(result.labels, "labels", {
-    allowed: config.review.allowedLabels,
-    maximum: config.review.allowedLabels.length
+    allowed: allowedIssueLabels,
+    maximum: allowedIssueLabels.length
   });
   assert(typeof result.actionable === "boolean", "actionable must be boolean");
   assertUniqueStrings(result.missingInformation, "missingInformation", { maximum: 8, itemMaximum: 4000 });

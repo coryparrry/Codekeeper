@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GitHubClient } from "../src/lib/github.mjs";
+import { LABELS } from "../src/lib/label-ownership.mjs";
 import { labelMethods } from "../src/lib/github/labels.mjs";
+import { managedLifecycleLabels } from "../src/lib/publish/common.mjs";
 
 function client(transport = {}) {
   return new GitHubClient({ token: "token", repository: "owner/repository", transport });
@@ -143,7 +145,7 @@ test("conditional pull label removal reconciles an applied mutation after respon
       advanced = [method, actualEndpoint];
     },
   };
-  await labelMethods.removeLabel.call(github, 7, "codekeeper:paused");
+  await labelMethods.removeLabel.call(github, 7, "codekeeper:paused", "lifecycle");
   assert.deepEqual(advanced, ["DELETE", endpoint]);
 });
 
@@ -179,4 +181,118 @@ test("Codekeeper label management preserves existing metadata and unrelated labe
   const add = calls.find((call) => call.target.endsWith("/issues/7/labels") && call.method === "POST");
   assert.deepEqual(JSON.parse(add.body), { labels: ["codekeeper:reviewed"] });
   assert.ok(calls.some((call) => call.target.endsWith("/issues/7/labels/codekeeper%3Arisk-high") && call.method === "DELETE"));
+});
+
+test("mode-specific reconciliation fails closed, preserves cross-mode labels, and is idempotent", async () => {
+  const labels = ["human-owned", LABELS.BUG, LABELS.CHANGES_REQUIRED];
+  const calls = [];
+  const github = {
+    repoPath(value) {
+      return `/repos/owner/repository${value}`;
+    },
+    async getIssue() {
+      return { number: 7, labels: labels.map((name) => ({ name })) };
+    },
+    async request(method, endpoint) {
+      calls.push({ method, endpoint });
+      if (method === "DELETE") labels.splice(labels.indexOf(decodeURIComponent(endpoint.split("/").at(-1))), 1);
+      return { data: {} };
+    }
+  };
+
+  await assert.rejects(
+    labelMethods.replaceManagedLabels.call(github, 7, [LABELS.BUG], [LABELS.BUG], "pull-request"),
+    /outside Codekeeper ownership: bug \(mode: pull-request\)/
+  );
+  await assert.rejects(
+    labelMethods.replaceManagedLabels.call(github, 7, [LABELS.CHANGES_REQUIRED], [LABELS.CHANGES_REQUIRED], "issue"),
+    /outside Codekeeper ownership: changes required \(mode: issue\)/
+  );
+
+  await labelMethods.replaceManagedLabels.call(github, 7, [], [LABELS.CHANGES_REQUIRED], "pull-request");
+  assert.deepEqual(labels, ["human-owned", LABELS.BUG]);
+  const mutationCount = calls.length;
+  await labelMethods.replaceManagedLabels.call(github, 7, [], [LABELS.CHANGES_REQUIRED], "pull-request");
+  assert.equal(calls.length, mutationCount);
+  await labelMethods.replaceManagedLabels.call(github, 7, [], [LABELS.BUG], "issue");
+  assert.deepEqual(labels, ["human-owned"]);
+});
+
+test("real adapter reconciles a narrow lifecycle set and issue-specific needs-tests", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const state = {
+    labels: [
+      { name: "human-owned" },
+      { name: LABELS.REVIEW_NEEDED },
+    ],
+  };
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const method = options.method ?? "GET";
+      const pathname = new URL(url).pathname;
+      calls.push({ method, pathname, body: options.body });
+      if (method === "GET" && pathname.endsWith("/issues/7")) {
+        return new Response(JSON.stringify({ number: 7, labels: state.labels }), { status: 200 });
+      }
+      if (method === "DELETE" && pathname.endsWith(`/labels/${encodeURIComponent(LABELS.REVIEW_NEEDED)}`)) {
+        state.labels = state.labels.filter(({ name }) => name !== LABELS.REVIEW_NEEDED);
+        return new Response(null, { status: 204 });
+      }
+      if (method === "POST" && pathname.endsWith("/issues/7/labels")) {
+        const { labels } = JSON.parse(options.body);
+        state.labels = [
+          ...state.labels,
+          ...labels.filter((name) => !state.labels.some(({ name: current }) => current === name)).map((name) => ({ name })),
+        ];
+        return new Response(JSON.stringify(state.labels), { status: 200 });
+      }
+      throw new Error(`Unexpected ${method} ${pathname}`);
+    };
+    const github = new GitHubClient({ token: "token", repository: "owner/repository" });
+    await github.replaceManagedLabels(
+      7,
+      [],
+      managedLifecycleLabels([LABELS.REVIEW_NEEDED]),
+      "lifecycle",
+    );
+    await github.replaceManagedLabels(
+      7,
+      [LABELS.ISSUE_NEEDS_TESTS],
+      [LABELS.ISSUE_NEEDS_TESTS],
+      "issue",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(state.labels.map(({ name }) => name).sort(), ["human-owned", LABELS.ISSUE_NEEDS_TESTS].sort());
+  assert.ok(calls.some(({ method, pathname }) => method === "DELETE" && pathname.endsWith(`/labels/${encodeURIComponent(LABELS.REVIEW_NEEDED)}`)));
+  assert.ok(calls.some(({ method, pathname }) => method === "POST" && pathname.endsWith("/issues/7/labels")));
+});
+
+test("direct label removal requires explicit authority and cannot cross modes", async () => {
+  const calls = [];
+  const github = {
+    repoPath(value) {
+      return `/repos/owner/repository${value}`;
+    },
+    async request(method, endpoint) {
+      calls.push({ method, endpoint });
+      return { data: {} };
+    }
+  };
+
+  await assert.rejects(
+    labelMethods.removeLabel.call(github, 7, LABELS.PAUSED),
+    /Unknown label removal authority: undefined/
+  );
+  await assert.rejects(
+    labelMethods.removeLabel.call(github, 7, LABELS.READY_FOR_FIX, "pull-request"),
+    /outside pull-request ownership: ready for fix/
+  );
+  await labelMethods.removeLabel.call(github, 7, LABELS.PAUSED, "lifecycle");
+  assert.deepEqual(calls, [{
+    method: "DELETE",
+    endpoint: "/repos/owner/repository/issues/7/labels/paused"
+  }]);
 });

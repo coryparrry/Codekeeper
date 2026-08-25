@@ -1,4 +1,7 @@
-import { isCodekeeperOwnedLabel } from "./label-ownership.mjs";
+import {
+  isCodekeeperIssueLabel,
+  isCodekeeperPullRequestLabel
+} from "./label-ownership.mjs";
 import {
   ISSUE_MANAGED_LABELS,
   REQUIRED_RUNTIME_LABELS,
@@ -447,7 +450,7 @@ export function validatePolicy(config) {
   stringArray(config.review.managedLabels, "review.managedLabels", { maximumLength: 256 });
   for (const label of [...config.review.allowedLabels, ...config.review.managedLabels]) {
     assert(config.labels[label], `review references undefined label ${label}`);
-    assert(isCodekeeperOwnedLabel(label), `review may only emit Codekeeper-owned labels: ${label}`);
+    assert(isCodekeeperPullRequestLabel(label), `review may only manage PR-owned labels: ${label}`);
   }
   const managedReviewLabels = new Set(config.review.managedLabels);
   for (const label of [...REVIEW_MANAGED_LABELS, ...config.review.allowedLabels]) {
@@ -498,18 +501,23 @@ export function validatePolicy(config) {
   cappedPositiveInteger(config.audit.repair.maximumPatchBytes, "audit.repair.maximumPatchBytes", LIMITS.maximumPatchBytes);
   cappedPositiveInteger(config.audit.repair.maximumFileBytes, "audit.repair.maximumFileBytes", LIMITS.maximumFileBytes);
 
-  fixedObject(config.issues, "issues", ["closeExactDuplicates", "closeResolvedIssues", "allowAiImplementation", "maximumOpenIssueContext", "managedLabels"]);
+  fixedObject(config.issues, "issues", ["closeExactDuplicates", "closeResolvedIssues", "allowAiImplementation", "maximumOpenIssueContext", "allowedLabels", "managedLabels"]);
   boolean(config.issues.closeExactDuplicates, "issues.closeExactDuplicates");
   boolean(config.issues.closeResolvedIssues, "issues.closeResolvedIssues");
   boolean(config.issues.allowAiImplementation, "issues.allowAiImplementation");
   cappedPositiveInteger(config.issues.maximumOpenIssueContext, "issues.maximumOpenIssueContext", LIMITS.maximumOpenIssueContext);
+  stringArray(config.issues.allowedLabels, "issues.allowedLabels", { maximumLength: 256 });
+  for (const label of config.issues.allowedLabels) {
+    assert(config.labels[label], `issues references undefined label ${label}`);
+    assert(isCodekeeperIssueLabel(label), `issues may only manage issue-owned labels: ${label}`);
+  }
   stringArray(config.issues.managedLabels, "issues.managedLabels", { maximumLength: 256 });
   for (const label of config.issues.managedLabels) {
     assert(config.labels[label], `issues references undefined label ${label}`);
-    assert(isCodekeeperOwnedLabel(label), `issues may only manage Codekeeper-owned labels: ${label}`);
+    assert(isCodekeeperIssueLabel(label), `issues may only manage issue-owned labels: ${label}`);
   }
   const managedIssueLabels = new Set(config.issues.managedLabels);
-  for (const label of [...ISSUE_MANAGED_LABELS, ...config.review.allowedLabels]) {
+  for (const label of [...ISSUE_MANAGED_LABELS, ...config.issues.allowedLabels]) {
     assert(managedIssueLabels.has(label), `issues must explicitly manage emitted label ${label}`);
   }
   validateWriteAuthorityValidationCommands(config);

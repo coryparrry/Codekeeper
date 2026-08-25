@@ -1,4 +1,8 @@
-import { isCodekeeperOwnedLabel } from "../label-ownership.mjs";
+import {
+  isCodekeeperIssueLabel,
+  isCodekeeperLifecycleLabel,
+  isCodekeeperPullRequestLabel
+} from "../label-ownership.mjs";
 import { issueLabelNames, issueMutationSubject, sameJson, sameStrings } from "./issues.mjs";
 import { ISSUE_MUTATION_INTERNAL } from "./transport.mjs";
 
@@ -34,12 +38,20 @@ export const labelMethods = {
     }
   },
 
-  async replaceManagedLabels(number, desired, managed) {
+  async replaceManagedLabels(number, desired, managed, mode = "pull-request") {
     const managedSet = new Set(managed);
     const desiredSet = new Set(desired);
-    const nonCodekeeperManaged = [...managedSet].filter((label) => !isCodekeeperOwnedLabel(label));
+    const isModeLabel = mode === "issue"
+      ? isCodekeeperIssueLabel
+      : mode === "pull-request"
+        ? isCodekeeperPullRequestLabel
+        : mode === "lifecycle"
+          ? isCodekeeperLifecycleLabel
+          : null;
+    if (!isModeLabel) throw new Error(`Unknown label reconciliation mode: ${mode}`);
+    const nonCodekeeperManaged = [...managedSet].filter((label) => !isModeLabel(label));
     if (nonCodekeeperManaged.length > 0) {
-      throw new Error(`Attempted to manage labels outside Codekeeper ownership: ${nonCodekeeperManaged.join(", ")}`);
+      throw new Error(`Attempted to manage labels outside Codekeeper ownership: ${nonCodekeeperManaged.join(", ")} (mode: ${mode})`);
     }
     const unmanaged = [...desiredSet].filter((label) => !managedSet.has(label));
     if (unmanaged.length > 0) {
@@ -113,9 +125,17 @@ export const labelMethods = {
     }
   },
 
-  async removeLabel(number, label) {
-    if (!isCodekeeperOwnedLabel(label)) {
-      throw new Error(`Attempted to remove label outside Codekeeper ownership: ${label}`);
+  async removeLabel(number, label, authority) {
+    const isAuthorityLabel = authority === "issue"
+      ? isCodekeeperIssueLabel
+      : authority === "pull-request"
+        ? isCodekeeperPullRequestLabel
+        : authority === "lifecycle"
+          ? isCodekeeperLifecycleLabel
+          : null;
+    if (!isAuthorityLabel) throw new Error(`Unknown label removal authority: ${authority}`);
+    if (!isAuthorityLabel(label)) {
+      throw new Error(`Attempted to remove label outside ${authority} ownership: ${label}`);
     }
     const endpoint = this.repoPath(
       `/issues/${number}/labels/${encodeURIComponent(label)}`,

@@ -1,12 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { fixSchema, reviewSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "../src/lib/schemas.mjs";
+import { fixSchema, issueSchema, reviewSchema, validateAuditResult, validateFixResult, validateIssueResult, validateReviewResult } from "../src/lib/schemas.mjs";
+import { LABELS } from "../src/lib/label-ownership.mjs";
 import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
 
 const config = normalizeLivePolicy(JSON.parse(
   await readFile(new URL("../../../.github/codekeeper.json", import.meta.url), "utf8")
 ));
+
+test("issue schema and validator use the issue-only model allowlist", () => {
+  assert.deepEqual(issueSchema(config).properties.labels.items.enum, config.issues.allowedLabels);
+  assert.throws(
+    () => validateIssueResult({
+      mode: "issue",
+      summary: "The issue is clear.",
+      type: "bug",
+      priority: "p2",
+      labels: [LABELS.NEEDS_TESTS],
+      actionable: true,
+      missingInformation: [],
+      duplicateOf: null,
+      duplicateConfidence: "none",
+      implementationRecommendation: "no",
+      decision: {
+        required: false,
+        question: "",
+        rationale: "",
+        options: []
+      },
+      comment: "The issue is ready for triage."
+    }, config),
+    /labels contains unsupported value needs tests/
+  );
+});
 
 test("review validator keeps Mermaid optional for ordinary changes", () => {
   const result = validateReviewResult({

@@ -104,7 +104,7 @@ export const issueMethods = {
     if (!expected || expected.number !== number || !expected.trackSubject) {
       throw new Error("Managed issue-label publication requires an active subject guard");
     }
-    await this.replaceManagedLabels(number, desired, managed);
+    await this.replaceManagedLabels(number, desired, managed, "issue");
     const after = await this.getIssue(number);
     if (!sameJson(issueMutationSubject(after), expected.subject)) {
       throw new Error(`Issue #${number} changed while Codekeeper reconciled labels`);

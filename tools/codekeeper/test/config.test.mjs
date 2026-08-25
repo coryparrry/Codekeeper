@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { getAgentRuntimeSettings, loadConfig, reviewReasoningEscalation, validatePolicy } from "../src/lib/config.mjs";
-import { normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
+import { ISSUE_NEEDS_TESTS_LABEL, normalizeLivePolicy } from "../src/lib/policy-normalization.mjs";
 import { LABELS } from "../src/lib/label-ownership.mjs";
 
 const source = normalizeLivePolicy(JSON.parse(
@@ -71,6 +71,59 @@ test("configuration validator rejects unsafe or incomplete policy values", async
       repository: { ...source.repository, automationBranchPrefix: "automation/codekeeper" }
     })),
     /automationBranchPrefix must end with/
+  );
+});
+
+test("legacy shared model label allowlists migrate to issue triage", () => {
+  const legacy = structuredClone(source);
+  delete legacy.issues.allowedLabels;
+  legacy.review.allowedLabels = [LABELS.BUG, "codekeeper:type-bug", "codekeeper:needs-tests"];
+
+  const migrated = normalizeLivePolicy(legacy);
+  assert.deepEqual(migrated.review.allowedLabels, [LABELS.NEEDS_TESTS]);
+  assert.deepEqual(migrated.issues.allowedLabels, [LABELS.BUG, ISSUE_NEEDS_TESTS_LABEL]);
+  assert.ok(migrated.issues.managedLabels.includes(ISSUE_NEEDS_TESTS_LABEL));
+  assert.equal(migrated.issues.managedLabels.includes(LABELS.DEFERRED), false);
+  assert.equal(migrated.issues.managedLabels.includes("codekeeper:needs-tests"), false);
+});
+
+test("mode-specific model label allowlists reject cross-mode values", () => {
+  const invalidReview = structuredClone(source);
+  invalidReview.review.allowedLabels = [LABELS.BUG];
+  assert.throws(
+    () => validatePolicy(invalidReview),
+    /review may only manage PR-owned labels: bug/
+  );
+
+  const invalidReviewManaged = structuredClone(source);
+  invalidReviewManaged.review.managedLabels = [LABELS.NEEDS_TESTS, LABELS.BUG];
+  assert.throws(
+    () => validatePolicy(invalidReviewManaged),
+    /review may only manage PR-owned labels: bug/
+  );
+
+  const invalidIssue = structuredClone(source);
+  invalidIssue.issues.allowedLabels = [LABELS.MERGE_READY];
+  assert.throws(
+    () => validatePolicy(invalidIssue),
+    /issues may only manage issue-owned labels: merge ready/
+  );
+
+  const invalidIssueFromExplicitPolicy = normalizeLivePolicy({
+    ...structuredClone(source),
+    issues: { ...structuredClone(source.issues), allowedLabels: [LABELS.NEEDS_TESTS] }
+  });
+  assert.deepEqual(invalidIssueFromExplicitPolicy.issues.allowedLabels, [LABELS.NEEDS_TESTS]);
+  assert.throws(
+    () => validatePolicy(invalidIssueFromExplicitPolicy),
+    /issues may only manage issue-owned labels: needs tests/
+  );
+
+  const invalidIssueManaged = structuredClone(source);
+  invalidIssueManaged.issues.managedLabels = [LABELS.BUG, LABELS.MERGE_READY];
+  assert.throws(
+    () => validatePolicy(invalidIssueManaged),
+    /issues may only manage issue-owned labels: merge ready/
   );
 });
 

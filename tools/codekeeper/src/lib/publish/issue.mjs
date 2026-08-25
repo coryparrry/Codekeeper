@@ -1,6 +1,6 @@
 import { GitHubClient } from "../github.mjs";
 import { log } from "../io.mjs";
-import { LABELS } from "../label-ownership.mjs";
+import { isCodekeeperLifecycleLabel, LABELS } from "../label-ownership.mjs";
 import { ISSUE_TRIAGE_MARKER, issueTriageStateMarker } from "../markers.mjs";
 import { issueTypeLabel, priorityLabel } from "../policy.mjs";
 import { renderIssueTriage } from "../render.mjs";
@@ -9,6 +9,7 @@ import {
   expectedAutomationIdentity,
   isTrustedMaintenanceIssue,
   issueLabelNames,
+  managedLifecycleLabels,
   managedIssueLabels,
   trustedPublicationRunUrl
 } from "./common.mjs";
@@ -48,8 +49,12 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   }
 
   const desired = new Set([issueTypeLabel(result.type), priorityLabel(result.priority)].filter(Boolean));
-  if ((result.labels ?? []).some((label) => label === LABELS.NEEDS_TESTS || label === "codekeeper:needs-tests")) {
-    desired.add(LABELS.NEEDS_TESTS);
+  if ((result.labels ?? []).some((label) => [
+    LABELS.ISSUE_NEEDS_TESTS,
+    LABELS.NEEDS_TESTS,
+    "codekeeper:needs-tests",
+  ].includes(label))) {
+    desired.add(LABELS.ISSUE_NEEDS_TESTS);
   }
   if (result.decision?.required) desired.add(LABELS.REVIEW_NEEDED);
 
@@ -81,7 +86,9 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
     desired.delete(LABELS.READY_FOR_FIX);
     desired.delete(LABELS.POSSIBLE_DUPLICATE);
   }
-  const desiredLabels = [...desired];
+  const lifecycleLabels = [...desired].filter(isCodekeeperLifecycleLabel);
+  const issueLabels = [...desired].filter((label) => !isCodekeeperLifecycleLabel(label));
+  const desiredLabels = [...new Set([...issueLabels, ...lifecycleLabels])];
   const comment = `${renderIssueTriage(result, runUrl)}\n${issueTriageStateMarker(result)}`;
 
   if (dryRun) {
@@ -90,7 +97,17 @@ export async function publishIssue({ artifactDirectory, config, configSha256, ex
   }
 
   await github.ensureLabels(config.labels, desiredLabels);
-  await github.replaceManagedIssueLabels(issue.number, desiredLabels, managedIssueLabels(config));
+  await github.replaceManagedIssueLabels(issue.number, issueLabels, managedIssueLabels(config));
+  const lifecycleManaged = [LABELS.REVIEW_NEEDED];
+  if (lifecycleLabels.includes(LABELS.DEFERRED)) {
+    lifecycleManaged.push(LABELS.DEFERRED, "codekeeper:deferred");
+  }
+  await github.replaceManagedLabels(
+    issue.number,
+    lifecycleLabels,
+    managedLifecycleLabels(lifecycleManaged),
+    "lifecycle",
+  );
   await github.verifyIssueMutation();
   if (closingDuplicate || closingResolved) {
     await github.upsertOwnedIssueMarker(
