@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.3](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.5.2...codekeeper-v0.5.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* **runtime:** close missed verification gaps ([a2c0dc3](https://github.com/coryparrry/Codekeeper/commit/a2c0dc3e8a8806e0c940c6e5e7223a72d3791b1a))
+* **runtime:** close missed verification gaps ([6a6e186](https://github.com/coryparrry/Codekeeper/commit/6a6e1868a9d48b3ba1e21245c7d721993ec1baa9))
+
 ## [0.5.2](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.5.1...codekeeper-v0.5.2) (2026-08-24)
 
 
