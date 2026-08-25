@@ -209,6 +209,9 @@ async function loadContext(parsed) {
     context.policy.audit = {
       repair: { enabled: config.audit?.repair?.enabled === true },
     };
+    if (config.ai?.orchestration) {
+      context.policy.orchestration = config.ai.orchestration;
+    }
   }
   return context;
 }

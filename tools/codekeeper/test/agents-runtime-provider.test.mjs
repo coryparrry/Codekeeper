@@ -162,6 +162,58 @@ test("configured agent selects the issue provider and retries contract-invalid J
   assert.match(calls.input, /Repair the previous Codekeeper response attempt 1/i);
   assert.equal(calls.closed, true);
 });
+
+test("disabled orchestration leaves workspace specialists intact and keeps the manager on the no-tool path", async () => {
+  const disabled = withoutTracing();
+  assert.equal(disabled.ai.orchestration.enabled, false);
+  assert.deepEqual(disabled.ai.orchestration.modes, {
+    review: false,
+    issues: false,
+    fix: false,
+    maintain: false,
+  });
+  assert.equal(disabled.ai.agents.issue.workspace.enabled, true);
+  assert.equal(disabled.ai.agents.review.workspace.enabled, true);
+  const calls = { runs: 0, specialists: 0 };
+  class FakeProvider {
+    async close() {}
+  }
+  class FakeAgent {
+    constructor(options) {
+      calls.agent = options;
+      calls.specialists += (options.tools?.length ?? 0) + (options.handoffs?.length ?? 0);
+    }
+  }
+  class FakeRunner {
+    constructor(options) {
+      calls.runner = options;
+    }
+    async run(agent, input, options) {
+      calls.runs += 1;
+      calls.invocation = { agent, input, options };
+      return { finalOutput: JSON.stringify(validIssue()) };
+    }
+  }
+
+  const result = await runConfiguredAgent({
+    mode: "issue",
+    config: disabled,
+    prompt: "Classify this issue.",
+    schema,
+    apiKey: "provider-secret",
+    validateOutput: (output) => validateIssueResult(output, disabled),
+    sdkLoader: async () => ({ Agent: FakeAgent, Runner: FakeRunner, OpenAIProvider: FakeProvider }),
+  });
+
+  assert.equal(calls.runs, 1);
+  assert.equal(calls.specialists, 0);
+  assert.equal(Object.hasOwn(calls.agent, "tools"), false);
+  assert.equal(Object.hasOwn(calls.agent, "handoffs"), false);
+  assert.equal(calls.invocation.options.maxTurns, 1);
+  assert.equal(result.metadata.maxTurns, 1);
+  assert.equal(result.metadata.workspaceSpecialistUsed, false);
+});
+
 test("security-facing review coordination uses Luna Max from frozen context", async () => {
   const specialistResult = {
     mode: "review",

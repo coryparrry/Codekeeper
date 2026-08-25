@@ -137,6 +137,27 @@ test("the current runtime accepts the policy version emitted by this installer",
   assert.match(validator, /config\.version === 3/);
 });
 
+test("the installer rejects a bundled policy that enables orchestration", async () => {
+  const bundle = await loadVerifiedAssets();
+  const unsafe = JSON.parse(bundle.contents["policies/mixed.json"]);
+  for (const mutate of [
+    (policy) => { policy.ai.orchestration.enabled = true; },
+    (policy) => { policy.ai.orchestration.modes.review = true; },
+    (policy) => { policy.ai.orchestration.providerMultiAgent = true; },
+  ]) {
+    const invalid = structuredClone(unsafe);
+    mutate(invalid);
+    assert.throws(
+      () => renderPolicy(JSON.stringify(invalid), {
+        displayName: "Widget",
+        defaultBranch: "main",
+        ownerLogins: ["coryparrry"],
+      }),
+      /Bundled policy is invalid or unsupported/,
+    );
+  }
+});
+
 test("bundled provenance is byte-for-byte metadata from the current source tree", async () => {
   const bundle = await loadVerifiedAssets();
   assert.deepEqual(Object.keys(bundle.metadata.provenance).sort(), Object.keys(CHECKPOINT_PROVENANCE_PATHS).sort());
@@ -626,7 +647,26 @@ test("legacy policies keep deferred issue publication off until the publisher is
   delete legacy.labels.deferred;
   delete legacy.labels["codekeeper:deferred"];
   legacy.issues.managedLabels = legacy.issues.managedLabels.filter((label) => !["deferred", "codekeeper:deferred"].includes(label));
-  assert.equal(upgradePolicy(legacy).review.createDeferredIssues, false);
+  delete legacy.ai.orchestration;
+  const upgraded = upgradePolicy(legacy);
+  assert.equal(upgraded.review.createDeferredIssues, false);
+  assert.deepEqual(upgraded.ai.orchestration, {
+    enabled: false,
+    modes: {
+      review: false,
+      issues: false,
+      fix: false,
+      maintain: false,
+    },
+    maximumSpecialists: 4,
+    maximumConcurrency: 3,
+    maximumToolCalls: 6,
+    maximumTokensPerAgent: 32000,
+    maximumTotalTokens: 96000,
+    maximumOutputBytes: 262144,
+    maximumAutomaticRepairRounds: 1,
+    providerMultiAgent: false,
+  });
 });
 
 test("policy upgrades concise labels while retaining legacy cleanup aliases", async () => {

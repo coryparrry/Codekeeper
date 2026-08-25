@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "modelCalls": {
+    "review": {
+      "minimum": 2,
+      "maximum": 3,
+      "stages": ["workspace", "coordinator", "focused-workspace (optional)"]
+    },
+    "issue": {
+      "minimum": 1,
+      "maximum": 1,
+      "stages": ["workspace or coordinator"]
+    },
+    "fix": {
+      "minimum": 2,
+      "maximum": 3,
+      "stages": ["workspace", "coordinator", "second clustered workspace (optional)"]
+    },
+    "maintain": {
+      "minimum": 2,
+      "maximum": 2,
+      "stages": ["workspace", "coordinator"]
+    }
+  },
+  "repairClusters": {
+    "review": { "minimum": 0, "maximum": 0 },
+    "issue": { "minimum": 0, "maximum": 0 },
+    "fix": { "minimum": 0, "maximum": 2 },
+    "maintain": { "minimum": 0, "maximum": 0 }
+  },
+  "runnerAllocations": {
+    "review": 2,
+    "issue": 2,
+    "fix": 3,
+    "maintain": 3
+  },
+  "peakRunnerConcurrency": 1,
+  "orchestrationSpecialistInvocations": 0,
+  "modelCallBasis": "Nominal successful stages; bounded provider retries are not topology stages."
+}

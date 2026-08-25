@@ -262,6 +262,57 @@ test("configuration rejects resource limits above global ceilings and accepts th
   )))));
 });
 
+test("orchestration policy is closed, bounded, and disabled by default", async () => {
+  assert.deepEqual(source.ai.orchestration, {
+    enabled: false,
+    modes: {
+      review: false,
+      issues: false,
+      fix: false,
+      maintain: false,
+    },
+    maximumSpecialists: 4,
+    maximumConcurrency: 3,
+    maximumToolCalls: 6,
+    maximumTokensPerAgent: 32000,
+    maximumTotalTokens: 96000,
+    maximumOutputBytes: 262144,
+    maximumAutomaticRepairRounds: 1,
+    providerMultiAgent: false,
+  });
+  for (const mode of ["review", "audit", "issue", "fix"]) {
+    assert.equal(getAgentRuntimeSettings(source, mode).maxTurns, 1);
+  }
+
+  const legacy = structuredClone(source);
+  delete legacy.ai.orchestration;
+  const loadedLegacy = await loadConfig(await writeConfig(legacy));
+  assert.deepEqual(loadedLegacy.config.ai.orchestration, source.ai.orchestration);
+
+  for (const mutate of [
+    (config) => { config.ai.orchestration.unexpected = false; },
+    (config) => { config.ai.orchestration.role = "correctness"; },
+    (config) => { config.ai.orchestration.modes.correctness = false; },
+    (config) => { config.ai.orchestration.maximumSpecialists = 0; },
+    (config) => { config.ai.orchestration.maximumSpecialists = 5; },
+    (config) => { config.ai.orchestration.maximumConcurrency = 4; },
+    (config) => { config.ai.orchestration.maximumConcurrency = 4; config.ai.orchestration.maximumSpecialists = 3; },
+    (config) => { config.ai.orchestration.maximumToolCalls = 7; },
+    (config) => { config.ai.orchestration.maximumTokensPerAgent = 32001; },
+    (config) => { config.ai.orchestration.maximumTotalTokens = 31999; },
+    (config) => { config.ai.orchestration.maximumTotalTokens = 32000; },
+    (config) => { config.ai.orchestration.maximumOutputBytes = 262145; },
+    (config) => { config.ai.orchestration.maximumAutomaticRepairRounds = 2; },
+    (config) => { config.ai.orchestration.review = true; },
+    (config) => { config.ai.orchestration.modes.review = true; },
+    (config) => { config.ai.orchestration.providerMultiAgent = true; },
+  ]) {
+    const invalid = structuredClone(source);
+    mutate(invalid);
+    await assert.rejects(loadConfig(await writeConfig(invalid)), /Invalid Codekeeper policy/);
+  }
+});
+
 test("policy v3 exposes autonomous defaults and OpenRouter without changing workspace ownership", async () => {
   const { config } = await loadConfig(await writeConfig(structuredClone(source)));
   assert.equal(config.version, 3);

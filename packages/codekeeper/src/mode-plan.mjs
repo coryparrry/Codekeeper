@@ -57,10 +57,25 @@ const POLICY_CONTEXT_KEYS = new Set([
   "readyLabelFix",
   "review",
   "audit",
+  "orchestration",
 ]);
 const REVIEW_POLICY_KEYS = new Set(["autoRepair"]);
 const AUDIT_POLICY_KEYS = new Set(["repair"]);
 const REPAIR_POLICY_KEYS = new Set(["enabled"]);
+const ORCHESTRATION_POLICY_KEYS = new Set([
+  "enabled",
+  "modes",
+  "maximumSpecialists",
+  "maximumConcurrency",
+  "maximumToolCalls",
+  "maximumTokensPerAgent",
+  "maximumTotalTokens",
+  "maximumOutputBytes",
+  "maximumAutomaticRepairRounds",
+  "providerMultiAgent",
+]);
+const ORCHESTRATION_MODE_KEYS = new Set(["review", "issues", "fix", "maintain"]);
+const ORCHESTRATION_MODES = Object.freeze(["review", "issues", "fix", "maintain"]);
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function deepFreeze(value) {
@@ -224,6 +239,77 @@ function validatePolicyContext(policy) {
       throw new TypeError("Mode-plan audit repair policy must be boolean.");
     }
   }
+  let orchestration;
+  if (policy.orchestration !== undefined) {
+    assertExactKeys(
+      policy.orchestration,
+      ORCHESTRATION_POLICY_KEYS,
+      "Mode-plan orchestration policy",
+    );
+    const value = policy.orchestration;
+    assertExactKeys(value.modes, ORCHESTRATION_MODE_KEYS, "Mode-plan orchestration modes");
+    for (const key of ["enabled", "providerMultiAgent"]) {
+      if (typeof value[key] !== "boolean") {
+        throw new TypeError(`Mode-plan ${key} orchestration policy must be boolean.`);
+      }
+    }
+    for (const mode of ORCHESTRATION_MODES) {
+      if (typeof value.modes[mode] !== "boolean") {
+        throw new TypeError(`Mode-plan orchestration modes.${mode} must be boolean.`);
+      }
+    }
+    for (const [key, maximum] of [
+      ["maximumSpecialists", 4],
+      ["maximumConcurrency", 3],
+      ["maximumToolCalls", 6],
+      ["maximumTokensPerAgent", 32000],
+      ["maximumTotalTokens", 96000],
+      ["maximumOutputBytes", 262144],
+    ]) {
+      if (!Number.isSafeInteger(value[key]) || value[key] <= 0 || value[key] > maximum) {
+        throw new TypeError(
+          `Mode-plan orchestration ${key} must be a positive integer at most ${maximum}.`,
+        );
+      }
+    }
+    if (value.maximumTotalTokens < value.maximumTokensPerAgent) {
+      throw new TypeError(
+        "Mode-plan orchestration maximumTotalTokens must not be less than maximumTokensPerAgent.",
+      );
+    }
+    if (value.maximumTotalTokens < value.maximumTokensPerAgent * value.maximumConcurrency) {
+      throw new TypeError(
+        "Mode-plan orchestration maximumTotalTokens must cover maximumTokensPerAgent for maximumConcurrency.",
+      );
+    }
+    if (
+      !Number.isSafeInteger(value.maximumAutomaticRepairRounds) ||
+      value.maximumAutomaticRepairRounds < 0 ||
+      value.maximumAutomaticRepairRounds > 1
+    ) {
+      throw new TypeError(
+        "Mode-plan orchestration maximumAutomaticRepairRounds must be a non-negative integer at most 1.",
+      );
+    }
+    if (value.maximumConcurrency > value.maximumSpecialists) {
+      throw new TypeError(
+        "Mode-plan orchestration maximumConcurrency must not exceed maximumSpecialists.",
+      );
+    }
+    for (const mode of ORCHESTRATION_MODES) {
+      if (value.modes[mode] && !value.enabled) {
+        throw new TypeError(
+          `Mode-plan orchestration modes.${mode} requires enabled=true.`,
+        );
+      }
+    }
+    if (value.providerMultiAgent && !value.enabled) {
+      throw new TypeError(
+        "Mode-plan orchestration providerMultiAgent requires enabled=true.",
+      );
+    }
+    orchestration = Object.freeze({ ...value, modes: Object.freeze({ ...value.modes }) });
+  }
   return Object.freeze({
     candidateRequiresValidation: policy.candidateRequiresValidation,
     publicationEnabled: policy.publicationEnabled,
@@ -239,6 +325,7 @@ function validatePolicyContext(policy) {
         : Object.freeze({
             repair: Object.freeze({ enabled: policy.audit.repair.enabled }),
           }),
+    orchestration,
   });
 }
 

@@ -186,6 +186,13 @@ function assertDisabledPolicy(policy) {
   if (policy?.issues?.allowAiImplementation !== false) throw new InstallerError("Bundled policy enables AI issue implementation.", { code: "UNSAFE_POLICY" });
   if (policy?.issues?.closeExactDuplicates !== false) throw new InstallerError("Bundled policy enables automatic duplicate closure.", { code: "UNSAFE_POLICY" });
   if (policy?.merge?.enabled !== false) throw new InstallerError("Bundled policy enables automatic merge.", { code: "UNSAFE_POLICY" });
+  if (
+    policy?.ai?.orchestration?.enabled !== false ||
+    policy?.ai?.orchestration?.providerMultiAgent !== false ||
+    ["review", "issues", "fix", "maintain"].some((mode) => policy?.ai?.orchestration?.modes?.[mode] !== false)
+  ) {
+    throw new InstallerError("Bundled policy enables orchestration.", { code: "UNSAFE_POLICY" });
+  }
   if (!Array.isArray(policy.audit.repair.protectedPaths) || !policy.audit.repair.protectedPaths.length) {
     throw new InstallerError("Bundled policy has no protected paths.", { code: "UNSAFE_POLICY" });
   }

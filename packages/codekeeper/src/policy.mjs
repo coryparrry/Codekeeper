@@ -2,6 +2,7 @@ import { LABELS } from "./label-ownership.mjs";
 import {
   applyLabelCatalog,
   applyManagedLabelSets,
+  applyOrchestrationDefaults,
   applyRepairDefaults,
   ISSUE_MANAGED_LABELS,
   LABEL_DEFINITIONS,
@@ -210,5 +211,6 @@ export function upgradePolicy(input) {
   policy.issues.managedLabels = migrateLabelList(policy.issues.managedLabels ?? []);
   migrateLabels(policy);
   applyRepairDefaults(policy);
+  applyOrchestrationDefaults(policy);
   return policy;
 }

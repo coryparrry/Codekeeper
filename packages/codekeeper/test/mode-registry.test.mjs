@@ -305,6 +305,86 @@ test("resolved plans are closed, frozen, deterministic, and reject event authori
   );
 });
 
+test("mode planning validates disabled orchestration without changing the plan shape", () => {
+  const disabled = {
+    enabled: false,
+    modes: {
+      review: false,
+      issues: false,
+      fix: false,
+      maintain: false,
+    },
+    maximumSpecialists: 4,
+    maximumConcurrency: 3,
+    maximumToolCalls: 6,
+    maximumTokensPerAgent: 32000,
+    maximumTotalTokens: 96000,
+    maximumOutputBytes: 262144,
+    maximumAutomaticRepairRounds: 1,
+    providerMultiAgent: false,
+  };
+  const withoutPolicy = resolveModePlan({
+    requestedMode: "review",
+    event: { eventName: "pull_request" },
+  });
+  const withDisabledPolicy = resolveModePlan({
+    requestedMode: "review",
+    event: { eventName: "pull_request" },
+    policy: { orchestration: disabled },
+  });
+  assert.deepEqual(withDisabledPolicy, withoutPolicy);
+  assert.throws(
+    () => resolveModePlan({
+      requestedMode: "review",
+      event: { eventName: "pull_request" },
+      policy: {
+        orchestration: { ...disabled, modes: { ...disabled.modes, review: true } },
+      },
+    }),
+    /requires enabled=true/,
+  );
+  assert.throws(
+    () => resolveModePlan({
+      requestedMode: "review",
+      event: { eventName: "pull_request" },
+      policy: {
+        orchestration: { ...disabled, maximumToolCalls: 7 },
+      },
+    }),
+    /maximumToolCalls must be a positive integer at most 6/,
+  );
+  assert.throws(
+    () => resolveModePlan({
+      requestedMode: "review",
+      event: { eventName: "pull_request" },
+      policy: {
+        orchestration: { ...disabled, maximumTotalTokens: 32000 },
+      },
+    }),
+    /maximumTotalTokens must cover maximumTokensPerAgent for maximumConcurrency/,
+  );
+  assert.throws(
+    () => resolveModePlan({
+      requestedMode: "review",
+      event: { eventName: "pull_request" },
+      policy: {
+        orchestration: { ...disabled, role: "correctness" },
+      },
+    }),
+    /invalid key set/,
+  );
+  assert.throws(
+    () => resolveModePlan({
+      requestedMode: "review",
+      event: { eventName: "pull_request" },
+      policy: {
+        orchestration: { ...disabled, modes: { ...disabled.modes, correctness: false } },
+      },
+    }),
+    /invalid key set/,
+  );
+});
+
 test("auto resolution uses unambiguous event and command routes", () => {
   assert.equal(
     resolveModePlan({

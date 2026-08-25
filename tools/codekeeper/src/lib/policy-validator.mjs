@@ -39,8 +39,22 @@ const LIMITS = Object.freeze({
   maximumFileBytes: 1 * 1024 * 1024,
   maximumOpenIssueContext: 200,
   maximumMergeFiles: 50,
-  maximumMergeChangedLines: 5_000
+  maximumMergeChangedLines: 5_000,
+  maximumOrchestrationSpecialists: 4,
+  maximumOrchestrationConcurrency: 3,
+  maximumOrchestrationToolCalls: 6,
+  maximumOrchestrationTokensPerAgent: 32_000,
+  maximumOrchestrationTotalTokens: 96_000,
+  maximumOrchestrationOutputBytes: 262_144,
+  maximumAutomaticRepairRounds: 1
 });
+
+const ORCHESTRATION_MODES = Object.freeze([
+  "review",
+  "issues",
+  "fix",
+  "maintain"
+]);
 
 function assert(condition, message) {
   if (!condition) throw new Error(`Invalid Codekeeper policy: ${message}`);
@@ -250,8 +264,84 @@ function validateWriteAuthorityValidationCommands(config) {
   );
 }
 
+function validateOrchestration(config) {
+  const orchestration = fixedObject(config.ai.orchestration, "ai.orchestration", [
+    "enabled",
+    "modes",
+    "maximumSpecialists",
+    "maximumConcurrency",
+    "maximumToolCalls",
+    "maximumTokensPerAgent",
+    "maximumTotalTokens",
+    "maximumOutputBytes",
+    "maximumAutomaticRepairRounds",
+    "providerMultiAgent"
+  ]);
+  boolean(orchestration.enabled, "ai.orchestration.enabled");
+  const modes = fixedObject(orchestration.modes, "ai.orchestration.modes", ORCHESTRATION_MODES);
+  for (const mode of ORCHESTRATION_MODES) boolean(modes[mode], `ai.orchestration.modes.${mode}`);
+  cappedPositiveInteger(
+    orchestration.maximumSpecialists,
+    "ai.orchestration.maximumSpecialists",
+    LIMITS.maximumOrchestrationSpecialists
+  );
+  cappedPositiveInteger(
+    orchestration.maximumConcurrency,
+    "ai.orchestration.maximumConcurrency",
+    LIMITS.maximumOrchestrationConcurrency
+  );
+  assert(
+    orchestration.maximumConcurrency <= orchestration.maximumSpecialists,
+    "ai.orchestration.maximumConcurrency must not exceed ai.orchestration.maximumSpecialists"
+  );
+  cappedPositiveInteger(
+    orchestration.maximumToolCalls,
+    "ai.orchestration.maximumToolCalls",
+    LIMITS.maximumOrchestrationToolCalls
+  );
+  cappedPositiveInteger(
+    orchestration.maximumTokensPerAgent,
+    "ai.orchestration.maximumTokensPerAgent",
+    LIMITS.maximumOrchestrationTokensPerAgent
+  );
+  cappedPositiveInteger(
+    orchestration.maximumTotalTokens,
+    "ai.orchestration.maximumTotalTokens",
+    LIMITS.maximumOrchestrationTotalTokens
+  );
+  assert(
+    orchestration.maximumTotalTokens >= orchestration.maximumTokensPerAgent,
+    "ai.orchestration.maximumTotalTokens must not be less than ai.orchestration.maximumTokensPerAgent"
+  );
+  assert(
+    orchestration.maximumTotalTokens >= orchestration.maximumTokensPerAgent * orchestration.maximumConcurrency,
+    "ai.orchestration.maximumTotalTokens must cover maximumTokensPerAgent for maximumConcurrency"
+  );
+  cappedPositiveInteger(
+    orchestration.maximumOutputBytes,
+    "ai.orchestration.maximumOutputBytes",
+    LIMITS.maximumOrchestrationOutputBytes
+  );
+  cappedNonNegativeInteger(
+    orchestration.maximumAutomaticRepairRounds,
+    "ai.orchestration.maximumAutomaticRepairRounds",
+    LIMITS.maximumAutomaticRepairRounds
+  );
+  boolean(orchestration.providerMultiAgent, "ai.orchestration.providerMultiAgent");
+  for (const mode of ORCHESTRATION_MODES) {
+    assert(
+      !modes[mode] || orchestration.enabled,
+      `ai.orchestration.modes.${mode} requires ai.orchestration.enabled=true`
+    );
+  }
+  assert(
+    !orchestration.providerMultiAgent || orchestration.enabled,
+    "ai.orchestration.providerMultiAgent requires ai.orchestration.enabled=true"
+  );
+}
+
 function validateAi(config) {
-  fixedObject(config.ai, "ai", ["tracing", "providers", "agents"]);
+  fixedObject(config.ai, "ai", ["tracing", "providers", "agents", "orchestration"]);
   fixedObject(config.ai.tracing, "ai.tracing", ["enabled", "includeSensitiveData"]);
   boolean(config.ai.tracing.enabled, "ai.tracing.enabled");
   boolean(config.ai.tracing.includeSensitiveData, "ai.tracing.includeSensitiveData");
@@ -269,6 +359,8 @@ function validateAi(config) {
     boolean(provider.structuredOutputs, `ai.providers.${name}.structuredOutputs`);
     boolean(provider.supportsReasoningEffort, `ai.providers.${name}.supportsReasoningEffort`);
   }
+
+  validateOrchestration(config);
 
   const agents = fixedObject(config.ai.agents, "ai.agents", AGENT_MODES);
   for (const mode of AGENT_MODES) {

@@ -21,7 +21,13 @@ export * from "./agents-runtime-provider.mjs";
 
 const DEFAULT_CODEX_MCP_TIMEOUT_SECONDS = 20 * 60;
 const FIX_CODEX_MCP_TIMEOUT_SECONDS = 10 * 60;
-const MAX_CLUSTERED_FIXER_AGENTS = 2;
+export const MAX_CLUSTERED_FIXER_AGENTS = 2;
+export const MAX_WORKSPACE_PASSES = Object.freeze({
+  review: 2,
+  audit: 2,
+  issue: 2,
+  fix: 4,
+});
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -126,7 +132,7 @@ export function validateWorkspaceRuntimeMetadata(metadata, mode, config, context
   if (!metadata || metadata.version !== 1 || metadata.mode !== mode || !Array.isArray(metadata.passes)) {
     throw new Error("Workspace runtime metadata is missing or invalid");
   }
-  const maxPasses = mode === "fix" ? 4 : 2;
+  const maxPasses = MAX_WORKSPACE_PASSES[mode] ?? 2;
   if (metadata.passes.length < 1 || metadata.passes.length > maxPasses) {
     throw new Error("Workspace runtime metadata has an invalid pass count");
   }

@@ -22,6 +22,27 @@ export const REPAIR_LIMITS = Object.freeze({
   maximumFileBytes: 1024 * 1024
 });
 
+// OA-01 reserves the orchestration policy surface without granting it any
+// execution authority. These defaults are applied to older adopter policies
+// before validation so adding the closed object is backwards compatible.
+export const ORCHESTRATION_DEFAULTS = Object.freeze({
+  enabled: false,
+  modes: Object.freeze({
+    review: false,
+    issues: false,
+    fix: false,
+    maintain: false
+  }),
+  maximumSpecialists: 4,
+  maximumConcurrency: 3,
+  maximumToolCalls: 6,
+  maximumTokensPerAgent: 32_000,
+  maximumTotalTokens: 96_000,
+  maximumOutputBytes: 262_144,
+  maximumAutomaticRepairRounds: 1,
+  providerMultiAgent: false
+});
+
 export const REVIEW_MANAGED_LABELS = Object.freeze([
   LABELS.CHANGES_REQUIRED,
   LABELS.REVIEW_NEEDED,
@@ -139,6 +160,21 @@ export function applyRepairDefaults(policy) {
   Object.assign(repair, REPAIR_LIMITS);
 }
 
+export function applyOrchestrationDefaults(policy) {
+  const existing = policy.ai.orchestration;
+  if (existing === undefined) {
+    policy.ai.orchestration = structuredClone(ORCHESTRATION_DEFAULTS);
+  } else if (existing !== null && typeof existing === "object" && !Array.isArray(existing)) {
+    policy.ai.orchestration = {
+      ...structuredClone(ORCHESTRATION_DEFAULTS),
+      ...existing,
+      ...(existing.modes && typeof existing.modes === "object" && !Array.isArray(existing.modes)
+        ? { modes: { ...ORCHESTRATION_DEFAULTS.modes, ...existing.modes } }
+        : {})
+    };
+  }
+}
+
 export function applyLabelCatalog(policy) {
   policy.labels ??= {};
   for (const [name, definition] of Object.entries(LABEL_DEFINITIONS)) {
@@ -171,6 +207,7 @@ export function normalizeLivePolicy(input) {
     applyLabelCatalog(config);
     applyManagedLabelSets(config);
     applyRepairDefaults(config);
+    applyOrchestrationDefaults(config);
     return config;
   } catch (error) {
     throw new Error(`Invalid Codekeeper policy: ${error.message}`, { cause: error });

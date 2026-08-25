@@ -45,6 +45,23 @@
         "supportsReasoningEffort": false
       }
     },
+    "orchestration": {
+      "enabled": false,
+      "modes": {
+        "review": false,
+        "issues": false,
+        "fix": false,
+        "maintain": false
+      },
+      "maximumSpecialists": 4,
+      "maximumConcurrency": 3,
+      "maximumToolCalls": 6,
+      "maximumTokensPerAgent": 32000,
+      "maximumTotalTokens": 96000,
+      "maximumOutputBytes": 262144,
+      "maximumAutomaticRepairRounds": 1,
+      "providerMultiAgent": false
+    },
     "agents": {
       "review": {
         "provider": "openai",
