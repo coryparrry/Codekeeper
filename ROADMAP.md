@@ -5,6 +5,9 @@ commitments.
 
 ## Next: product hardening
 
+- Implement the [multi-agent orchestration specification](docs/MULTI_AGENT_ORCHESTRATION_SPEC.md):
+  manager-led specialists, reviewer-owned PR semantics, bounded repair
+  re-review, issue-label ownership, and human decision gates.
 - Preserve human-owned repository labels and namespace labels Codekeeper can
   remove.
 - Include bounded issue conversation context and rerun triage when a reporter
