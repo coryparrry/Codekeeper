@@ -305,7 +305,7 @@ test("resolved plans are closed, frozen, deterministic, and reject event authori
   );
 });
 
-test("mode planning validates disabled orchestration without changing the plan shape", () => {
+test("mode planning binds disabled orchestration ceilings without enabling it", () => {
   const disabled = {
     enabled: false,
     modes: {
@@ -332,55 +332,77 @@ test("mode planning validates disabled orchestration without changing the plan s
     event: { eventName: "pull_request" },
     policy: { orchestration: disabled },
   });
-  assert.deepEqual(withDisabledPolicy, withoutPolicy);
+  assert.equal(withoutPolicy.orchestration, null);
+  assert.deepEqual(withDisabledPolicy.orchestration, {
+    enabled: false,
+    providerMultiAgent: false,
+    maximumSpecialists: 4,
+    maximumConcurrency: 3,
+    maximumToolCalls: 6,
+    maximumTokensPerAgent: 32000,
+    maximumTotalTokens: 96000,
+    maximumOutputBytes: 262144,
+    maximumAutomaticRepairRounds: 1,
+  });
   assert.throws(
-    () => resolveModePlan({
-      requestedMode: "review",
-      event: { eventName: "pull_request" },
-      policy: {
-        orchestration: { ...disabled, modes: { ...disabled.modes, review: true } },
-      },
-    }),
+    () =>
+      resolveModePlan({
+        requestedMode: "review",
+        event: { eventName: "pull_request" },
+        policy: {
+          orchestration: {
+            ...disabled,
+            modes: { ...disabled.modes, review: true },
+          },
+        },
+      }),
     /requires enabled=true/,
   );
   assert.throws(
-    () => resolveModePlan({
-      requestedMode: "review",
-      event: { eventName: "pull_request" },
-      policy: {
-        orchestration: { ...disabled, maximumToolCalls: 7 },
-      },
-    }),
+    () =>
+      resolveModePlan({
+        requestedMode: "review",
+        event: { eventName: "pull_request" },
+        policy: {
+          orchestration: { ...disabled, maximumToolCalls: 7 },
+        },
+      }),
     /maximumToolCalls must be a positive integer at most 6/,
   );
   assert.throws(
-    () => resolveModePlan({
-      requestedMode: "review",
-      event: { eventName: "pull_request" },
-      policy: {
-        orchestration: { ...disabled, maximumTotalTokens: 32000 },
-      },
-    }),
+    () =>
+      resolveModePlan({
+        requestedMode: "review",
+        event: { eventName: "pull_request" },
+        policy: {
+          orchestration: { ...disabled, maximumTotalTokens: 32000 },
+        },
+      }),
     /maximumTotalTokens must cover maximumTokensPerAgent for maximumConcurrency/,
   );
   assert.throws(
-    () => resolveModePlan({
-      requestedMode: "review",
-      event: { eventName: "pull_request" },
-      policy: {
-        orchestration: { ...disabled, role: "correctness" },
-      },
-    }),
+    () =>
+      resolveModePlan({
+        requestedMode: "review",
+        event: { eventName: "pull_request" },
+        policy: {
+          orchestration: { ...disabled, role: "correctness" },
+        },
+      }),
     /invalid key set/,
   );
   assert.throws(
-    () => resolveModePlan({
-      requestedMode: "review",
-      event: { eventName: "pull_request" },
-      policy: {
-        orchestration: { ...disabled, modes: { ...disabled.modes, correctness: false } },
-      },
-    }),
+    () =>
+      resolveModePlan({
+        requestedMode: "review",
+        event: { eventName: "pull_request" },
+        policy: {
+          orchestration: {
+            ...disabled,
+            modes: { ...disabled.modes, correctness: false },
+          },
+        },
+      }),
     /invalid key set/,
   );
 });

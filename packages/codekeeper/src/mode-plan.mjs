@@ -74,8 +74,18 @@ const ORCHESTRATION_POLICY_KEYS = new Set([
   "maximumAutomaticRepairRounds",
   "providerMultiAgent",
 ]);
-const ORCHESTRATION_MODE_KEYS = new Set(["review", "issues", "fix", "maintain"]);
-const ORCHESTRATION_MODES = Object.freeze(["review", "issues", "fix", "maintain"]);
+const ORCHESTRATION_MODE_KEYS = new Set([
+  "review",
+  "issues",
+  "fix",
+  "maintain",
+]);
+const ORCHESTRATION_MODES = Object.freeze([
+  "review",
+  "issues",
+  "fix",
+  "maintain",
+]);
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function deepFreeze(value) {
@@ -247,15 +257,23 @@ function validatePolicyContext(policy) {
       "Mode-plan orchestration policy",
     );
     const value = policy.orchestration;
-    assertExactKeys(value.modes, ORCHESTRATION_MODE_KEYS, "Mode-plan orchestration modes");
+    assertExactKeys(
+      value.modes,
+      ORCHESTRATION_MODE_KEYS,
+      "Mode-plan orchestration modes",
+    );
     for (const key of ["enabled", "providerMultiAgent"]) {
       if (typeof value[key] !== "boolean") {
-        throw new TypeError(`Mode-plan ${key} orchestration policy must be boolean.`);
+        throw new TypeError(
+          `Mode-plan ${key} orchestration policy must be boolean.`,
+        );
       }
     }
     for (const mode of ORCHESTRATION_MODES) {
       if (typeof value.modes[mode] !== "boolean") {
-        throw new TypeError(`Mode-plan orchestration modes.${mode} must be boolean.`);
+        throw new TypeError(
+          `Mode-plan orchestration modes.${mode} must be boolean.`,
+        );
       }
     }
     for (const [key, maximum] of [
@@ -266,7 +284,11 @@ function validatePolicyContext(policy) {
       ["maximumTotalTokens", 96000],
       ["maximumOutputBytes", 262144],
     ]) {
-      if (!Number.isSafeInteger(value[key]) || value[key] <= 0 || value[key] > maximum) {
+      if (
+        !Number.isSafeInteger(value[key]) ||
+        value[key] <= 0 ||
+        value[key] > maximum
+      ) {
         throw new TypeError(
           `Mode-plan orchestration ${key} must be a positive integer at most ${maximum}.`,
         );
@@ -277,7 +299,10 @@ function validatePolicyContext(policy) {
         "Mode-plan orchestration maximumTotalTokens must not be less than maximumTokensPerAgent.",
       );
     }
-    if (value.maximumTotalTokens < value.maximumTokensPerAgent * value.maximumConcurrency) {
+    if (
+      value.maximumTotalTokens <
+      value.maximumTokensPerAgent * value.maximumConcurrency
+    ) {
       throw new TypeError(
         "Mode-plan orchestration maximumTotalTokens must cover maximumTokensPerAgent for maximumConcurrency.",
       );
@@ -308,7 +333,10 @@ function validatePolicyContext(policy) {
         "Mode-plan orchestration providerMultiAgent requires enabled=true.",
       );
     }
-    orchestration = Object.freeze({ ...value, modes: Object.freeze({ ...value.modes }) });
+    orchestration = Object.freeze({
+      ...value,
+      modes: Object.freeze({ ...value.modes }),
+    });
   }
   return Object.freeze({
     candidateRequiresValidation: policy.candidateRequiresValidation,
@@ -497,6 +525,7 @@ export function resolveModePlan(input = {}) {
       !eventContext.dryRun &&
       !policyContext.dryRun &&
       policyContext.publicationEnabled !== false);
+  const orchestration = policyContext.orchestration;
   return deepFreeze({
     schemaVersion: 1,
     requestedMode: normalizedRequestedMode,
@@ -509,6 +538,21 @@ export function resolveModePlan(input = {}) {
     requiredGate: mode.requiredGate,
     publicationAdapter: mode.publicationAdapter,
     appPermissions: resolveModeAppPermissions(mode, policyContext),
+    orchestration:
+      orchestration === undefined
+        ? null
+        : {
+            enabled: orchestration.enabled && orchestration.modes[resolvedMode],
+            providerMultiAgent: orchestration.providerMultiAgent,
+            maximumSpecialists: orchestration.maximumSpecialists,
+            maximumConcurrency: orchestration.maximumConcurrency,
+            maximumToolCalls: orchestration.maximumToolCalls,
+            maximumTokensPerAgent: orchestration.maximumTokensPerAgent,
+            maximumTotalTokens: orchestration.maximumTotalTokens,
+            maximumOutputBytes: orchestration.maximumOutputBytes,
+            maximumAutomaticRepairRounds:
+              orchestration.maximumAutomaticRepairRounds,
+          },
   });
 }
 
@@ -524,4 +568,5 @@ export const MODE_PLAN_KEYS = Object.freeze([
   "requiredGate",
   "publicationAdapter",
   "appPermissions",
+  "orchestration",
 ]);

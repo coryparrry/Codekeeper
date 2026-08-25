@@ -10,6 +10,12 @@ import { applyPatch, createPatch, currentHead } from "../git.mjs";
 import { modeAdapter, assertVerifiedModePlan } from "./mode-adapters.mjs";
 import { assertCredentialBoundary } from "./credential-boundaries.mjs";
 import {
+  assertOrchestrationPlan,
+  assertProviderSettingsWithinPlan,
+  orchestrationPlanBindings,
+  orchestrationPlanBytes,
+} from "./orchestration-plan.mjs";
+import {
   runIsolatedWorkspaceAgent,
   verifyFrozenContext,
 } from "./workspace-isolation.mjs";
@@ -33,6 +39,55 @@ async function applyWorkspacePatch(patchPath) {
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
+}
+
+async function bindOrchestrationPlan(verifiedPlan, options, directory) {
+  const supplied = required(options.orchestrationPlan, "orchestrationPlan");
+  const modePlanBytes = await readFile(
+    required(options.modePlanPath, "modePlanPath"),
+  );
+  const policyBytes = await readFile(
+    required(options.configPath, "configPath"),
+  );
+  const contextBytes = await readFile(path.join(directory, "context.json"));
+  const context = JSON.parse(contextBytes.toString("utf8"));
+  const sourceCommit = String(options.toolingSha ?? context.toolingSha ?? "");
+  if (
+    !/^[a-f0-9]{40,64}$/i.test(sourceCommit) ||
+    (context.toolingSha && context.toolingSha !== sourceCommit)
+  )
+    throw new Error("Orchestration package source commit is stale");
+  const bindings = orchestrationPlanBindings({
+    modePlanBytes,
+    policyBytes,
+    packageIdentity: {
+      name: "@coryparry/codekeeper",
+      version: required(
+        process.env.CODEKEEPER_PACKAGE_VERSION,
+        "CODEKEEPER_PACKAGE_VERSION",
+      ),
+      integrity: required(
+        process.env.CODEKEEPER_PACKAGE_INTEGRITY,
+        "CODEKEEPER_PACKAGE_INTEGRITY",
+      ),
+      sourceCommit,
+    },
+    repository:
+      context.repository ??
+      required(process.env.GITHUB_REPOSITORY, "GITHUB_REPOSITORY"),
+    contextBytes,
+    head: context.pullRequest?.headSha ?? context.baseSha,
+  });
+  const plan = assertOrchestrationPlan(supplied, {
+    modePlan: verifiedPlan,
+    bindings,
+  });
+  await writeFile(
+    path.join(directory, "orchestration-plan.json"),
+    orchestrationPlanBytes(plan, { modePlan: verifiedPlan, bindings }),
+    { flag: "wx" },
+  );
+  return plan;
 }
 
 export async function runCompute({
@@ -162,6 +217,24 @@ export async function runCompute({
         throw new Error(
           "Workspace checkout target does not match the frozen context base SHA",
         );
+    }
+    if (verifiedPlan.orchestration?.enabled) {
+      const orchestrationPlan = await bindOrchestrationPlan(
+        verifiedPlan,
+        options,
+        directory,
+      );
+      const runtimeMode =
+        adapter.mode === "issues"
+          ? "issue"
+          : adapter.mode === "maintain"
+            ? "audit"
+            : adapter.mode;
+      const settings = getAgentRuntimeSettings(config, runtimeMode);
+      assertProviderSettingsWithinPlan(orchestrationPlan, {
+        maxTurns: settings.maxTurns,
+        maximumAttempts: settings.maximumAttempts,
+      });
     }
     if (options.workspacePatchPath)
       await applyWorkspacePatch(options.workspacePatchPath);

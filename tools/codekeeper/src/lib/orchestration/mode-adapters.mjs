@@ -33,6 +33,26 @@ const TRIGGER_VALUES = new Set([
 ]);
 const WORKSPACE_ACCESS_VALUES = new Set(["none", "read", "write"]);
 const MODE_ALIASES = Object.freeze({ issue: "issues", audit: "maintain" });
+const ORCHESTRATION_KEYS = [
+  "enabled",
+  "providerMultiAgent",
+  "maximumSpecialists",
+  "maximumConcurrency",
+  "maximumToolCalls",
+  "maximumTokensPerAgent",
+  "maximumTotalTokens",
+  "maximumOutputBytes",
+  "maximumAutomaticRepairRounds",
+];
+const ORCHESTRATION_MAXIMUMS = Object.freeze({
+  maximumSpecialists: 4,
+  maximumConcurrency: 3,
+  maximumToolCalls: 6,
+  maximumTokensPerAgent: 32000,
+  maximumTotalTokens: 96000,
+  maximumOutputBytes: 262144,
+  maximumAutomaticRepairRounds: 1,
+});
 
 // These are the closed semantic invariants of the package registry. The
 // resolver remains the source of the plan; this table only prevents a
@@ -149,6 +169,58 @@ function assertPermissions(permissions) {
   }
 }
 
+function assertOrchestration(value, mode, config) {
+  if (value === null) {
+    if (config?.ai?.orchestration)
+      throw new Error("Mode plan is missing orchestration policy bindings");
+    return null;
+  }
+  plainObject(value, "Mode-plan orchestration");
+  const keys = Object.keys(value).sort();
+  if (keys.join(",") !== [...ORCHESTRATION_KEYS].sort().join(",")) {
+    throw new TypeError("Mode-plan orchestration has an invalid key set");
+  }
+  if (
+    typeof value.enabled !== "boolean" ||
+    typeof value.providerMultiAgent !== "boolean"
+  )
+    throw new TypeError("Mode-plan orchestration flags must be booleans");
+  for (const [key, maximum] of Object.entries(ORCHESTRATION_MAXIMUMS)) {
+    const minimum = key === "maximumAutomaticRepairRounds" ? 0 : 1;
+    if (
+      !Number.isSafeInteger(value[key]) ||
+      value[key] < minimum ||
+      value[key] > maximum
+    )
+      throw new TypeError(
+        `Mode-plan orchestration ${key} must be an integer from ${minimum} to ${maximum}`,
+      );
+  }
+  if (
+    value.maximumConcurrency > value.maximumSpecialists ||
+    value.maximumTotalTokens <
+      value.maximumTokensPerAgent * value.maximumConcurrency
+  )
+    throw new TypeError("Mode-plan orchestration ceilings are inconsistent");
+  const policy = config?.ai?.orchestration;
+  if (policy) {
+    const expected = {
+      ...Object.fromEntries(
+        ORCHESTRATION_KEYS.filter(
+          (key) => !["enabled", "providerMultiAgent"].includes(key),
+        ).map((key) => [key, policy[key]]),
+      ),
+      enabled: policy.enabled && policy.modes[mode],
+      providerMultiAgent: policy.providerMultiAgent,
+    };
+    for (const key of ORCHESTRATION_KEYS) {
+      if (value[key] !== expected[key])
+        throw new Error(`Mode plan orchestration ${key} does not match policy`);
+    }
+  }
+  return Object.freeze({ ...value });
+}
+
 /**
  * Validate the closed, package-produced mode plan before any adapter is run.
  * Runtime code intentionally consumes this artifact instead of re-resolving
@@ -172,6 +244,7 @@ export function assertVerifiedModePlan(
     "requiredGate",
     "publicationAdapter",
     "appPermissions",
+    "orchestration",
   ]);
   const unknown = Object.keys(plan).filter((key) => !allowed.has(key));
   const missing = [...allowed].filter((key) => !Object.hasOwn(plan, key));
@@ -244,6 +317,7 @@ export function assertVerifiedModePlan(
     ...plan,
     resolvedMode: mode,
     appPermissions: Object.freeze({ ...plan.appPermissions }),
+    orchestration: assertOrchestration(plan.orchestration, mode, config),
   });
 }
 

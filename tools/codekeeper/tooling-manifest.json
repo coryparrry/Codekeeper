@@ -131,7 +131,7 @@
     },
     {
       "path": "src/lib/orchestration/artifact-handoff.mjs",
-      "sha256": "ebe278daea234e2e9eaacc7283f73d2b996b3ed02a89ec5bee6b7418b2d008e7"
+      "sha256": "e132e460321551a4925b83d4c955d0028c57aab828ccbcc376db192174688b69"
     },
     {
       "path": "src/lib/orchestration/command-artifact.mjs",
@@ -139,7 +139,7 @@
     },
     {
       "path": "src/lib/orchestration/compute.mjs",
-      "sha256": "6f832049a6046a5fd118ccbc177aac5f7a04ad587c8aa3bfd595902c71a29159"
+      "sha256": "bc73a04ec3542112ee51e947d6f82ca20b6f10adc9371187539ad697bad8a949"
     },
     {
       "path": "src/lib/orchestration/credential-boundaries.mjs",
@@ -147,11 +147,11 @@
     },
     {
       "path": "src/lib/orchestration/envelope.mjs",
-      "sha256": "73e9f1d94c813db34e3e91821363babfc932ce044d22d14722426d649bc44fea"
+      "sha256": "871940a39c29884838d0905c7d6c5d26980e9700ae6ff54265a2a030ac514f6c"
     },
     {
       "path": "src/lib/orchestration/handoff.mjs",
-      "sha256": "a5be94c4ab2507c3f5e5843382f40c351ceb958be37348448c8f72d2e45384dd"
+      "sha256": "99e09d0077363c3d041390deca46822d523a30aa108bc6e13ddc3e730ea9193e"
     },
     {
       "path": "src/lib/orchestration/index.mjs",
@@ -159,7 +159,11 @@
     },
     {
       "path": "src/lib/orchestration/mode-adapters.mjs",
-      "sha256": "056743b83c4df1efbd09e5ea4b162ebcf7768c710211999a6e0dcd9bb803a784"
+      "sha256": "24c870712f458869e60c940a2e6ffc441c49c168d22bfc3790903cf18268acc7"
+    },
+    {
+      "path": "src/lib/orchestration/orchestration-plan.mjs",
+      "sha256": "4db70f48fc0109ea85f9cccee6464b4a0d550b6cbc42387341aa6d013b8335ee"
     },
     {
       "path": "src/lib/orchestration/publish.mjs",

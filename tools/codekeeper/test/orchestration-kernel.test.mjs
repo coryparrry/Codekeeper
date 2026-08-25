@@ -21,6 +21,11 @@ import { runCompute } from "../src/lib/orchestration/compute.mjs";
 import { runPublish } from "../src/lib/orchestration/publish.mjs";
 import { sha256 } from "../src/lib/markers.mjs";
 import {
+  createOrchestrationPlan,
+  orchestrationPlanBindings,
+  orchestrationPlanBytes,
+} from "../src/lib/orchestration/orchestration-plan.mjs";
+import {
   assertCredentialBoundary,
   resolveAutomationBot,
   validateAppPermissionInputs,
@@ -36,6 +41,18 @@ const modeEvents = {
   issues: { eventName: "issues" },
   maintain: { eventName: "schedule" },
   fix: { eventName: "repository_dispatch" },
+};
+const disabledOrchestration = {
+  enabled: false,
+  modes: { review: false, issues: false, fix: false, maintain: false },
+  maximumSpecialists: 4,
+  maximumConcurrency: 3,
+  maximumToolCalls: 6,
+  maximumTokensPerAgent: 32000,
+  maximumTotalTokens: 96000,
+  maximumOutputBytes: 262144,
+  maximumAutomaticRepairRounds: 1,
+  providerMultiAgent: false,
 };
 
 function packagePlan(mode, policy = {}) {
@@ -105,6 +122,20 @@ test("verified plans reject adapter, permission, and unknown-field tampering", (
         "review",
       ),
     /issues permission does not match/,
+  );
+  const bounded = packagePlan("review", {
+    orchestration: disabledOrchestration,
+  });
+  assert.throws(
+    () =>
+      assertVerifiedModePlan({
+        ...bounded,
+        orchestration: {
+          ...bounded.orchestration,
+          maximumTotalTokens: 96001,
+        },
+      }),
+    /maximumTotalTokens must be an integer from 1 to 96000/,
   );
 });
 
@@ -274,10 +305,7 @@ test("workspace isolation passes env -i KEY=VALUE assignments to the isolated us
       CI: "true",
       HOME: "/home/runner/work/repo/repo/codekeeper-codex-home",
     }),
-    [
-      "CI=true",
-      "HOME=/home/runner/work/repo/repo/codekeeper-codex-home",
-    ],
+    ["CI=true", "HOME=/home/runner/work/repo/repo/codekeeper-codex-home"],
   );
   assert.throws(
     () => environmentAssignments({ "CI true": "1" }),
@@ -376,6 +404,103 @@ test("disabled workspaces preserve no-evidence coordinator semantics", async () 
   }
 });
 
+test("enabled orchestration cannot reach analysis without a bound plan", async () => {
+  const orchestration = {
+    ...disabledOrchestration,
+    enabled: true,
+    modes: { ...disabledOrchestration.modes, review: true },
+  };
+  await assert.rejects(
+    runCompute({
+      mode: "review",
+      operation: "analyze",
+      plan: packagePlan("review", { orchestration }),
+      config: { ai: { orchestration } },
+      directory: "unused",
+      resultPath: "unused/result.json",
+    }),
+    /orchestrationPlan is required/,
+  );
+});
+
+test("enabled analysis recomputes plan bindings from frozen files", async () => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "codekeeper-plan-binding-"),
+  );
+  const orchestration = {
+    ...disabledOrchestration,
+    enabled: true,
+    modes: { ...disabledOrchestration.modes, review: true },
+  };
+  const plan = packagePlan("review", { orchestration });
+  const modePlanPath = path.join(root, "mode-plan.json");
+  const configPath = path.join(root, "policy.json");
+  const contextPath = path.join(root, "context.json");
+  const sourceCommit = "b".repeat(40);
+  const context = {
+    repository: "owner/repository",
+    baseSha: "a".repeat(40),
+    toolingSha: sourceCommit,
+  };
+  await writeFile(modePlanPath, `${JSON.stringify(plan)}\n`);
+  await writeFile(configPath, `${JSON.stringify({ ai: { orchestration } })}\n`);
+  await writeFile(contextPath, JSON.stringify(context));
+  const packageIdentity = {
+    name: "@coryparry/codekeeper",
+    version: "0.5.3",
+    integrity: "sha512-YQ==",
+    sourceCommit,
+  };
+  const bindings = orchestrationPlanBindings({
+    modePlanBytes: await readFile(modePlanPath),
+    policyBytes: await readFile(configPath),
+    packageIdentity,
+    repository: context.repository,
+    contextBytes: await readFile(contextPath),
+    head: context.baseSha,
+  });
+  const orchestrationPlan = createOrchestrationPlan({
+    modePlan: plan,
+    bindings,
+  });
+  const previousVersion = process.env.CODEKEEPER_PACKAGE_VERSION;
+  const previousIntegrity = process.env.CODEKEEPER_PACKAGE_INTEGRITY;
+  Object.assign(process.env, {
+    CODEKEEPER_PACKAGE_VERSION: packageIdentity.version,
+    CODEKEEPER_PACKAGE_INTEGRITY: packageIdentity.integrity,
+  });
+  try {
+    await writeFile(
+      contextPath,
+      JSON.stringify({ ...context, requestedBy: "changed" }),
+    );
+    await assert.rejects(
+      runCompute({
+        mode: "review",
+        operation: "analyze",
+        plan,
+        config: { ai: { orchestration } },
+        directory: root,
+        resultPath: path.join(root, "result.json"),
+        modePlanPath,
+        configPath,
+        toolingSha: sourceCommit,
+        orchestrationPlan,
+      }),
+      /context binding is stale/,
+    );
+  } finally {
+    for (const [key, value] of [
+      ["CODEKEEPER_PACKAGE_VERSION", previousVersion],
+      ["CODEKEEPER_PACKAGE_INTEGRITY", previousIntegrity],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("artifact stages bind the PR3 handoff manifest to candidate and validation bytes", async () => {
   const root = await mkdtemp(
     path.join(os.tmpdir(), "codekeeper-orchestration-"),
@@ -391,11 +516,21 @@ test("artifact stages bind the PR3 handoff manifest to candidate and validation 
     requestedBy: "actor",
     issue: { number: 7 },
   };
+  const enabledOrchestration = {
+    ...disabledOrchestration,
+    enabled: true,
+    modes: { ...disabledOrchestration.modes, review: true },
+  };
   const config = {
     repository: { defaultBranch: "main" },
-    ai: { agents: { review: { workspace: { enabled: false } } } },
+    ai: {
+      orchestration: enabledOrchestration,
+      agents: { review: { workspace: { enabled: false } } },
+    },
   };
-  const plan = packagePlan("review");
+  const plan = packagePlan("review", {
+    orchestration: enabledOrchestration,
+  });
   const planPath = path.join(root, "mode-plan.json");
   const configPath = path.join(root, "policy.json");
   await writeFile(planPath, `${JSON.stringify(plan)}\n`);
@@ -446,6 +581,46 @@ test("artifact stages bind the PR3 handoff manifest to candidate and validation 
     GITHUB_ACTOR: "actor",
   });
   try {
+    await assert.rejects(
+      createArtifactHandoff({
+        sourceDirectory: candidateDirectory,
+        modePlanPath: planPath,
+        configPath,
+        config,
+        toolingSha: "",
+        workspaceResultPath: path.join(root, "missing-workspace-result.json"),
+      }),
+      /requires orchestration-plan.json/,
+    );
+    const modePlanBytes = await readFile(planPath);
+    const policyBytes = await readFile(configPath);
+    const contextBytes = await readFile(
+      path.join(candidateDirectory, "context.json"),
+    );
+    const bindings = orchestrationPlanBindings({
+      modePlanBytes,
+      policyBytes,
+      packageIdentity: {
+        name: "@coryparry/codekeeper",
+        version: process.env.CODEKEEPER_PACKAGE_VERSION,
+        integrity: process.env.CODEKEEPER_PACKAGE_INTEGRITY,
+        sourceCommit,
+      },
+      repository: context.repository,
+      contextBytes,
+      head: context.baseSha,
+    });
+    const orchestrationPlan = createOrchestrationPlan({
+      modePlan: plan,
+      bindings,
+    });
+    await writeFile(
+      path.join(candidateDirectory, "orchestration-plan.json"),
+      orchestrationPlanBytes(orchestrationPlan, {
+        modePlan: plan,
+        bindings,
+      }),
+    );
     const compute = await createArtifactHandoff({
       sourceDirectory: candidateDirectory,
       modePlanPath: planPath,
@@ -460,6 +635,12 @@ test("artifact stages bind the PR3 handoff manifest to candidate and validation 
         "utf8",
       ),
       '{"skipped":true}\n',
+    );
+    assert.equal(
+      compute.envelope.digests.orchestrationPlan,
+      sha256(
+        orchestrationPlanBytes(orchestrationPlan, { modePlan: plan, bindings }),
+      ),
     );
     await verifyArtifactHandoff({
       sourceDirectory: candidateDirectory,

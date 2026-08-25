@@ -37,6 +37,7 @@ const DIGEST_PATHS = Object.freeze({
   policy: "policy.json",
   profile: "profile.json",
   context: "context.json",
+  orchestrationPlan: "orchestration-plan.json",
   workspaceResult: "workspace-result.json",
   candidate: "candidate.json",
   validationReceipt: "validation-receipt.json",

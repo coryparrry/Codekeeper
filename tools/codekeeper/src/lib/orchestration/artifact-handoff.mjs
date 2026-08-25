@@ -9,6 +9,10 @@ import {
   HANDOFF_MANIFEST_FILE,
   verifyHandoff,
 } from "./handoff.mjs";
+import {
+  orchestrationPlanBindings,
+  parseOrchestrationPlan,
+} from "./orchestration-plan.mjs";
 
 const ARTIFACT_FILES = [
   "agent-profile.md",
@@ -81,7 +85,11 @@ async function optionalArtifactFile(directory, name) {
   }
 }
 
-function artifactExpectedFiles(hasPatch, hasValidation = false) {
+function artifactExpectedFiles(
+  hasPatch,
+  hasValidation = false,
+  hasOrchestrationPlan = false,
+) {
   const files = [
     HANDOFF_ENVELOPE_FILE,
     ...ARTIFACT_FILES,
@@ -92,6 +100,7 @@ function artifactExpectedFiles(hasPatch, hasValidation = false) {
   ];
   if (hasPatch) files.push("patch.diff");
   if (hasValidation) files.push("validation-receipt.json");
+  if (hasOrchestrationPlan) files.push("orchestration-plan.json");
   return files;
 }
 
@@ -100,6 +109,7 @@ async function artifactEnvelope({
   policyBytes,
   profileBytes,
   contextBytes,
+  orchestrationPlanBytes,
   workspaceBytes,
   candidateBytes,
   config,
@@ -122,6 +132,25 @@ async function artifactEnvelope({
     );
   }
   const sourceCommit = trustedSourceCommit({ toolingSha, context });
+  const packageIdentity = {
+    name: "@coryparry/codekeeper",
+    version: packageVersion,
+    integrity: packageIntegrity,
+    sourceCommit,
+  };
+  if (orchestrationPlanBytes) {
+    parseOrchestrationPlan(orchestrationPlanBytes, {
+      modePlan: plan,
+      bindings: orchestrationPlanBindings({
+        modePlanBytes,
+        policyBytes,
+        packageIdentity,
+        repository,
+        contextBytes,
+        head: headSha ?? baseSha,
+      }),
+    });
+  }
   const created = createEnvelope({
     mode: plan.resolvedMode,
     run: {
@@ -129,12 +158,7 @@ async function artifactEnvelope({
       runId: process.env.GITHUB_RUN_ID ?? "local-run",
       attempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? 1),
     },
-    package: {
-      name: "@coryparry/codekeeper",
-      version: packageVersion,
-      integrity: packageIntegrity,
-      sourceCommit,
-    },
+    package: packageIdentity,
     request: {
       eventName: process.env.GITHUB_EVENT_NAME ?? "workflow_dispatch",
       targetNumber:
@@ -155,6 +179,9 @@ async function artifactEnvelope({
       policy: sha256(policyBytes),
       profile: sha256(profileBytes),
       context: sha256(contextBytes),
+      orchestrationPlan: orchestrationPlanBytes
+        ? sha256(orchestrationPlanBytes)
+        : null,
     },
   });
   return advanceEnvelope(created, "compute-complete", {
@@ -198,6 +225,12 @@ export async function createArtifactHandoff({
           "workspace-result.json",
         )) ?? Buffer.from('{"skipped":true}\n', "utf8"));
   const patchBytes = await optionalArtifactFile(sourceDirectory, "patch.diff");
+  const orchestrationPlanBytes = await optionalArtifactFile(
+    sourceDirectory,
+    "orchestration-plan.json",
+  );
+  if (plan.orchestration?.enabled && !orchestrationPlanBytes)
+    throw new Error("Enabled orchestration requires orchestration-plan.json");
   const sourceFiles = [];
   for (const name of ARTIFACT_FILES)
     sourceFiles.push({
@@ -206,6 +239,12 @@ export async function createArtifactHandoff({
     });
   if (patchBytes)
     sourceFiles.push({ path: "patch.diff", contents: patchBytes });
+  if (orchestrationPlanBytes) {
+    sourceFiles.push({
+      path: "orchestration-plan.json",
+      contents: orchestrationPlanBytes,
+    });
+  }
   sourceFiles.push(
     { path: "mode-plan.json", contents: modePlanBytes },
     { path: "policy.json", contents: policyBytes },
@@ -217,6 +256,7 @@ export async function createArtifactHandoff({
     policyBytes,
     profileBytes,
     contextBytes,
+    orchestrationPlanBytes,
     workspaceBytes,
     candidateBytes,
     config,
@@ -226,7 +266,11 @@ export async function createArtifactHandoff({
     path.join(os.tmpdir(), "codekeeper-handoff-"),
   );
   try {
-    const expectedFiles = artifactExpectedFiles(Boolean(patchBytes));
+    const expectedFiles = artifactExpectedFiles(
+      Boolean(patchBytes),
+      false,
+      Boolean(orchestrationPlanBytes),
+    );
     const result = await createHandoff({
       directory: temporary,
       envelope,
@@ -265,6 +309,7 @@ export async function createValidationArtifactHandoff({
     sourceDirectory,
     "mode-plan.json",
   );
+  const plan = JSON.parse(modePlanBytes.toString("utf8"));
   const policyBytes = await requiredArtifactFile(
     sourceDirectory,
     "policy.json",
@@ -290,11 +335,18 @@ export async function createValidationArtifactHandoff({
     "validation-receipt.json",
   );
   const patchBytes = await optionalArtifactFile(sourceDirectory, "patch.diff");
+  const orchestrationPlanBytes = await optionalArtifactFile(
+    sourceDirectory,
+    "orchestration-plan.json",
+  );
+  if (plan.orchestration?.enabled && !orchestrationPlanBytes)
+    throw new Error("Enabled orchestration requires orchestration-plan.json");
   const compute = await artifactEnvelope({
     modePlanBytes,
     policyBytes,
     profileBytes,
     contextBytes,
+    orchestrationPlanBytes,
     workspaceBytes,
     candidateBytes,
     config,
@@ -311,6 +363,12 @@ export async function createValidationArtifactHandoff({
       contents: await requiredArtifactFile(sourceDirectory, name),
     });
   if (patchBytes) files.push({ path: "patch.diff", contents: patchBytes });
+  if (orchestrationPlanBytes) {
+    files.push({
+      path: "orchestration-plan.json",
+      contents: orchestrationPlanBytes,
+    });
+  }
   files.push(
     { path: "mode-plan.json", contents: modePlanBytes },
     { path: "policy.json", contents: policyBytes },
@@ -327,7 +385,11 @@ export async function createValidationArtifactHandoff({
       envelope,
       kind: "validation",
       files,
-      expectedFiles: artifactExpectedFiles(Boolean(patchBytes), true),
+      expectedFiles: artifactExpectedFiles(
+        Boolean(patchBytes),
+        true,
+        Boolean(orchestrationPlanBytes),
+      ),
     });
     await rm(path.join(sourceDirectory, HANDOFF_ENVELOPE_FILE), {
       force: true,
@@ -402,6 +464,13 @@ export async function verifyArtifactHandoff({
     "workspace-result.json",
   );
   const patchBytes = await optionalArtifactFile(sourceDirectory, "patch.diff");
+  const orchestrationPlanBytes = await optionalArtifactFile(
+    sourceDirectory,
+    "orchestration-plan.json",
+  );
+  const plan = JSON.parse(modePlanBytes.toString("utf8"));
+  if (plan.orchestration?.enabled && !orchestrationPlanBytes)
+    throw new Error("Enabled orchestration requires orchestration-plan.json");
   const receiptBytes = await optionalArtifactFile(
     sourceDirectory,
     "validation-receipt.json",
@@ -411,6 +480,7 @@ export async function verifyArtifactHandoff({
     policyBytes,
     profileBytes,
     contextBytes,
+    orchestrationPlanBytes,
     workspaceBytes,
     candidateBytes,
     config,
@@ -431,6 +501,7 @@ export async function verifyArtifactHandoff({
     expectedFiles: artifactExpectedFiles(
       Boolean(patchBytes),
       Boolean(receiptBytes),
+      Boolean(orchestrationPlanBytes),
     ),
   });
 }
