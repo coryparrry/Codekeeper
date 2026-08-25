@@ -4,6 +4,7 @@
 - **Audience:** Codekeeper runtime, workflow, policy, and evaluation maintainers
 - **Scope:** pull-request review and repair, issue triage, and repository
   maintenance
+- **Implementation backlog:** [Multi-agent orchestration tasks](MULTI_AGENT_ORCHESTRATION_TASKS.md)
 
 This specification defines how Codekeeper should use the OpenAI Agents SDK for
 bounded multi-agent work without weakening its deterministic security,

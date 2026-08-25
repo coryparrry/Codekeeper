@@ -5,7 +5,8 @@ commitments.
 
 ## Next: product hardening
 
-- Implement the [multi-agent orchestration specification](docs/MULTI_AGENT_ORCHESTRATION_SPEC.md):
+- Implement the [multi-agent orchestration specification](docs/MULTI_AGENT_ORCHESTRATION_SPEC.md)
+  through its [dependency-ordered task backlog](docs/MULTI_AGENT_ORCHESTRATION_TASKS.md):
   manager-led specialists, reviewer-owned PR semantics, bounded repair
   re-review, issue-label ownership, and human decision gates.
 - Preserve human-owned repository labels and namespace labels Codekeeper can
