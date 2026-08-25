@@ -155,7 +155,11 @@
     },
     {
       "path": "src/lib/orchestration/index.mjs",
-      "sha256": "4e063c8b7c127c615d8c5e4e1ce215c08d349dace82976224b703a01c261d361"
+      "sha256": "bd4b6d2ec33401cbbc84193de59562ff0fc0c4334e0c2ef6e87427da720f41c8"
+    },
+    {
+      "path": "src/lib/orchestration/lineage.mjs",
+      "sha256": "745773bf0b3a52a5c2b4e27fdf670d1557a6b4220ca45df477208c3492485665"
     },
     {
       "path": "src/lib/orchestration/mode-adapters.mjs",
