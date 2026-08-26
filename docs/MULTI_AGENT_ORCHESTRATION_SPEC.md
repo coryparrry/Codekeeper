@@ -6,12 +6,8 @@
   maintenance
 - **Implementation backlog:** [Multi-agent orchestration tasks](MULTI_AGENT_ORCHESTRATION_TASKS.md)
 
-This specification defines how Codekeeper should use the OpenAI Agents SDK for
-bounded multi-agent work without weakening its deterministic security,
-validation, or publication boundaries. It turns the current specialist-to-
-coordinator flow into a manager-led orchestration kernel, assigns one semantic
-owner to every GitHub object, and makes repair re-review, drift detection,
-loop prevention, and human decisions explicit contracts.
+Target: manager-led Agents SDK orchestration inside compute, with one semantic
+owner per GitHub object. The outer trust pipeline stays unchanged.
 
 The words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative.
 
@@ -112,16 +108,6 @@ orchestrator. The proposed kernel lives inside compute; it does not replace the
 outer trust pipeline.
 
 ### 3.2 Preserved runner allocations
-
-```mermaid
-flowchart TB
-    subgraph Preserved["Shipped and required with orchestration"]
-        N1["Review: 2"]
-        N2["Issue: 2"]
-        N3["Fix: 3"]
-        N4["Maintain: 3"]
-    end
-```
 
 | Mode                      | Shipped allocations | Required with orchestration | Preserved shape                                                 |
 | ------------------------- | ------------------: | --------------------------: | --------------------------------------------------------------- |
@@ -869,8 +855,7 @@ into adopter repositories or exposed to runtime agents.
 - Promote it only if all deterministic contracts remain provider-independent.
 
 Each phase requires offline contract tests, exact-candidate verification, and
-authorized live adopter evidence appropriate to the changed boundary. A later
-phase is not required to ship an earlier independently useful phase.
+authorized live adopter evidence appropriate to the changed boundary.
 
 ## 17. Implementation seams
 
@@ -889,10 +874,6 @@ The first implementation is expected to touch these canonical areas:
 | GitHub markers          | `tools/codekeeper/src/lib/markers.mjs`                 | Add stable review-lineage, decision, and repair-attempt fingerprints.                                                                                  |
 | Workflows               | reusable runtime workflows and workflow contract tests | Preserve canonical allocations, credential placement, validation, and publication authority while adding in-compute orchestration.                     |
 | Evaluations             | `tools/codekeeper` eval harness and private live suite | Add routing, conflict, drift, loop, ownership, and human-gate cases.                                                                                   |
-
-This table is an impact map, not a requirement to implement the design as one
-large pull request. Each rollout phase should remain independently reviewable
-and below the repository's changed-line limit.
 
 ## 18. Acceptance criteria
 
@@ -950,6 +931,3 @@ The composition choices in this specification follow OpenAI's current guidance:
 - [Latest model guidance](https://developers.openai.com/api/docs/guides/latest-model)
   recommends explicit autonomy, tool, concurrency, retry, and stopping limits
   for multi-agent workflows.
-
-These SDK facilities support orchestration. Codekeeper's deterministic runtime
-and fresh-runner boundaries remain the authority and security controls.

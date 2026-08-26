@@ -30,9 +30,6 @@ export const REPAIR_LIMITS = Object.freeze({
   maximumFileBytes: 1024 * 1024
 });
 
-// OA-01 reserves the orchestration policy surface without granting it any
-// execution authority. These defaults are applied to older adopter policies
-// before validation so adding the closed object is backwards compatible.
 export const ORCHESTRATION_DEFAULTS = Object.freeze({
   enabled: false,
   modes: Object.freeze({
@@ -53,15 +50,12 @@ export const ORCHESTRATION_DEFAULTS = Object.freeze({
 
 export const REVIEW_MANAGED_LABELS = Object.freeze([...PR_SEMANTIC_LABELS]);
 
-export const ISSUE_NEEDS_TESTS_LABEL = LABELS.ISSUE_NEEDS_TESTS ?? "issue needs tests";
+export const ISSUE_NEEDS_TESTS_LABEL = LABELS.ISSUE_NEEDS_TESTS;
 
 export const AGENT_EMITTABLE_LABELS = Object.freeze([
   LABELS.NEEDS_TESTS
 ]);
 
-// Model-proposed labels are mode inputs, not a shared ownership pool. Review
-// output currently only needs the deterministic test-coverage signal; issue
-// triage retains the older type labels plus that signal for compatibility.
 export const REVIEW_ALLOWED_LABELS = Object.freeze([
   ...AGENT_EMITTABLE_LABELS
 ]);
@@ -201,7 +195,7 @@ export function applyManagedLabelSets(policy) {
       : [...ISSUE_ALLOWED_LABELS];
   } else if (Array.isArray(configuredIssueLabels)) {
     policy.issues.allowedLabels = migrateIssueAllowedLabels(configuredIssueLabels);
-  } else if (!Array.isArray(configuredIssueLabels)) {
+  } else {
     policy.issues.allowedLabels = [...ISSUE_ALLOWED_LABELS];
   }
 

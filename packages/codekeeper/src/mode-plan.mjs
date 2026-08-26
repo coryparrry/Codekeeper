@@ -74,18 +74,13 @@ const ORCHESTRATION_POLICY_KEYS = new Set([
   "maximumAutomaticRepairRounds",
   "providerMultiAgent",
 ]);
-const ORCHESTRATION_MODE_KEYS = new Set([
-  "review",
-  "issues",
-  "fix",
-  "maintain",
-]);
 const ORCHESTRATION_MODES = Object.freeze([
   "review",
   "issues",
   "fix",
   "maintain",
 ]);
+const ORCHESTRATION_MODE_KEYS = new Set(ORCHESTRATION_MODES);
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function deepFreeze(value) {

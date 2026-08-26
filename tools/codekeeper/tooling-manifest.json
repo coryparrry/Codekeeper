@@ -95,7 +95,7 @@
     },
     {
       "path": "src/lib/github/labels.mjs",
-      "sha256": "9845aae6ff297f4f696421f38917a73cd35c9c1adddb82115d62a6566c7077e1"
+      "sha256": "24db3fe9bbb6da28a4973eb51372ac27d504ad62ad9e3ab790575bcffd90966e"
     },
     {
       "path": "src/lib/github/mutation-guard.mjs",
@@ -123,7 +123,7 @@
     },
     {
       "path": "src/lib/label-ownership.mjs",
-      "sha256": "0303d9a5ad81b48605d121829bd467c84d1a64b80b3ad0266eb2146f796214b3"
+      "sha256": "3b308c0efab51fe1a1402e8e92222b8f14eb719f38be495a86dad92e10b091ab"
     },
     {
       "path": "src/lib/markers.mjs",
@@ -131,7 +131,7 @@
     },
     {
       "path": "src/lib/orchestration/artifact-handoff.mjs",
-      "sha256": "e132e460321551a4925b83d4c955d0028c57aab828ccbcc376db192174688b69"
+      "sha256": "01e2a7b163dea829d2339a1ed03508d8576473bda2fbb58bf56d494bf689dc69"
     },
     {
       "path": "src/lib/orchestration/command-artifact.mjs",
@@ -139,7 +139,7 @@
     },
     {
       "path": "src/lib/orchestration/compute.mjs",
-      "sha256": "bc73a04ec3542112ee51e947d6f82ca20b6f10adc9371187539ad697bad8a949"
+      "sha256": "5c973971dc52844212960d9c2097e3d7c16afc1d67b1026ee80e6b9e3e21d577"
     },
     {
       "path": "src/lib/orchestration/credential-boundaries.mjs",
@@ -155,11 +155,11 @@
     },
     {
       "path": "src/lib/orchestration/index.mjs",
-      "sha256": "bd4b6d2ec33401cbbc84193de59562ff0fc0c4334e0c2ef6e87427da720f41c8"
+      "sha256": "d9ea46e5b4f31e99737de65ed1f86c56a2ef2cf85f85dcef9248197602ca9227"
     },
     {
       "path": "src/lib/orchestration/lineage.mjs",
-      "sha256": "745773bf0b3a52a5c2b4e27fdf670d1557a6b4220ca45df477208c3492485665"
+      "sha256": "6bcff44fc88e2f551763cd2e2e6f0a67d63a6763f53dd89acc15ba0dccb826e4"
     },
     {
       "path": "src/lib/orchestration/mode-adapters.mjs",
@@ -191,7 +191,7 @@
     },
     {
       "path": "src/lib/policy-normalization.mjs",
-      "sha256": "d0ffe866c2dc0625210ee568143daf049d26bb2764b8c2ece4050246542966b2"
+      "sha256": "9dc1d44cf82f5eec251fc53e8045b24d3b7718f44a0dd2d12fc0c2164901d762"
     },
     {
       "path": "src/lib/policy-validator.mjs",
@@ -287,7 +287,7 @@
     },
     {
       "path": "src/lib/schemas.mjs",
-      "sha256": "82407fd200e92a40c690bcce61ad6b34a387236cc1207ae1263ad9066cd94ff5"
+      "sha256": "ac21c75e4a5bf523076ffc2c88035a47216435bd9f8aaa83881204fd276cce6b"
     },
     {
       "path": "src/lib/security-containment.mjs",

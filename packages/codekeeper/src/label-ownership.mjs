@@ -21,9 +21,6 @@ export const LABELS = Object.freeze({
   TESTING: "testing"
 });
 
-// Semantic labels belong to one publication mode. Lifecycle labels are the
-// small set of deterministic state markers that either mode may preserve or
-// reconcile without taking ownership of the other mode's semantics.
 export const PR_SEMANTIC_LABELS = Object.freeze([
   LABELS.CHANGES_REQUIRED,
   LABELS.MERGE_READY,

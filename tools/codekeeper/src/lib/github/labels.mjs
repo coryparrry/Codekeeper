@@ -6,6 +6,18 @@ import {
 import { issueLabelNames, issueMutationSubject, sameJson, sameStrings } from "./issues.mjs";
 import { ISSUE_MUTATION_INTERNAL } from "./transport.mjs";
 
+const MODE_LABEL_PREDICATES = Object.freeze({
+  issue: isCodekeeperIssueLabel,
+  "pull-request": isCodekeeperPullRequestLabel,
+  lifecycle: isCodekeeperLifecycleLabel
+});
+
+function modeLabelPredicate(mode, kind) {
+  const predicate = MODE_LABEL_PREDICATES[mode];
+  if (!predicate) throw new Error(`Unknown label ${kind}: ${mode}`);
+  return predicate;
+}
+
 export function labelNames(subject) {
   return [...new Set((subject?.labels ?? []).map((label) =>
     String(typeof label === "string" ? label : label?.name ?? "").trim()
@@ -41,14 +53,7 @@ export const labelMethods = {
   async replaceManagedLabels(number, desired, managed, mode = "pull-request") {
     const managedSet = new Set(managed);
     const desiredSet = new Set(desired);
-    const isModeLabel = mode === "issue"
-      ? isCodekeeperIssueLabel
-      : mode === "pull-request"
-        ? isCodekeeperPullRequestLabel
-        : mode === "lifecycle"
-          ? isCodekeeperLifecycleLabel
-          : null;
-    if (!isModeLabel) throw new Error(`Unknown label reconciliation mode: ${mode}`);
+    const isModeLabel = modeLabelPredicate(mode, "reconciliation mode");
     const nonCodekeeperManaged = [...managedSet].filter((label) => !isModeLabel(label));
     if (nonCodekeeperManaged.length > 0) {
       throw new Error(`Attempted to manage labels outside Codekeeper ownership: ${nonCodekeeperManaged.join(", ")} (mode: ${mode})`);
@@ -126,14 +131,7 @@ export const labelMethods = {
   },
 
   async removeLabel(number, label, authority) {
-    const isAuthorityLabel = authority === "issue"
-      ? isCodekeeperIssueLabel
-      : authority === "pull-request"
-        ? isCodekeeperPullRequestLabel
-        : authority === "lifecycle"
-          ? isCodekeeperLifecycleLabel
-          : null;
-    if (!isAuthorityLabel) throw new Error(`Unknown label removal authority: ${authority}`);
+    const isAuthorityLabel = modeLabelPredicate(authority, "removal authority");
     if (!isAuthorityLabel(label)) {
       throw new Error(`Attempted to remove label outside ${authority} ownership: ${label}`);
     }

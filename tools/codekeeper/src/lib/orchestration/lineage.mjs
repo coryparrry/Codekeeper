@@ -96,7 +96,7 @@ function boundedBytes(value, name) {
   }
 }
 
-function boundedList(value, name, { empty = true, sort = false } = {}) {
+function boundedList(value, name, { empty = true, sort = false, normalize } = {}) {
   if (
     !Array.isArray(value) ||
     value.length > MAX_ITEMS ||
@@ -104,9 +104,9 @@ function boundedList(value, name, { empty = true, sort = false } = {}) {
   ) {
     invalid(`${name} must be a bounded list`);
   }
-  const normalized = value.map((item, index) =>
-    boundedText(item, `${name}[${index}]`),
-  );
+  const normalizeItem =
+    normalize ?? ((item, index) => boundedText(item, `${name}[${index}]`));
+  const normalized = value.map((item, index) => normalizeItem(item, index));
   if (new Set(normalized).size !== normalized.length)
     invalid(`${name} contains duplicates`);
   const result = sort
@@ -220,8 +220,6 @@ function intentPayload(
     .sort((left, right) => canonical(left).localeCompare(canonical(right)));
   if (new Set(sources.map(canonical)).size !== sources.length)
     invalid("sourceRefs contains duplicates");
-  if (!Array.isArray(input.authorizedPaths))
-    invalid("authorizedPaths must be a bounded list");
   const payload = {
     goal: boundedText(input.goal, "goal"),
     acceptanceCriteria: boundedList(
@@ -233,13 +231,11 @@ function intentPayload(
       "explicitDecisions",
     ),
     nonGoals: boundedList(input.nonGoals, "nonGoals"),
-    authorizedPaths: boundedList(
-      input.authorizedPaths.map((item, index) =>
+    authorizedPaths: boundedList(input.authorizedPaths, "authorizedPaths", {
+      sort: true,
+      normalize: (item, index) =>
         repositoryPath(item, `authorizedPaths[${index}]`),
-      ),
-      "authorizedPaths",
-      { sort: true },
-    ),
+    }),
     authorizedEffects: boundedList(
       input.authorizedEffects,
       "authorizedEffects",
@@ -272,10 +268,7 @@ export function assertFrozenIntent(intent) {
 export function assertIntentPreserved(original, replacement) {
   const frozen = assertFrozenIntent(original);
   const candidate = assertFrozenIntent(replacement);
-  if (
-    candidate.intentDigest !== frozen.intentDigest ||
-    canonical(candidate) !== canonical(frozen)
-  ) {
+  if (candidate.intentDigest !== frozen.intentDigest) {
     invalid("replacement changes frozen intent");
   }
   return frozen;
@@ -314,17 +307,17 @@ export function createFindingLineage({
   status = "new",
 }) {
   if (!FINDING_STATUSES.includes(status)) invalid("finding status is invalid");
+  const resolvedDigest = boundIntentDigest(intent ?? intentDigest);
   const fingerprint = findingFingerprint({
     rootCause,
     owningPath,
     behavior,
-    intent,
-    intentDigest,
+    intentDigest: resolvedDigest,
   });
   return deepFreeze({
     findingId: `finding-${fingerprint.slice(7)}`,
     fingerprint,
-    intentDigest: boundIntentDigest(intent ?? intentDigest),
+    intentDigest: resolvedDigest,
     firstHeadSha: commit(firstHeadSha, "finding firstHeadSha"),
     currentHeadSha: commit(currentHeadSha, "finding currentHeadSha"),
     status,
@@ -674,11 +667,7 @@ export function parseLineageStateMarker(
     intent: frozenIntent,
     currentHeadSha: expectedHead,
   });
-  const canonicalState = serializeLineageState(state, {
-    intent: frozenIntent,
-    currentHeadSha: expectedHead,
-  });
-  if (serialized !== canonicalState) {
+  if (serialized !== `${canonical(state)}\n`) {
     invalid("lineage marker state is not canonical");
   }
   return state;
@@ -722,6 +711,16 @@ function authorityFor(author, authorizedAuthors) {
     : "maintainer";
 }
 
+function authorizedDecisionAuthor(author, authorizedAuthors, appIdentity) {
+  const expected = normalizedAppIdentity(appIdentity);
+  const login = boundedText(author, "decision author", 256).toLowerCase();
+  if (login === expected.login)
+    invalid("App-authored decision is not authorized");
+  const authority = authorityFor(login, authorizedAuthors);
+  if (!authority) invalid("decision author is not authorized");
+  return { login, authority };
+}
+
 export function bindHumanDecision({
   decision,
   decisionFingerprint: suppliedFingerprint,
@@ -731,16 +730,15 @@ export function bindHumanDecision({
   authorizedAuthors,
   appIdentity,
 }) {
-  const expected = normalizedAppIdentity(appIdentity);
+  const { login, authority } = authorizedDecisionAuthor(
+    author,
+    authorizedAuthors,
+    appIdentity,
+  );
   const fingerprint = digest(
     suppliedFingerprint ?? decision?.decisionFingerprint,
     "decisionFingerprint",
   );
-  const login = boundedText(author, "decision author", 256).toLowerCase();
-  if (login === expected.login)
-    invalid("App-authored decision is not authorized");
-  const authority = authorityFor(login, authorizedAuthors);
-  if (!authority) invalid("decision author is not authorized");
   return deepFreeze({
     decisionFingerprint: fingerprint,
     author: login,
@@ -771,22 +769,17 @@ export function assertHumanDecision(
     ],
     "human decision",
   );
-  const expected = normalizedAppIdentity(appIdentity);
+  const { authority } = authorizedDecisionAuthor(
+    binding.author,
+    authorizedAuthors,
+    appIdentity,
+  );
   const fingerprint = digest(
     suppliedFingerprint ?? decision?.decisionFingerprint,
     "decisionFingerprint",
   );
   if (binding.decisionFingerprint !== fingerprint)
     invalid("decision fingerprint is stale");
-  const login = boundedText(
-    binding.author,
-    "decision author",
-    256,
-  ).toLowerCase();
-  if (login === expected.login)
-    invalid("App-authored decision is not authorized");
-  const authority = authorityFor(login, authorizedAuthors);
-  if (!authority) invalid("decision author is not authorized");
   if (binding.authorAuthority !== authority)
     invalid("decision author authority is stale");
   if (

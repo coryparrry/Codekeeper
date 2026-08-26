@@ -119,8 +119,6 @@ function labelArraySchema(labels, maxItems) {
 }
 
 function issueAllowedLabels(config) {
-  // Production callers pass a normalized policy. Fail closed for direct
-  // callers that skip normalization instead of falling back to PR labels.
   return Array.isArray(config?.issues?.allowedLabels) ? config.issues.allowedLabels : [];
 }
 

@@ -14,6 +14,12 @@ import {
   parseOrchestrationPlan,
 } from "./orchestration-plan.mjs";
 
+function requireOrchestrationPlanBytes(plan, bytes) {
+  if (plan.orchestration?.enabled && !bytes) {
+    throw new Error("Enabled orchestration requires orchestration-plan.json");
+  }
+}
+
 const ARTIFACT_FILES = [
   "agent-profile.md",
   "candidate.json",
@@ -229,8 +235,7 @@ export async function createArtifactHandoff({
     sourceDirectory,
     "orchestration-plan.json",
   );
-  if (plan.orchestration?.enabled && !orchestrationPlanBytes)
-    throw new Error("Enabled orchestration requires orchestration-plan.json");
+  requireOrchestrationPlanBytes(plan, orchestrationPlanBytes);
   const sourceFiles = [];
   for (const name of ARTIFACT_FILES)
     sourceFiles.push({
@@ -339,8 +344,7 @@ export async function createValidationArtifactHandoff({
     sourceDirectory,
     "orchestration-plan.json",
   );
-  if (plan.orchestration?.enabled && !orchestrationPlanBytes)
-    throw new Error("Enabled orchestration requires orchestration-plan.json");
+  requireOrchestrationPlanBytes(plan, orchestrationPlanBytes);
   const compute = await artifactEnvelope({
     modePlanBytes,
     policyBytes,
@@ -469,8 +473,7 @@ export async function verifyArtifactHandoff({
     "orchestration-plan.json",
   );
   const plan = JSON.parse(modePlanBytes.toString("utf8"));
-  if (plan.orchestration?.enabled && !orchestrationPlanBytes)
-    throw new Error("Enabled orchestration requires orchestration-plan.json");
+  requireOrchestrationPlanBytes(plan, orchestrationPlanBytes);
   const receiptBytes = await optionalArtifactFile(
     sourceDirectory,
     "validation-receipt.json",

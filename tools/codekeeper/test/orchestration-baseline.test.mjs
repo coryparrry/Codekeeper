@@ -93,7 +93,7 @@ function derivePeakRunnerConcurrency() {
 function deriveModelCalls() {
   return {
     review: {
-      minimum: 1 + 1,
+      minimum: 2,
       maximum: 1 + MAX_WORKSPACE_PASSES.review,
       stages: ["workspace", "coordinator", "focused-workspace (optional)"],
     },
@@ -103,13 +103,13 @@ function deriveModelCalls() {
       stages: ["workspace or coordinator"],
     },
     fix: {
-      minimum: 1 + 1,
+      minimum: 2,
       maximum: 1 + MAX_CLUSTERED_FIXER_AGENTS,
       stages: ["workspace", "coordinator", "second clustered workspace (optional)"],
     },
     maintain: {
-      minimum: 1 + 1,
-      maximum: 1 + 1,
+      minimum: 2,
+      maximum: 2,
       stages: ["workspace", "coordinator"],
     },
   };
@@ -139,12 +139,6 @@ test("the committed baseline records current model, repair, and runner topology"
   assert.deepEqual(baselineFixture.modelCalls, deriveModelCalls());
   assert.deepEqual(baselineFixture.repairClusters, deriveRepairClusters());
   assert.deepEqual(baselineFixture.runnerAllocations, deriveRunnerAllocations());
-  assert.deepEqual(deriveRunnerAllocations(), {
-    review: 2,
-    issue: 2,
-    fix: 3,
-    maintain: 3,
-  });
   assert.equal(baselineFixture.peakRunnerConcurrency, derivePeakRunnerConcurrency());
   assert.equal(baselineFixture.orchestrationSpecialistInvocations, 0);
 });

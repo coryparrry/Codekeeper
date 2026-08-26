@@ -16,4 +16,19 @@ export {
   assertWorkspaceEvidence,
   verifyFrozenContext,
 } from "./workspace-isolation.mjs";
-export * from "./lineage.mjs";
+export {
+  freezeIntent,
+  assertFrozenIntent,
+  assertIntentPreserved,
+  createFindingLineage,
+  assertFindingLineage,
+  createRepairAttempt,
+  createLineageState,
+  assertLineageState,
+  advanceLineageState,
+  lineageStateMarker,
+  parseLineageStateMarker,
+  createDecisionIdentity,
+  bindHumanDecision,
+  assertHumanDecision,
+} from "./lineage.mjs";

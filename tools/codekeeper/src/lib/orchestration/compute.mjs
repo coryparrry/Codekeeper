@@ -26,6 +26,14 @@ function required(value, name) {
   return value;
 }
 
+function adapterRuntimeMode(adapter) {
+  return adapter.mode === "issues"
+    ? "issue"
+    : adapter.mode === "maintain"
+      ? "audit"
+      : adapter.mode;
+}
+
 async function applyWorkspacePatch(patchPath) {
   const patch = await readFile(patchPath);
   if (patch.length === 0) return;
@@ -118,12 +126,7 @@ export async function runCompute({
   if (operation === "workspace-worker") {
     const resultPath = required(options.resultPath, "resultPath");
     return runWorkspaceAgentFromBundle({
-      mode:
-        adapter.mode === "issues"
-          ? "issue"
-          : adapter.mode === "maintain"
-            ? "audit"
-            : adapter.mode,
+      mode: adapterRuntimeMode(adapter),
       directory,
       resultPath,
       config,
@@ -138,12 +141,7 @@ export async function runCompute({
         options.workspaceApiKey ?? process.env.CODEKEEPER_WORKSPACE_API_KEY,
     });
     const resultPath = required(options.resultPath, "resultPath");
-    const runtimeMode =
-      adapter.mode === "issues"
-        ? "issue"
-        : adapter.mode === "maintain"
-          ? "audit"
-          : adapter.mode;
+    const runtimeMode = adapterRuntimeMode(adapter);
     const settings = getAgentRuntimeSettings(config, runtimeMode, {
       mutationAuthorized: options.mutationAuthorized === true,
     });
@@ -207,6 +205,7 @@ export async function runCompute({
       workspaceKey: process.env.CODEKEEPER_WORKSPACE_API_KEY,
     });
     const resultPath = required(options.resultPath, "resultPath");
+    const runtimeMode = adapterRuntimeMode(adapter);
     if (options.expectedContextSha256)
       await verifyFrozenContext(directory, options.expectedContextSha256);
     if (options.expectedBaseSha) {
@@ -224,12 +223,6 @@ export async function runCompute({
         options,
         directory,
       );
-      const runtimeMode =
-        adapter.mode === "issues"
-          ? "issue"
-          : adapter.mode === "maintain"
-            ? "audit"
-            : adapter.mode;
       const settings = getAgentRuntimeSettings(config, runtimeMode);
       assertProviderSettingsWithinPlan(orchestrationPlan, {
         maxTurns: settings.maxTurns,
@@ -239,12 +232,7 @@ export async function runCompute({
     if (options.workspacePatchPath)
       await applyWorkspacePatch(options.workspacePatchPath);
     return runAgentFromBundle({
-      mode:
-        adapter.mode === "issues"
-          ? "issue"
-          : adapter.mode === "maintain"
-            ? "audit"
-            : adapter.mode,
+      mode: runtimeMode,
       directory,
       resultPath,
       config,
