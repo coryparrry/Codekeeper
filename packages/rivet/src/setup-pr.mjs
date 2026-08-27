@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
-  applyReviewInstallation,
+  applyInstallation,
+  prepareRepairInstallation,
   prepareReviewInstallation,
 } from "./install.mjs";
 
@@ -32,7 +33,7 @@ function pullRequestBody(plan) {
   const authority = plan.productAuthority.map((line) => `- ${line}`).join("\n");
   return `## Summary
 
-This draft installs Rivet's review-only workflow. Repair, issue implementation, maintenance, and merge authority remain disabled.
+This draft installs Rivet's ${plan.mode === "repair" ? "owner-authorized review and repair workflows" : "review-only workflow"}. Issue implementation, maintenance, and merge authority remain disabled.
 
 ## Product authority
 
@@ -45,14 +46,20 @@ ${files}
 Rivet created this pull request but will never merge it automatically.`;
 }
 
-export async function createReviewSetupPullRequest({
-  branch = "rivet/setup-review",
+async function createSetupPullRequest({
+  branch,
   run = runCommand,
+  prepare,
   ...installOptions
 } = {}) {
-  const plan = await prepareReviewInstallation(installOptions);
+  const plan = await prepare(installOptions);
   const cwd = plan.repositoryRoot;
-  const paths = plan.files.map(({ path }) => path);
+  const paths = plan.files
+    .filter(({ status }) => status !== "unchanged")
+    .map(({ path }) => path);
+  if (paths.length === 0) {
+    throw new Error(`Rivet installer: ${plan.mode} installation is up to date`);
+  }
 
   await run("git", ["check-ref-format", "--branch", branch], { cwd });
   const status = await run(
@@ -101,7 +108,7 @@ export async function createReviewSetupPullRequest({
   }
 
   await run("git", ["switch", "-c", branch, base], { cwd });
-  await applyReviewInstallation(plan);
+  await applyInstallation(plan);
   await run("git", ["add", "--", ...paths], { cwd });
   assertExactPaths(
     await run("git", ["diff", "--cached", "--name-only", "-z"], { cwd }),
@@ -110,7 +117,14 @@ export async function createReviewSetupPullRequest({
   await run("git", ["diff", "--cached", "--check"], { cwd });
   await run(
     "git",
-    ["commit", "--only", "-m", "chore: set up Rivet review", "--", ...paths],
+    [
+      "commit",
+      "--only",
+      "-m",
+      `chore: set up Rivet ${plan.mode}`,
+      "--",
+      ...paths,
+    ],
     { cwd },
   );
 
@@ -156,7 +170,7 @@ export async function createReviewSetupPullRequest({
       branch,
       "--draft",
       "--title",
-      "chore: set up Rivet review",
+      `chore: set up Rivet ${plan.mode}`,
       "--body",
       pullRequestBody(plan),
     ],
@@ -199,5 +213,21 @@ export async function createReviewSetupPullRequest({
     branch,
     commit,
     pullRequestUrl,
+  });
+}
+
+export function createReviewSetupPullRequest(options = {}) {
+  return createSetupPullRequest({
+    branch: "rivet/setup-review",
+    ...options,
+    prepare: prepareReviewInstallation,
+  });
+}
+
+export function createRepairSetupPullRequest(options = {}) {
+  return createSetupPullRequest({
+    branch: "rivet/setup-repair",
+    ...options,
+    prepare: prepareRepairInstallation,
   });
 }

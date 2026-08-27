@@ -11,7 +11,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { installReview } from "../src/install.mjs";
+import {
+  applyInstallation,
+  installRepair,
+  installReview,
+  prepareRepairInstallation,
+} from "../src/install.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -25,7 +30,7 @@ async function repository(t) {
   return root;
 }
 
-async function fixtureCompiler({ repositoryRoot }) {
+async function fixtureCompiler({ repositoryRoot, workflowId }) {
   const source = await readFile(
     path.join(
       PACKAGE_ROOT,
@@ -33,7 +38,10 @@ async function fixtureCompiler({ repositoryRoot }) {
     ),
     "utf8",
   );
-  await writeFile(path.join(repositoryRoot, LOCK_PATH), source);
+  await writeFile(
+    path.join(repositoryRoot, `.github/workflows/${workflowId}.lock.yml`),
+    source,
+  );
 }
 
 async function fixtureValidator() {}
@@ -158,5 +166,139 @@ test("refuses a repository path that does not exist", async (t) => {
   await assert.rejects(
     installReview({ repositoryRoot: path.join(repositoryRoot, "missing") }),
     { code: "ENOENT" },
+  );
+});
+
+test("upgrades an exact review installation to owner-authorized repair", async (t) => {
+  const repositoryRoot = await repository(t);
+  await installReview({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+
+  const result = await installRepair({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+
+  assert.equal(result.mode, "repair");
+  assert.equal(result.files.length, 13);
+  assert.equal(
+    result.files.filter(({ status }) => status === "update").length,
+    2,
+  );
+  assert.equal(
+    result.files.filter(({ status }) => status === "create").length,
+    6,
+  );
+  assert.equal(
+    result.files.filter(({ status }) => status === "unchanged").length,
+    5,
+  );
+  assert.deepEqual(result.githubApp.permissions, {
+    contents: "write",
+    metadata: "read",
+    pullRequests: "write",
+  });
+  const config = JSON.parse(
+    await readFile(path.join(repositoryRoot, ".github/rivet.json"), "utf8"),
+  );
+  const installation = JSON.parse(
+    await readFile(
+      path.join(repositoryRoot, ".github/rivet/installation.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(config.repair.authority, "owner");
+  assert.equal(installation.mode, "repair");
+  assert.equal(installation.managedFiles.length, 13);
+  assert.equal(installation.githubApp.permissions.contents, "write");
+});
+
+test("refuses a modified review installation before upgrading", async (t) => {
+  const repositoryRoot = await repository(t);
+  await installReview({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+  const reviewPath = path.join(
+    repositoryRoot,
+    ".github/workflows/rivet-review.md",
+  );
+  await writeFile(reviewPath, "adopter workflow\n");
+
+  await assert.rejects(
+    installRepair({
+      repositoryRoot,
+      compileWorkflow: fixtureCompiler,
+      validateWorkflow: fixtureValidator,
+    }),
+    /refusing to overwrite \.github\/workflows\/rivet-review\.md/,
+  );
+  await assert.rejects(
+    access(path.join(repositoryRoot, ".github/workflows/rivet-repair.md")),
+    { code: "ENOENT" },
+  );
+});
+
+test("refuses files changed after the repair plan is prepared", async (t) => {
+  const repositoryRoot = await repository(t);
+  await installReview({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+  const plan = await prepareRepairInstallation({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+  await writeFile(path.join(repositoryRoot, ".github/rivet.json"), "changed\n");
+
+  await assert.rejects(applyInstallation(plan), /changed after planning/);
+  await assert.rejects(
+    access(path.join(repositoryRoot, ".github/workflows/rivet-repair.md")),
+    { code: "ENOENT" },
+  );
+});
+
+test("normalizes semantic-only compiler lock drift during upgrade", async (t) => {
+  const repositoryRoot = await repository(t);
+  await installReview({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+  const plan = await prepareRepairInstallation({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+  const repairLock = plan.files.find(
+    ({ path: filePath }) =>
+      filePath === ".github/workflows/rivet-repair.lock.yml",
+  );
+  await writeFile(
+    path.join(repositoryRoot, repairLock.path),
+    `# prior compiler formatting\n${repairLock.content}`,
+  );
+
+  const result = await installRepair({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+
+  assert.equal(
+    result.files.find(({ path: filePath }) => filePath === repairLock.path)
+      .status,
+    "update",
+  );
+  assert.equal(
+    await readFile(path.join(repositoryRoot, repairLock.path), "utf8"),
+    repairLock.content,
   );
 });

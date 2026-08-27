@@ -2,8 +2,11 @@ import {
   reviewAppAuthority,
   reviewAppRegistrationUrl,
 } from "./app-authority.mjs";
-import { installReview } from "./install.mjs";
-import { createReviewSetupPullRequest } from "./setup-pr.mjs";
+import { installRepair, installReview } from "./install.mjs";
+import {
+  createRepairSetupPullRequest,
+  createReviewSetupPullRequest,
+} from "./setup-pr.mjs";
 import {
   configureReviewApp,
   verifyRepairApp,
@@ -11,7 +14,7 @@ import {
 } from "./app-setup.mjs";
 
 function usage() {
-  return "Usage:\n  rivet init --review-only [--repository <path>] [--dry-run | --setup-pr] [--setup-branch <name>]\n  rivet app-plan --repository <owner/repository> [--owner-type <User|Organization>]\n  rivet app-configure --repository <owner/repository> --client-id <id> --private-key-file <path>\n  rivet app-verify --repository <owner/repository> --client-id <id> --private-key-file <path> [--repair]";
+  return "Usage:\n  rivet init (--review-only | --repair) [--repository <path>] [--dry-run | --setup-pr] [--setup-branch <name>]\n  rivet app-plan --repository <owner/repository> [--owner-type <User|Organization>]\n  rivet app-configure --repository <owner/repository> --client-id <id> --private-key-file <path>\n  rivet app-verify --repository <owner/repository> --client-id <id> --private-key-file <path> [--repair]";
 }
 
 function parseAppCredentials(args, { allowRepair = false } = {}) {
@@ -64,10 +67,16 @@ function parseAppPlan(args) {
 }
 
 function parseInit(args) {
-  const options = { dryRun: false, setupPullRequest: false };
+  const options = { dryRun: false, setupPullRequest: false, mode: null };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === "--review-only") continue;
+    if (argument === "--review-only" || argument === "--repair") {
+      if (options.mode) {
+        throw new Error(`Rivet: choose one init mode\n${usage()}`);
+      }
+      options.mode = argument === "--repair" ? "repair" : "review";
+      continue;
+    }
     if (argument === "--dry-run") {
       options.dryRun = true;
       continue;
@@ -88,8 +97,8 @@ function parseInit(args) {
     }
     throw new Error(`Rivet: unknown argument ${argument}\n${usage()}`);
   }
-  if (!args.includes("--review-only")) {
-    throw new Error(`Rivet: --review-only is required\n${usage()}`);
+  if (!options.mode) {
+    throw new Error(`Rivet: an init mode is required\n${usage()}`);
   }
   if (options.dryRun && options.setupPullRequest) {
     throw new Error(
@@ -106,7 +115,9 @@ export async function runCli(
   argv = process.argv.slice(2),
   {
     installReviewImpl = installReview,
-    createSetupPullRequestImpl = createReviewSetupPullRequest,
+    installRepairImpl = installRepair,
+    createReviewSetupPullRequestImpl = createReviewSetupPullRequest,
+    createRepairSetupPullRequestImpl = createRepairSetupPullRequest,
     configureReviewAppImpl = configureReviewApp,
     verifyRepairAppImpl = verifyRepairApp,
     verifyReviewAppImpl = verifyReviewApp,
@@ -138,10 +149,14 @@ export async function runCli(
   }
   if (command !== "init") throw new Error(`Rivet: unknown command\n${usage()}`);
   const options = parseInit(args);
-  const { setupPullRequest, ...installationOptions } = options;
+  const { setupPullRequest, mode, ...installationOptions } = options;
   const result = setupPullRequest
-    ? await createSetupPullRequestImpl(installationOptions)
-    : await installReviewImpl(installationOptions);
+    ? await (mode === "repair"
+        ? createRepairSetupPullRequestImpl(installationOptions)
+        : createReviewSetupPullRequestImpl(installationOptions))
+    : await (mode === "repair"
+        ? installRepairImpl(installationOptions)
+        : installReviewImpl(installationOptions));
   stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return result;
 }
