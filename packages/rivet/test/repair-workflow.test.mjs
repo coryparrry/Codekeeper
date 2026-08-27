@@ -24,7 +24,7 @@ test("defines the repair permission increase explicitly", () => {
   });
 });
 
-test("renders an admin-command repair candidate with one bounded push", () => {
+test("renders isolated validation before the App-authorized publisher", () => {
   const source = renderRivetRepairWorkflow({
     validation: ["npm test", "npm run check"],
   });
@@ -33,16 +33,47 @@ test("renders an admin-command repair candidate with one bounded push", () => {
   assert.match(source, /roles: \[admin\]/);
   assert.match(source, /if: github\.event\.comment\.body == '\/rivet-repair'/);
   assert.match(source, /permissions:\n  contents: read\n  pull-requests: read/);
-  assert.match(source, /safe-outputs:\n  max-patch-files: 25\n  github-app:/);
+  assert.match(source, /safe-outputs:\n  max-patch-files: 25/);
   assert.match(source, /report-failure-as-issue: false/);
   assert.match(source, /report-failed-jobs: false/);
   assert.match(source, /report-incomplete:\n    create-issue: false/);
-  assert.match(source, /push-to-pull-request-branch:\n    target: triggering/);
-  assert.match(source, /fallback-as-pull-request: false/);
-  assert.match(source, /protected-files: blocked/);
-  assert.match(source, /re-read the live pull request head/);
+  assert.match(source, /jobs:\n    validate-repair:/);
+  assert.match(
+    source,
+    /uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/,
+  );
+  assert.match(source, /uses: \.\/\.github\/rivet\/actions\/validate-repair/);
+  assert.match(source, /needs: validate-repair/);
+  assert.match(source, /uses: \.\/\.github\/rivet\/actions\/publish-repair/);
+  assert.match(
+    source,
+    /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/,
+  );
+  assert.match(
+    source,
+    /actions\/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c/,
+  );
+  assert.match(
+    source,
+    /RIVET_APP_CLIENT_ID: \$\{\{ vars\.RIVET_APP_CLIENT_ID \}\}/,
+  );
+  assert.match(
+    source,
+    /RIVET_APP_PRIVATE_KEY: \$\{\{ secrets\.RIVET_APP_PRIVATE_KEY \}\}/,
+  );
+  assert.match(
+    source,
+    /RIVET_VALIDATION_COMMANDS_BASE64: WyJucG0gdGVzdCIsIm5wbSBydW4gY2hlY2siXQ==/,
+  );
+  assert.match(
+    source,
+    /validates without write credentials on an isolated runner/,
+  );
   assert.match(source, /- `npm test`\n- `npm run check`/);
-  assert.doesNotMatch(source, /create-pull-request:|merge-pull-request:/);
+  assert.doesNotMatch(
+    source,
+    /create-pull-request:|merge-pull-request:|push-to-pull-request-branch:/,
+  );
 });
 
 test("rejects missing or multiline validation commands", () => {

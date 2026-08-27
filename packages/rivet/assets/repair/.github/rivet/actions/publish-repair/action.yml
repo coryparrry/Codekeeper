@@ -1,0 +1,5 @@
+name: Publish a validated Rivet repair
+description: Apply, validate, and publish one authorized Rivet repair patch
+runs:
+  using: node24
+  main: index.mjs
