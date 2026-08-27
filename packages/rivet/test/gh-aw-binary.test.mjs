@@ -17,7 +17,10 @@ import {
   ensureGhAwBinary,
   resolveGhAwAsset,
 } from "../src/gh-aw/binary.mjs";
-import { GH_AW_RELEASE } from "../src/gh-aw/versions.mjs";
+import {
+  GH_AW_RELEASE,
+  GH_AW_UPGRADE_EXPERIMENT,
+} from "../src/gh-aw/versions.mjs";
 
 function fixtureRelease(bytes = Buffer.from("verified gh-aw fixture")) {
   return Object.freeze({
@@ -73,6 +76,26 @@ test("pins the immutable gh-aw release and supported assets", () => {
     "win32-x64",
   ]);
   for (const asset of Object.values(GH_AW_RELEASE.assets)) {
+    assert.match(asset.sha256, /^[0-9a-f]{64}$/);
+    assert.ok(asset.size > 0);
+  }
+});
+
+test("records the adjacent upgrade compiler and action receipts", () => {
+  assert.equal(GH_AW_UPGRADE_EXPERIMENT.version, "0.86.3");
+  assert.equal(
+    GH_AW_UPGRADE_EXPERIMENT.commit,
+    "6062cd2238b68226eb2bfd47607703ed7944330f",
+  );
+  assert.equal(
+    GH_AW_UPGRADE_EXPERIMENT.actionsCommit,
+    "30aadb1626371455f145991c6385924babda2d04",
+  );
+  assert.deepEqual(
+    Object.keys(GH_AW_UPGRADE_EXPERIMENT.assets),
+    Object.keys(GH_AW_RELEASE.assets),
+  );
+  for (const asset of Object.values(GH_AW_UPGRADE_EXPERIMENT.assets)) {
     assert.match(asset.sha256, /^[0-9a-f]{64}$/);
     assert.ok(asset.size > 0);
   }

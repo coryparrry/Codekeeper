@@ -5,6 +5,7 @@ import {
   compileGhAwWorkflow,
   validateGhAwWorkflow,
 } from "../src/gh-aw/compile.mjs";
+import { GH_AW_UPGRADE_EXPERIMENT } from "../src/gh-aw/versions.mjs";
 
 function successReport({ compiled = true } = {}) {
   return JSON.stringify([
@@ -61,6 +62,35 @@ test("compiles one workflow through strict action mode", async () => {
         maxBuffer: 16 * 1024 * 1024,
       },
     ],
+  ]);
+});
+
+test("compiles an upgrade candidate with its matching action commit", async () => {
+  let invocation;
+  await compileGhAwWorkflow({
+    repositoryRoot: "/repo",
+    workflowId: "rivet-review",
+    binaryPath: "/cache/gh-aw-0.86.3",
+    release: GH_AW_UPGRADE_EXPERIMENT,
+    execFileImpl: async (binaryPath, args) => {
+      invocation = { binaryPath, args };
+      return {
+        stdout: JSON.stringify([
+          {
+            valid: true,
+            errors: [],
+            compiled_file: "/repo/.github/workflows/rivet-review.lock.yml",
+          },
+        ]),
+        stderr: "",
+      };
+    },
+  });
+
+  assert.equal(invocation.binaryPath, "/cache/gh-aw-0.86.3");
+  assert.deepEqual(invocation.args.slice(-2), [
+    "--action-tag",
+    GH_AW_UPGRADE_EXPERIMENT.actionsCommit,
   ]);
 });
 

@@ -34,6 +34,9 @@ export function assessPullRequestTargetTrust({
   if (authority.unpinnedActions.length > 0) {
     violations.push("all actions must use immutable commit pins");
   }
+  if (authority.unpinnedContainers.length > 0) {
+    violations.push("all containers must use immutable digest pins");
+  }
   if (!sameValues(authority.localActions, expectedLocalActions)) {
     violations.push("local actions differ from the approved inventory");
   }
