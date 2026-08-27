@@ -12,7 +12,7 @@
   },
   "scripts": {
     "check": "npm run syntax && npm test",
-    "syntax": "node --check bin/rivet.mjs && node --check assets/review/.github/rivet/actions/authority-receipt/index.mjs && node --check src/cli.mjs && node --check src/install.mjs && node --check src/setup-pr.mjs && node --check src/gh-aw/binary.mjs && node --check src/gh-aw/compile.mjs && node --check src/gh-aw/inspect.mjs && node --check src/gh-aw/trust.mjs && node --check src/gh-aw/versions.mjs && node --check src/runtime-mirror.mjs && node --check src/workflows/review.mjs",
+    "syntax": "node --check bin/rivet.mjs && node --check assets/review/.github/rivet/actions/authority-receipt/index.mjs && node --check src/cli.mjs && node --check src/config.mjs && node --check src/install.mjs && node --check src/setup-pr.mjs && node --check src/gh-aw/binary.mjs && node --check src/gh-aw/compile.mjs && node --check src/gh-aw/inspect.mjs && node --check src/gh-aw/trust.mjs && node --check src/gh-aw/versions.mjs && node --check src/runtime-mirror.mjs && node --check src/workflows/review.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

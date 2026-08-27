@@ -1,3 +1,5 @@
+import { DEFAULT_RIVET_CONFIG, reviewWorkflowProjection } from "../config.mjs";
+
 export const RIVET_REVIEW_WORKFLOW_ID = "rivet-review";
 const MANAGED_NATIVE_IMPORT =
   /^\.github\/rivet\/aw\/[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*\.md$/;
@@ -15,7 +17,23 @@ function nativeImportFrontmatter(nativeImport) {
   return `imports:\n  - ${nativeImport}\n`;
 }
 
-export function renderRivetReviewWorkflow({ nativeImport = null } = {}) {
+function engineFrontmatter({ engine, model }) {
+  return `engine: ${engine}\nmodel: ${model}\n`;
+}
+
+function inlineFindingsFrontmatter({ inlineFindings, maximumFindings }) {
+  if (!inlineFindings) return "";
+  return `  create-pull-request-review-comment:\n    max: ${maximumFindings}\n`;
+}
+
+export function renderRivetReviewWorkflow({
+  nativeImport = null,
+  configuration = DEFAULT_RIVET_CONFIG,
+} = {}) {
+  const review = reviewWorkflowProjection(configuration);
+  const reviewEvents = review.requestChanges
+    ? "COMMENT, REQUEST_CHANGES"
+    : "COMMENT";
   return `---
 name: Rivet pull request review
 on:
@@ -25,15 +43,12 @@ permissions:
   contents: read
   pull-requests: read
 checkout: false
-engine: codex
-inlined-imports: true
+${engineFrontmatter(review)}inlined-imports: true
 ${nativeImportFrontmatter(nativeImport)}safe-outputs:
   add-comment:
     max: 1
-  create-pull-request-review-comment:
-    max: 8
-  submit-pull-request-review:
-    allowed-events: [COMMENT]
+${inlineFindingsFrontmatter(review)}  submit-pull-request-review:
+    allowed-events: [${reviewEvents}]
 ---
 
 # Rivet pull request review

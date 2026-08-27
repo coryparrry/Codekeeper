@@ -112,8 +112,8 @@ test("creates a verified draft setup pull request without merging", async (t) =>
   );
   assert.equal(
     JSON.parse(await readFile(path.join(root, ".github/rivet.json"), "utf8"))
-      .modes.repair,
-    false,
+      .repair.authority,
+    "never",
   );
 
   const pullRequestCall = calls.find(
@@ -122,6 +122,10 @@ test("creates a verified draft setup pull request without merging", async (t) =>
   );
   assert.ok(pullRequestCall[1].includes("--draft"));
   assert.ok(!pullRequestCall[1].includes("merge"));
+  assert.match(
+    pullRequestCall[1][pullRequestCall[1].indexOf("--body") + 1],
+    /Merge is impossible/,
+  );
 });
 
 test("refuses setup from a dirty repository before creating a branch", async (t) => {
