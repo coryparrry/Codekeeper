@@ -34,6 +34,7 @@ test("renders the checked-in Rivet review workflow source", async () => {
   );
   assert.doesNotMatch(fixture, /Codekeeper/i);
   assert.match(fixture, /pull_request_target:/);
+  assert.match(fixture, /bots: \[\"\$\{\{ vars\.RIVET_APP_BOT_LOGIN \}\}\"\]/);
   assert.match(
     fixture,
     /checkout:\n  sparse-checkout: \|\n    \.github\/rivet\/actions\/authority-receipt/,

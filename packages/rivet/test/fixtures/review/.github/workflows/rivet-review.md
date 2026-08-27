@@ -3,6 +3,7 @@ name: Rivet pull request review
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  bots: ["${{ vars.RIVET_APP_BOT_LOGIN }}"]
 permissions:
   contents: read
   pull-requests: read

@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import {
   repairAppAuthority,
   reviewAppAuthority,
+  RIVET_APP_BOT_LOGIN_VARIABLE,
   RIVET_APP_CLIENT_ID_VARIABLE,
   RIVET_APP_PRIVATE_KEY_SECRET,
 } from "./app-authority.mjs";
@@ -195,6 +196,15 @@ export async function configureReviewApp({
       "--body",
       clientId,
     ]);
+    await run([
+      "variable",
+      "set",
+      RIVET_APP_BOT_LOGIN_VARIABLE,
+      "--repo",
+      repository,
+      "--body",
+      app.slug,
+    ]);
     await run(
       ["secret", "set", RIVET_APP_PRIVATE_KEY_SECRET, "--repo", repository],
       { input: privateKey },
@@ -203,6 +213,7 @@ export async function configureReviewApp({
       repository,
       appId: app.id,
       appSlug: app.slug,
+      botLoginVariable: RIVET_APP_BOT_LOGIN_VARIABLE,
       clientIdVariable: RIVET_APP_CLIENT_ID_VARIABLE,
       privateKeySecret: RIVET_APP_PRIVATE_KEY_SECRET,
       installationUrl: `https://github.com/apps/${encodeURIComponent(app.slug)}/installations/new`,
@@ -255,6 +266,9 @@ async function verifyApp(
   const configuredClientId = variables.find(
     ({ name }) => name === RIVET_APP_CLIENT_ID_VARIABLE,
   )?.value;
+  const configuredBotLogin = variables.find(
+    ({ name }) => name === RIVET_APP_BOT_LOGIN_VARIABLE,
+  )?.value;
   const hasPrivateKey = secrets.some(
     ({ name }) => name === RIVET_APP_PRIVATE_KEY_SECRET,
   );
@@ -279,6 +293,7 @@ async function verifyApp(
       JSON.stringify(expected.permissions) ||
     extraPermissions.length > 0 ||
     configuredClientId !== clientId ||
+    configuredBotLogin !== app.slug ||
     !hasPrivateKey
   ) {
     throw new Error(
@@ -289,6 +304,7 @@ async function verifyApp(
     repository,
     appId: app.id,
     appSlug: app.slug,
+    botLoginVariable: RIVET_APP_BOT_LOGIN_VARIABLE,
     repositorySelection: installation.repository_selection,
     permissions: expected.permissions,
     credentialsConfigured: true,

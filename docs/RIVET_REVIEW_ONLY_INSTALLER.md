@@ -62,7 +62,8 @@ requests a merge.
 ## GitHub App boundary
 
 The generated review workflow mints short-lived installation tokens from the
-`RIVET_APP_CLIENT_ID` repository variable and `RIVET_APP_PRIVATE_KEY` secret.
+`RIVET_APP_CLIENT_ID` and `RIVET_APP_BOT_LOGIN` repository variables plus the
+`RIVET_APP_PRIVATE_KEY` secret.
 The installer records the minimum review-only App authority, and `rivet
 app-plan` produces a private, webhook-free registration URL.
 

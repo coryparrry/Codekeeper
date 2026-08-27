@@ -140,14 +140,23 @@ test("configures Rivet credentials without putting the private key in arguments"
     CLIENT_ID,
   ]);
   assert.deepEqual(calls[1].args, [
+    "variable",
+    "set",
+    "RIVET_APP_BOT_LOGIN",
+    "--repo",
+    REPOSITORY,
+    "--body",
+    "rivet-review",
+  ]);
+  assert.deepEqual(calls[2].args, [
     "secret",
     "set",
     "RIVET_APP_PRIVATE_KEY",
     "--repo",
     REPOSITORY,
   ]);
-  assert.equal(calls[1].inputLength, privateKeyBytes.length);
-  assert.equal(calls[1].inputDigest, digest(privateKeyBytes));
+  assert.equal(calls[2].inputLength, privateKeyBytes.length);
+  assert.equal(calls[2].inputDigest, digest(privateKeyBytes));
   assert.doesNotMatch(
     JSON.stringify(calls.map(({ args }) => args)),
     /PRIVATE KEY/,
@@ -180,13 +189,17 @@ test("verifies exact selected-repository App authority and credential metadata",
       url.endsWith("/app") ? response(app()) : response(installation()),
     run: async (args) =>
       args[0] === "variable"
-        ? JSON.stringify([{ name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID }])
+        ? JSON.stringify([
+            { name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID },
+            { name: "RIVET_APP_BOT_LOGIN", value: "rivet-review" },
+          ])
         : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
   });
   assert.deepEqual(result, {
     repository: REPOSITORY,
     appId: 42,
     appSlug: "rivet-review",
+    botLoginVariable: "RIVET_APP_BOT_LOGIN",
     repositorySelection: "selected",
     permissions: {
       contents: "read",
@@ -217,7 +230,10 @@ test("verifies exact repair App authority after an explicit widening", async (t)
           ),
     run: async (args) =>
       args[0] === "variable"
-        ? JSON.stringify([{ name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID }])
+        ? JSON.stringify([
+            { name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID },
+            { name: "RIVET_APP_BOT_LOGIN", value: "rivet-review" },
+          ])
         : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
   });
   assert.deepEqual(result.permissions, {
@@ -229,6 +245,20 @@ test("verifies exact repair App authority after an explicit widening", async (t)
 
 test("rejects missing, wider, or all-repository App authority", async (t) => {
   const { privateKeyPath } = await keyFixture(t);
+  await assert.rejects(
+    verifyReviewApp({
+      repository: REPOSITORY,
+      clientId: CLIENT_ID,
+      privateKeyPath,
+      fetchImpl: async (url) =>
+        url.endsWith("/app") ? response(app()) : response(installation()),
+      run: async (args) =>
+        args[0] === "variable"
+          ? JSON.stringify([{ name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID }])
+          : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
+    }),
+    /does not match the review plan/,
+  );
   for (const installed of [
     installation({ repository_selection: "all" }),
     installation({ events: ["pull_request"] }),
@@ -259,6 +289,7 @@ test("rejects missing, wider, or all-repository App authority", async (t) => {
           args[0] === "variable"
             ? JSON.stringify([
                 { name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID },
+                { name: "RIVET_APP_BOT_LOGIN", value: "rivet-review" },
               ])
             : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
       }),

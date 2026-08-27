@@ -1,6 +1,7 @@
 import { DEFAULT_RIVET_CONFIG, validateRivetConfig } from "./config.mjs";
 
 export const RIVET_APP_CLIENT_ID_VARIABLE = "RIVET_APP_CLIENT_ID";
+export const RIVET_APP_BOT_LOGIN_VARIABLE = "RIVET_APP_BOT_LOGIN";
 export const RIVET_APP_PRIVATE_KEY_SECRET = "RIVET_APP_PRIVATE_KEY";
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -32,10 +33,7 @@ export function repairAppAuthority() {
   });
 }
 
-export function reviewAppRegistrationUrl({
-  repository,
-  ownerType = "User",
-}) {
+export function reviewAppRegistrationUrl({ repository, ownerType = "User" }) {
   const segments = repository?.split("/") ?? [];
   if (
     !REPOSITORY.test(repository ?? "") ||
