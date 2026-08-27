@@ -7,7 +7,7 @@ import { parse } from "yaml";
 import {
   createAuthorityReceipt,
   runAuthorityReceiptAction,
-} from "./fixtures/review/.github/rivet/actions/authority-receipt/index.mjs";
+} from "../assets/review/.github/rivet/actions/authority-receipt/index.mjs";
 
 const INPUTS = Object.freeze({
   compilerVersion: "v0.86.2",
@@ -18,7 +18,8 @@ const INPUTS = Object.freeze({
 });
 const ACTION_ROOT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  "fixtures",
+  "..",
+  "assets",
   "review",
   ".github",
   "rivet",
