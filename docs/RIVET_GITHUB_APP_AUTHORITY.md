@@ -25,6 +25,43 @@ rivet app-plan --repository OWNER/REPOSITORY
 
 For an organization-owned App, add `--owner-type Organization`. The command is read-only and never creates or installs the App.
 
-## Current boundary
+## Configure repository credentials
 
-The review installer records this authority in `.github/rivet/installation.json`, and the generated workflow is ready to mint App tokens. This layer does not upload the PEM, set the client-ID variable, install the App, or verify its effective repository permissions. Those GitHub mutations require explicit human-controlled setup and live verification before the setup PR can be called operational.
+After creating the App and downloading its private key, configure one repository:
+
+```bash
+rivet app-configure \
+  --repository OWNER/REPOSITORY \
+  --client-id CLIENT_ID \
+  --private-key-file /path/to/private-key.pem
+```
+
+Rivet authenticates the key against GitHub before changing repository metadata. It sets `RIVET_APP_CLIENT_ID` as a repository variable and sends the private key to `gh secret set` over standard input. The key is never placed in command arguments or output. The command returns the App installation URL; a repository administrator must use it to install the App on the selected repository.
+
+Do not reuse legacy Codekeeper credential names. Rivet intentionally has no fallback to them.
+
+## Verify effective authority
+
+After installation, verify the live App and repository configuration:
+
+```bash
+rivet app-verify \
+  --repository OWNER/REPOSITORY \
+  --client-id CLIENT_ID \
+  --private-key-file /path/to/private-key.pem
+```
+
+Verification fails unless all of these conditions hold:
+
+- the key authenticates as the App identified by the supplied client ID;
+- the installation targets selected repositories rather than all repositories;
+- effective permissions are exactly Contents read, Metadata read, and Pull requests write;
+- no webhook events or additional permissions are enabled;
+- the repository variable contains the supplied client ID; and
+- the repository secret exists under the Rivet name.
+
+GitHub does not expose a stored secret value, so this command proves the secret's metadata but cannot compare its contents with the local key. A successful review workflow run is the final proof that GitHub can mint an installation token from the stored credentials.
+
+## Operational boundary
+
+The review installer records this authority in `.github/rivet/installation.json`, and the generated workflow is ready to mint App tokens. App creation and installation remain human-controlled GitHub operations. The setup is operational only after `app-verify` succeeds and a review workflow mints a token in the selected repository.
