@@ -1,4 +1,8 @@
 import { DEFAULT_RIVET_CONFIG, reviewWorkflowProjection } from "../config.mjs";
+import {
+  RIVET_APP_CLIENT_ID_VARIABLE,
+  RIVET_APP_PRIVATE_KEY_SECRET,
+} from "../app-authority.mjs";
 
 export const RIVET_REVIEW_WORKFLOW_ID = "rivet-review";
 const MANAGED_NATIVE_IMPORT =
@@ -19,6 +23,10 @@ function nativeImportFrontmatter(nativeImport) {
 
 function engineFrontmatter({ engine, model }) {
   return `engine: ${engine}\nmodel: ${model}\n`;
+}
+
+function appFrontmatter() {
+  return `github-app:\n  client-id: \${{ vars.${RIVET_APP_CLIENT_ID_VARIABLE} }}\n  private-key: \${{ secrets.${RIVET_APP_PRIVATE_KEY_SECRET} }}\n`;
 }
 
 function inlineFindingsFrontmatter({ inlineFindings, maximumFindings }) {
@@ -63,7 +71,7 @@ permissions:
   contents: read
   pull-requests: read
 checkout: false
-${engineFrontmatter(review)}inlined-imports: true
+${engineFrontmatter(review)}${appFrontmatter()}inlined-imports: true
 ${nativeImportFrontmatter(nativeImport)}safe-outputs:
 ${inlineFindingsFrontmatter(review)}  submit-pull-request-review:
     allowed-events: [${reviewEvents}]

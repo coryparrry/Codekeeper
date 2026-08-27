@@ -37,6 +37,8 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /checkout: false/);
   assert.match(fixture, /inlined-imports: true/);
   assert.match(fixture, /model: gpt-5\.6-luna/);
+  assert.match(fixture, /vars\.RIVET_APP_CLIENT_ID/);
+  assert.match(fixture, /secrets\.RIVET_APP_PRIVATE_KEY/);
   assert.match(fixture, new RegExp(NATIVE_IMPORT.replaceAll(".", "\\.")));
   assert.match(fixture, /Publish no more than 8 inline findings/);
   assert.match(fixture, /submit_pull_request_review/);

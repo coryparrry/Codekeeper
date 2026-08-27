@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { reviewAppAuthority } from "./app-authority.mjs";
 import {
   DEFAULT_RIVET_CONFIG,
   productAuthoritySummary,
@@ -90,6 +91,7 @@ export async function prepareReviewInstallation({
   const root = path.resolve(repositoryRoot ?? process.cwd());
   const config = validateRivetConfig(configuration);
   const productAuthority = productAuthoritySummary(config);
+  const githubApp = reviewAppAuthority(config);
   const rootMetadata = await lstat(root);
   if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
     throw new Error("Rivet installer: repository root must be a directory");
@@ -145,6 +147,7 @@ export async function prepareReviewInstallation({
           mode: "review",
           configSchemaVersion: config.schemaVersion,
           productAuthority,
+          githubApp,
           compiler: {
             version: GH_AW_RELEASE.version,
             commit: GH_AW_RELEASE.commit,
@@ -178,6 +181,7 @@ export async function prepareReviewInstallation({
       repositoryRoot: root,
       mode: "review",
       productAuthority,
+      githubApp,
       authority,
       files: Object.freeze(plannedFiles),
     });
@@ -194,6 +198,7 @@ export async function installReview(options = {}) {
     mode: plan.mode,
     dryRun: options.dryRun === true,
     productAuthority: plan.productAuthority,
+    githubApp: plan.githubApp,
     files: plan.files.map(({ path: filePath, status, sha256 }) => ({
       path: filePath,
       status,

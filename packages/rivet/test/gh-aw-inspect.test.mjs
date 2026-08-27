@@ -41,8 +41,13 @@ test("inspects the pinned Rivet review fixture authority", async () => {
   ]);
   assert.deepEqual(authority.additionalRepositories, []);
   assert.ok(authority.actionRepositories.includes("github/gh-aw-actions"));
+  assert.ok(
+    authority.actionRepositories.includes("actions/create-github-app-token"),
+  );
   assert.ok(authority.secrets.includes("CODEX_API_KEY"));
+  assert.ok(authority.secrets.includes("RIVET_APP_PRIVATE_KEY"));
   assert.ok(authority.variables.includes("GH_AW_DEFAULT_MAX_TURNS"));
+  assert.ok(authority.variables.includes("RIVET_APP_CLIENT_ID"));
   assert.ok(authority.safeOutputJobs.includes("safe_outputs"));
   assert.deepEqual(authority.runtimeImports, []);
   assert.doesNotMatch(
