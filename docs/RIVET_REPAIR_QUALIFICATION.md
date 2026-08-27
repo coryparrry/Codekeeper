@@ -30,15 +30,28 @@ The checked-in source compiles cleanly with gh-aw `v0.86.2` in strict action mod
 
 The generated lock file is deliberately not installed or checked in at this gate.
 
+## Repair lineage
+
+Rivet records repair progress as one immutable sequence:
+
+1. review head and findings fingerprint;
+2. authorization actor, comment, and still-live head;
+3. successful command exit codes and the new repair commit; and
+4. a fresh review of that exact repair commit.
+
+The sequence rejects moved heads, failed commands, no-change repairs, reordered steps, forged base records, and altered validation receipts. A repair is complete only when the fresh review of the repair commit has no blocking result. Each new repair attempt starts a new lineage from the newly reviewed head.
+
+This state machine validates receipts supplied by deterministic workflow steps. It does not treat an agent's claim that validation ran as proof.
+
 ## Remaining hard gates
 
 The upstream primitive enforces same-repository targeting, protected paths, patch limits, and non-fast-forward failure. It does not by itself prove that the configured validation commands ran successfully, and prompt instructions are not a deterministic validation gate.
 
 Before repair can be installed, Rivet still needs:
 
-1. a narrow validation receipt checked before publication;
-2. a review, authorization, original-head, repair-commit, and re-review lineage receipt;
-3. live verification that the Rivet App was widened from Contents read to Contents write; and
-4. an installer/update PR that enables repair only after those checks pass.
+1. wire a deterministic validation runner and the lineage state machine into publication;
+2. persist the lineage through a Rivet-owned GitHub marker or check result;
+3. verify live that the Rivet App was widened from Contents read to Contents write; and
+4. enable repair in an installer/update PR only after those checks pass.
 
 Until then, review remains the only operational Rivet workflow and repair authority remains disabled in schema v4.
