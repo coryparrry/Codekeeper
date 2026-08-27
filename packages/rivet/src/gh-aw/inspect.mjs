@@ -67,6 +67,19 @@ function references(source, namespace) {
     .sort();
 }
 
+function resolvedImports(source) {
+  const lines = source.split("\n");
+  const start = lines.indexOf("#   Imports:");
+  if (start === -1) return [];
+  const imports = [];
+  for (const line of lines.slice(start + 1)) {
+    const match = line.match(/^#     - (.+)$/);
+    if (!match) break;
+    imports.push(match[1]);
+  }
+  return imports;
+}
+
 export function inspectCompiledWorkflow(source) {
   const workflow = parseWorkflow(source);
   const jobs =
@@ -110,6 +123,8 @@ export function inspectCompiledWorkflow(source) {
   return Object.freeze({
     metadata: header(source, "gh-aw-metadata"),
     manifest: header(source, "gh-aw-manifest"),
+    inlinedImports: /^# inlined-imports: true$/m.test(source),
+    resolvedImports: resolvedImports(source),
     triggers: Object.keys(workflow.on ?? {}).sort(),
     permissions: rootPermissions,
     secrets: references(source, "secrets"),

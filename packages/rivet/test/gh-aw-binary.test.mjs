@@ -60,6 +60,10 @@ test("pins the immutable gh-aw release and supported assets", () => {
     GH_AW_RELEASE.commit,
     "48e5fa3ff52294d91d97715017a9f8693a48387f",
   );
+  assert.equal(
+    GH_AW_RELEASE.actionsCommit,
+    "6aab9e5b5c91c615506061f09bedd81a23babe3c",
+  );
   assert.deepEqual(Object.keys(GH_AW_RELEASE.assets), [
     "darwin-arm64",
     "darwin-x64",

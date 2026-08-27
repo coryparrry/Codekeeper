@@ -33,6 +33,7 @@ const assets = Object.freeze({
 
 export const GH_AW_RELEASE = Object.freeze({
   repository: "github/gh-aw",
+  actionsCommit: "6aab9e5b5c91c615506061f09bedd81a23babe3c",
   version: "0.86.2",
   tag: "v0.86.2",
   commit: "48e5fa3ff52294d91d97715017a9f8693a48387f",

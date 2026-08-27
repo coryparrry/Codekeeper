@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import { ensureGhAwBinary } from "./binary.mjs";
+import { GH_AW_RELEASE } from "./versions.mjs";
 
 const execFileAsync = promisify(execFile);
 const WORKFLOW_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -78,6 +79,8 @@ export async function compileGhAwWorkflow({
     "--no-check-update",
     "--action-mode",
     "action",
+    "--action-tag",
+    GH_AW_RELEASE.actionsCommit,
   ];
   if (approveNewDependencies) args.push("--approve");
   const output = await runGhAw({

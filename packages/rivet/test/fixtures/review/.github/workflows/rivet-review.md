@@ -8,6 +8,9 @@ permissions:
   pull-requests: read
 checkout: false
 engine: codex
+inlined-imports: true
+imports:
+  - .github/rivet/aw/review-extension.md
 safe-outputs:
   add-comment:
     max: 1
