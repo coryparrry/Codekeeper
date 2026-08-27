@@ -1,0 +1,15 @@
+{
+  "name": "@coryparry/rivet",
+  "version": "0.0.0-development",
+  "private": true,
+  "description": "Rivet repository maintenance workflows",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "npm run syntax && npm test",
+    "syntax": "node --check src/gh-aw/binary.mjs && node --check src/gh-aw/versions.mjs",
+    "test": "node --test test/gh-aw-binary.test.mjs"
+  }
+}
