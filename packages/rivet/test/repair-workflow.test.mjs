@@ -44,6 +44,7 @@ test("renders isolated validation before the App-authorized publisher", () => {
   );
   assert.match(source, /uses: \.\/\.github\/rivet\/actions\/validate-repair/);
   assert.match(source, /needs: validate-repair/);
+  assert.match(source, /if: needs\.validate_repair\.result == 'success'/);
   assert.match(source, /uses: \.\/\.github\/rivet\/actions\/publish-repair/);
   assert.match(
     source,

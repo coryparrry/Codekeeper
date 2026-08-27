@@ -71,6 +71,7 @@ safe-outputs:
     publish-repair:
       description: Publish the exact patch emitted by the isolated validation job
       needs: validate-repair
+      if: needs.validate_repair.result == 'success'
       runs-on: ubuntu-latest
       permissions:
         contents: read

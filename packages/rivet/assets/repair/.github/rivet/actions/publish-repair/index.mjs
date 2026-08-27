@@ -167,6 +167,13 @@ export function inspectRepairPatch(patch) {
   return Object.freeze(paths);
 }
 
+export function normalizeRepairPatch(patch) {
+  if (typeof patch !== "string" || patch.length < 1) {
+    fail("patch is empty, oversized, or binary");
+  }
+  return patch.endsWith("\n") ? patch : `${patch}\n`;
+}
+
 function reviewFingerprint(review, comments) {
   const input = {
     reviewId: review.id,
@@ -312,9 +319,8 @@ export async function runPublishRepairAction({
   );
   const request = parsePublicationRequest({ event, agentOutput });
   const artifactRoot = env.RIVET_REPAIR_ARTIFACT;
-  const validatedPatch = await readFileImpl(
-    `${artifactRoot}/patch.diff`,
-    "utf8",
+  const validatedPatch = normalizeRepairPatch(
+    await readFileImpl(`${artifactRoot}/patch.diff`, "utf8"),
   );
   const validationReceipt = JSON.parse(
     await readFileImpl(`${artifactRoot}/receipt.json`, "utf8"),

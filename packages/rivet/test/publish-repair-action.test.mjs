@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 import {
   inspectRepairPatch,
+  normalizeRepairPatch,
   parseRepairRequest,
   runPublishRepairAction,
 } from "../assets/repair/.github/rivet/actions/publish-repair/index.mjs";
@@ -75,6 +76,7 @@ test("accepts a bounded existing-file patch", () => {
     "",
   ].join("\n");
   assert.deepEqual(inspectRepairPatch(patch), ["src/discount.mjs"]);
+  assert.equal(normalizeRepairPatch(patch.slice(0, -1)), patch);
 });
 
 test("rejects protected, renamed, binary, and oversized patches", () => {

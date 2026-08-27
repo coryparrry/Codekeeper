@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   inspectRepairPatch,
+  normalizeRepairPatch,
   parseRepairRequest,
 } from "../publish-repair/index.mjs";
 
@@ -38,7 +39,7 @@ async function run(command, args, options = {}) {
       maxBuffer: 16 * 1024 * 1024,
       timeout: options.timeout,
     });
-    return stdout.trim();
+    return options.trim === false ? stdout : stdout.trim();
   } catch (cause) {
     const detail = String(
       cause?.stderr || cause?.stdout || cause?.message || "command failed",
@@ -103,7 +104,8 @@ export async function runValidateRepairAction({
     agentOutput,
     outputType: "validate_repair",
   });
-  const proposedPaths = inspectRepairPatch(request.patch);
+  const proposedPatch = normalizeRepairPatch(request.patch);
+  const proposedPaths = inspectRepairPatch(proposedPatch);
   const pull = await githubJson(
     `/repos/${request.repository}/pulls/${request.pullRequest}`,
     env.GITHUB_TOKEN,
@@ -131,7 +133,7 @@ export async function runValidateRepairAction({
     env.RUNNER_TEMP,
     "rivet-proposed-repair.patch",
   );
-  await writeFileImpl(proposedPatchPath, request.patch, { mode: 0o600 });
+  await writeFileImpl(proposedPatchPath, proposedPatch, { mode: 0o600 });
   await runImpl(
     "git",
     ["apply", "--check", "--whitespace=error-all", proposedPatchPath],
@@ -144,7 +146,7 @@ export async function runValidateRepairAction({
   const canonicalPatch = await runImpl(
     "git",
     ["diff", "--binary", "--full-index", "--no-ext-diff"],
-    { cwd, env },
+    { cwd, env, trim: false },
   );
   const changedPaths = (
     await runImpl("git", ["diff", "--name-only", "-z"], { cwd, env })
@@ -171,7 +173,7 @@ export async function runValidateRepairAction({
   const finalPatch = await runImpl(
     "git",
     ["diff", "--binary", "--full-index", "--no-ext-diff"],
-    { cwd, env },
+    { cwd, env, trim: false },
   );
   const untracked = await runImpl(
     "git",
