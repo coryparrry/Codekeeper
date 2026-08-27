@@ -34,6 +34,9 @@ test("renders an admin-command repair candidate with one bounded push", () => {
   assert.match(source, /if: github\.event\.comment\.body == '\/rivet-repair'/);
   assert.match(source, /permissions:\n  contents: read\n  pull-requests: read/);
   assert.match(source, /safe-outputs:\n  max-patch-files: 25\n  github-app:/);
+  assert.match(source, /report-failure-as-issue: false/);
+  assert.match(source, /report-failed-jobs: false/);
+  assert.match(source, /report-incomplete:\n    create-issue: false/);
   assert.match(source, /push-to-pull-request-branch:\n    target: triggering/);
   assert.match(source, /fallback-as-pull-request: false/);
   assert.match(source, /protected-files: blocked/);
