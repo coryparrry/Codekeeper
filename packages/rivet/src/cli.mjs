@@ -4,18 +4,25 @@ import {
 } from "./app-authority.mjs";
 import { installReview } from "./install.mjs";
 import { createReviewSetupPullRequest } from "./setup-pr.mjs";
-import { configureReviewApp, verifyReviewApp } from "./app-setup.mjs";
+import {
+  configureReviewApp,
+  verifyRepairApp,
+  verifyReviewApp,
+} from "./app-setup.mjs";
 
 function usage() {
-  return "Usage:\n  rivet init --review-only [--repository <path>] [--dry-run | --setup-pr] [--setup-branch <name>]\n  rivet app-plan --repository <owner/repository> [--owner-type <User|Organization>]\n  rivet app-configure --repository <owner/repository> --client-id <id> --private-key-file <path>\n  rivet app-verify --repository <owner/repository> --client-id <id> --private-key-file <path>";
+  return "Usage:\n  rivet init --review-only [--repository <path>] [--dry-run | --setup-pr] [--setup-branch <name>]\n  rivet app-plan --repository <owner/repository> [--owner-type <User|Organization>]\n  rivet app-configure --repository <owner/repository> --client-id <id> --private-key-file <path>\n  rivet app-verify --repository <owner/repository> --client-id <id> --private-key-file <path> [--repair]";
 }
 
-function parseAppCredentials(args) {
+function parseAppCredentials(args, { allowRepair = false } = {}) {
   const options = {};
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     const value = args[index + 1];
-    if (argument === "--repository" && value) options.repository = value;
+    if (argument === "--repair" && allowRepair) {
+      options.repair = true;
+      continue;
+    } else if (argument === "--repository" && value) options.repository = value;
     else if (argument === "--client-id" && value) options.clientId = value;
     else if (argument === "--private-key-file" && value) {
       options.privateKeyPath = value;
@@ -101,6 +108,7 @@ export async function runCli(
     installReviewImpl = installReview,
     createSetupPullRequestImpl = createReviewSetupPullRequest,
     configureReviewAppImpl = configureReviewApp,
+    verifyRepairAppImpl = verifyRepairApp,
     verifyReviewAppImpl = verifyReviewApp,
     stdout = process.stdout,
   } = {},
@@ -117,10 +125,14 @@ export async function runCli(
     return result;
   }
   if (command === "app-configure" || command === "app-verify") {
-    const options = parseAppCredentials(args);
+    const { repair = false, ...options } = parseAppCredentials(args, {
+      allowRepair: command === "app-verify",
+    });
     const result = await (command === "app-configure"
       ? configureReviewAppImpl(options)
-      : verifyReviewAppImpl(options));
+      : repair
+        ? verifyRepairAppImpl(options)
+        : verifyReviewAppImpl(options));
     stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return result;
   }
