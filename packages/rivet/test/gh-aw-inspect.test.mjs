@@ -33,6 +33,9 @@ test("inspects the pinned Rivet review fixture authority", async () => {
     ".github/rivet/aw/review-extension.md",
   ]);
   assert.deepEqual(authority.unpinnedActions, []);
+  assert.deepEqual(authority.localActions, [
+    "./.github/rivet/actions/authority-receipt",
+  ]);
   assert.deepEqual(authority.additionalRepositories, []);
   assert.ok(authority.actionRepositories.includes("github/gh-aw-actions"));
   assert.ok(authority.secrets.includes("CODEX_API_KEY"));
