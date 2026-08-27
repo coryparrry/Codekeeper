@@ -6,7 +6,9 @@ on:
 permissions:
   contents: read
   pull-requests: read
-checkout: false
+checkout:
+  sparse-checkout: |
+    .github/rivet/actions/authority-receipt
 engine: codex
 model: gpt-5.6-luna
 inlined-imports: true
@@ -16,6 +18,10 @@ safe-outputs:
   github-app:
     client-id: ${{ vars.RIVET_APP_CLIENT_ID }}
     private-key: ${{ secrets.RIVET_APP_PRIVATE_KEY }}
+  report-failure-as-issue: false
+  report-failed-jobs: false
+  report-incomplete:
+    create-issue: false
   create-pull-request-review-comment:
     max: 8
   submit-pull-request-review:

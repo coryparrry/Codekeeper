@@ -70,10 +70,16 @@ on:
 permissions:
   contents: read
   pull-requests: read
-checkout: false
+checkout:
+  sparse-checkout: |
+    .github/rivet/actions/authority-receipt
 ${engineFrontmatter(review)}inlined-imports: true
 ${nativeImportFrontmatter(nativeImport)}safe-outputs:
-${safeOutputsAppFrontmatter()}${inlineFindingsFrontmatter(review)}  submit-pull-request-review:
+${safeOutputsAppFrontmatter()}  report-failure-as-issue: false
+  report-failed-jobs: false
+  report-incomplete:
+    create-issue: false
+${inlineFindingsFrontmatter(review)}  submit-pull-request-review:
     allowed-events: [${reviewEvents}]
 ---
 

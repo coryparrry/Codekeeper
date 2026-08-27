@@ -34,7 +34,10 @@ test("renders the checked-in Rivet review workflow source", async () => {
   );
   assert.doesNotMatch(fixture, /Codekeeper/i);
   assert.match(fixture, /pull_request_target:/);
-  assert.match(fixture, /checkout: false/);
+  assert.match(
+    fixture,
+    /checkout:\n  sparse-checkout: \|\n    \.github\/rivet\/actions\/authority-receipt/,
+  );
   assert.match(fixture, /inlined-imports: true/);
   assert.match(fixture, /model: gpt-5\.6-luna/);
   assert.match(fixture, /vars\.RIVET_APP_CLIENT_ID/);
@@ -44,6 +47,9 @@ test("renders the checked-in Rivet review workflow source", async () => {
     /safe-outputs:\n  github-app:\n    client-id: \$\{\{ vars\.RIVET_APP_CLIENT_ID \}\}\n    private-key: \$\{\{ secrets\.RIVET_APP_PRIVATE_KEY \}\}/,
   );
   assert.doesNotMatch(fixture, /^github-app:/m);
+  assert.match(fixture, /report-failure-as-issue: false/);
+  assert.match(fixture, /report-failed-jobs: false/);
+  assert.match(fixture, /report-incomplete:\n    create-issue: false/);
   assert.match(fixture, new RegExp(NATIVE_IMPORT.replaceAll(".", "\\.")));
   assert.match(fixture, /Publish no more than 8 inline findings/);
   assert.match(fixture, /submit_pull_request_review/);
