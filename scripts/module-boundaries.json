@@ -13,6 +13,8 @@
     "packages/codekeeper/bin",
     "packages/codekeeper/src",
     "packages/codekeeper/test",
+    "packages/rivet/src",
+    "packages/rivet/test",
     "scripts",
     "tools/codekeeper/audit",
     "tools/codekeeper/evals",
