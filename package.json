@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "npm@12.0.2",
   "scripts": {
-    "rivet:check": "npm --prefix packages/rivet run check",
+    "rivet:check": "npm --prefix packages/rivet ci --ignore-scripts --no-audit --no-fund && npm --prefix packages/rivet run check",
     "package:pack": "node scripts/pack-codekeeper-package.mjs",
     "package:stage": "node scripts/build-codekeeper-package.mjs",
     "package:distribution": "node scripts/generate-codekeeper-distribution.mjs",
