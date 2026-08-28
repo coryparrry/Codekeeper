@@ -140,12 +140,8 @@ These ceilings were measured on this tree. They are not targets to grow into.
 
 | File | Lines | Bytes |
 |---|---:|---:|
-| `acceptance/src/harness.mjs` | 1,455 | 83,761 |
 | `packages/codekeeper/src/install.mjs` | 812 | 32,748 |
 | `packages/codekeeper/src/tui.mjs` | 948 | 36,271 |
-| `packages/codekeeper/test/assets-plan.test.mjs` | 1,589 | 64,635 |
-| `packages/codekeeper/test/cli.test.mjs` | 1,471 | 54,700 |
-| `packages/codekeeper/test/tui.test.mjs` | 1,462 | 59,021 |
 | `tools/codekeeper/src/lib/git.mjs` | 884 | 32,028 |
 | `tools/codekeeper/test/commands.test.mjs` | 1,163 | 35,565 |
 | `tools/codekeeper/test/integration.test.mjs` | 1,558 | 67,318 |

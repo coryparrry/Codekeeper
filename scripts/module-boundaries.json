@@ -27,10 +27,6 @@
       "maxLines": 948,
       "maxBytes": 36271
     },
-    "packages/codekeeper/test/assets-plan.test.mjs": {
-      "maxLines": 1589,
-      "maxBytes": 64635
-    },
     "tools/codekeeper/src/lib/git.mjs": {
       "maxLines": 884,
       "maxBytes": 32028
