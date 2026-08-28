@@ -9,8 +9,8 @@
     "governance:check": "node scripts/repository-governance.mjs --validate && node --test scripts/repository-governance.test.mjs",
     "architecture:check": "node scripts/check-module-boundaries.mjs && node scripts/check-local-import-cycles.mjs && node --test scripts/check-module-boundaries.test.mjs scripts/check-local-import-cycles.test.mjs",
     "lint": "eslint .",
-    "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
-    "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
+    "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs",
+    "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs",
     "check": "npm run rivet:check && npm run lint && npm run format:check && npm run governance:check && npm run architecture:check && bash scripts/release-source.sh --verify-worktree"
   },
   "devDependencies": {

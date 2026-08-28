@@ -103,7 +103,6 @@ These ceilings were measured on this tree. They are not targets to grow into.
 | File | Lines | Bytes |
 |---|---:|---:|
 | `tools/codekeeper/src/lib/git.mjs` | 884 | 32,028 |
-| `tools/codekeeper/test/commands.test.mjs` | 1,163 | 35,565 |
 | `tools/codekeeper/test/integration.test.mjs` | 1,558 | 67,318 |
 | `tools/codekeeper/test/publish.test.mjs` | 1,740 | 73,858 |
 
