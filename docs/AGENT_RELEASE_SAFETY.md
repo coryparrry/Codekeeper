@@ -57,7 +57,7 @@ installer assets and generated workflow callers
         |  package stage and release/manifest.json
         v
 npm tarball + SHA-512 receipt
-        |  candidate verifier, locked runtime install, YAML parse
+        |  locked runtime install, YAML parse
         v
 installed adopter workflows and runtime
         |  App authorization, publication, evidence, GitHub state
@@ -88,8 +88,8 @@ named in its “also verify” column.
 | `tools/codekeeper/tooling-manifest.json` or runtime payload | Generated inventory is stale, incomplete, or records a different source payload | `cd tools/codekeeper && node scripts/generate-tooling-manifest.mjs --check`; runtime check | package runtime contents and release provenance |
 | `.github/workflows/**`, action files, or `examples/workflows/**` | Trigger, input, secret, permission, job dependency, checkout ref, action pin, runner, or caller/reusable-workflow contract breaks | root `npm run check`; actionlint; Ruby/Psych YAML parsing; workflow contract tests | packaged workflow assets, rendered adopter workflows, protected live checks |
 | Review or `pull_request_target` caller | Untrusted pull-request code is checked out or executed on a privileged runner, or required review authority is bypassed | workflow contract tests plus static inspection of checkout refs and job permissions | a controlled same-repository adopter PR |
-| Runtime workflow consumer | One isolated job fails to acquire/reverify the exact package, install the locked runtime, or transfer a frozen artifact | workflow package-contract tests; candidate verifier | workflow run evidence and exact package receipt |
-| `scripts/build-*`, `pack-*`, release verifier, or release lifecycle | Source, stage, tarball, manifest, receipt, or installed runtime describes different bytes; candidate mode reaches publication | `npm run package:stage`; release-candidate tests; pack and verify an exact candidate | protected release workflow and registry receipt |
+| Runtime workflow consumer | One isolated job fails to acquire/reverify the exact package, install the locked runtime, or transfer a frozen artifact | workflow package-contract tests | workflow run evidence and exact package receipt |
+| `scripts/build-*`, `pack-*`, or package release verifier | Source, stage, tarball, manifest, receipt, or installed runtime describes different bytes | `npm run package:stage`; pack and inspect an exact candidate | protected release workflow and registry receipt |
 | `package.json`, package lockfiles, runtime lockfile, Node/npm versions | Lifecycle scripts, bundled Ink/React dependencies, nested runtime, or supported Node line changes without reproducible installs | clean `npm ci --ignore-scripts --no-audit --no-fund` on Node 22 and 24; package checks | exact npm 12.0.2 pack and install canary |
 | Generated package source commit or source repository identity | Installer records a stale, unreachable, future, self-referential, or wrong-owner commit | package contract and distribution tests; verify full SHA and default-branch ancestry for release packs | inspect the exact build commit contents, not ancestry alone |
 | `MANIFEST.sha256` (compatibility-only), release docs, or tracked files | Source archive no longer represents the reviewed tracked tree | `bash scripts/release-source.sh --verify` from a clean final commit | archive receipt and release tag |
@@ -196,31 +196,9 @@ mkdir -p ../codekeeper-release-artifacts
 npm run package:pack -- --destination ../codekeeper-release-artifacts
 ```
 
-Verify the resulting pack receipt and candidate:
-
-```bash
-node scripts/verify-release-candidate.mjs \
-  --pack-report <PACK_REPORT> \
-  --tarball-directory ../codekeeper-release-artifacts \
-  --expected-source-commit <EXACT_COMMIT>
-```
-
-The candidate boundary must prove all of the following before publication:
-
-- package name, version, filename, SHA-512 integrity, and source commit agree;
-- `release/manifest.json` exactly inventories the staged product;
-- every declared file is a regular non-symlink file with the expected SHA-256;
-- no hidden paths or unexpected filesystem entries enter the release;
-- nested runtime lockfiles install with scripts disabled;
-- all packaged and generated workflow YAML parses;
-- required agent, asset, runtime, action, and verifier paths exist;
-- the literal package acquisition/install path reaches the expected no-origin
-  readiness stop;
-- production verification adapters do not attempt secret or variable mutation.
-
-For pull-request readiness, `--candidate` may use the clean checkout supplied by
-CI but does not replace the clean exact-commit release build. It must remain
-upstream of the protected publish job.
+The legacy Codekeeper pre-publication verification tool and protected release
+workflow are retired. Package staging is not publication evidence; current
+release qualification is defined by the Rivet migration documentation.
 
 ### Gate F — workflow and trust-boundary proof
 
@@ -280,7 +258,6 @@ Before publication, separately confirm the external boundaries:
 
 - the protected `main` ruleset is live and requires the intended checks;
 - immutable `codekeeper-vX.Y.Z` tag protection is live;
-- Release Please has the required token and creates the reviewed release PR;
 - the npm environment, publisher credentials, provenance prerequisites, and
   public repository state are correct;
 - the release tag resolves to the exact source commit;
