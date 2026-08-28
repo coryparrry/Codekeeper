@@ -15,13 +15,8 @@
     "registry": "https://registry.npmjs.org/"
   },
   "type": "module",
-  "bin": {
-    "codekeeper": "bin/codekeeper.mjs",
-    "codekeeper-verify-package": "bin/verify-package.mjs"
-  },
   "files": [
     "assets/",
-    "bin/",
     "release/",
     "runtime/",
     "src/",
@@ -34,14 +29,6 @@
   ],
   "engines": {
     "node": ">=22"
-  },
-  "scripts": {
-    "prepublishOnly": "node bin/prepublish-guard.mjs",
-    "prepare:runtime-test": "npm --prefix runtime-package ci --ignore-scripts --no-audit --no-fund",
-    "test:unit": "node --test test/*.test.mjs audit/*.test.mjs",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/*.mjs' --test-coverage-include='src/preflight/*.mjs' --test-coverage-include='src/plan/*.mjs' --test-coverage-lines=70 --test-coverage-branches=50 --test-coverage-functions=75 test/*.test.mjs audit/*.test.mjs",
-    "test": "npm run prepare:runtime-test && npm run test:unit",
-    "check": "npm run prepare:runtime-test && bash -c 'for file in bin/*.mjs src/*.mjs src/preflight/*.mjs src/plan/*.mjs test/*.mjs audit/*.mjs; do node --check \"$file\"; done' && npm run coverage"
   },
   "keywords": [
     "ai-agent",
