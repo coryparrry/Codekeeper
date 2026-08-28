@@ -1,9 +1,10 @@
 {
-  "name": "codekeeper-repository",
+  "name": "rivet-repository",
   "private": true,
   "type": "module",
   "packageManager": "npm@12.0.2",
   "scripts": {
+    "rivet:check": "npm --prefix packages/rivet run check",
     "package:pack": "node scripts/pack-codekeeper-package.mjs",
     "package:stage": "node scripts/build-codekeeper-package.mjs",
     "package:distribution": "node scripts/generate-codekeeper-distribution.mjs",
@@ -16,7 +17,7 @@
     "lint": "eslint .",
     "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
-    "check": "npm run lint && npm run format:check && npm run governance:check && npm run architecture:check && npm run helpers:check && npm run release:tag:check && bash scripts/release-source.sh --verify-worktree"
+    "check": "npm run rivet:check && npm run lint && npm run format:check && npm run governance:check && npm run architecture:check && npm run helpers:check && npm run release:tag:check && bash scripts/release-source.sh --verify-worktree"
   },
   "devDependencies": {
     "acorn": "8.18.0",

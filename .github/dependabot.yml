@@ -12,3 +12,7 @@ updates:
     directory: /packages/codekeeper
     schedule:
       interval: weekly
+  - package-ecosystem: npm
+    directory: /packages/rivet
+    schedule:
+      interval: weekly
