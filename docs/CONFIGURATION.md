@@ -6,7 +6,13 @@ The adopter-owned `.github/codekeeper.json` is the runtime policy file. Each coo
 
 Version 3 treats every named policy object as closed: unknown keys fail validation. Its `automation` section controls automatic PR review, review-feedback triage, issue triage, owner requests, and the maintenance schedule. The intentional extension points are the provider names in `ai.providers`, label names in `labels`, and provider-specific JSON in `modelSettings`; these dynamic maps remain supported but have bounded entry counts, nesting, strings, arrays, and numeric values. `modelSettings` numbers may be negative or fractional when a provider supports them, but their absolute magnitude may not exceed 1,000,000. Lists, strings, provider and label counts, and validation-command count are also bounded before a coordinator can consume them.
 
-Until a public package release is available, build the verified local tarball described in [INSTALL.md](../INSTALL.md), install that exact tarball, and run `codekeeper init`. A fresh setup first offers the conservative Recommended path or Customize. Customize opens the tabbed Settings screen; simple mode hides inactive agents, while advanced mode keeps inactive settings visible and read-only. The final authority summary can return to Settings and remains the only mutation boundary.
+The former local Codekeeper tarball path is retired while Rivet's package release
+boundary is established. Follow the [Rivet migration authority](RIVET_GH_AW_MIGRATION.md)
+for current delivery gates. A fresh setup first offers the conservative
+Recommended path or Customize. Customize opens the tabbed Settings screen;
+simple mode hides inactive agents, while advanced mode keeps inactive settings
+visible and read-only. The final authority summary can return to Settings and
+remains the only mutation boundary.
 
 Every operation limit has a global ceiling. Review context is limited to 20 findings of each kind, 5 MiB of diff, and 1,000 files. Audit publication is limited to 20 issues and issue triage to 200 open-issue summaries. A repair can be at most 100 files, 10,000 changed lines, 5 MiB total, and 1 MiB per file. Auto-merge is limited to 50 files and 5,000 changed lines. These ceilings are intentionally above the starter policy while preventing a trusted-policy mistake from turning into unbounded work.
 
