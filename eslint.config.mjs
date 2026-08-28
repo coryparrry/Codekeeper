@@ -21,11 +21,7 @@ const globals = Object.fromEntries(
 
 export default [
   {
-    ignores: [
-      "**/node_modules/**",
-      ".codex-pr*-fix/**",
-      "acceptance/fixture/**",
-    ],
+    ignores: ["**/node_modules/**", ".codex-pr*-fix/**"],
   },
   {
     files: ["**/*.mjs"],

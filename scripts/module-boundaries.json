@@ -5,10 +5,6 @@
   "newTestMaxLines": 1000,
   "newTestMaxBytes": 60000,
   "roots": [
-    "acceptance/audit",
-    "acceptance/bin",
-    "acceptance/src",
-    "acceptance/test",
     "packages/codekeeper/audit",
     "packages/codekeeper/bin",
     "packages/codekeeper/src",
@@ -23,10 +19,6 @@
     "tools/codekeeper/test"
   ],
   "legacy": {
-    "acceptance/src/harness.mjs": {
-      "maxLines": 1455,
-      "maxBytes": 83761
-    },
     "packages/codekeeper/src/install.mjs": {
       "maxLines": 812,
       "maxBytes": 32748
