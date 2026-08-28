@@ -7,8 +7,6 @@
   "roots": [
     "packages/codekeeper/audit",
     "packages/codekeeper/bin",
-    "packages/codekeeper/src",
-    "packages/codekeeper/test",
     "packages/rivet/src",
     "packages/rivet/test",
     "scripts",
@@ -19,14 +17,6 @@
     "tools/codekeeper/test"
   ],
   "legacy": {
-    "packages/codekeeper/src/install.mjs": {
-      "maxLines": 812,
-      "maxBytes": 32748
-    },
-    "packages/codekeeper/src/tui.mjs": {
-      "maxLines": 948,
-      "maxBytes": 36271
-    },
     "tools/codekeeper/src/lib/git.mjs": {
       "maxLines": 884,
       "maxBytes": 32028

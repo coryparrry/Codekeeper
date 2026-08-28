@@ -32,8 +32,6 @@ test("compatibility facades are the recorded public module map", () => {
   assert.deepEqual(COMPATIBILITY_FACADES, [
     { facade: "tools/codekeeper/src/lib/github.mjs", domain: "tools/codekeeper/src/lib/github" },
     { facade: "tools/codekeeper/src/lib/publish.mjs", domain: "tools/codekeeper/src/lib/publish" },
-    { facade: "packages/codekeeper/src/preflight.mjs", domain: "packages/codekeeper/src/preflight" },
-    { facade: "packages/codekeeper/src/plan.mjs", domain: "packages/codekeeper/src/plan" },
     { facade: "tools/codekeeper/src/cli.mjs", domain: "tools/codekeeper/src/cli-heavy.mjs" },
   ]);
 });
