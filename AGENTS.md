@@ -50,7 +50,7 @@ Treat hashes, manifests, and package source commits as dependent outputs, never 
 3. From that clean commit, run `node scripts/refresh-release-manifest.mjs`. It computes and commits only `MANIFEST.sha256`, which is compatibility-only for remaining source-pinned installations; never hand-edit that file. If any tracked file changes afterward, repeat this final step.
 4. Verify the final clean commit with `bash scripts/release-source.sh --verify` and report the exact commit SHA that passed.
 
-Never record a future, unmerged, or self-referential commit. Run `node scripts/sync-policy-validator.mjs --write` when the installer policy-validator copy must match `tools/codekeeper/src/lib/policy-validator.mjs`, then rerun the manifest sequence above. Do not hand-edit a source-commit constant.
+Never record a future, unmerged, or self-referential commit. Do not hand-edit a source-commit constant.
 
 ## Generic Product Boundary
 

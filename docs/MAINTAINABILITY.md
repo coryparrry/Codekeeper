@@ -118,22 +118,3 @@ npm run architecture:check
 
 The root `npm run check` command runs the same gate. It rejects local import
 cycles and any import from a domain module back through its facade.
-
-## Mirrored helpers
-
-A few installer files are physical copies of runtime helpers so the published
-package stays self-contained. The runtime file is canonical.
-
-| Canonical | Published copy |
-|---|---|
-| `tools/codekeeper/src/lib/label-ownership.mjs` | `packages/codekeeper/src/label-ownership.mjs` |
-
-```bash
-npm run helpers:check
-node scripts/sync-mirrored-helpers.mjs --write
-```
-
-`--check` fails if the copies differ. `--write` copies canonical bytes into the
-published path. Do not replace a published copy with an import outside
-`packages/codekeeper`. Add another pair only when the files are byte-identical
-and the installer must own its own copy.
