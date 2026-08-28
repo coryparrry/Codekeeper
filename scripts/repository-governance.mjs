@@ -180,10 +180,9 @@ export function validateGovernancePolicy(input) {
     ),
   );
   for (const requiredCheck of [
-    "acceptance-harness-checks",
-    "installer-checks (22.23.2)",
-    "installer-checks (24.19.0)",
-    "maintainer-checks",
+    "rivet-checks (22.23.2)",
+    "rivet-checks (24.19.0)",
+    "actionlint",
   ]) {
     if (!requiredChecks.has(requiredCheck)) {
       fail(`branch ruleset must require the ${requiredCheck} check`);
@@ -369,8 +368,8 @@ async function main(argv = process.argv.slice(2)) {
     return;
   }
 
-  if (process.env.CODEKEEPER_GOVERNANCE_APPLY !== "true") {
-    fail("--apply requires CODEKEEPER_GOVERNANCE_APPLY=true");
+  if (process.env.RIVET_GOVERNANCE_APPLY !== "true") {
+    fail("--apply requires RIVET_GOVERNANCE_APPLY=true");
   }
   for (const item of plan) {
     if (item.action === "create") {

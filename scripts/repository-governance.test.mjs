@@ -45,10 +45,9 @@ function policy() {
             type: "required_status_checks",
             parameters: {
               required_status_checks: [
-                { context: "acceptance-harness-checks" },
-                { context: "installer-checks (22.23.2)" },
-                { context: "installer-checks (24.19.0)" },
-                { context: "maintainer-checks" },
+                { context: "rivet-checks (22.23.2)" },
+                { context: "rivet-checks (24.19.0)" },
+                { context: "actionlint" },
               ],
             },
           },
@@ -61,7 +60,7 @@ function policy() {
         bypass_actors: [],
         conditions: {
           ref_name: {
-            include: ["refs/tags/codekeeper-v*"],
+            include: ["refs/tags/rivet-v*"],
             exclude: [],
           },
         },
@@ -169,19 +168,15 @@ test("reconciliation ignores GitHub default fields and key order", () => {
         parameters: {
           required_status_checks: [
             {
-              context: "acceptance-harness-checks",
+              context: "rivet-checks (22.23.2)",
               integration_id: 15368,
             },
             {
-              context: "installer-checks (22.23.2)",
+              context: "rivet-checks (24.19.0)",
               integration_id: 15368,
             },
             {
-              context: "installer-checks (24.19.0)",
-              integration_id: 15368,
-            },
-            {
-              context: "maintainer-checks",
+              context: "actionlint",
               integration_id: 15368,
             },
           ],
@@ -207,7 +202,7 @@ test("reconciliation ignores GitHub default fields and key order", () => {
     conditions: {
       ref_name: {
         exclude: [],
-        include: ["refs/tags/codekeeper-v*"],
+        include: ["refs/tags/rivet-v*"],
       },
     },
     rules: [{ type: "update" }],
