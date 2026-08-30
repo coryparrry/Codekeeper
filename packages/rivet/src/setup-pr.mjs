@@ -29,9 +29,14 @@ function assertExactPaths(actual, expected) {
 
 function pullRequestBody(plan) {
   const files = plan.files.map(({ path }) => `- \`${path}\``).join("\n");
+  const authority = plan.productAuthority.map((line) => `- ${line}`).join("\n");
   return `## Summary
 
 This draft installs Rivet's review-only workflow. Repair, issue implementation, maintenance, and merge authority remain disabled.
+
+## Product authority
+
+${authority}
 
 ## Managed files
 

@@ -10,6 +10,11 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+  DEFAULT_RIVET_CONFIG,
+  productAuthoritySummary,
+  validateRivetConfig,
+} from "./config.mjs";
 import { compileGhAwWorkflow, validateGhAwWorkflow } from "./gh-aw/compile.mjs";
 import { inspectCompiledWorkflow } from "./gh-aw/inspect.mjs";
 import { assessPullRequestTargetTrust } from "./gh-aw/trust.mjs";
@@ -75,25 +80,16 @@ async function existingFile(filePath) {
   }
 }
 
-function configuration() {
-  return {
-    schemaVersion: 1,
-    modes: {
-      review: true,
-      repair: false,
-      issues: false,
-      maintain: false,
-    },
-  };
-}
-
 export async function prepareReviewInstallation({
   repositoryRoot,
   binaryPath,
+  configuration = DEFAULT_RIVET_CONFIG,
   compileWorkflow = compileGhAwWorkflow,
   validateWorkflow = validateGhAwWorkflow,
 } = {}) {
   const root = path.resolve(repositoryRoot ?? process.cwd());
+  const config = validateRivetConfig(configuration);
+  const productAuthority = productAuthoritySummary(config);
   const rootMetadata = await lstat(root);
   if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
     throw new Error("Rivet installer: repository root must be a directory");
@@ -105,7 +101,10 @@ export async function prepareReviewInstallation({
     const files = await assetFiles();
     files.set(
       `.github/workflows/${RIVET_REVIEW_WORKFLOW_ID}.md`,
-      renderRivetReviewWorkflow({ nativeImport: NATIVE_IMPORT }),
+      renderRivetReviewWorkflow({
+        nativeImport: NATIVE_IMPORT,
+        configuration: config,
+      }),
     );
     await writeFiles(stagingRoot, files);
     await validateWorkflow({
@@ -132,10 +131,7 @@ export async function prepareReviewInstallation({
       );
     }
     files.set(lockPath, lockSource);
-    files.set(
-      ".github/rivet.json",
-      `${JSON.stringify(configuration(), null, 2)}\n`,
-    );
+    files.set(".github/rivet.json", `${JSON.stringify(config, null, 2)}\n`);
     const managedFiles = [
       ...files.keys(),
       ".github/rivet/installation.json",
@@ -147,6 +143,8 @@ export async function prepareReviewInstallation({
           schemaVersion: 1,
           product: "Rivet",
           mode: "review",
+          configSchemaVersion: config.schemaVersion,
+          productAuthority,
           compiler: {
             version: GH_AW_RELEASE.version,
             commit: GH_AW_RELEASE.commit,
@@ -179,6 +177,7 @@ export async function prepareReviewInstallation({
     return Object.freeze({
       repositoryRoot: root,
       mode: "review",
+      productAuthority,
       authority,
       files: Object.freeze(plannedFiles),
     });
@@ -194,6 +193,7 @@ export async function installReview(options = {}) {
     repositoryRoot: plan.repositoryRoot,
     mode: plan.mode,
     dryRun: options.dryRun === true,
+    productAuthority: plan.productAuthority,
     files: plan.files.map(({ path: filePath, status, sha256 }) => ({
       path: filePath,
       status,

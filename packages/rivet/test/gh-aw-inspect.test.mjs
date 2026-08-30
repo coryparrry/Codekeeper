@@ -26,6 +26,7 @@ test("inspects the pinned Rivet review fixture authority", async () => {
   const authority = inspectCompiledWorkflow(source);
   assert.deepEqual(authority.triggers, ["pull_request_target"]);
   assert.equal(authority.metadata.compiler_version, "v0.86.2");
+  assert.equal(authority.metadata.agent_model, "gpt-5.6-luna");
   assert.equal(authority.metadata.strict, true);
   assert.equal(authority.manifest.has_pull_request_target, true);
   assert.equal(authority.inlinedImports, true);
@@ -44,6 +45,10 @@ test("inspects the pinned Rivet review fixture authority", async () => {
   assert.ok(authority.variables.includes("GH_AW_DEFAULT_MAX_TURNS"));
   assert.ok(authority.safeOutputJobs.includes("safe_outputs"));
   assert.deepEqual(authority.runtimeImports, []);
+  assert.doesNotMatch(
+    source,
+    /model_reasoning_effort|detection_result\.json-c/,
+  );
   assert.ok(
     authority.writeCapableJobs.some(({ job }) => job === "safe_outputs"),
   );

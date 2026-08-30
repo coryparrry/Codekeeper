@@ -51,12 +51,13 @@ test("installs only the trusted Rivet review mode", async (t) => {
   assert.equal(result.dryRun, false);
   assert.equal(result.files.length, 7);
   assert.ok(result.files.every(({ status }) => status === "create"));
-  assert.deepEqual(
-    JSON.parse(
-      await readFile(path.join(repositoryRoot, ".github/rivet.json"), "utf8"),
-    ).modes,
-    { review: true, repair: false, issues: false, maintain: false },
+  const configuration = JSON.parse(
+    await readFile(path.join(repositoryRoot, ".github/rivet.json"), "utf8"),
   );
+  assert.equal(configuration.schemaVersion, 4);
+  assert.equal(configuration.review.automatic, true);
+  assert.equal(configuration.repair.authority, "never");
+  assert.equal(configuration.merge.authority, "never");
   const installation = JSON.parse(
     await readFile(
       path.join(repositoryRoot, ".github/rivet/installation.json"),
@@ -64,6 +65,8 @@ test("installs only the trusted Rivet review mode", async (t) => {
     ),
   );
   assert.equal(installation.product, "Rivet");
+  assert.equal(installation.configSchemaVersion, 4);
+  assert.deepEqual(installation.productAuthority, result.productAuthority);
   assert.equal(installation.compiler.version, "0.86.2");
   assert.deepEqual(
     installation.managedFiles,

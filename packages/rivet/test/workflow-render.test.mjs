@@ -7,6 +7,7 @@ import {
   renderRivetReviewWorkflow,
   RIVET_REVIEW_WORKFLOW_ID,
 } from "../src/workflows/review.mjs";
+import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -35,7 +36,17 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /pull_request_target:/);
   assert.match(fixture, /checkout: false/);
   assert.match(fixture, /inlined-imports: true/);
+  assert.match(fixture, /model: gpt-5\.6-luna/);
   assert.match(fixture, new RegExp(NATIVE_IMPORT.replaceAll(".", "\\.")));
+});
+
+test("projects domain review controls into gh-aw frontmatter", () => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.review.inlineFindings = false;
+  configuration.review.requestChanges = true;
+  const source = renderRivetReviewWorkflow({ configuration });
+  assert.doesNotMatch(source, /create-pull-request-review-comment/);
+  assert.match(source, /allowed-events: \[COMMENT, REQUEST_CHANGES\]/);
 });
 
 test("accepts only managed local native imports", () => {
