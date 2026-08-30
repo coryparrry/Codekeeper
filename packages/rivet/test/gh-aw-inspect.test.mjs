@@ -28,15 +28,17 @@ test("inspects the pinned Rivet review fixture authority", async () => {
   assert.equal(authority.metadata.compiler_version, "v0.86.2");
   assert.equal(authority.metadata.strict, true);
   assert.equal(authority.manifest.has_pull_request_target, true);
+  assert.equal(authority.inlinedImports, true);
+  assert.deepEqual(authority.resolvedImports, [
+    ".github/rivet/aw/review-extension.md",
+  ]);
   assert.deepEqual(authority.unpinnedActions, []);
   assert.deepEqual(authority.additionalRepositories, []);
   assert.ok(authority.actionRepositories.includes("github/gh-aw-actions"));
   assert.ok(authority.secrets.includes("CODEX_API_KEY"));
   assert.ok(authority.variables.includes("GH_AW_DEFAULT_MAX_TURNS"));
   assert.ok(authority.safeOutputJobs.includes("safe_outputs"));
-  assert.ok(
-    authority.runtimeImports.includes(".github/workflows/rivet-review.md"),
-  );
+  assert.deepEqual(authority.runtimeImports, []);
   assert.ok(
     authority.writeCapableJobs.some(({ job }) => job === "safe_outputs"),
   );

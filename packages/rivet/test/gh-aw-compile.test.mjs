@@ -51,6 +51,8 @@ test("compiles one workflow through strict action mode", async () => {
         "--no-check-update",
         "--action-mode",
         "action",
+        "--action-tag",
+        "6aab9e5b5c91c615506061f09bedd81a23babe3c",
         "--approve",
       ],
       {
