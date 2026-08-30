@@ -94,9 +94,9 @@ refuses adopter-owned file collisions and rechecks managed destinations before
 writing.
 
 For the complete authority and installer contracts, see the
-[GitHub App guide](https://github.com/coryparrry/Codekeeper/blob/main/docs/RIVET_GITHUB_APP_AUTHORITY.md)
+[GitHub App guide](https://github.com/coryparrry/Rivet/blob/main/docs/RIVET_GITHUB_APP_AUTHORITY.md)
 and
-[installer guide](https://github.com/coryparrry/Codekeeper/blob/main/docs/RIVET_REVIEW_ONLY_INSTALLER.md).
+[installer guide](https://github.com/coryparrry/Rivet/blob/main/docs/RIVET_REVIEW_ONLY_INSTALLER.md).
 
 ## License
 

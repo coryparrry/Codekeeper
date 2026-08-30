@@ -16,12 +16,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/coryparrry/Codekeeper.git"
+    "url": "git+https://github.com/coryparrry/Rivet.git"
   },
   "bugs": {
-    "url": "https://github.com/coryparrry/Codekeeper/issues"
+    "url": "https://github.com/coryparrry/Rivet/issues"
   },
-  "homepage": "https://github.com/coryparrry/Codekeeper#readme",
+  "homepage": "https://github.com/coryparrry/Rivet#readme",
   "type": "module",
   "bin": {
     "rivet": "bin/rivet.mjs"

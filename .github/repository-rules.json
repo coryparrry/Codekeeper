@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "repository": "coryparrry/Codekeeper",
+  "repository": "coryparrry/Rivet",
   "activation": {
     "automatic": false,
     "reason": "Repository rules are reviewed as code and applied only by an administrator with an explicit command."
