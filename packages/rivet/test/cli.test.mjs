@@ -62,13 +62,7 @@ test("creates an explicit setup pull request", async () => {
 test("prints a review-only GitHub App plan", async () => {
   const stdout = output();
   const result = await runCli(
-    [
-      "app-plan",
-      "--repository",
-      "Acme/Widget",
-      "--owner-type",
-      "Organization",
-    ],
+    ["app-plan", "--repository", "Acme/Widget", "--owner-type", "Organization"],
     { stdout: stdout.stream },
   );
   assert.equal(result.repository, "Acme/Widget");
@@ -120,6 +114,36 @@ for (const [command, dependency] of [
   });
 }
 
+test("verifies an explicit repair App authority target", async () => {
+  let received;
+  const expected = { permissions: { contents: "write" } };
+  const result = await runCli(
+    [
+      "app-verify",
+      "--repository",
+      "Acme/Widget",
+      "--client-id",
+      "Iv123456789012345678",
+      "--private-key-file",
+      "/keys/rivet.pem",
+      "--repair",
+    ],
+    {
+      stdout: output().stream,
+      verifyRepairAppImpl: async (options) => {
+        received = options;
+        return expected;
+      },
+    },
+  );
+  assert.deepEqual(received, {
+    repository: "Acme/Widget",
+    clientId: "Iv123456789012345678",
+    privateKeyPath: "/keys/rivet.pem",
+  });
+  assert.equal(result, expected);
+});
+
 test("rejects implicit modes and unknown arguments", async () => {
   await assert.rejects(runCli(["init"]), /--review-only is required/);
   await assert.rejects(
@@ -139,5 +163,18 @@ test("rejects implicit modes and unknown arguments", async () => {
   await assert.rejects(
     runCli(["app-configure", "--repository", "Acme/Widget"]),
     /--client-id is required/,
+  );
+  await assert.rejects(
+    runCli([
+      "app-configure",
+      "--repository",
+      "Acme/Widget",
+      "--client-id",
+      "Iv123456789012345678",
+      "--private-key-file",
+      "/keys/rivet.pem",
+      "--repair",
+    ]),
+    /unknown argument --repair/,
   );
 });

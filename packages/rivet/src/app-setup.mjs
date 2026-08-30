@@ -3,6 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { open } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import {
+  repairAppAuthority,
   reviewAppAuthority,
   RIVET_APP_CLIENT_ID_VARIABLE,
   RIVET_APP_PRIVATE_KEY_SECRET,
@@ -47,7 +48,9 @@ export async function readPrivateKeyFile(privateKeyPath) {
         (fsConstants.O_NONBLOCK ?? 0),
     );
   } catch {
-    throw new Error("Rivet App setup: private-key file could not be read safely");
+    throw new Error(
+      "Rivet App setup: private-key file could not be read safely",
+    );
   }
   let privateKey;
   try {
@@ -129,14 +132,18 @@ async function runGh(args, { input } = {}) {
       bytes += chunk.length;
       if (bytes > MAX_COMMAND_OUTPUT_BYTES) {
         child.kill();
-        reject(new Error("Rivet App setup: GitHub CLI output exceeded the limit"));
+        reject(
+          new Error("Rivet App setup: GitHub CLI output exceeded the limit"),
+        );
         return;
       }
       destination.push(chunk);
     };
     child.stdout.on("data", collect(stdout));
     child.stderr.on("data", collect(stderr));
-    child.on("error", () => reject(new Error("Rivet App setup: GitHub CLI failed")));
+    child.on("error", () =>
+      reject(new Error("Rivet App setup: GitHub CLI failed")),
+    );
     child.on("close", (status) => {
       if (status !== 0) {
         reject(new Error("Rivet App setup: GitHub CLI failed"));
@@ -157,7 +164,9 @@ async function appIdentity({ clientId, privateKey, fetchImpl, now }) {
     typeof app?.slug !== "string" ||
     !app.slug
   ) {
-    throw new Error("Rivet App setup: GitHub returned an unexpected App identity");
+    throw new Error(
+      "Rivet App setup: GitHub returned an unexpected App identity",
+    );
   }
   return { app, jwt };
 }
@@ -203,14 +212,10 @@ export async function configureReviewApp({
   }
 }
 
-export async function verifyReviewApp({
-  repository,
-  clientId,
-  privateKeyPath,
-  run = runGh,
-  fetchImpl = fetch,
-  now,
-}) {
+async function verifyApp(
+  { repository, clientId, privateKeyPath, run = runGh, fetchImpl = fetch, now },
+  { expected, plan },
+) {
   if (!validRepository(repository)) {
     throw new Error("Rivet App setup: invalid repository");
   }
@@ -235,7 +240,14 @@ export async function verifyReviewApp({
     privateKey.fill(0);
   }
   const variables = JSON.parse(
-    await run(["variable", "list", "--repo", repository, "--json", "name,value"]),
+    await run([
+      "variable",
+      "list",
+      "--repo",
+      repository,
+      "--json",
+      "name,value",
+    ]),
   );
   const secrets = JSON.parse(
     await run(["secret", "list", "--repo", repository, "--json", "name"]),
@@ -246,7 +258,6 @@ export async function verifyReviewApp({
   const hasPrivateKey = secrets.some(
     ({ name }) => name === RIVET_APP_PRIVATE_KEY_SECRET,
   );
-  const expected = reviewAppAuthority();
   const actualPermissions = {
     contents: installation?.permissions?.contents,
     metadata: installation?.permissions?.metadata,
@@ -264,13 +275,14 @@ export async function verifyReviewApp({
     installation?.app_slug !== app.slug ||
     installation?.repository_selection !== "selected" ||
     (installation?.events ?? []).length !== 0 ||
-    JSON.stringify(actualPermissions) !== JSON.stringify(expected.permissions) ||
+    JSON.stringify(actualPermissions) !==
+      JSON.stringify(expected.permissions) ||
     extraPermissions.length > 0 ||
     configuredClientId !== clientId ||
     !hasPrivateKey
   ) {
     throw new Error(
-      "Rivet App setup: effective installation authority does not match the review plan",
+      `Rivet App setup: effective installation authority does not match the ${plan} plan`,
     );
   }
   return Object.freeze({
@@ -280,5 +292,19 @@ export async function verifyReviewApp({
     repositorySelection: installation.repository_selection,
     permissions: expected.permissions,
     credentialsConfigured: true,
+  });
+}
+
+export function verifyReviewApp(options) {
+  return verifyApp(options, {
+    expected: reviewAppAuthority(),
+    plan: "review",
+  });
+}
+
+export function verifyRepairApp(options) {
+  return verifyApp(options, {
+    expected: repairAppAuthority(),
+    plan: "repair",
   });
 }

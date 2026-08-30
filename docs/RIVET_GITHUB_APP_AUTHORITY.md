@@ -51,11 +51,28 @@ rivet app-verify \
   --private-key-file /path/to/private-key.pem
 ```
 
+Owner-authorized repair requires one explicit authority widening. After GitHub
+shows and applies the Contents permission change from read to write, verify the
+exact repair scope before enabling the repair workflow:
+
+```bash
+rivet app-verify \
+  --repository OWNER/REPOSITORY \
+  --client-id CLIENT_ID \
+  --private-key-file /path/to/private-key.pem \
+  --repair
+```
+
+The repair verifier rejects selected-repository drift, events, extra
+permissions, missing credential metadata, and any Contents permission other
+than write. Passing this command verifies authority only; it does not install
+or enable repair.
+
 Verification fails unless all of these conditions hold:
 
 - the key authenticates as the App identified by the supplied client ID;
 - the installation targets selected repositories rather than all repositories;
-- effective permissions are exactly Contents read, Metadata read, and Pull requests write;
+- effective permissions are exactly the selected review or repair plan;
 - no webhook events or additional permissions are enabled;
 - the repository variable contains the supplied client ID; and
 - the repository secret exists under the Rivet name.

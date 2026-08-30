@@ -8,6 +8,7 @@ import {
   configureReviewApp,
   createAppJwt,
   readPrivateKeyFile,
+  verifyRepairApp,
   verifyReviewApp,
 } from "../src/app-setup.mjs";
 
@@ -125,7 +126,10 @@ test("configures Rivet credentials without putting the private key in arguments"
       return "";
     },
   });
-  assert.equal(result.installationUrl, "https://github.com/apps/rivet-review/installations/new");
+  assert.equal(
+    result.installationUrl,
+    "https://github.com/apps/rivet-review/installations/new",
+  );
   assert.deepEqual(calls[0].args, [
     "variable",
     "set",
@@ -144,7 +148,10 @@ test("configures Rivet credentials without putting the private key in arguments"
   ]);
   assert.equal(calls[1].inputLength, privateKeyBytes.length);
   assert.equal(calls[1].inputDigest, digest(privateKeyBytes));
-  assert.doesNotMatch(JSON.stringify(calls.map(({ args }) => args)), /PRIVATE KEY/);
+  assert.doesNotMatch(
+    JSON.stringify(calls.map(({ args }) => args)),
+    /PRIVATE KEY/,
+  );
 });
 
 test("does not expose a GitHub error response", async (t) => {
@@ -187,6 +194,36 @@ test("verifies exact selected-repository App authority and credential metadata",
       pullRequests: "write",
     },
     credentialsConfigured: true,
+  });
+});
+
+test("verifies exact repair App authority after an explicit widening", async (t) => {
+  const { privateKeyPath } = await keyFixture(t);
+  const result = await verifyRepairApp({
+    repository: REPOSITORY,
+    clientId: CLIENT_ID,
+    privateKeyPath,
+    fetchImpl: async (url) =>
+      url.endsWith("/app")
+        ? response(app())
+        : response(
+            installation({
+              permissions: {
+                contents: "write",
+                metadata: "read",
+                pull_requests: "write",
+              },
+            }),
+          ),
+    run: async (args) =>
+      args[0] === "variable"
+        ? JSON.stringify([{ name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID }])
+        : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
+  });
+  assert.deepEqual(result.permissions, {
+    contents: "write",
+    metadata: "read",
+    pullRequests: "write",
   });
 });
 
