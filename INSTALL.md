@@ -11,58 +11,16 @@ You need Node.js 22+, Git, an authenticated current GitHub CLI, and permission
 to administer the repository. The installer refuses unsafe repository state. It
 creates a setup pull request and never merges it.
 
-This page is the source-checkout path: pack an exact local tarball from this
-repository when you are evaluating a commit, recovering an install, or cannot
-use the registry package. Treat the tarball and its SHA-512 receipt as one
-pair. Do not substitute an integrity value from another build or registry
-response.
+The former source-checkout tarball path is retired while Rivet's package release
+boundary is established. Follow [Rivet migration authority](docs/RIVET_GH_AW_MIGRATION.md)
+for current delivery and qualification gates.
 
-## 1. Build an exact local package
-
-From a clean source checkout, make a tarball outside that checkout and retain
-the integrity returned by the same pack operation:
-
-```bash
-PACKAGE_DESTINATION=/absolute/path/outside/source-checkout/codekeeper-dist
-mkdir -p "$PACKAGE_DESTINATION"
-npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
-PACK_REPORT="$(npm run --silent package:pack -- --destination "$PACKAGE_DESTINATION")"
-PACKAGE_FILE="$(node -e '
-const report = JSON.parse(process.argv[1]);
-const reports = Array.isArray(report)
-  ? report
-  : report && typeof report === "object"
-    ? Object.hasOwn(report, "filename") || Object.hasOwn(report, "integrity") ? [report] : Object.values(report)
-    : [];
-if (reports.length !== 1) throw new Error("npm pack must return exactly one report");
-const [entry] = reports;
-if (!entry || typeof entry !== "object" || typeof entry.filename !== "string" || typeof entry.integrity !== "string" || !entry.integrity.startsWith("sha512-")) throw new Error("npm pack returned an invalid report");
-process.stdout.write(entry.filename);
-' "$PACK_REPORT")"
-PACKAGE_INTEGRITY="$(node -e '
-const report = JSON.parse(process.argv[1]);
-const reports = Array.isArray(report)
-  ? report
-  : report && typeof report === "object"
-    ? Object.hasOwn(report, "filename") || Object.hasOwn(report, "integrity") ? [report] : Object.values(report)
-    : [];
-if (reports.length !== 1) throw new Error("npm pack must return exactly one report");
-const [entry] = reports;
-if (!entry || typeof entry !== "object" || typeof entry.filename !== "string" || typeof entry.integrity !== "string" || !entry.integrity.startsWith("sha512-")) throw new Error("npm pack returned an invalid report");
-process.stdout.write(entry.integrity);
-' "$PACK_REPORT")"
-```
-
-The pack command enforces the repository's pinned npm version and release
-snapshot checks.
-
-## 2. Run the guided installer
+## 1. Run the guided installer
 
 From a clean, current checkout of the target repository's default branch:
 
 ```bash
-npm exec --package "$PACKAGE_DESTINATION/$PACKAGE_FILE" -- \
-  codekeeper init --current-package --package-integrity "$PACKAGE_INTEGRITY"
+npx @coryparry/codekeeper@0.2.0 init
 ```
 
 `doctor` runs before configuration and reports repository readiness together:
@@ -94,7 +52,7 @@ thread. `/codekeeper defer` is an explicit owner-authorized deferral of one
 review thread; ordinary prose, extra text, and unconfigured users never grant
 that authority.
 
-## 3. Review before merge
+## 2. Review before merge
 
 Review the generated policy and callers as you would any privileged automation.
 In particular, confirm:
@@ -115,14 +73,13 @@ otherwise read-only; metadata remains read-only. These are still real
 permissions, so review the exact final authority summary before creating the
 App.
 
-## 4. Verify after merge
+## 3. Verify after merge
 
-After the setup PR merges, run the same local package command from a clean,
+After the setup PR merges, run the published package command from a clean,
 current checkout:
 
 ```bash
-npm exec --package "$PACKAGE_DESTINATION/$PACKAGE_FILE" -- \
-  codekeeper verify
+npx @coryparry/codekeeper@0.2.0 verify
 ```
 
 `verify` checks the installed catalog, required GitHub setting names, App
@@ -131,26 +88,12 @@ and the credential-free policy check. A controlled maintenance dry run is
 optional; it cannot prove App publication because dry runs do not mint the App
 token.
 
-A local tarball proves this checkout. The installed runtime still acquires the
-pinned npm package by version and SHA-512. If that package is not the one you
-packed, treat package acquisition as unproven until the receipts match.
-
 After a successful install, open a small same-repository pull request against
 the default branch and confirm the App-authored summary, labels, and gate
 result before requiring the review gate in branch protection. Keep normal
 build, test, approval, and deployment checks independently required.
 
-## Manual installation and recovery
-
-The local tarball installer is the supported source-evaluation path. Manual
-copying of workflows is useful only for audit or recovery and has more
-provenance and update risk. If it is unavoidable, copy the policy, selected
-caller templates, matching reusable workflows, and package-acquisition action
-together; pin every caller to the exact local package version and SHA-512
-receipt. Never copy a source commit, an unverified tarball, or a package
-integrity from a different build into an adopter repository.
-
-## Supported limits
+## 4. Supported limits
 
 - GitHub Enterprise Server is unsupported.
 - Same-repository, non-draft PRs are supported for review. Non-default stacked

@@ -40,10 +40,9 @@ Then:
 6. If another process advances `HEAD` or changes an affected file, stop and
    rebind the review to the new state.
 
-A release build requires a clean checkout. The pull-request candidate mode
-(`scripts/pack-codekeeper-package.mjs --candidate`) is for unpublished CI
-readiness only; it must never be used as evidence that a publishable release
-was built from a clean immutable commit.
+A source release requires a clean checkout. The legacy Codekeeper package-stage
+and candidate-pack paths are retired while Rivet's release boundary is
+established; use the Rivet migration documentation for current qualification.
 
 ## 2. The coupled release graph
 
@@ -51,13 +50,10 @@ The same product crosses several independently fallible boundaries:
 
 ```text
 runtime source and policies
-        |  tooling manifest, generated distribution, mirrored helper
+        |  tooling manifest and Rivet workflow/compiler inputs
         v
 installer assets and generated workflow callers
-        |  package stage and release/manifest.json
-        v
-npm tarball + SHA-512 receipt
-        |  locked runtime install, YAML parse
+        |  locked runtime install and YAML parse
         v
 installed adopter workflows and runtime
         |  App authorization, publication, evidence, GitHub state
@@ -84,12 +80,11 @@ named in its “also verify” column.
 | `tools/codekeeper/src/**`, agents, presets, schemas, provider code | Runtime behavior, provider routing, output schemas, retries, timeouts, cancellation, workspace isolation, or mutation authority changes without a matching packaged/runtime contract | `cd tools/codekeeper && npm run check`; run the focused runtime, provider, schema, isolation, and audit tests | tooling manifest, generated package distribution, policy-validator copy, embedded runtime, workflow execution |
 | `.github/codekeeper.json` and policy validators | Closed-schema rejection, invalid provider/model settings, capability accidentally enabled, owner/label drift, or a trusted policy read from the wrong ref | `node tools/codekeeper/src/cli.mjs check-config --config .github/codekeeper.json`; focused policy/config tests | default-branch policy checkout, profile provenance, workflow authorization, App permissions |
 | `packages/codekeeper/src/**` and installer CLI/TUI | Installer plans the wrong files, overwrites adopter-owned content, changes settings authority, breaks `doctor`, `verify`, update, or clean-room setup | `cd packages/codekeeper && npm run check`; focused installer, preflight, TUI, package-acquisition, and repository-artifact tests | stage, tarball, exact-version install, clean adopter repository |
-| `packages/codekeeper/assets/**` or generated `metadata.json` | Packaged agent profiles, policies, workflow templates, digests, source paths, or release metadata diverge from canonical source | package asset/plan/contract tests; `npm run package:stage` | package stage, release verifier, YAML parse, rendered adopter files |
+| `packages/codekeeper/assets/**` or generated `metadata.json` | Packaged agent profiles, policies, workflow templates, digests, source paths, or release metadata diverge from canonical source | package asset/plan/contract tests; `cd packages/codekeeper && npm run check` | YAML parse, rendered adopter files |
 | `tools/codekeeper/tooling-manifest.json` or runtime payload | Generated inventory is stale, incomplete, or records a different source payload | `cd tools/codekeeper && node scripts/generate-tooling-manifest.mjs --check`; runtime check | package runtime contents and release provenance |
 | `.github/workflows/**`, action files, or `examples/workflows/**` | Trigger, input, secret, permission, job dependency, checkout ref, action pin, runner, or caller/reusable-workflow contract breaks | root `npm run check`; actionlint; Ruby/Psych YAML parsing; workflow contract tests | packaged workflow assets, rendered adopter workflows, protected live checks |
 | Review or `pull_request_target` caller | Untrusted pull-request code is checked out or executed on a privileged runner, or required review authority is bypassed | workflow contract tests plus static inspection of checkout refs and job permissions | a controlled same-repository adopter PR |
 | Runtime workflow consumer | One isolated job fails to acquire/reverify the exact package, install the locked runtime, or transfer a frozen artifact | workflow package-contract tests | workflow run evidence and exact package receipt |
-| `scripts/build-*`, `pack-*`, or package release verifier | Source, stage, tarball, manifest, receipt, or installed runtime describes different bytes | `npm run package:stage`; pack and inspect an exact candidate | protected release workflow and registry receipt |
 | `package.json`, package lockfiles, runtime lockfile, Node/npm versions | Lifecycle scripts, bundled Ink/React dependencies, nested runtime, or supported Node line changes without reproducible installs | clean `npm ci --ignore-scripts --no-audit --no-fund` on Node 22 and 24; package checks | exact npm 12.0.2 pack and install canary |
 | Generated package source commit or source repository identity | Installer records a stale, unreachable, future, self-referential, or wrong-owner commit | package contract and distribution tests; verify full SHA and default-branch ancestry for release packs | inspect the exact build commit contents, not ancestry alone |
 | `MANIFEST.sha256` (compatibility-only), release docs, or tracked files | Source archive no longer represents the reviewed tracked tree | `bash scripts/release-source.sh --verify` from a clean final commit | archive receipt and release tag |
@@ -168,37 +163,24 @@ Run only after source changes are complete:
 
 ```bash
 node tools/codekeeper/scripts/generate-tooling-manifest.mjs --check
-npm run package:stage
 ```
 
 If a runtime payload changed, generate the tooling manifest before committing
-the source change. If a mirrored helper changed, regenerate the published copy
-from its canonical source. Never hand-edit generated hashes, workflow copies, or
-package source commits. `node scripts/generate-codekeeper-distribution.mjs`
-writes those into a package stage; do not commit them.
+the source change. Never hand-edit generated hashes, workflow copies, or package
+source commits.
 
-A release pack binds `assets/metadata.json` to clean `HEAD`. A candidate pack
-binds it to the explicitly supplied candidate commit. The root `MANIFEST.sha256`
-inventory is compatibility-only for remaining source-pinned installations; do
-not extend it.
+The root `MANIFEST.sha256` inventory is compatibility-only for remaining
+source-pinned installations; do not extend it.
 
-Confirm the recorded package commit contains the intended runtime and embedded
-workflow contents. An ancestor can still be the wrong release checkpoint.
+Confirm the exact source checkpoint contains the intended runtime and workflow
+contents. An ancestor can still be the wrong release checkpoint.
 
-### Gate E — exact package boundary
+### Gate E — Rivet delivery boundary
 
-Use npm 12.0.2, an output directory outside the source checkout, and a clean
-working tree for release packaging:
-
-```bash
-npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
-mkdir -p ../codekeeper-release-artifacts
-npm run package:pack -- --destination ../codekeeper-release-artifacts
-```
-
-The legacy Codekeeper pre-publication verification tool and protected release
-workflow are retired. Package staging is not publication evidence; current
-release qualification is defined by the Rivet migration documentation.
+The legacy Codekeeper package staging and candidate-pack tooling are retired.
+No local npm tarball or pre-publication package receipt is produced by this
+repository. Use the Rivet migration documentation for current delivery and
+release qualification.
 
 ### Gate F — workflow and trust-boundary proof
 
@@ -280,8 +262,8 @@ Stop and report an evidence gap or blocker when:
 
 - `HEAD` changes after validation begins;
 - the working tree is dirty during a release build;
-- a generated manifest, mirrored helper, source pin, lockfile, embedded asset,
-  package stage, or root manifest is stale;
+- a generated manifest, source pin, lockfile, embedded asset, or root manifest
+  is stale;
 - a package receipt has an unexpected JSON shape or mismatched integrity;
 - a registry lookup fails for a reason other than confirmed propagation delay;
 - a workflow parses but its caller, inputs, permissions, or `needs` graph do not

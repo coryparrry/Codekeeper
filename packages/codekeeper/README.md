@@ -91,8 +91,9 @@ npx @coryparry/codekeeper@0.2.0 verify [--json] [--controlled]
 moves to a newer verified release. `rollback --to` asks that older release to
 open a normal update pull request; it never force-pushes.
 
-To pack this source checkout into a local tarball instead of using npm, see
-[INSTALL.md](https://github.com/coryparrry/Codekeeper/blob/main/INSTALL.md).
+The former source-checkout tarball path is retired while Rivet's package release
+boundary is established. See the [Rivet migration authority](https://github.com/coryparrry/Codekeeper/blob/main/docs/RIVET_GH_AW_MIGRATION.md)
+for current delivery gates.
 
 ## Supported surface
 

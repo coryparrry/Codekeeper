@@ -16,7 +16,9 @@ cd ../../packages/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && 
 cd ../../acceptance && npm run check
 ```
 
-The root `packageManager` and self-test workflow pin the same npm release. Package publication must use `npm run package:pack -- --destination /absolute/output/directory`; that command builds the verified stage, installs the exact installer lock, bundles the complete Ink/React graph required by npm 12, and rejects a mismatched npm executable before creating the tarball.
+The root `packageManager` and self-test workflow pin the same npm release. The
+legacy Codekeeper package staging and publication path is retired; current Rivet
+delivery qualification is defined in [Rivet migration authority](docs/RIVET_GH_AW_MIGRATION.md).
 
 The maintainer `npm run check` also verifies the complete source-release inventory and fails unless [`MANIFEST.sha256`](MANIFEST.sha256) exactly covers every tracked file except itself. The runtime check regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. Reusable workflows acquire and reverify the exact package by version, SRI, manifest digest, and source commit; they deliberately do not embed a second tooling-manifest digest. The installer suite covers the strict repository-artifact catalog, copied Markdown rendering and digest checks, generated assets, fixed agent-profile paths, preflight failures, secret boundaries, Git recovery, the terminal flow, and the packed entrypoint. The catalog tests must prove additions, prior-target renames, release-owned retirements, duplicate rejection, destination confinement, and optional activation without adding another reconciliation path. The acceptance suite remains offline and uses only its deterministic fixture.
 
