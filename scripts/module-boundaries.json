@@ -22,10 +22,6 @@
     "tools/codekeeper/test/integration.test.mjs": {
       "maxLines": 1558,
       "maxBytes": 67318
-    },
-    "tools/codekeeper/test/publish.test.mjs": {
-      "maxLines": 1740,
-      "maxBytes": 73858
     }
   }
 }
