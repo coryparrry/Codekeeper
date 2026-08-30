@@ -18,9 +18,12 @@ const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const releaseCheckPath = fileURLToPath(
   new URL("../scripts/release-check.mjs", import.meta.url),
 );
-const workflowUrl = new URL("../../../.github/workflows/rivet-release.yml", import.meta.url);
+const workflowUrl = new URL(
+  "../../../.github/workflows/rivet-release.yml",
+  import.meta.url,
+);
 
-test("binds public Rivet metadata to its first release tag", async () => {
+test("binds public Rivet metadata to its exact release tag", async () => {
   const pkg = await readPackage();
   const tag = tagForVersion(pkg.version);
 
@@ -56,17 +59,13 @@ test("packs the executable and production payload without package tests", async 
   const outputDirectory = await mkdtemp(join(tmpdir(), "rivet-pack-"));
   try {
     const pkg = await readPackage();
-    await execFileAsync(
-      "npm",
-      ["pack", packageRoot, "--ignore-scripts"],
-      {
-        cwd: outputDirectory,
-        env: {
-          ...process.env,
-          NPM_CONFIG_CACHE: join(outputDirectory, "npm-cache"),
-        },
+    await execFileAsync("npm", ["pack", packageRoot, "--ignore-scripts"], {
+      cwd: outputDirectory,
+      env: {
+        ...process.env,
+        NPM_CONFIG_CACHE: join(outputDirectory, "npm-cache"),
       },
-    );
+    });
     const archives = (await readdir(outputDirectory)).filter((entry) =>
       entry.endsWith(".tgz"),
     );
@@ -84,6 +83,7 @@ test("packs the executable and production payload without package tests", async 
     );
 
     assert(paths.has("bin/rivet.mjs"));
+    assert(paths.has("README.md"));
     assert([...paths].some((path) => path.startsWith("src/")));
     assert([...paths].some((path) => path.startsWith("assets/")));
     assert(![...paths].some((path) => path.startsWith("test/")));
@@ -93,9 +93,13 @@ test("packs the executable and production payload without package tests", async 
   }
 });
 
-test("uses a protected tag workflow with OIDC and a scoped bootstrap credential", async () => {
-  const workflow = parse(await readFile(workflowUrl, "utf8"));
+test("uses a protected tag workflow with OIDC trusted publishing", async () => {
+  const workflowSource = await readFile(workflowUrl, "utf8");
+  const workflow = parse(workflowSource);
   const publish = workflow.jobs.publish;
+  const publishStep = publish.steps.find(
+    (step) => step.name === "Publish to npm",
+  );
 
   assert.deepEqual(workflow.on.push.tags, ["rivet-v*"]);
   assert.equal(publish["runs-on"], "ubuntu-latest");
@@ -104,12 +108,11 @@ test("uses a protected tag workflow with OIDC and a scoped bootstrap credential"
     "id-token": "write",
   });
   assert.equal(publish.environment, "npm");
-  assert(
-    publish.steps.some(
-      (step) =>
-        step.name === "Publish to npm" &&
-        step.run === "npm publish --provenance --access public --ignore-scripts" &&
-        step.env?.NODE_AUTH_TOKEN === "${{ secrets.NPM_PUBLISH_TOKEN }}",
-    ),
+  assert.equal(
+    publishStep?.run,
+    "npm publish --provenance --access public --ignore-scripts",
   );
+  assert.equal(publishStep?.env, undefined);
+  assert(!workflowSource.includes("NODE_AUTH_TOKEN"));
+  assert(!workflowSource.includes("NPM_PUBLISH_TOKEN"));
 });
