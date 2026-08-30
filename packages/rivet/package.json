@@ -9,7 +9,7 @@
   },
   "scripts": {
     "check": "npm run syntax && npm test",
-    "syntax": "node --check src/gh-aw/binary.mjs && node --check src/gh-aw/compile.mjs && node --check src/gh-aw/inspect.mjs && node --check src/gh-aw/trust.mjs && node --check src/gh-aw/versions.mjs && node --check src/workflows/review.mjs",
+    "syntax": "node --check src/gh-aw/binary.mjs && node --check src/gh-aw/compile.mjs && node --check src/gh-aw/inspect.mjs && node --check src/gh-aw/trust.mjs && node --check src/gh-aw/versions.mjs && node --check src/runtime-mirror.mjs && node --check src/workflows/review.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
