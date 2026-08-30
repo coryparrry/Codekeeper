@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,15 +53,35 @@ test("checks the release tag from the command-line entrypoint", async () => {
 });
 
 test("packs the executable and production payload without package tests", async () => {
-  const cache = await mkdtemp(join(tmpdir(), "rivet-pack-cache-"));
+  const outputDirectory = await mkdtemp(join(tmpdir(), "rivet-pack-"));
   try {
-    const { stdout } = await execFileAsync(
+    const pkg = await readPackage();
+    await execFileAsync(
       "npm",
-      ["pack", "--dry-run", "--json", "--ignore-scripts"],
-      { cwd: packageRoot, env: { ...process.env, NPM_CONFIG_CACHE: cache } },
+      ["pack", packageRoot, "--ignore-scripts"],
+      {
+        cwd: outputDirectory,
+        env: {
+          ...process.env,
+          NPM_CONFIG_CACHE: join(outputDirectory, "npm-cache"),
+        },
+      },
     );
-    const [pack] = JSON.parse(stdout);
-    const paths = new Set(pack.files.map(({ path }) => path));
+    const archives = (await readdir(outputDirectory)).filter((entry) =>
+      entry.endsWith(".tgz"),
+    );
+    assert.deepEqual(archives, [`coryparry-rivet-${pkg.version}.tgz`]);
+    const { stdout } = await execFileAsync(
+      "tar",
+      ["-tzf", join(outputDirectory, archives[0])],
+      { cwd: outputDirectory },
+    );
+    const paths = new Set(
+      stdout
+        .trim()
+        .split("\n")
+        .map((entry) => entry.replace(/^package\//, "")),
+    );
 
     assert(paths.has("bin/rivet.mjs"));
     assert([...paths].some((path) => path.startsWith("src/")));
@@ -69,7 +89,7 @@ test("packs the executable and production payload without package tests", async 
     assert(![...paths].some((path) => path.startsWith("test/")));
     assert(!paths.has("package-lock.json"));
   } finally {
-    await rm(cache, { force: true, recursive: true });
+    await rm(outputDirectory, { force: true, recursive: true });
   }
 });
 
