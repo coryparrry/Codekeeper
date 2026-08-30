@@ -22,14 +22,6 @@ export const COMPATIBILITY_FACADES = Object.freeze([
     domain: "tools/codekeeper/src/lib/publish",
   }),
   Object.freeze({
-    facade: "packages/codekeeper/src/preflight.mjs",
-    domain: "packages/codekeeper/src/preflight",
-  }),
-  Object.freeze({
-    facade: "packages/codekeeper/src/plan.mjs",
-    domain: "packages/codekeeper/src/plan",
-  }),
-  Object.freeze({
     facade: "tools/codekeeper/src/cli.mjs",
     domain: "tools/codekeeper/src/cli-heavy.mjs",
   }),

@@ -71,42 +71,6 @@ plus the existing repair-lease and trust helpers re-exported from
 | `publish/repair-pr.mjs` | Commit/push phases, remote branch re-read, PR create/update, thread resolution |
 | `publish/index.mjs` | Public re-exports consumed by the facade |
 
-### `packages/codekeeper/src/preflight.mjs`
-
-Public names: `assertNodeVersion`, `assertNoInstallationFiles`,
-`assertNoSetupBranch`, `discoverRepositoryValidationCommand`,
-`doctorRepository`, `inspectInstallationFiles`, `inspectRepository`,
-`parseGitHubRemote`, `parseReleaseManifest`, `parseRemoteBranchSha`.
-
-| Module | Owns |
-|---|---|
-| `preflight/environment.mjs` | Node version, Git and GitHub CLI availability, trusted commands, platform support |
-| `preflight/repository.mjs` | Repository root, Git operation checks, origin parsing, default branch, clean status, identity |
-| `preflight/github.mjs` | Repository metadata, owner type, admin access, archived/disabled state, Actions, viewer |
-| `preflight/managed-files.mjs` | Release-manifest parsing, managed-artifact verification, installed-workflow recognition |
-| `preflight/installation.mjs` | Installed policy, caller workflows, legacy discovery, validation-command discovery |
-| `preflight/collisions.mjs` | Path, workflow, setup-branch/ref, and existing setup-PR collisions |
-| `preflight/doctor.mjs` | Aggregate check execution, status counts, visible report ordering, remediation text |
-| `preflight/index.mjs` | `inspectRepository` composition and public re-exports |
-
-### `packages/codekeeper/src/plan.mjs`
-
-Public names: `buildInstallPlan`, `buildUpdateAnswers`, planning
-normalisation, model and capability helpers, prompt collectors, and setup
-pull-request rendering re-exported from `plan/index.mjs`.
-
-| Module | Owns |
-|---|---|
-| `plan/normalization.mjs` | Modes, owner logins, display name, client ID, common input validation |
-| `plan/models.mjs` | Model choices, custom model validation, assignments, provider secrets, summary |
-| `plan/capabilities.mjs` | Applicable capabilities, normalisation, automation-bot requirement, summary |
-| `plan/policy.mjs` | Baseline/effective policy, validation command, code-changing requirements |
-| `plan/files.mjs` | Rendered install files, changed-file comparison, deletions, SHA calculations |
-| `plan/prompts.mjs` | Setup, App, private-key, and custom-model question collection |
-| `plan/pull-request.mjs` | Document map, workflow map, setup PR Markdown, completion guidance |
-| `plan/update.mjs` | Existing-installation editable settings and release-update decisions |
-| `plan/index.mjs` | `buildInstallPlan` composition and public re-exports |
-
 ### Agent runtime boundary
 
 `tools/codekeeper/src/lib/agents-runtime.mjs` is now a compatibility facade.
@@ -128,8 +92,6 @@ Measured on the pre-split tree versus the current facades.
 | `tools/codekeeper/src/lib/agents-runtime.mjs` | 1,143 / 49,648 | 119 / 6,118 |
 | `tools/codekeeper/src/lib/agents-runtime-provider.mjs` | — | 746 / 32,617 |
 | `tools/codekeeper/src/lib/agents-runtime-core.mjs` | — | 426 / 18,258 |
-| `packages/codekeeper/src/preflight.mjs` | 1,472 / 63,835 | 12 / 290 |
-| `packages/codekeeper/src/plan.mjs` | 1,229 / 54,594 | 23 / 507 |
 
 Replacement domain modules stay under the normal 800-line and 40,000-byte
 limits. No empty domain directories or transitional `*-core` modules remain.
@@ -140,8 +102,6 @@ These ceilings were measured on this tree. They are not targets to grow into.
 
 | File | Lines | Bytes |
 |---|---:|---:|
-| `packages/codekeeper/src/install.mjs` | 812 | 32,748 |
-| `packages/codekeeper/src/tui.mjs` | 948 | 36,271 |
 | `tools/codekeeper/src/lib/git.mjs` | 884 | 32,028 |
 | `tools/codekeeper/test/commands.test.mjs` | 1,163 | 35,565 |
 | `tools/codekeeper/test/integration.test.mjs` | 1,558 | 67,318 |
