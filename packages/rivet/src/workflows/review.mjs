@@ -25,8 +25,8 @@ function engineFrontmatter({ engine, model }) {
   return `engine: ${engine}\nmodel: ${model}\n`;
 }
 
-function appFrontmatter() {
-  return `github-app:\n  client-id: \${{ vars.${RIVET_APP_CLIENT_ID_VARIABLE} }}\n  private-key: \${{ secrets.${RIVET_APP_PRIVATE_KEY_SECRET} }}\n`;
+function safeOutputsAppFrontmatter() {
+  return `  github-app:\n    client-id: \${{ vars.${RIVET_APP_CLIENT_ID_VARIABLE} }}\n    private-key: \${{ secrets.${RIVET_APP_PRIVATE_KEY_SECRET} }}\n`;
 }
 
 function inlineFindingsFrontmatter({ inlineFindings, maximumFindings }) {
@@ -70,9 +70,15 @@ on:
 permissions:
   contents: read
   pull-requests: read
-checkout: false
-${engineFrontmatter(review)}${appFrontmatter()}inlined-imports: true
+checkout:
+  sparse-checkout: |
+    .github/rivet/actions/authority-receipt
+${engineFrontmatter(review)}inlined-imports: true
 ${nativeImportFrontmatter(nativeImport)}safe-outputs:
+${safeOutputsAppFrontmatter()}  report-failure-as-issue: false
+  report-failed-jobs: false
+  report-incomplete:
+    create-issue: false
 ${inlineFindingsFrontmatter(review)}  submit-pull-request-review:
     allowed-events: [${reviewEvents}]
 ---

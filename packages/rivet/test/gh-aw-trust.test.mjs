@@ -44,6 +44,12 @@ test("accepts the self-contained base-branch Rivet review authority", async () =
   assert.match(source, /Rivet review contract/);
   assert.match(source, /actively disprove each one/);
   assert.match(source, /"toolTimeout": 240/);
+  assert.ok(
+    source.indexOf("- name: Checkout repository") <
+      source.indexOf("name: Record Rivet authority receipt"),
+  );
+  assert.match(source, /permission-pull-requests: write/);
+  assert.doesNotMatch(source, /permission-(?:actions|issues):/);
 });
 
 test("rejects PR-head prompt loading and mutable action authority", async () => {
