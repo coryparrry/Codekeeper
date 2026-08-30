@@ -12,8 +12,15 @@ function validationCommands(commands) {
     .join("\n");
 }
 
+function encodedValidationCommands(commands) {
+  return Buffer.from(
+    JSON.stringify(normalizeValidationCommands(commands)),
+  ).toString("base64");
+}
+
 export function renderRivetRepairWorkflow({ validation = ["npm test"] } = {}) {
   const commands = validationCommands(validation);
+  const encodedCommands = encodedValidationCommands(validation);
   return `---
 name: Rivet pull request repair
 on:
@@ -31,19 +38,63 @@ engine: codex
 model: gpt-5.6-luna
 safe-outputs:
   max-patch-files: 25
-  github-app:
-    client-id: \${{ vars.${RIVET_APP_CLIENT_ID_VARIABLE} }}
-    private-key: \${{ secrets.${RIVET_APP_PRIVATE_KEY_SECRET} }}
   report-failure-as-issue: false
   report-failed-jobs: false
   report-incomplete:
     create-issue: false
-  push-to-pull-request-branch:
-    target: triggering
-    fallback-as-pull-request: false
-    check-branch-protection: false
-    protected-files: blocked
-    max-patch-size: 1024
+  jobs:
+    validate-repair:
+      description: Apply and validate one patch without write credentials
+      runs-on: ubuntu-latest
+      permissions:
+        contents: read
+        pull-requests: read
+      inputs:
+        patch:
+          description: Unified diff that modifies at most 25 existing, non-protected files
+          required: true
+          type: string
+      steps:
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+          with:
+            persist-credentials: false
+        - uses: ./.github/rivet/actions/validate-repair
+          env:
+            GITHUB_TOKEN: \${{ github.token }}
+            RIVET_VALIDATION_COMMANDS_BASE64: ${encodedCommands}
+        - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+          with:
+            name: rivet-repair-\${{ github.run_id }}
+            path: \${{ runner.temp }}/rivet-repair
+            if-no-files-found: error
+            retention-days: 1
+    publish-repair:
+      description: Publish the exact patch emitted by the isolated validation job
+      needs: validate-repair
+      if: needs.validate_repair.result == 'success'
+      runs-on: ubuntu-latest
+      permissions:
+        contents: read
+        pull-requests: read
+      inputs:
+        confirmation:
+          description: Confirm publication of the validated repair artifact
+          required: true
+          type: choice
+          options: [publish-validated-repair]
+      steps:
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+          with:
+            persist-credentials: false
+        - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+          with:
+            name: rivet-repair-\${{ github.run_id }}
+            path: \${{ runner.temp }}/rivet-repair
+        - uses: ./.github/rivet/actions/publish-repair
+          env:
+            RIVET_APP_CLIENT_ID: \${{ vars.${RIVET_APP_CLIENT_ID_VARIABLE} }}
+            RIVET_APP_PRIVATE_KEY: \${{ secrets.${RIVET_APP_PRIVATE_KEY_SECRET} }}
+            RIVET_REPAIR_ARTIFACT: \${{ runner.temp }}/rivet-repair
 ---
 
 # Rivet pull request repair
@@ -56,8 +107,8 @@ Run every validation command after editing:
 
 ${commands}
 
-If validation fails, call \`report_incomplete\` with the failed command and do not request a push. Immediately before publication, re-read the live pull request head. If it differs from the recorded SHA, call \`report_incomplete\` and do not request a push.
+Prepare one unified diff that modifies only existing, non-protected files. Do not create, delete, or rename files.
 
-Only after validation passes and the live head is unchanged, call \`push_to_pull_request_branch\` once. The automatic review workflow will review the resulting head.
+Call \`validate_repair\` exactly once with the patch, then call \`publish_repair\` exactly once with confirmation \`publish-validated-repair\`. Rivet validates without write credentials on an isolated runner. A second runner independently binds the App-authored review and owner authorization to the unchanged head, accepts only the immutable validated artifact, and publishes one App-authored commit. The automatic review workflow will review the resulting head.
 `;
 }
