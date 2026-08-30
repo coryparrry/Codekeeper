@@ -13,7 +13,7 @@ The review-only App requires:
 
 Pull-request write access is required for bounded inline findings and the final review. Repair, issue, maintenance, contents-write, and merge authority remain disabled.
 
-Rivet expects the repository variable `RIVET_APP_CLIENT_ID` and repository secret `RIVET_APP_PRIVATE_KEY`. The pinned gh-aw compiler uses those credentials to generate immutable `actions/create-github-app-token` steps for activation and safe outputs. Missing credentials fail token minting; Rivet does not fall back to a differently named legacy App credential.
+Rivet expects the repository variables `RIVET_APP_CLIENT_ID` and `RIVET_APP_BOT_LOGIN` plus the repository secret `RIVET_APP_PRIVATE_KEY`. The bot-login variable names the verified App slug and permits that App to trigger the review that follows a repair. The pinned gh-aw compiler uses the credentials to generate immutable `actions/create-github-app-token` steps for activation and safe outputs. Missing credentials fail token minting; Rivet does not fall back to differently named legacy App credentials.
 
 ## Registration plan
 
@@ -36,7 +36,7 @@ rivet app-configure \
   --private-key-file /path/to/private-key.pem
 ```
 
-Rivet authenticates the key against GitHub before changing repository metadata. It sets `RIVET_APP_CLIENT_ID` as a repository variable and sends the private key to `gh secret set` over standard input. The key is never placed in command arguments or output. The command returns the App installation URL; a repository administrator must use it to install the App on the selected repository.
+Rivet authenticates the key against GitHub before changing repository metadata. It sets `RIVET_APP_CLIENT_ID` and the verified App slug in `RIVET_APP_BOT_LOGIN`, then sends the private key to `gh secret set` over standard input. The key is never placed in command arguments or output. The command returns the App installation URL; a repository administrator must use it to install the App on the selected repository.
 
 Do not reuse legacy Codekeeper credential names. Rivet intentionally has no fallback to them.
 

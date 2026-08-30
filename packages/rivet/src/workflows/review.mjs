@@ -1,5 +1,6 @@
 import { DEFAULT_RIVET_CONFIG, reviewWorkflowProjection } from "../config.mjs";
 import {
+  RIVET_APP_BOT_LOGIN_VARIABLE,
   RIVET_APP_CLIENT_ID_VARIABLE,
   RIVET_APP_PRIVATE_KEY_SECRET,
 } from "../app-authority.mjs";
@@ -67,6 +68,7 @@ name: Rivet pull request review
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  bots: [\"\${{ vars.${RIVET_APP_BOT_LOGIN_VARIABLE} }}\"]
 permissions:
   contents: read
   pull-requests: read
