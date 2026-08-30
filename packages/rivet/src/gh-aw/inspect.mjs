@@ -130,6 +130,11 @@ export function inspectCompiledWorkflow(source) {
     secrets: references(source, "secrets"),
     variables: references(source, "vars"),
     actions,
+    localActions: [
+      ...new Set(
+        actions.filter((action) => action.local).map((action) => action.uses),
+      ),
+    ].sort(),
     actionRepositories: [
       ...new Set(actions.map((action) => action.repository).filter(Boolean)),
     ].sort(),

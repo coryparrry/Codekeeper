@@ -11,6 +11,7 @@ const PACKAGE_ROOT = path.resolve(
   "..",
 );
 const NATIVE_IMPORT = ".github/rivet/aw/review-extension.md";
+const LOCAL_ACTION = "./.github/rivet/actions/authority-receipt";
 
 async function compiledAuthority() {
   const source = await readFile(
@@ -33,6 +34,7 @@ test("accepts the self-contained base-branch Rivet review authority", async () =
   const trust = assessPullRequestTargetTrust({
     authority,
     expectedImports: [NATIVE_IMPORT],
+    expectedLocalActions: [LOCAL_ACTION],
   });
   assert.deepEqual(trust, {
     trusted: true,
@@ -58,6 +60,7 @@ test("rejects PR-head prompt loading and mutable action authority", async () => 
   const trust = assessPullRequestTargetTrust({
     authority: untrusted,
     expectedImports: [NATIVE_IMPORT],
+    expectedLocalActions: [LOCAL_ACTION],
   });
   assert.equal(trust.trusted, false);
   assert.deepEqual(trust.violations, [
@@ -75,9 +78,22 @@ test("rejects a native import inventory change without approval", async () => {
       NATIVE_IMPORT,
       ".github/rivet/aw/unreviewed-extension.md",
     ],
+    expectedLocalActions: [LOCAL_ACTION],
   });
   assert.equal(trust.trusted, false);
   assert.deepEqual(trust.violations, [
     "resolved native imports differ from the approved inventory",
+  ]);
+});
+
+test("rejects an unapproved local extension action", async () => {
+  const { authority } = await compiledAuthority();
+  const trust = assessPullRequestTargetTrust({
+    authority,
+    expectedImports: [NATIVE_IMPORT],
+  });
+  assert.equal(trust.trusted, false);
+  assert.deepEqual(trust.violations, [
+    "local actions differ from the approved inventory",
   ]);
 });

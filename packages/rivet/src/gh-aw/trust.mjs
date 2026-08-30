@@ -8,6 +8,7 @@ function sameValues(left, right) {
 export function assessPullRequestTargetTrust({
   authority,
   expectedImports = [],
+  expectedLocalActions = [],
 }) {
   const violations = [];
   if (!sameValues(authority.triggers, ["pull_request_target"])) {
@@ -32,6 +33,9 @@ export function assessPullRequestTargetTrust({
   }
   if (authority.unpinnedActions.length > 0) {
     violations.push("all actions must use immutable commit pins");
+  }
+  if (!sameValues(authority.localActions, expectedLocalActions)) {
+    violations.push("local actions differ from the approved inventory");
   }
   if (authority.additionalRepositories.length > 0) {
     violations.push("additional repository checkouts are not allowed");
