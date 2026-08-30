@@ -34,6 +34,10 @@ safe-outputs:
   github-app:
     client-id: \${{ vars.${RIVET_APP_CLIENT_ID_VARIABLE} }}
     private-key: \${{ secrets.${RIVET_APP_PRIVATE_KEY_SECRET} }}
+  report-failure-as-issue: false
+  report-failed-jobs: false
+  report-incomplete:
+    create-issue: false
   push-to-pull-request-branch:
     target: triggering
     fallback-as-pull-request: false
