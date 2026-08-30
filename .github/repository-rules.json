@@ -7,7 +7,7 @@
   },
   "rulesets": [
     {
-      "name": "Codekeeper protected main",
+      "name": "Rivet protected main",
       "target": "branch",
       "enforcement": "active",
       "bypass_actors": [
@@ -47,16 +47,13 @@
             "strict_required_status_checks_policy": true,
             "required_status_checks": [
               {
-                "context": "acceptance-harness-checks"
+                "context": "rivet-checks (22.23.2)"
               },
               {
-                "context": "installer-checks (22.23.2)"
+                "context": "rivet-checks (24.19.0)"
               },
               {
-                "context": "installer-checks (24.19.0)"
-              },
-              {
-                "context": "maintainer-checks"
+                "context": "actionlint"
               }
             ]
           }
@@ -64,13 +61,13 @@
       ]
     },
     {
-      "name": "Codekeeper immutable release tags",
+      "name": "Rivet immutable release tags",
       "target": "tag",
       "enforcement": "active",
       "bypass_actors": [],
       "conditions": {
         "ref_name": {
-          "include": ["refs/tags/codekeeper-v*"],
+          "include": ["refs/tags/rivet-v*"],
           "exclude": []
         }
       },
