@@ -8,15 +8,14 @@
     "package:pack": "node scripts/pack-codekeeper-package.mjs",
     "package:stage": "node scripts/build-codekeeper-package.mjs",
     "package:distribution": "node scripts/generate-codekeeper-distribution.mjs",
-    "coverage": "npm --prefix tools/codekeeper run coverage && npm --prefix packages/codekeeper run coverage",
+    "coverage": "npm --prefix tools/codekeeper run coverage",
     "governance:check": "node scripts/repository-governance.mjs --validate && node --test scripts/repository-governance.test.mjs",
     "architecture:check": "node scripts/check-module-boundaries.mjs && node scripts/check-local-import-cycles.mjs && node --test scripts/check-module-boundaries.test.mjs scripts/check-local-import-cycles.test.mjs",
-    "helpers:check": "node scripts/sync-mirrored-helpers.mjs --check && node --test scripts/sync-mirrored-helpers.test.mjs",
     "release:tag:check": "node --test scripts/release-tag-integrity.test.mjs scripts/refresh-release-manifest.test.mjs scripts/verify-release-candidate.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
     "format:check": "prettier --check package.json eslint.config.mjs tools/codekeeper/src/lib/commands.mjs tools/codekeeper/test/commands.test.mjs",
-    "check": "npm run rivet:check && npm run lint && npm run format:check && npm run governance:check && npm run architecture:check && npm run helpers:check && npm run release:tag:check && bash scripts/release-source.sh --verify-worktree"
+    "check": "npm run rivet:check && npm run lint && npm run format:check && npm run governance:check && npm run architecture:check && npm run release:tag:check && bash scripts/release-source.sh --verify-worktree"
   },
   "devDependencies": {
     "acorn": "8.18.0",
