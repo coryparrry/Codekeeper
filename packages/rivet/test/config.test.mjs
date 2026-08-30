@@ -62,7 +62,30 @@ test("fails closed when review-only installation gains mutation authority", () =
   config.repair.authority = "owner";
   assert.throws(
     () => reviewWorkflowProjection(config),
-    /cannot enable mutation modes/,
+    /cannot enable unsupported mutation modes/,
+  );
+
+  const ownerTriage = structuredClone(DEFAULT_RIVET_CONFIG);
+  ownerTriage.issues.triage = "owner";
+  assert.throws(
+    () => reviewWorkflowProjection(ownerTriage),
+    /cannot enable unsupported mutation modes/,
+  );
+});
+
+test("allows automatic issue triage but never implementation", () => {
+  const projection = reviewWorkflowProjection(DEFAULT_RIVET_CONFIG);
+  assert.equal(projection.issueTriage, true);
+
+  const disabled = structuredClone(DEFAULT_RIVET_CONFIG);
+  disabled.issues.triage = "disabled";
+  assert.equal(reviewWorkflowProjection(disabled).issueTriage, false);
+
+  const implementation = structuredClone(DEFAULT_RIVET_CONFIG);
+  implementation.issues.implementation = "owner";
+  assert.throws(
+    () => reviewWorkflowProjection(implementation),
+    /cannot enable unsupported mutation modes/,
   );
 });
 
@@ -72,7 +95,7 @@ test("summarizes product authority before workflow compilation", () => {
     "Review may publish up to 8 inline findings.",
     "Review may comment but cannot request changes.",
     "Repair is disabled.",
-    "Issue triage is disabled.",
+    "Issue triage is automatic.",
     "Issue implementation is disabled.",
     "Maintenance is disabled.",
     "Merge is impossible.",

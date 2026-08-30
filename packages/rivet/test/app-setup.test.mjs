@@ -11,6 +11,7 @@ import {
   verifyRepairApp,
   verifyReviewApp,
 } from "../src/app-setup.mjs";
+import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 
 const CLIENT_ID = "Iv123456789012345678";
 const REPOSITORY = "acme/example";
@@ -53,6 +54,7 @@ function installation(overrides = {}) {
     events: [],
     permissions: {
       contents: "read",
+      issues: "write",
       metadata: "read",
       pull_requests: "write",
     },
@@ -203,11 +205,72 @@ test("verifies exact selected-repository App authority and credential metadata",
     repositorySelection: "selected",
     permissions: {
       contents: "read",
+      issues: "write",
       metadata: "read",
       pullRequests: "write",
     },
     credentialsConfigured: true,
   });
+});
+
+test("accepts an issue-free App when review triage is disabled", async (t) => {
+  const { privateKeyPath } = await keyFixture(t);
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.issues.triage = "disabled";
+  const result = await verifyReviewApp({
+    repository: REPOSITORY,
+    clientId: CLIENT_ID,
+    privateKeyPath,
+    configuration,
+    fetchImpl: async (url) =>
+      url.endsWith("/app")
+        ? response(app())
+        : response(
+            installation({
+              permissions: {
+                contents: "read",
+                issues: "none",
+                metadata: "read",
+                pull_requests: "write",
+              },
+            }),
+          ),
+    run: async (args) =>
+      args[0] === "variable"
+        ? JSON.stringify([
+            { name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID },
+            { name: "RIVET_APP_BOT_LOGIN", value: "rivet-review" },
+          ])
+        : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
+  });
+  assert.deepEqual(result.permissions, {
+    contents: "read",
+    metadata: "read",
+    pullRequests: "write",
+  });
+});
+
+test("reports malformed installation permissions as an authority mismatch", async (t) => {
+  const { privateKeyPath } = await keyFixture(t);
+  await assert.rejects(
+    verifyReviewApp({
+      repository: REPOSITORY,
+      clientId: CLIENT_ID,
+      privateKeyPath,
+      fetchImpl: async (url) =>
+        url.endsWith("/app")
+          ? response(app())
+          : response(installation({ permissions: null })),
+      run: async (args) =>
+        args[0] === "variable"
+          ? JSON.stringify([
+              { name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID },
+              { name: "RIVET_APP_BOT_LOGIN", value: "rivet-review" },
+            ])
+          : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
+    }),
+    /effective installation authority does not match the review plan/,
+  );
 });
 
 test("verifies exact repair App authority after an explicit widening", async (t) => {
@@ -265,6 +328,13 @@ test("rejects missing, wider, or all-repository App authority", async (t) => {
     installation({
       permissions: {
         contents: "write",
+        metadata: "read",
+        pull_requests: "write",
+      },
+    }),
+    installation({
+      permissions: {
+        contents: "read",
         metadata: "read",
         pull_requests: "write",
       },

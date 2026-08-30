@@ -7,15 +7,17 @@ export const RIVET_APP_PRIVATE_KEY_SECRET = "RIVET_APP_PRIVATE_KEY";
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 export function reviewAppAuthority(configuration = DEFAULT_RIVET_CONFIG) {
-  validateRivetConfig(configuration);
+  const config = validateRivetConfig(configuration);
+  const permissions = {
+    contents: "read",
+    metadata: "read",
+    pullRequests: "write",
+  };
+  if (config.issues.triage === "automatic") permissions.issues = "write";
   return Object.freeze({
     clientIdVariable: RIVET_APP_CLIENT_ID_VARIABLE,
     privateKeySecret: RIVET_APP_PRIVATE_KEY_SECRET,
-    permissions: Object.freeze({
-      contents: "read",
-      metadata: "read",
-      pullRequests: "write",
-    }),
+    permissions: Object.freeze(permissions),
     events: Object.freeze([]),
   });
 }
@@ -33,7 +35,11 @@ export function repairAppAuthority() {
   });
 }
 
-export function reviewAppRegistrationUrl({ repository, ownerType = "User" }) {
+export function reviewAppRegistrationUrl({
+  repository,
+  ownerType = "User",
+  configuration = DEFAULT_RIVET_CONFIG,
+}) {
   const segments = repository?.split("/") ?? [];
   if (
     !REPOSITORY.test(repository ?? "") ||
@@ -45,7 +51,7 @@ export function reviewAppRegistrationUrl({ repository, ownerType = "User" }) {
     throw new Error("Rivet App owner must be User or Organization");
   }
   const [owner, name] = repository.split("/");
-  const authority = reviewAppAuthority();
+  const authority = reviewAppAuthority(configuration);
   const registrationPath =
     ownerType === "Organization"
       ? `/organizations/${encodeURIComponent(owner)}/settings/apps/new`
@@ -60,5 +66,8 @@ export function reviewAppRegistrationUrl({ repository, ownerType = "User" }) {
     pull_requests: authority.permissions.pullRequests,
     metadata: authority.permissions.metadata,
   });
+  if (authority.permissions.issues) {
+    parameters.set("issues", authority.permissions.issues);
+  }
   return `https://github.com${registrationPath}?${parameters.toString()}#rivet-${owner.toLowerCase()}`;
 }

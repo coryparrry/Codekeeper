@@ -277,10 +277,16 @@ async function verifyApp(
     metadata: installation?.permissions?.metadata,
     pullRequests: installation?.permissions?.pull_requests,
   };
+  if (
+    installation?.permissions?.issues &&
+    installation.permissions.issues !== "none"
+  ) {
+    actualPermissions.issues = installation.permissions.issues;
+  }
   const extraPermissions = Object.entries(installation?.permissions ?? {})
     .filter(
       ([name, value]) =>
-        !["contents", "metadata", "pull_requests"].includes(name) &&
+        !["contents", "issues", "metadata", "pull_requests"].includes(name) &&
         value !== "none",
     )
     .map(([name]) => name);
@@ -311,9 +317,9 @@ async function verifyApp(
   });
 }
 
-export function verifyReviewApp(options) {
+export function verifyReviewApp(options = {}) {
   return verifyApp(options, {
-    expected: reviewAppAuthority(),
+    expected: reviewAppAuthority(options.configuration),
     plan: "review",
   });
 }
