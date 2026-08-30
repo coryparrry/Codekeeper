@@ -19,10 +19,6 @@
       "maxLines": 884,
       "maxBytes": 32028
     },
-    "tools/codekeeper/test/commands.test.mjs": {
-      "maxLines": 1163,
-      "maxBytes": 35565
-    },
     "tools/codekeeper/test/integration.test.mjs": {
       "maxLines": 1558,
       "maxBytes": 67318

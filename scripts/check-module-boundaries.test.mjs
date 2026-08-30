@@ -46,7 +46,7 @@ async function fixture(files) {
 test("valid current tree satisfies recorded module boundaries", async () => {
   const result = await checkRepositoryModuleBoundaries();
   assert.equal(result.valid, true);
-  assert.equal(result.legacyModules, 4);
+  assert.equal(result.legacyModules, 3);
   assert.ok(result.modulesChecked > result.legacyModules);
 });
 
