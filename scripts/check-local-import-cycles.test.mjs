@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 import {
   COMPATIBILITY_FACADES,
@@ -18,22 +15,8 @@ function files(entries) {
   return Object.entries(entries).map(([pathName, source]) => ({ path: pathName, source }));
 }
 
-async function fixture(tree) {
-  const root = await mkdtemp(path.join(os.tmpdir(), "codekeeper-import-cycles-"));
-  for (const [relativePath, contents] of Object.entries(tree)) {
-    const absolutePath = path.join(root, ...relativePath.split("/"));
-    await mkdir(path.dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, contents, "utf8");
-  }
-  return root;
-}
-
 test("compatibility facades are the recorded public module map", () => {
-  assert.deepEqual(COMPATIBILITY_FACADES, [
-    { facade: "tools/codekeeper/src/lib/github.mjs", domain: "tools/codekeeper/src/lib/github" },
-    { facade: "tools/codekeeper/src/lib/publish.mjs", domain: "tools/codekeeper/src/lib/publish" },
-    { facade: "tools/codekeeper/src/cli.mjs", domain: "tools/codekeeper/src/cli-heavy.mjs" },
-  ]);
+  assert.deepEqual(COMPATIBILITY_FACADES, []);
 });
 
 test("current tree has no local import cycles or facade back-imports", async () => {
@@ -158,27 +141,9 @@ test("import-looking strings, templates, and regular expressions are not edges",
   );
 });
 
-test("missing facade files fail closed", async (context) => {
-  const root = await fixture({
-    "scripts/module-boundaries.json": `${JSON.stringify(
-      {
-        version: 1,
-        newModuleMaxLines: 800,
-        newModuleMaxBytes: 40000,
-        newTestMaxLines: 1000,
-        newTestMaxBytes: 60000,
-        roots: ["src"],
-        legacy: {},
-      },
-      null,
-      2,
-    )}\n`,
-    "src/ok.mjs": "export const ok = true;\n",
-  });
-  context.after(() => rm(root, { recursive: true, force: true }));
-
-  await assert.rejects(
-    checkRepositoryLocalImportCycles(root),
-    /compatibility facade is missing: tools\/codekeeper\/src\/lib\/github\.mjs/,
+test("configured facade files fail closed when missing", () => {
+  assert.throws(
+    () => evaluateLocalImportCycles({ facades, files: files({ "src/ok.mjs": "export const ok = true;\n" }) }),
+    /compatibility facade is missing: src\/github\.mjs/,
   );
 });

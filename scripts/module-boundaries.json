@@ -7,21 +7,7 @@
   "roots": [
     "packages/rivet/src",
     "packages/rivet/test",
-    "scripts",
-    "tools/codekeeper/audit",
-    "tools/codekeeper/evals",
-    "tools/codekeeper/scripts",
-    "tools/codekeeper/src",
-    "tools/codekeeper/test"
+    "scripts"
   ],
-  "legacy": {
-    "tools/codekeeper/src/lib/git.mjs": {
-      "maxLines": 884,
-      "maxBytes": 32028
-    },
-    "tools/codekeeper/test/integration.test.mjs": {
-      "maxLines": 1558,
-      "maxBytes": 67318
-    }
-  }
+  "legacy": {}
 }
