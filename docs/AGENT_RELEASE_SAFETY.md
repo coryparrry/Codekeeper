@@ -150,30 +150,15 @@ environment outage is an evidence gap, not a product pass or product failure.
 Record the infrastructure cause and run the safe local checks that remain
 available.
 
-### Gate C — installer, acceptance, and structural contracts
+### Gate C — Rivet and structural contracts
 
 ```bash
-cd packages/codekeeper
-npm ci --ignore-scripts --no-audit --no-fund
-npm run check
-cd ../..
-
-cd acceptance
-npm run check
-cd ..
+npm run rivet:check
+npm run architecture:check
 ```
 
-Then run the affected focused tests, including the relevant tests in:
-
-- `packages/codekeeper/test/assets-plan.test.mjs`
-- `packages/codekeeper/test/package-stage.test.mjs`
-- `packages/codekeeper/test/package-verification.test.mjs`
-- `packages/codekeeper/test/repository-artifacts.test.mjs`
-- `packages/codekeeper/test/runtime-installer.test.mjs`
-- `packages/codekeeper/test/validation-discovery.test.mjs`
-- `tools/codekeeper/test/workflow-contract.test.mjs`
-- `tools/codekeeper/test/workflow-package-contract.test.mjs`
-- `acceptance/test/harness.test.mjs`
+Then run focused tests for every affected Rivet source, workflow, or packaged
+asset.
 
 Do not treat source-text assertions as end-to-end workflow evidence. Confirm that
 the assertion reaches the production path and rejects a plausible wrong
