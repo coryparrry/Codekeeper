@@ -34,6 +34,14 @@ test("binds public Rivet metadata to its exact release tag", async () => {
   });
   assert.equal(pkg.private, undefined);
   assert.deepEqual(pkg.files, ["assets", "bin", "src"]);
+  assert.deepEqual(pkg.repository, {
+    type: "git",
+    url: "git+https://github.com/coryparrry/Rivet.git",
+  });
+  assert.deepEqual(pkg.bugs, {
+    url: "https://github.com/coryparrry/Rivet/issues",
+  });
+  assert.equal(pkg.homepage, "https://github.com/coryparrry/Rivet#readme");
 });
 
 test("rejects tags that do not exactly match the package version", async () => {

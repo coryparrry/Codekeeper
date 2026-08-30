@@ -326,7 +326,7 @@ export function verifyReviewApp(options = {}) {
 
 export function verifyRepairApp(options) {
   return verifyApp(options, {
-    expected: repairAppAuthority(),
+    expected: repairAppAuthority(options.configuration),
     plan: "repair",
   });
 }

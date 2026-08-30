@@ -43,6 +43,14 @@ npx --yes @coryparry/rivet app-verify \
   --private-key-file /path/to/private-key.pem
 ```
 
+The shipped review workflow uses the Codex engine. Add either `CODEX_API_KEY`
+or `OPENAI_API_KEY` as a repository secret before the first review. Neither App
+setup nor `rivet init` configures model-provider credentials:
+
+```bash
+gh secret set CODEX_API_KEY --repo OWNER/REPOSITORY
+```
+
 Preview the managed workflow files without changing the checkout:
 
 ```bash
@@ -88,10 +96,10 @@ disabled in the shipped configuration.
 
 ## Installation behavior
 
-`--dry-run` writes nothing. Without `--dry-run` or `--setup-pr`, `rivet init`
-applies the verified plan directly to the existing repository path. Rivet
-refuses adopter-owned file collisions and rechecks managed destinations before
-writing.
+`--dry-run` writes nothing to the repository checkout. Without `--dry-run` or
+`--setup-pr`, `rivet init` applies the verified plan directly to the existing
+repository path. Rivet refuses adopter-owned file collisions and rechecks
+managed destinations before writing.
 
 For the complete authority and installer contracts, see the
 [GitHub App guide](https://github.com/coryparrry/Rivet/blob/main/docs/RIVET_GITHUB_APP_AUTHORITY.md)

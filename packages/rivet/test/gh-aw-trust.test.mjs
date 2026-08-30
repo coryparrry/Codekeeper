@@ -48,8 +48,13 @@ test("accepts the self-contained base-branch Rivet review authority", async () =
     source.indexOf("- name: Checkout repository") <
       source.indexOf("name: Record Rivet authority receipt"),
   );
+  assert.match(source, /Tools: create_issue,/);
+  assert.match(source, /permission-issues: write/);
   assert.match(source, /permission-pull-requests: write/);
-  assert.doesNotMatch(source, /permission-(?:actions|issues):/);
+  assert.doesNotMatch(
+    source,
+    /permission-(?:actions|contents|deployments|discussions|packages|statuses): write/,
+  );
 });
 
 test("rejects PR-head prompt loading and mutable action authority", async () => {

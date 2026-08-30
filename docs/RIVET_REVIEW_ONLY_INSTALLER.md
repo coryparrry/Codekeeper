@@ -2,9 +2,10 @@
 
 ## Scope
 
-Rivet installs review-only mode or enables owner-authorized repair on top of a
-verified review installation. Issue triage, maintenance, and merge behavior
-remain disabled in `.github/rivet.json`.
+Rivet installs review-only mode with automatic issue triage or enables
+owner-authorized repair on top of a verified review installation. Issue
+implementation, maintenance, and merge behavior remain disabled in
+`.github/rivet.json`.
 
 ```bash
 rivet init --review-only --repository /path/to/repository --dry-run
@@ -36,7 +37,9 @@ upgrade pull request on `rivet/setup-repair` by default.
 
 The installer renders and validates these Rivet-owned surfaces:
 
-- `.github/rivet.json` with review enabled and every mutation mode disabled;
+- `.github/rivet.json` with review and automatic issue triage enabled, issue
+  implementation, maintenance, and merge disabled, and repair either disabled
+  in review-only mode or owner-authorized in repair mode;
 - `.github/rivet/installation.json` with the compiler/action receipt and exact
   managed-file inventory;
 - the review workflow Markdown source and compiled lock;
@@ -44,7 +47,8 @@ The installer renders and validates these Rivet-owned surfaces:
 
 Repair mode also manages the repair workflow source and compiled lock plus the
 isolated validation and App-authenticated publication actions. Its receipt
-records Contents write authority and owner authorization explicitly.
+preserves Issues write for automatic triage, widens only Contents from read to
+write, and records owner authorization explicitly.
 
 The package assets are the canonical extension source. Tests and installation
 use that same copy.
@@ -82,8 +86,10 @@ requests a merge.
 The generated review workflow mints short-lived installation tokens from the
 `RIVET_APP_CLIENT_ID` and `RIVET_APP_BOT_LOGIN` repository variables plus the
 `RIVET_APP_PRIVATE_KEY` secret.
-The installer records the minimum review-only App authority, and `rivet
-app-plan` produces a private, webhook-free registration URL.
+The installer records the minimum review-only App authority: Contents read,
+Issues write, Metadata read, and Pull requests write. Repair preserves those
+permissions and widens only Contents to write. `rivet app-plan` produces a
+private, webhook-free registration URL.
 
 `rivet app-configure` uploads the PEM as a repository secret and sets the
 verified variables. App creation and installation remain administrator-controlled

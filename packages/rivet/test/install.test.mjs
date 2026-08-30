@@ -17,6 +17,7 @@ import {
   installReview,
   prepareRepairInstallation,
 } from "../src/install.mjs";
+import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -203,6 +204,7 @@ test("upgrades an exact review installation to owner-authorized repair", async (
     contents: "write",
     metadata: "read",
     pullRequests: "write",
+    issues: "write",
   });
   const config = JSON.parse(
     await readFile(path.join(repositoryRoot, ".github/rivet.json"), "utf8"),
@@ -216,7 +218,50 @@ test("upgrades an exact review installation to owner-authorized repair", async (
   assert.equal(config.repair.authority, "owner");
   assert.equal(installation.mode, "repair");
   assert.equal(installation.managedFiles.length, 13);
-  assert.equal(installation.githubApp.permissions.contents, "write");
+  assert.deepEqual(installation.githubApp.permissions, {
+    contents: "write",
+    metadata: "read",
+    pullRequests: "write",
+    issues: "write",
+  });
+});
+
+test("upgrades a triage-disabled review without granting Issues", async (t) => {
+  const repositoryRoot = await repository(t);
+  const reviewConfiguration = structuredClone(DEFAULT_RIVET_CONFIG);
+  reviewConfiguration.issues.triage = "disabled";
+  await installReview({
+    repositoryRoot,
+    configuration: reviewConfiguration,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+
+  const repairConfiguration = structuredClone(reviewConfiguration);
+  repairConfiguration.repair.authority = "owner";
+
+  const result = await installRepair({
+    repositoryRoot,
+    configuration: repairConfiguration,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+
+  assert.deepEqual(result.githubApp.permissions, {
+    contents: "write",
+    metadata: "read",
+    pullRequests: "write",
+  });
+  const installation = JSON.parse(
+    await readFile(
+      path.join(repositoryRoot, ".github/rivet/installation.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    installation.githubApp.permissions,
+    result.githubApp.permissions,
+  );
 });
 
 test("refuses a modified review installation before upgrading", async (t) => {

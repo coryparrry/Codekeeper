@@ -273,12 +273,81 @@ test("reports malformed installation permissions as an authority mismatch", asyn
   );
 });
 
-test("verifies exact repair App authority after an explicit widening", async (t) => {
+test("verifies an existing review App after widening only Contents", async (t) => {
   const { privateKeyPath } = await keyFixture(t);
   const result = await verifyRepairApp({
     repository: REPOSITORY,
     clientId: CLIENT_ID,
     privateKeyPath,
+    fetchImpl: async (url) =>
+      url.endsWith("/app")
+        ? response(app())
+        : response(
+            installation({
+              permissions: {
+                contents: "write",
+                issues: "write",
+                metadata: "read",
+                pull_requests: "write",
+              },
+            }),
+          ),
+    run: async (args) =>
+      args[0] === "variable"
+        ? JSON.stringify([
+            { name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID },
+            { name: "RIVET_APP_BOT_LOGIN", value: "rivet-review" },
+          ])
+        : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
+  });
+  assert.deepEqual(result.permissions, {
+    contents: "write",
+    metadata: "read",
+    pullRequests: "write",
+    issues: "write",
+  });
+});
+
+test("rejects repair authority that drops default Issues write", async (t) => {
+  const { privateKeyPath } = await keyFixture(t);
+  await assert.rejects(
+    verifyRepairApp({
+      repository: REPOSITORY,
+      clientId: CLIENT_ID,
+      privateKeyPath,
+      fetchImpl: async (url) =>
+        url.endsWith("/app")
+          ? response(app())
+          : response(
+              installation({
+                permissions: {
+                  contents: "write",
+                  metadata: "read",
+                  pull_requests: "write",
+                },
+              }),
+            ),
+      run: async (args) =>
+        args[0] === "variable"
+          ? JSON.stringify([
+              { name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID },
+              { name: "RIVET_APP_BOT_LOGIN", value: "rivet-review" },
+            ])
+          : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
+    }),
+    /effective installation authority does not match the repair plan/,
+  );
+});
+
+test("accepts issue-free repair authority when triage is disabled", async (t) => {
+  const { privateKeyPath } = await keyFixture(t);
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.issues.triage = "disabled";
+  const result = await verifyRepairApp({
+    repository: REPOSITORY,
+    clientId: CLIENT_ID,
+    privateKeyPath,
+    configuration,
     fetchImpl: async (url) =>
       url.endsWith("/app")
         ? response(app())

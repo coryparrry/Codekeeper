@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  loadGovernancePolicy,
   reconciliationPlan,
   rulesetPayload,
   validateGovernancePolicy,
@@ -69,6 +70,11 @@ function policy() {
     ],
   };
 }
+
+test("binds the checked-in governance policy to the Rivet repository", async () => {
+  const checkedInPolicy = await loadGovernancePolicy();
+  assert.equal(checkedInPolicy.repository, "coryparrry/Rivet");
+});
 
 test("governance requires explicit non-automatic branch and tag rules", () => {
   assert.equal(validateGovernancePolicy(policy()).rulesets.length, 2);
