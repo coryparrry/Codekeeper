@@ -10,7 +10,7 @@ self-review result is recorded in
 | Document                                            | Type        | Purpose                                                                                           |
 | --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
 | [Installation](../INSTALL.md)                       | How-to      | Evaluate a local package and prove an installation.                                               |
-| [Reviewed release delivery](RELEASE_READINESS.md)   | How-to      | Promote reviewed changes through main, Release Please, and the protected npm publisher.           |
+| [Legacy release delivery](RELEASE_READINESS.md)     | Historical  | Superseded Codekeeper release process and its migration status.                                    |
 | [Agent change and release safety](AGENT_RELEASE_SAFETY.md) | How-to | Map breaking points and verify every source, package, workflow, and live-release boundary before publication. |
 | [Repository governance](REPOSITORY_GOVERNANCE.md)   | How-to      | Review and deliberately apply branch and immutable-tag rules.                                     |
 | [Configuration](CONFIGURATION.md)                   | Reference   | Configure policy, workflows, providers, and capabilities.                                         |
@@ -22,5 +22,6 @@ self-review result is recorded in
 | [Support](../SUPPORT.md)                            | Reference   | Get help, report bugs, or report security concerns.                                               |
 
 Start with installation for local evaluation, then review configuration and
-authority before enabling any workflow. A new version is not published until its
-Release Please pull request is explicitly approved and merged.
+authority before enabling any workflow. Use the Rivet migration documentation
+for current delivery boundaries; the legacy Codekeeper release process is
+retired.
