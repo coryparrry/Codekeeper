@@ -41,7 +41,8 @@ test("accepts the self-contained base-branch Rivet review authority", async () =
     baseContext: "pull_request_target default branch",
     violations: [],
   });
-  assert.match(source, /Native Rivet extension proof/);
+  assert.match(source, /Rivet review contract/);
+  assert.match(source, /actively disprove each one/);
   assert.match(source, /"toolTimeout": 240/);
 });
 

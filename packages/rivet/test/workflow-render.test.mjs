@@ -38,6 +38,10 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /inlined-imports: true/);
   assert.match(fixture, /model: gpt-5\.6-luna/);
   assert.match(fixture, new RegExp(NATIVE_IMPORT.replaceAll(".", "\\.")));
+  assert.match(fixture, /Publish no more than 8 inline findings/);
+  assert.match(fixture, /submit_pull_request_review/);
+  assert.match(fixture, /call only `noop`/);
+  assert.doesNotMatch(fixture, /  add-comment:/);
 });
 
 test("projects domain review controls into gh-aw frontmatter", () => {
@@ -46,7 +50,9 @@ test("projects domain review controls into gh-aw frontmatter", () => {
   configuration.review.requestChanges = true;
   const source = renderRivetReviewWorkflow({ configuration });
   assert.doesNotMatch(source, /create-pull-request-review-comment/);
+  assert.match(source, /inline findings are disabled/);
   assert.match(source, /allowed-events: \[COMMENT, REQUEST_CHANGES\]/);
+  assert.match(source, /event `REQUEST_CHANGES`/);
 });
 
 test("accepts only managed local native imports", () => {
