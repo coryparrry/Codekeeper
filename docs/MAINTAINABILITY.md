@@ -104,7 +104,6 @@ These ceilings were measured on this tree. They are not targets to grow into.
 |---|---:|---:|
 | `tools/codekeeper/src/lib/git.mjs` | 884 | 32,028 |
 | `tools/codekeeper/test/integration.test.mjs` | 1,558 | 67,318 |
-| `tools/codekeeper/test/publish.test.mjs` | 1,740 | 73,858 |
 
 Remove a legacy entry only after the file is at or below the normal limit, or
 after a behavior-preserving split has replaced it with bounded modules.

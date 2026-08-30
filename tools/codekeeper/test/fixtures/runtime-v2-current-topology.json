@@ -1,6 +1,0 @@
-{
-  "review": ["runtime"],
-  "issue": ["runtime"],
-  "fix": ["runtime"],
-  "maintain": ["runtime"]
-}
