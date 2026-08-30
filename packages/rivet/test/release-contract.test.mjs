@@ -78,11 +78,10 @@ test("packs the executable and production payload without package tests", async 
       entry.endsWith(".tgz"),
     );
     assert.deepEqual(archives, [`coryparry-rivet-${pkg.version}.tgz`]);
-    const { stdout } = await execFileAsync(
-      "tar",
-      ["-tzf", join(outputDirectory, archives[0])],
-      { cwd: outputDirectory },
-    );
+    const archivePath = join(outputDirectory, archives[0]);
+    const { stdout } = await execFileAsync("tar", ["-tzf", archivePath], {
+      cwd: outputDirectory,
+    });
     const paths = new Set(
       stdout
         .trim()
@@ -96,6 +95,20 @@ test("packs the executable and production payload without package tests", async 
     assert([...paths].some((path) => path.startsWith("assets/")));
     assert(![...paths].some((path) => path.startsWith("test/")));
     assert(!paths.has("package-lock.json"));
+
+    const { stdout: readme } = await execFileAsync(
+      "tar",
+      ["-xOzf", archivePath, "package/README.md"],
+      { cwd: outputDirectory },
+    );
+    assert.match(
+      readme,
+      /## Quick start[\s\S]*```bash\nnpx @coryparry\/rivet init\n```/,
+    );
+    assert.ok(
+      readme.indexOf("npx @coryparry/rivet init") <
+        readme.indexOf("npx @coryparry/rivet app-plan"),
+    );
   } finally {
     await rm(outputDirectory, { force: true, recursive: true });
   }

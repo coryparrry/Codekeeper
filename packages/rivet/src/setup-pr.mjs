@@ -8,6 +8,64 @@ import {
 
 const execFileAsync = promisify(execFile);
 const PULL_REQUEST_URL = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+$/;
+const REPOSITORY_SEGMENT = /^[A-Za-z0-9_.-]+$/;
+export const REVIEW_SETUP_BRANCH = "rivet/setup-review";
+export const REPAIR_SETUP_BRANCH = "rivet/setup-repair";
+
+function repositoryFromSegments(owner, rawName) {
+  const name = rawName.endsWith(".git") ? rawName.slice(0, -4) : rawName;
+  if (
+    !REPOSITORY_SEGMENT.test(owner) ||
+    !REPOSITORY_SEGMENT.test(name) ||
+    [owner, name].some((segment) => segment === "." || segment === "..")
+  ) {
+    return null;
+  }
+  return `${owner}/${name}`;
+}
+
+export function repositoryFromGitHubOrigin(remoteUrl) {
+  const value = typeof remoteUrl === "string" ? remoteUrl.trim() : "";
+  const scp = /^git@github\.com:([^/]+)\/([^/]+)\/?$/.exec(value);
+  if (scp) {
+    const repository = repositoryFromSegments(scp[1], scp[2]);
+    if (repository) return repository;
+  }
+
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    url = null;
+  }
+  if (url) {
+    const secureHttps =
+      url.protocol === "https:" && !url.username && !url.password;
+    const secureSsh =
+      url.protocol === "ssh:" && url.username === "git" && !url.password;
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (
+      (secureHttps || secureSsh) &&
+      url.hostname.toLowerCase() === "github.com" &&
+      !url.port &&
+      !url.search &&
+      !url.hash &&
+      segments.length === 2
+    ) {
+      const repository = repositoryFromSegments(segments[0], segments[1]);
+      if (repository) return repository;
+    }
+  }
+  throw new Error(
+    "Rivet installer: origin must be an exact github.com repository URL",
+  );
+}
+
+async function originRepository({ run, cwd }) {
+  return repositoryFromGitHubOrigin(
+    await run("git", ["remote", "get-url", "origin"], { cwd }),
+  );
+}
 
 async function runCommand(command, args, { cwd }) {
   const { stdout } = await execFileAsync(command, args, {
@@ -48,11 +106,16 @@ Rivet created this pull request but will never merge it automatically.`;
 
 async function createSetupPullRequest({
   branch,
+  mode,
   run = runCommand,
   prepare,
+  preparedPlan,
   ...installOptions
 } = {}) {
-  const plan = await prepare(installOptions);
+  const plan = preparedPlan ?? (await prepare(installOptions));
+  if (plan.mode !== mode) {
+    throw new Error(`Rivet installer: expected a ${mode} installation plan`);
+  }
   const cwd = plan.repositoryRoot;
   const paths = plan.files
     .filter(({ status }) => status !== "unchanged")
@@ -71,16 +134,28 @@ async function createSetupPullRequest({
     throw new Error("Rivet installer: repository working tree must be clean");
   }
 
+  const expectedRepository = await originRepository({ run, cwd });
+
   const repositoryDetails = JSON.parse(
     await run(
       "gh",
-      ["repo", "view", "--json", "nameWithOwner,defaultBranchRef"],
+      [
+        "repo",
+        "view",
+        `github.com/${expectedRepository}`,
+        "--json",
+        "nameWithOwner,defaultBranchRef",
+      ],
       { cwd },
     ),
   );
   const repository = repositoryDetails.nameWithOwner;
   const defaultBranch = repositoryDetails.defaultBranchRef?.name;
-  if (!repository || !defaultBranch) {
+  if (
+    !repository ||
+    repository.toLowerCase() !== expectedRepository.toLowerCase() ||
+    !defaultBranch
+  ) {
     throw new Error("Rivet installer: could not resolve the GitHub repository");
   }
 
@@ -163,7 +238,7 @@ async function createSetupPullRequest({
       "pr",
       "create",
       "--repo",
-      repository,
+      `github.com/${repository}`,
       "--base",
       defaultBranch,
       "--head",
@@ -218,16 +293,18 @@ async function createSetupPullRequest({
 
 export function createReviewSetupPullRequest(options = {}) {
   return createSetupPullRequest({
-    branch: "rivet/setup-review",
+    branch: REVIEW_SETUP_BRANCH,
     ...options,
+    mode: "review",
     prepare: prepareReviewInstallation,
   });
 }
 
 export function createRepairSetupPullRequest(options = {}) {
   return createSetupPullRequest({
-    branch: "rivet/setup-repair",
+    branch: REPAIR_SETUP_BRANCH,
     ...options,
+    mode: "repair",
     prepare: prepareRepairInstallation,
   });
 }

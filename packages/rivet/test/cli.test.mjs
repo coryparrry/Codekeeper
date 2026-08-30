@@ -10,6 +10,53 @@ function output() {
   };
 }
 
+test("routes bare init to the guided review-only setup", async () => {
+  const stdout = output();
+  const stderr = output();
+  const stdin = { isTTY: true };
+  const environment = { TERM: "xterm" };
+  const expected = { pullRequestUrl: "https://github.com/acme/repo/pull/3" };
+  let received;
+  const result = await runCli(["init"], {
+    cwd: "/repo",
+    environment,
+    stdin,
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    runGuidedInitImpl: async (options) => {
+      received = options;
+      return expected;
+    },
+  });
+
+  assert.equal(result, expected);
+  assert.equal(stdout.read(), "");
+  assert.deepEqual(received, {
+    cwd: "/repo",
+    env: environment,
+    stdio: { stdin, stdout: stdout.stream, stderr: stderr.stream },
+  });
+});
+
+test("prints useful help without starting guided setup", async () => {
+  for (const argv of [[], ["--help"], ["init", "--help"]]) {
+    const stdout = output();
+    let guidedCalls = 0;
+    const result = await runCli(argv, {
+      stdout: stdout.stream,
+      runGuidedInitImpl: async () => {
+        guidedCalls += 1;
+      },
+    });
+
+    assert.equal(result, 0);
+    assert.equal(guidedCalls, 0);
+    assert.match(stdout.read(), /npx @coryparry\/rivet init/);
+    assert.match(stdout.read(), /init --review-only/);
+    assert.match(stdout.read(), /init --repair/);
+  }
+});
+
 test("runs an explicit review-only dry-run", async () => {
   const stdout = output();
   let options;
@@ -180,8 +227,7 @@ test("verifies an explicit repair App authority target", async () => {
   assert.equal(result, expected);
 });
 
-test("rejects implicit modes and unknown arguments", async () => {
-  await assert.rejects(runCli(["init"]), /an init mode is required/);
+test("rejects conflicting explicit modes and unknown arguments", async () => {
   await assert.rejects(
     runCli(["init", "--review-only", "--repair"]),
     /choose one init mode/,

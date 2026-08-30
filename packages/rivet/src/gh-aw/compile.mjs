@@ -39,13 +39,20 @@ async function runGhAw({
   args,
   operation,
   execFileImpl,
+  env,
 }) {
   try {
-    const { stdout, stderr } = await execFileImpl(binaryPath, args, {
+    const commandOptions = {
       cwd: repositoryRoot,
       encoding: "utf8",
       maxBuffer: 16 * 1024 * 1024,
-    });
+    };
+    if (env) commandOptions.env = env;
+    const { stdout, stderr } = await execFileImpl(
+      binaryPath,
+      args,
+      commandOptions,
+    );
     return { result: parseReport(stdout, operation), stderr };
   } catch (cause) {
     if (cause?.message?.startsWith("Rivet gh-aw compiler:")) throw cause;
@@ -68,6 +75,7 @@ export async function compileGhAwWorkflow({
   release = GH_AW_RELEASE,
   approveNewDependencies = false,
   execFileImpl = execFileAsync,
+  env,
 } = {}) {
   const root = path.resolve(repositoryRoot);
   const id = workflowInput(workflowId);
@@ -90,6 +98,7 @@ export async function compileGhAwWorkflow({
     args,
     operation: "compile",
     execFileImpl,
+    env,
   });
   const compiledFile = path.resolve(output.result.compiled_file ?? "");
   const expectedFile = path.join(
@@ -112,6 +121,7 @@ export async function validateGhAwWorkflow({
   workflowId,
   binaryPath,
   execFileImpl = execFileAsync,
+  env,
 } = {}) {
   const root = path.resolve(repositoryRoot);
   const id = workflowInput(workflowId);
@@ -122,6 +132,7 @@ export async function validateGhAwWorkflow({
     args: ["validate", id, "--strict", "--json", "--no-check-update"],
     operation: "validate",
     execFileImpl,
+    env,
   });
   return Object.freeze({ report: output.result, stderr: output.stderr });
 }

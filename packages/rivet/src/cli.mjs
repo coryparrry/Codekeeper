@@ -12,9 +12,38 @@ import {
   verifyRepairApp,
   verifyReviewApp,
 } from "./app-setup.mjs";
+import { runGuidedInit } from "./guided-init.mjs";
+
+export const USAGE = `Rivet repository maintenance
+
+Usage:
+  npx @coryparry/rivet init
+  rivet init
+
+Guided setup:
+  init                         Start the review-only guided setup.
+
+Explicit commands (advanced/noninteractive):
+  init --review-only [--repository <path>] [--dry-run | --setup-pr]
+             [--setup-branch <name>]
+                               Install review workflows with explicit options.
+  init --repair [--repository <path>] [--dry-run | --setup-pr]
+             [--setup-branch <name>]
+                               Upgrade an existing install with explicit options.
+  app-plan --repository <owner/repository> [--owner-type <User|Organization>]
+                               Print the required GitHub App permissions.
+  app-configure --repository <owner/repository> --client-id <id>
+                 --private-key-file <path>
+                               Configure an App from explicit credentials.
+  app-verify --repository <owner/repository> --client-id <id>
+             --private-key-file <path> [--repair]
+                               Verify explicit App credentials and permissions.
+
+Run rivet init --help for this help. The guided setup does not configure repair mode.
+`;
 
 function usage() {
-  return "Usage:\n  rivet init (--review-only | --repair) [--repository <path>] [--dry-run | --setup-pr] [--setup-branch <name>]\n  rivet app-plan --repository <owner/repository> [--owner-type <User|Organization>]\n  rivet app-configure --repository <owner/repository> --client-id <id> --private-key-file <path>\n  rivet app-verify --repository <owner/repository> --client-id <id> --private-key-file <path> [--repair]";
+  return USAGE;
 }
 
 function parseAppCredentials(args, { allowRepair = false } = {}) {
@@ -121,10 +150,23 @@ export async function runCli(
     configureReviewAppImpl = configureReviewApp,
     verifyRepairAppImpl = verifyRepairApp,
     verifyReviewAppImpl = verifyReviewApp,
+    runGuidedInitImpl = runGuidedInit,
+    stdin = process.stdin,
     stdout = process.stdout,
+    stderr = process.stderr,
+    cwd = process.cwd(),
+    environment = process.env,
   } = {},
 ) {
   const [command, ...args] = argv;
+  if (!command || command === "--help") {
+    stdout.write(usage());
+    return 0;
+  }
+  if (command === "init" && args.includes("--help")) {
+    stdout.write(usage());
+    return 0;
+  }
   if (command === "app-plan") {
     const options = parseAppPlan(args);
     const result = Object.freeze({
@@ -148,6 +190,13 @@ export async function runCli(
     return result;
   }
   if (command !== "init") throw new Error(`Rivet: unknown command\n${usage()}`);
+  if (args.length === 0) {
+    return runGuidedInitImpl({
+      cwd,
+      env: environment,
+      stdio: { stdin, stdout, stderr },
+    });
+  }
   const options = parseInit(args);
   const { setupPullRequest, mode, ...installationOptions } = options;
   const result = setupPullRequest
