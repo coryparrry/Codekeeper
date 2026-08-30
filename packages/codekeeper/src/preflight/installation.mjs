@@ -138,46 +138,6 @@ async function discoverPackageValidationCommand(root, fsImpl) {
   });
 }
 
-/**
- * Identify the narrow npm case where setup can offer to prepare the missing
- * repository-owned lockfile. A package-manager declaration for any other
- * ecosystem, any supported lockfile (including a non-regular entry), or an
- * invalid/ambiguous package manifest deliberately fails closed.
- */
-export async function discoverNpmPackageLockPreparation(
-  root,
-  { fsImpl = { lstat, readFile } } = {},
-) {
-  const packageSource = await readRootRegularFile(root, "package.json", fsImpl);
-  if (packageSource === null) return null;
-
-  let packageJson;
-  try {
-    packageJson = JSON.parse(packageSource);
-  } catch {
-    return null;
-  }
-  if (!packageJson || typeof packageJson !== "object" || Array.isArray(packageJson)) return null;
-
-  const declaredManager = packageManagerName(packageJson.packageManager);
-  if (Object.hasOwn(packageJson, "packageManager") && declaredManager !== "npm") return null;
-  for (const definition of PACKAGE_MANAGER_LOCKFILES) {
-    for (const name of definition.names) {
-      if (await exists(fsImpl, path.join(root, name))) return null;
-    }
-  }
-
-  const scripts = packageJson.scripts;
-  const script = ["check", "test"].find((name) => typeof scripts?.[name] === "string" && scripts[name].trim());
-  if (!script) return null;
-  return Object.freeze({
-    command: `npm run ${script}`,
-    packageManager: "npm",
-    lockfile: "package-lock.json",
-    script,
-  });
-}
-
 function makeTarget(source) {
   return ["check", "test"].find((target) => new RegExp(`^\\s*${target}\\s*:(?:\\s|$)`, "m").test(source));
 }

@@ -28,7 +28,6 @@ import { assertNoSetupBranch } from "./collisions.mjs";
 export { assertNodeVersion } from "./environment.mjs";
 export { parseGitHubRemote, parseRemoteBranchSha } from "./repository.mjs";
 export {
-  discoverNpmPackageLockPreparation,
   discoverRepositoryValidationCommand,
   inspectInstallationFiles,
   parseReleaseManifest

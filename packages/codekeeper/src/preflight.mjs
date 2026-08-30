@@ -2,7 +2,6 @@ export {
   assertNodeVersion,
   assertNoInstallationFiles,
   assertNoSetupBranch,
-  discoverNpmPackageLockPreparation,
   discoverRepositoryValidationCommand,
   doctorRepository,
   inspectInstallationFiles,
