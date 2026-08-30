@@ -1,4 +1,4 @@
-# Codekeeper is currently maintained from this repository-owner account.
+# Rivet is currently maintained from this repository-owner account.
 # Keep this file owned so governance changes cannot silently remove review routing.
 
 * @coryparrry
@@ -6,6 +6,7 @@
 /.github/ @coryparrry
 /acceptance/ @coryparrry
 /packages/codekeeper/ @coryparrry
+/packages/rivet/ @coryparrry
 /scripts/ @coryparrry
 /tools/codekeeper/ @coryparrry
 /MANIFEST.sha256 @coryparrry
