@@ -51,6 +51,7 @@ test("rejects PR-head prompt loading and mutable action authority", async () => 
     ...authority,
     runtimeImports: [".github/workflows/rivet-review.md"],
     unpinnedActions: [{ uses: "owner/action@main" }],
+    unpinnedContainers: [{ image: "owner/image:latest" }],
     checkouts: authority.checkouts.map((checkout, index) =>
       index === 0
         ? { ...checkout, ref: "${{ github.event.pull_request.head.sha }}" }
@@ -66,6 +67,7 @@ test("rejects PR-head prompt loading and mutable action authority", async () => 
   assert.deepEqual(trust.violations, [
     "runtime prompt imports are not allowed",
     "all actions must use immutable commit pins",
+    "all containers must use immutable digest pins",
     "checkouts must use the base context without persisted credentials",
   ]);
 });

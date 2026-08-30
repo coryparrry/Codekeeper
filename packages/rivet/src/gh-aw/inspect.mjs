@@ -82,12 +82,17 @@ function resolvedImports(source) {
 
 export function inspectCompiledWorkflow(source) {
   const workflow = parseWorkflow(source);
+  const metadata = header(source, "gh-aw-metadata");
+  const manifest = header(source, "gh-aw-manifest");
   const jobs =
     workflow.jobs && typeof workflow.jobs === "object" ? workflow.jobs : {};
   const actions = [];
   const checkouts = [];
   const writeCapableJobs = [];
   const rootPermissions = permissions(workflow.permissions);
+  const containers = Array.isArray(manifest.containers)
+    ? manifest.containers
+    : [];
 
   for (const [jobId, job] of Object.entries(jobs)) {
     if (!job || typeof job !== "object" || Array.isArray(job)) continue;
@@ -121,8 +126,8 @@ export function inspectCompiledWorkflow(source) {
   }
 
   return Object.freeze({
-    metadata: header(source, "gh-aw-metadata"),
-    manifest: header(source, "gh-aw-manifest"),
+    metadata,
+    manifest,
     inlinedImports: /^# inlined-imports: true$/m.test(source),
     resolvedImports: resolvedImports(source),
     triggers: Object.keys(workflow.on ?? {}).sort(),
@@ -139,6 +144,13 @@ export function inspectCompiledWorkflow(source) {
       ...new Set(actions.map((action) => action.repository).filter(Boolean)),
     ].sort(),
     unpinnedActions: actions.filter((action) => !action.pinned),
+    containers,
+    unpinnedContainers: containers.filter(
+      ({ image, digest, pinned_image: pinnedImage }) =>
+        typeof image !== "string" ||
+        !/^sha256:[0-9a-f]{64}$/.test(digest) ||
+        pinnedImage !== `${image}@${digest}`,
+    ),
     checkouts,
     additionalRepositories: [
       ...new Set(

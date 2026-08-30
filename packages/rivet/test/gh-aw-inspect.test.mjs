@@ -33,6 +33,8 @@ test("inspects the pinned Rivet review fixture authority", async () => {
     ".github/rivet/aw/review-extension.md",
   ]);
   assert.deepEqual(authority.unpinnedActions, []);
+  assert.equal(authority.containers.length, 6);
+  assert.deepEqual(authority.unpinnedContainers, []);
   assert.deepEqual(authority.localActions, [
     "./.github/rivet/actions/authority-receipt",
   ]);
@@ -55,7 +57,7 @@ test("inspects the pinned Rivet review fixture authority", async () => {
 
 test("reports unpinned actions and additional checkout authority", () => {
   const source = `# gh-aw-metadata: {"strict":true}
-# gh-aw-manifest: {"version":1}
+# gh-aw-manifest: {"version":1,"containers":[{"image":"owner/image:latest","digest":"","pinned_image":"owner/image:latest"}]}
 name: fixture
 on:
   workflow_dispatch:
@@ -79,6 +81,13 @@ jobs:
     authority.unpinnedActions.map(({ uses }) => uses),
     ["actions/checkout@v4"],
   );
+  assert.deepEqual(authority.unpinnedContainers, [
+    {
+      image: "owner/image:latest",
+      digest: "",
+      pinned_image: "owner/image:latest",
+    },
+  ]);
   assert.deepEqual(authority.additionalRepositories, ["owner/other"]);
   assert.deepEqual(authority.secrets, ["MODEL_KEY"]);
   assert.deepEqual(authority.variables, ["RIVET_ENABLED"]);

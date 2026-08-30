@@ -65,12 +65,13 @@ export async function compileGhAwWorkflow({
   repositoryRoot,
   workflowId,
   binaryPath,
+  release = GH_AW_RELEASE,
   approveNewDependencies = false,
   execFileImpl = execFileAsync,
 } = {}) {
   const root = path.resolve(repositoryRoot);
   const id = workflowInput(workflowId);
-  const compiler = binaryPath ?? (await ensureGhAwBinary());
+  const compiler = binaryPath ?? (await ensureGhAwBinary({ release }));
   const args = [
     "compile",
     id,
@@ -80,7 +81,7 @@ export async function compileGhAwWorkflow({
     "--action-mode",
     "action",
     "--action-tag",
-    GH_AW_RELEASE.actionsCommit,
+    release.actionsCommit,
   ];
   if (approveNewDependencies) args.push("--approve");
   const output = await runGhAw({
