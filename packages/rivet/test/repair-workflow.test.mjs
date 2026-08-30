@@ -3,26 +3,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { repairAppAuthority } from "../src/app-authority.mjs";
 import { renderRivetRepairWorkflow } from "../src/workflows/repair.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-
-test("defines the repair permission increase explicitly", () => {
-  assert.deepEqual(repairAppAuthority(), {
-    clientIdVariable: "RIVET_APP_CLIENT_ID",
-    privateKeySecret: "RIVET_APP_PRIVATE_KEY",
-    permissions: {
-      contents: "write",
-      metadata: "read",
-      pullRequests: "write",
-    },
-    events: [],
-  });
-});
 
 test("renders isolated validation before the App-authorized publisher", () => {
   const source = renderRivetRepairWorkflow({

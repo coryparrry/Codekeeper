@@ -62,9 +62,19 @@ test("keeps generated review publication authority narrow", async () => {
     ),
     "utf8",
   );
+  assert.match(lock, /Tools: create_issue,/);
+  assert.match(
+    lock,
+    /"create_issue":\{"deduplicate_by_title":true,"max":1,"title_prefix":"\[rivet\] "\}/,
+  );
   assert.match(lock, /create_pull_request_review_comment\(max:8\)/);
   assert.match(lock, /"allowed_events":\["COMMENT"\]/);
   assert.match(lock, /"noop":\{"max":1,"report-as-issue":"false"\}/);
   assert.match(lock, /"report_incomplete":\{\}/);
+  assert.match(lock, /permission-issues: write/);
+  assert.doesNotMatch(
+    lock,
+    /permission-(?:actions|contents|deployments|discussions|packages|statuses): write/,
+  );
   assert.doesNotMatch(lock, /add_comment/);
 });

@@ -7,11 +7,12 @@ Rivet review workflows authenticate GitHub operations with short-lived installat
 The review-only App requires:
 
 - Contents: read
+- Issues: write
 - Metadata: read
 - Pull requests: write
 - Webhooks: disabled
 
-Pull-request write access is required for bounded inline findings and the final review. Repair, issue, maintenance, contents-write, and merge authority remain disabled.
+Pull-request write access is required for bounded inline findings and the final review. Issues write access supports automatic triage by deferring a verified concern to an issue; it does not authorize issue implementation. Repair, issue implementation, maintenance, contents-write, and merge authority remain disabled.
 
 Rivet expects the repository variables `RIVET_APP_CLIENT_ID` and `RIVET_APP_BOT_LOGIN` plus the repository secret `RIVET_APP_PRIVATE_KEY`. The bot-login variable names the verified App slug and permits that App to trigger the review that follows a repair. The pinned gh-aw compiler uses the credentials to generate immutable `actions/create-github-app-token` steps for activation and safe outputs. Missing credentials fail token minting; Rivet does not fall back to differently named legacy App credentials.
 
@@ -53,7 +54,8 @@ rivet app-verify \
 
 Owner-authorized repair requires one explicit authority widening. After GitHub
 shows and applies the Contents permission change from read to write, verify the
-exact repair scope before enabling the repair workflow:
+exact repair scope before enabling the repair workflow. Issues remains write
+for automatic triage; Metadata read and Pull requests write are unchanged:
 
 ```bash
 rivet app-verify \
@@ -63,7 +65,7 @@ rivet app-verify \
   --repair
 ```
 
-The repair verifier rejects selected-repository drift, events, extra
+The repair verifier rejects selected-repository drift, events, extra or missing
 permissions, missing credential metadata, and any Contents permission other
 than write. Passing this command verifies authority only. Enable the verified
 repair workflow and assets with `rivet init --repair`, preferably through its

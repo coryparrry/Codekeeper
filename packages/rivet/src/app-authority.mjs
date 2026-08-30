@@ -22,16 +22,14 @@ export function reviewAppAuthority(configuration = DEFAULT_RIVET_CONFIG) {
   });
 }
 
-export function repairAppAuthority() {
+export function repairAppAuthority(configuration = DEFAULT_RIVET_CONFIG) {
+  const review = reviewAppAuthority(configuration);
   return Object.freeze({
-    clientIdVariable: RIVET_APP_CLIENT_ID_VARIABLE,
-    privateKeySecret: RIVET_APP_PRIVATE_KEY_SECRET,
+    ...review,
     permissions: Object.freeze({
+      ...review.permissions,
       contents: "write",
-      metadata: "read",
-      pullRequests: "write",
     }),
-    events: Object.freeze([]),
   });
 }
 

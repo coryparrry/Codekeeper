@@ -49,8 +49,4 @@ jobs:
         run: npm run pack:check
       - name: Publish to npm
         working-directory: packages/rivet
-        # npm requires a package to exist before its OIDC trusted publisher can be configured.
-        # Remove this bootstrap credential after the first publish and trust setup.
         run: npm publish --provenance --access public --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}

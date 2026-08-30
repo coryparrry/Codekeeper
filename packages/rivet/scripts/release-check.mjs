@@ -3,14 +3,18 @@ import { fileURLToPath } from "node:url";
 
 const packageUrl = new URL("../package.json", import.meta.url);
 const PACKAGE_NAME = "@coryparry/rivet";
-const PACKAGE_REPOSITORY = "git+https://github.com/coryparrry/Codekeeper.git";
+const PACKAGE_REPOSITORY = "git+https://github.com/coryparrry/Rivet.git";
 
 function fail(message) {
   throw new Error(`release-check: ${message}`);
 }
 
 export function tagForVersion(version) {
-  if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version)) {
+  if (
+    !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(
+      version,
+    )
+  ) {
     fail(`version must be a valid semver release, received ${version}`);
   }
   return `rivet-v${version}`;
@@ -45,5 +49,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     fail("usage: node scripts/release-check.mjs --tag rivet-v<version>");
   }
   const release = validateReleasePackage(await readPackage(), tag);
-  process.stdout.write(`${release.name}@${release.version} is ready for ${release.tag}\n`);
+  process.stdout.write(
+    `${release.name}@${release.version} is ready for ${release.tag}\n`,
+  );
 }

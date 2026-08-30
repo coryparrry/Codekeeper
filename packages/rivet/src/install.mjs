@@ -172,9 +172,10 @@ async function prepareInstallation({
 } = {}) {
   const root = path.resolve(repositoryRoot ?? process.cwd());
   const config = validateRivetConfig(configuration);
+  const reviewConfig = reviewConfiguration(mode, config);
   const productAuthority = productAuthoritySummary(config);
   const githubApp =
-    mode === "repair" ? repairAppAuthority() : reviewAppAuthority(config);
+    mode === "repair" ? repairAppAuthority(config) : reviewAppAuthority(config);
   const rootMetadata = await lstat(root);
   if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
     throw new Error("Rivet installer: repository root must be a directory");
@@ -188,7 +189,7 @@ async function prepareInstallation({
       `.github/workflows/${RIVET_REVIEW_WORKFLOW_ID}.md`,
       renderRivetReviewWorkflow({
         nativeImport: NATIVE_IMPORT,
-        configuration: reviewConfiguration(mode, config),
+        configuration: reviewConfig,
       }),
     );
     if (mode === "repair") {
@@ -255,15 +256,15 @@ async function prepareInstallation({
       );
       baselineFiles.set(
         ".github/rivet.json",
-        `${JSON.stringify(DEFAULT_RIVET_CONFIG, null, 2)}\n`,
+        `${JSON.stringify(reviewConfig, null, 2)}\n`,
       );
       baselineFiles.set(
         ".github/rivet/installation.json",
         installationReceipt({
           mode: "review",
-          config: DEFAULT_RIVET_CONFIG,
-          productAuthority: productAuthoritySummary(DEFAULT_RIVET_CONFIG),
-          githubApp: reviewAppAuthority(DEFAULT_RIVET_CONFIG),
+          config: reviewConfig,
+          productAuthority: productAuthoritySummary(reviewConfig),
+          githubApp: reviewAppAuthority(reviewConfig),
           files: new Map(
             [...baselineFiles].filter(
               ([relativePath]) =>

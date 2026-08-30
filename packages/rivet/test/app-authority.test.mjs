@@ -21,16 +21,14 @@ test("derives minimum review-only App authority", () => {
   });
 });
 
-test("derives owner-authorized repair App authority", () => {
+test("widens only Contents for owner-authorized repair", () => {
+  const review = reviewAppAuthority();
   assert.deepEqual(repairAppAuthority(), {
-    clientIdVariable: "RIVET_APP_CLIENT_ID",
-    privateKeySecret: "RIVET_APP_PRIVATE_KEY",
+    ...review,
     permissions: {
+      ...review.permissions,
       contents: "write",
-      metadata: "read",
-      pullRequests: "write",
     },
-    events: [],
   });
 });
 
@@ -58,6 +56,11 @@ test("does not request issue authority when triage is disabled", () => {
   configuration.issues.triage = "disabled";
   assert.deepEqual(reviewAppAuthority(configuration).permissions, {
     contents: "read",
+    metadata: "read",
+    pullRequests: "write",
+  });
+  assert.deepEqual(repairAppAuthority(configuration).permissions, {
+    contents: "write",
     metadata: "read",
     pullRequests: "write",
   });

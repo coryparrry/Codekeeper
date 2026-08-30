@@ -1,6 +1,6 @@
 {
   "name": "@coryparry/rivet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Rivet repository maintenance workflows",
   "keywords": [
     "ai-agent",
@@ -16,12 +16,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/coryparrry/Codekeeper.git"
+    "url": "git+https://github.com/coryparrry/Rivet.git"
   },
   "bugs": {
-    "url": "https://github.com/coryparrry/Codekeeper/issues"
+    "url": "https://github.com/coryparrry/Rivet/issues"
   },
-  "homepage": "https://github.com/coryparrry/Codekeeper#readme",
+  "homepage": "https://github.com/coryparrry/Rivet#readme",
   "type": "module",
   "bin": {
     "rivet": "bin/rivet.mjs"
@@ -36,9 +36,10 @@
   },
   "scripts": {
     "check": "npm run syntax && npm test",
-    "release:check": "node scripts/release-check.mjs",
+    "review-lock:check": "node scripts/check-review-lock.mjs",
+    "release:check": "npm run review-lock:check && node scripts/release-check.mjs",
     "pack:check": "npm pack --dry-run --json --ignore-scripts",
-    "syntax": "node --check bin/rivet.mjs && node --check scripts/release-check.mjs && node --check assets/repair/.github/rivet/actions/publish-repair/index.mjs && node --check assets/repair/.github/rivet/actions/validate-repair/index.mjs && node --check assets/review/.github/rivet/actions/authority-receipt/index.mjs && node --check src/app-authority.mjs && node --check src/app-setup.mjs && node --check src/cli.mjs && node --check src/config.mjs && node --check src/install.mjs && node --check src/repair-lineage.mjs && node --check src/setup-pr.mjs && node --check src/validation-runner.mjs && node --check src/gh-aw/binary.mjs && node --check src/gh-aw/compile.mjs && node --check src/gh-aw/inspect.mjs && node --check src/gh-aw/trust.mjs && node --check src/gh-aw/versions.mjs && node --check src/runtime-mirror.mjs && node --check src/workflows/repair.mjs && node --check src/workflows/review.mjs",
+    "syntax": "node --check bin/rivet.mjs && node --check scripts/check-review-lock.mjs && node --check scripts/release-check.mjs && node --check assets/repair/.github/rivet/actions/publish-repair/index.mjs && node --check assets/repair/.github/rivet/actions/validate-repair/index.mjs && node --check assets/review/.github/rivet/actions/authority-receipt/index.mjs && node --check src/app-authority.mjs && node --check src/app-setup.mjs && node --check src/cli.mjs && node --check src/config.mjs && node --check src/install.mjs && node --check src/repair-lineage.mjs && node --check src/setup-pr.mjs && node --check src/validation-runner.mjs && node --check src/gh-aw/binary.mjs && node --check src/gh-aw/compile.mjs && node --check src/gh-aw/inspect.mjs && node --check src/gh-aw/trust.mjs && node --check src/gh-aw/versions.mjs && node --check src/runtime-mirror.mjs && node --check src/workflows/repair.mjs && node --check src/workflows/review.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "publishConfig": {
