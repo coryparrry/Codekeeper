@@ -45,7 +45,7 @@ test("creates an explicit setup pull request", async () => {
     ],
     {
       stdout: stdout.stream,
-      createSetupPullRequestImpl: async (value) => {
+      createReviewSetupPullRequestImpl: async (value) => {
         options = value;
         return expected;
       },
@@ -56,6 +56,41 @@ test("creates an explicit setup pull request", async () => {
     dryRun: false,
     branch: "rivet/test",
   });
+  assert.equal(result, expected);
+});
+
+test("runs an explicit repair upgrade", async () => {
+  const stdout = output();
+  let options;
+  const expected = { mode: "repair", files: [] };
+  const result = await runCli(
+    ["init", "--repair", "--repository", "/repo", "--dry-run"],
+    {
+      stdout: stdout.stream,
+      installRepairImpl: async (value) => {
+        options = value;
+        return expected;
+      },
+    },
+  );
+  assert.deepEqual(options, { repositoryRoot: "/repo", dryRun: true });
+  assert.equal(result, expected);
+});
+
+test("creates an explicit repair setup pull request", async () => {
+  let options;
+  const expected = { pullRequestUrl: "https://github.com/acme/repo/pull/2" };
+  const result = await runCli(
+    ["init", "--repair", "--repository", "/repo", "--setup-pr"],
+    {
+      stdout: output().stream,
+      createRepairSetupPullRequestImpl: async (value) => {
+        options = value;
+        return expected;
+      },
+    },
+  );
+  assert.deepEqual(options, { repositoryRoot: "/repo", dryRun: false });
   assert.equal(result, expected);
 });
 
@@ -145,10 +180,10 @@ test("verifies an explicit repair App authority target", async () => {
 });
 
 test("rejects implicit modes and unknown arguments", async () => {
-  await assert.rejects(runCli(["init"]), /--review-only is required/);
+  await assert.rejects(runCli(["init"]), /an init mode is required/);
   await assert.rejects(
     runCli(["init", "--review-only", "--repair"]),
-    /unknown argument --repair/,
+    /choose one init mode/,
   );
   await assert.rejects(
     runCli(["init", "--review-only", "--dry-run", "--setup-pr"]),

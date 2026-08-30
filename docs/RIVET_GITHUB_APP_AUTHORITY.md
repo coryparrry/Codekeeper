@@ -65,8 +65,9 @@ rivet app-verify \
 
 The repair verifier rejects selected-repository drift, events, extra
 permissions, missing credential metadata, and any Contents permission other
-than write. Passing this command verifies authority only; it does not install
-or enable repair.
+than write. Passing this command verifies authority only. Enable the verified
+repair workflow and assets with `rivet init --repair`, preferably through its
+`--setup-pr` path.
 
 Verification fails unless all of these conditions hold:
 

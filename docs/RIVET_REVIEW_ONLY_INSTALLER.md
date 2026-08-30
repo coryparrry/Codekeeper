@@ -1,9 +1,10 @@
-# Rivet review-only installer core
+# Rivet review and repair installer
 
 ## Scope
 
-The first Rivet installer path manages review mode only. Repair, issue triage,
-maintenance, and merge behavior remain disabled in `.github/rivet.json`.
+Rivet installs review-only mode or enables owner-authorized repair on top of a
+verified review installation. Issue triage, maintenance, and merge behavior
+remain disabled in `.github/rivet.json`.
 
 ```bash
 rivet init --review-only --repository /path/to/repository --dry-run
@@ -22,6 +23,15 @@ rivet init --review-only --repository /path/to/repository --setup-pr
 Rivet creates `rivet/setup-review` by default. `--setup-branch <name>` selects a
 different unused branch.
 
+After the App passes `app-verify --repair`, preview the repair upgrade with:
+
+```bash
+rivet init --repair --repository /path/to/repository --dry-run
+```
+
+Removing `--dry-run` applies the verified plan. `--setup-pr` creates a draft
+upgrade pull request on `rivet/setup-repair` by default.
+
 ## Managed installation
 
 The installer renders and validates these Rivet-owned surfaces:
@@ -31,6 +41,10 @@ The installer renders and validates these Rivet-owned surfaces:
   managed-file inventory;
 - the review workflow Markdown source and compiled lock;
 - the local native import and dependency-free authority-receipt action.
+
+Repair mode also manages the repair workflow source and compiled lock plus the
+isolated validation and App-authenticated publication actions. Its receipt
+records Contents write authority and owner authorization explicitly.
 
 The package assets are the canonical extension source. Tests and installation
 use that same copy.
@@ -47,11 +61,15 @@ Before changing the adopter repository, Rivet:
    immutable action and container pins;
 6. compares every managed destination with the planned bytes;
 7. refuses any adopter-owned collision;
-8. writes only files that do not already exist.
+8. rechecks every destination immediately before applying the plan;
+9. creates new files and updates only exact bytes from the prior managed review
+   receipt.
 
-A compiler, validation, trust, or collision failure therefore occurs before
-the installer writes a managed file. Re-running an identical installation is
-idempotent and reports the files as unchanged.
+A compiler, validation, trust, collision, or stale-plan failure therefore
+occurs before the installer writes a managed file. Re-running an identical
+installation is idempotent and reports the files as unchanged. Repair upgrade
+refuses a modified review workflow, config, receipt, or repair asset; it has no
+generic overwrite option.
 
 The setup-PR path additionally requires a clean checkout whose `HEAD` exactly
 matches the fetched remote default branch. It commits only the managed paths,
@@ -67,8 +85,6 @@ The generated review workflow mints short-lived installation tokens from the
 The installer records the minimum review-only App authority, and `rivet
 app-plan` produces a private, webhook-free registration URL.
 
-Rivet does not yet upload the PEM, set the variable, install the App, or verify
-its effective repository permissions. Those human-controlled GitHub changes
-remain a separate layer on top of the verified setup PR. Until that layer lands
-and passes live adopter validation, this is not the milestone's one-command
-external-repository installation.
+`rivet app-configure` uploads the PEM as a repository secret and sets the
+verified variables. App creation and installation remain administrator-controlled
+GitHub operations. `rivet app-verify --repair` must pass before enabling repair.
