@@ -62,6 +62,7 @@ test("installs only the trusted Rivet review mode", async (t) => {
     privateKeySecret: "RIVET_APP_PRIVATE_KEY",
     permissions: {
       contents: "read",
+      issues: "write",
       metadata: "read",
       pullRequests: "write",
     },
@@ -75,6 +76,7 @@ test("installs only the trusted Rivet review mode", async (t) => {
   assert.equal(configuration.schemaVersion, 4);
   assert.equal(configuration.review.automatic, true);
   assert.equal(configuration.repair.authority, "never");
+  assert.equal(configuration.issues.triage, "automatic");
   assert.equal(configuration.merge.authority, "never");
   const installation = JSON.parse(
     await readFile(

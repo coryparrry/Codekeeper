@@ -9,7 +9,7 @@ export const DEFAULT_RIVET_CONFIG = Object.freeze({
     maximumFindings: 8,
   }),
   repair: Object.freeze({ authority: "never" }),
-  issues: Object.freeze({ triage: "disabled", implementation: "disabled" }),
+  issues: Object.freeze({ triage: "automatic", implementation: "disabled" }),
   maintenance: Object.freeze({ mode: "disabled" }),
   merge: Object.freeze({ authority: "never" }),
   models: Object.freeze({
@@ -144,17 +144,18 @@ export function reviewWorkflowProjection(value) {
   }
   if (
     config.repair.authority !== "never" ||
-    config.issues.triage !== "disabled" ||
+    config.issues.triage === "owner" ||
     config.issues.implementation !== "disabled" ||
     config.maintenance.mode !== "disabled"
   ) {
     throw new Error(
-      "Rivet config: review-only installation cannot enable mutation modes",
+      "Rivet config: review-only installation cannot enable unsupported mutation modes",
     );
   }
   return Object.freeze({
     ...config.review,
     ...config.models.review,
+    issueTriage: config.issues.triage === "automatic",
   });
 }
 

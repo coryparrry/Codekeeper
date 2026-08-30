@@ -51,9 +51,15 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /report-failure-as-issue: false/);
   assert.match(fixture, /report-failed-jobs: false/);
   assert.match(fixture, /report-incomplete:\n    create-issue: false/);
+  assert.match(
+    fixture,
+    /create-issue:\n    title-prefix: "\[rivet\] "\n    max: 1\n    deduplicate-by-title: true/,
+  );
   assert.match(fixture, new RegExp(NATIVE_IMPORT.replaceAll(".", "\\.")));
   assert.match(fixture, /Publish no more than 8 inline findings/);
   assert.match(fixture, /submit_pull_request_review/);
+  assert.match(fixture, /Triage each supported finding before publication/);
+  assert.match(fixture, /it does not authorize a repair or implementation/);
   assert.match(fixture, /call only `noop`/);
   assert.doesNotMatch(fixture, /  add-comment:/);
 });
@@ -67,6 +73,11 @@ test("projects domain review controls into gh-aw frontmatter", () => {
   assert.match(source, /inline findings are disabled/);
   assert.match(source, /allowed-events: \[COMMENT, REQUEST_CHANGES\]/);
   assert.match(source, /event `REQUEST_CHANGES`/);
+
+  configuration.issues.triage = "disabled";
+  const issueTriageDisabled = renderRivetReviewWorkflow({ configuration });
+  assert.doesNotMatch(issueTriageDisabled, /^  create-issue:/m);
+  assert.match(issueTriageDisabled, /issue triage is disabled/);
 });
 
 test("accepts only managed local native imports", () => {

@@ -5,6 +5,7 @@ import {
   reviewAppAuthority,
   reviewAppRegistrationUrl,
 } from "../src/app-authority.mjs";
+import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 
 test("derives minimum review-only App authority", () => {
   assert.deepEqual(reviewAppAuthority(), {
@@ -14,6 +15,7 @@ test("derives minimum review-only App authority", () => {
       contents: "read",
       metadata: "read",
       pullRequests: "write",
+      issues: "write",
     },
     events: [],
   });
@@ -47,7 +49,25 @@ test("builds a private webhook-free Rivet App registration URL", () => {
     contents: "read",
     pull_requests: "write",
     metadata: "read",
+    issues: "write",
   });
+});
+
+test("does not request issue authority when triage is disabled", () => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.issues.triage = "disabled";
+  assert.deepEqual(reviewAppAuthority(configuration).permissions, {
+    contents: "read",
+    metadata: "read",
+    pullRequests: "write",
+  });
+  const url = new URL(
+    reviewAppRegistrationUrl({
+      repository: "Acme/Widget",
+      configuration,
+    }).split("#")[0],
+  );
+  assert.equal(url.searchParams.has("issues"), false);
 });
 
 test("supports organization registration and rejects unsafe inputs", () => {

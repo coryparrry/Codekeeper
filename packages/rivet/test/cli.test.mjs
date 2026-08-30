@@ -103,6 +103,7 @@ test("prints a review-only GitHub App plan", async () => {
   assert.equal(result.repository, "Acme/Widget");
   assert.deepEqual(result.authority.permissions, {
     contents: "read",
+    issues: "write",
     metadata: "read",
     pullRequests: "write",
   });

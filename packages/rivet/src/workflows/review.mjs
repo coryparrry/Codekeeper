@@ -35,19 +35,30 @@ function inlineFindingsFrontmatter({ inlineFindings, maximumFindings }) {
   return `  create-pull-request-review-comment:\n    max: ${maximumFindings}\n`;
 }
 
+function issueTriageFrontmatter({ issueTriage }) {
+  if (!issueTriage) return "";
+  return `  create-issue:\n    title-prefix: "[rivet] "\n    max: 1\n    deduplicate-by-title: true\n`;
+}
+
 function publicationContract({
   inlineFindings,
   maximumFindings,
   requestChanges,
+  issueTriage,
 }) {
   const inline = inlineFindings
     ? `For each supported finding, call \`create_pull_request_review_comment\` once on the smallest relevant changed line. Publish no more than ${maximumFindings} inline findings.`
     : "Do not call `create_pull_request_review_comment`; inline findings are disabled.";
   const event = requestChanges ? "REQUEST_CHANGES" : "COMMENT";
+  const triage = issueTriage
+    ? `Triage each supported finding before publication. Keep findings that should be fixed in this pull request as inline review comments. When one verified concern is outside this pull request or needs a separate owner decision, defer it by calling \`create_issue\` once. The issue must state the concrete evidence, why it is deferred, and the source pull request; it does not authorize a repair or implementation.`
+    : "Do not call `create_issue`; issue triage is disabled.";
   return `## Publication contract
 
 ${inline}
 After publishing supported findings, call \`submit_pull_request_review\` once with event \`${event}\` and a compact summary that does not duplicate the inline comments.
+
+${triage}
 
 If the change has no supported actionable finding, call only \`noop\` with a concise no-action reason. Do not publish a comment or review merely to appear useful.
 
@@ -83,7 +94,7 @@ ${safeOutputsAppFrontmatter()}  report-failure-as-issue: false
     create-issue: false
 ${inlineFindingsFrontmatter(review)}  submit-pull-request-review:
     allowed-events: [${reviewEvents}]
----
+${issueTriageFrontmatter(review)}---
 
 # Rivet pull request review
 
