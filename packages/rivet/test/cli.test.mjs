@@ -59,6 +59,31 @@ test("creates an explicit setup pull request", async () => {
   assert.equal(result, expected);
 });
 
+test("prints a review-only GitHub App plan", async () => {
+  const stdout = output();
+  const result = await runCli(
+    [
+      "app-plan",
+      "--repository",
+      "Acme/Widget",
+      "--owner-type",
+      "Organization",
+    ],
+    { stdout: stdout.stream },
+  );
+  assert.equal(result.repository, "Acme/Widget");
+  assert.deepEqual(result.authority.permissions, {
+    contents: "read",
+    metadata: "read",
+    pullRequests: "write",
+  });
+  assert.match(
+    result.registrationUrl,
+    /^https:\/\/github\.com\/organizations\/Acme\/settings\/apps\/new\?/,
+  );
+  assert.deepEqual(JSON.parse(stdout.read()), result);
+});
+
 test("rejects implicit modes and unknown arguments", async () => {
   await assert.rejects(runCli(["init"]), /--review-only is required/);
   await assert.rejects(
@@ -74,4 +99,5 @@ test("rejects implicit modes and unknown arguments", async () => {
     /requires --setup-pr/,
   );
   await assert.rejects(runCli(["install"]), /unknown command/);
+  await assert.rejects(runCli(["app-plan"]), /--repository is required/);
 });

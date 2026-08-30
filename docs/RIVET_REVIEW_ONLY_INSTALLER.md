@@ -59,10 +59,15 @@ pushes that exact commit to a previously unused branch, creates a draft pull
 request, and verifies its base, head, commit, draft state, and URL. It never
 requests a merge.
 
-## Deliberate boundary
+## GitHub App boundary
 
-The installer still does not create or widen a GitHub App, store secrets, or
-verify an App installation. Those authority changes remain separate layers on
-top of the verified setup PR. Until those layers land and pass live adopter
-validation, this is not the milestone’s one-command external-repository
-installation.
+The generated review workflow mints short-lived installation tokens from the
+`RIVET_APP_CLIENT_ID` repository variable and `RIVET_APP_PRIVATE_KEY` secret.
+The installer records the minimum review-only App authority, and `rivet
+app-plan` produces a private, webhook-free registration URL.
+
+Rivet does not yet upload the PEM, set the variable, install the App, or verify
+its effective repository permissions. Those human-controlled GitHub changes
+remain a separate layer on top of the verified setup PR. Until that layer lands
+and passes live adopter validation, this is not the milestone's one-command
+external-repository installation.

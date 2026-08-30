@@ -1,8 +1,34 @@
+import {
+  reviewAppAuthority,
+  reviewAppRegistrationUrl,
+} from "./app-authority.mjs";
 import { installReview } from "./install.mjs";
 import { createReviewSetupPullRequest } from "./setup-pr.mjs";
 
 function usage() {
-  return "Usage: rivet init --review-only [--repository <path>] [--dry-run | --setup-pr] [--setup-branch <name>]";
+  return "Usage:\n  rivet init --review-only [--repository <path>] [--dry-run | --setup-pr] [--setup-branch <name>]\n  rivet app-plan --repository <owner/repository> [--owner-type <User|Organization>]";
+}
+
+function parseAppPlan(args) {
+  const options = { ownerType: "User" };
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--repository" && args[index + 1]) {
+      options.repository = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument === "--owner-type" && args[index + 1]) {
+      options.ownerType = args[index + 1];
+      index += 1;
+      continue;
+    }
+    throw new Error(`Rivet: unknown argument ${argument}\n${usage()}`);
+  }
+  if (!options.repository) {
+    throw new Error(`Rivet: --repository is required\n${usage()}`);
+  }
+  return options;
 }
 
 function parseInit(args) {
@@ -53,6 +79,16 @@ export async function runCli(
   } = {},
 ) {
   const [command, ...args] = argv;
+  if (command === "app-plan") {
+    const options = parseAppPlan(args);
+    const result = Object.freeze({
+      repository: options.repository,
+      authority: reviewAppAuthority(),
+      registrationUrl: reviewAppRegistrationUrl(options),
+    });
+    stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result;
+  }
   if (command !== "init") throw new Error(`Rivet: unknown command\n${usage()}`);
   const options = parseInit(args);
   const { setupPullRequest, ...installationOptions } = options;

@@ -9,6 +9,9 @@ permissions:
 checkout: false
 engine: codex
 model: gpt-5.6-luna
+github-app:
+  client-id: ${{ vars.RIVET_APP_CLIENT_ID }}
+  private-key: ${{ secrets.RIVET_APP_PRIVATE_KEY }}
 inlined-imports: true
 imports:
   - .github/rivet/aw/review-extension.md

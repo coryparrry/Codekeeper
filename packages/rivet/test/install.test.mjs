@@ -49,6 +49,16 @@ test("installs only the trusted Rivet review mode", async (t) => {
 
   assert.equal(result.mode, "review");
   assert.equal(result.dryRun, false);
+  assert.deepEqual(result.githubApp, {
+    clientIdVariable: "RIVET_APP_CLIENT_ID",
+    privateKeySecret: "RIVET_APP_PRIVATE_KEY",
+    permissions: {
+      contents: "read",
+      metadata: "read",
+      pullRequests: "write",
+    },
+    events: [],
+  });
   assert.equal(result.files.length, 7);
   assert.ok(result.files.every(({ status }) => status === "create"));
   const configuration = JSON.parse(
@@ -67,6 +77,7 @@ test("installs only the trusted Rivet review mode", async (t) => {
   assert.equal(installation.product, "Rivet");
   assert.equal(installation.configSchemaVersion, 4);
   assert.deepEqual(installation.productAuthority, result.productAuthority);
+  assert.deepEqual(installation.githubApp, result.githubApp);
   assert.equal(installation.compiler.version, "0.86.2");
   assert.deepEqual(
     installation.managedFiles,
