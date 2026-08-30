@@ -19,6 +19,19 @@ export function reviewAppAuthority(configuration = DEFAULT_RIVET_CONFIG) {
   });
 }
 
+export function repairAppAuthority() {
+  return Object.freeze({
+    clientIdVariable: RIVET_APP_CLIENT_ID_VARIABLE,
+    privateKeySecret: RIVET_APP_PRIVATE_KEY_SECRET,
+    permissions: Object.freeze({
+      contents: "write",
+      metadata: "read",
+      pullRequests: "write",
+    }),
+    events: Object.freeze([]),
+  });
+}
+
 export function reviewAppRegistrationUrl({
   repository,
   ownerType = "User",
