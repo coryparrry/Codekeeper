@@ -1,5 +1,10 @@
 # Codekeeper documentation
 
+The product is migrating to Rivet. The migration authority and delivery gates
+are defined in [RIVET_GH_AW_MIGRATION.md](RIVET_GH_AW_MIGRATION.md), with the
+legacy comparison checkpoint in
+[RIVET_LEGACY_BASELINE.md](RIVET_LEGACY_BASELINE.md).
+
 | Document                                            | Type        | Purpose                                                                                           |
 | --------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
 | [Installation](../INSTALL.md)                       | How-to      | Evaluate a local package and prove an installation.                                               |
