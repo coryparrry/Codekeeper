@@ -2,32 +2,17 @@ import {
   RIVET_APP_CLIENT_ID_VARIABLE,
   RIVET_APP_PRIVATE_KEY_SECRET,
 } from "../app-authority.mjs";
+import { normalizeValidationCommands } from "../validation-runner.mjs";
 
 export const RIVET_REPAIR_WORKFLOW_ID = "rivet-repair";
 
 function validationCommands(commands) {
-  if (
-    !Array.isArray(commands) ||
-    commands.length < 1 ||
-    commands.length > 10 ||
-    commands.some(
-      (command) =>
-        typeof command !== "string" ||
-        command.length < 1 ||
-        command.length > 256 ||
-        /[\0\r\n`]/.test(command),
-    )
-  ) {
-    throw new Error(
-      "Rivet repair workflow requires 1 to 10 bounded validation commands",
-    );
-  }
-  return commands.map((command) => `- \`${command}\``).join("\n");
+  return normalizeValidationCommands(commands)
+    .map((command) => `- \`${command}\``)
+    .join("\n");
 }
 
-export function renderRivetRepairWorkflow({
-  validation = ["npm test"],
-} = {}) {
+export function renderRivetRepairWorkflow({ validation = ["npm test"] } = {}) {
   const commands = validationCommands(validation);
   return `---
 name: Rivet pull request repair
