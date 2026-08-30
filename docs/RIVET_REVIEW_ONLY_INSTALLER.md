@@ -12,6 +12,16 @@ rivet init --review-only --repository /path/to/repository --dry-run
 Removing `--dry-run` writes the reviewed plan. The repository path must already
 exist; Rivet does not create a repository when a path is mistyped.
 
+To create a reviewable setup change from a clean checkout of the remote default
+branch:
+
+```bash
+rivet init --review-only --repository /path/to/repository --setup-pr
+```
+
+Rivet creates `rivet/setup-review` by default. `--setup-branch <name>` selects a
+different unused branch.
+
 ## Managed installation
 
 The installer renders and validates these Rivet-owned surfaces:
@@ -43,10 +53,16 @@ A compiler, validation, trust, or collision failure therefore occurs before
 the installer writes a managed file. Re-running an identical installation is
 idempotent and reports the files as unchanged.
 
+The setup-PR path additionally requires a clean checkout whose `HEAD` exactly
+matches the fetched remote default branch. It commits only the managed paths,
+pushes that exact commit to a previously unused branch, creates a draft pull
+request, and verifies its base, head, commit, draft state, and URL. It never
+requests a merge.
+
 ## Deliberate boundary
 
-This PR establishes the local installer core. It does not create or widen a
-GitHub App, store secrets, create a setup branch, or open a pull request. Those
-are external authority changes and remain separate layers on top of the
-verified local plan. Until those layers land and pass live adopter validation,
-this is not the milestone’s one-command external-repository installation.
+The installer still does not create or widen a GitHub App, store secrets, or
+verify an App installation. Those authority changes remain separate layers on
+top of the verified setup PR. Until those layers land and pass live adopter
+validation, this is not the milestone’s one-command external-repository
+installation.

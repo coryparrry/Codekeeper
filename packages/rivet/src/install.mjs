@@ -40,6 +40,15 @@ async function writeFiles(root, files) {
   }
 }
 
+export async function applyReviewInstallation(plan) {
+  await writeFiles(
+    plan.repositoryRoot,
+    plan.files
+      .filter(({ status }) => status === "create")
+      .map(({ path: relativePath, content }) => [relativePath, content]),
+  );
+}
+
 async function assetFiles() {
   return new Map(
     await Promise.all(
@@ -180,14 +189,7 @@ export async function prepareReviewInstallation({
 
 export async function installReview(options = {}) {
   const plan = await prepareReviewInstallation(options);
-  if (!options.dryRun) {
-    await writeFiles(
-      plan.repositoryRoot,
-      plan.files
-        .filter(({ status }) => status === "create")
-        .map(({ path: relativePath, content }) => [relativePath, content]),
-    );
-  }
+  if (!options.dryRun) await applyReviewInstallation(plan);
   return Object.freeze({
     repositoryRoot: plan.repositoryRoot,
     mode: plan.mode,
