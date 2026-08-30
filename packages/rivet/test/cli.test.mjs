@@ -84,6 +84,42 @@ test("prints a review-only GitHub App plan", async () => {
   assert.deepEqual(JSON.parse(stdout.read()), result);
 });
 
+for (const [command, dependency] of [
+  ["app-configure", "configureReviewAppImpl"],
+  ["app-verify", "verifyReviewAppImpl"],
+]) {
+  test(`runs ${command} with explicit credential inputs`, async () => {
+    const stdout = output();
+    let received;
+    const expected = { repository: "Acme/Widget", verified: true };
+    const result = await runCli(
+      [
+        command,
+        "--repository",
+        "Acme/Widget",
+        "--client-id",
+        "Iv123456789012345678",
+        "--private-key-file",
+        "/keys/rivet.pem",
+      ],
+      {
+        stdout: stdout.stream,
+        [dependency]: async (options) => {
+          received = options;
+          return expected;
+        },
+      },
+    );
+    assert.deepEqual(received, {
+      repository: "Acme/Widget",
+      clientId: "Iv123456789012345678",
+      privateKeyPath: "/keys/rivet.pem",
+    });
+    assert.equal(result, expected);
+    assert.deepEqual(JSON.parse(stdout.read()), expected);
+  });
+}
+
 test("rejects implicit modes and unknown arguments", async () => {
   await assert.rejects(runCli(["init"]), /--review-only is required/);
   await assert.rejects(
@@ -100,4 +136,8 @@ test("rejects implicit modes and unknown arguments", async () => {
   );
   await assert.rejects(runCli(["install"]), /unknown command/);
   await assert.rejects(runCli(["app-plan"]), /--repository is required/);
+  await assert.rejects(
+    runCli(["app-configure", "--repository", "Acme/Widget"]),
+    /--client-id is required/,
+  );
 });
