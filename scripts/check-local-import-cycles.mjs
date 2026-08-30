@@ -12,20 +12,7 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 const FACADE_KEYS = "domain,facade";
 
-export const COMPATIBILITY_FACADES = Object.freeze([
-  Object.freeze({
-    facade: "tools/codekeeper/src/lib/github.mjs",
-    domain: "tools/codekeeper/src/lib/github",
-  }),
-  Object.freeze({
-    facade: "tools/codekeeper/src/lib/publish.mjs",
-    domain: "tools/codekeeper/src/lib/publish",
-  }),
-  Object.freeze({
-    facade: "tools/codekeeper/src/cli.mjs",
-    domain: "tools/codekeeper/src/cli-heavy.mjs",
-  }),
-]);
+export const COMPATIBILITY_FACADES = Object.freeze([]);
 
 function fail(message) {
   throw new Error(`Local import cycle: ${message}`);
@@ -81,7 +68,7 @@ export function localImportSpecifiers(source) {
 }
 
 export function validateCompatibilityFacades(facades = COMPATIBILITY_FACADES) {
-  if (!Array.isArray(facades) || facades.length === 0) fail("facade inventory must be a non-empty array");
+  if (!Array.isArray(facades)) fail("facade inventory must be an array");
   const seenFacades = new Set();
   const seenDomains = new Set();
   const validated = [];
