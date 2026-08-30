@@ -277,7 +277,10 @@ async function verifyApp(
     metadata: installation?.permissions?.metadata,
     pullRequests: installation?.permissions?.pull_requests,
   };
-  if (installation?.permissions?.issues !== "none") {
+  if (
+    installation?.permissions?.issues &&
+    installation.permissions.issues !== "none"
+  ) {
     actualPermissions.issues = installation.permissions.issues;
   }
   const extraPermissions = Object.entries(installation?.permissions ?? {})

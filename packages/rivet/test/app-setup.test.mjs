@@ -250,6 +250,29 @@ test("accepts an issue-free App when review triage is disabled", async (t) => {
   });
 });
 
+test("reports malformed installation permissions as an authority mismatch", async (t) => {
+  const { privateKeyPath } = await keyFixture(t);
+  await assert.rejects(
+    verifyReviewApp({
+      repository: REPOSITORY,
+      clientId: CLIENT_ID,
+      privateKeyPath,
+      fetchImpl: async (url) =>
+        url.endsWith("/app")
+          ? response(app())
+          : response(installation({ permissions: null })),
+      run: async (args) =>
+        args[0] === "variable"
+          ? JSON.stringify([
+              { name: "RIVET_APP_CLIENT_ID", value: CLIENT_ID },
+              { name: "RIVET_APP_BOT_LOGIN", value: "rivet-review" },
+            ])
+          : JSON.stringify([{ name: "RIVET_APP_PRIVATE_KEY" }]),
+    }),
+    /effective installation authority does not match the review plan/,
+  );
+});
+
 test("verifies exact repair App authority after an explicit widening", async (t) => {
   const { privateKeyPath } = await keyFixture(t);
   const result = await verifyRepairApp({
