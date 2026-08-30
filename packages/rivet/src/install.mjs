@@ -169,6 +169,7 @@ async function prepareInstallation({
   validation = ["npm test"],
   compileWorkflow = compileGhAwWorkflow,
   validateWorkflow = validateGhAwWorkflow,
+  env,
 } = {}) {
   const root = path.resolve(repositoryRoot ?? process.cwd());
   const config = validateRivetConfig(configuration);
@@ -214,11 +215,13 @@ async function prepareInstallation({
         repositoryRoot: stagingRoot,
         workflowId,
         binaryPath,
+        env,
       });
       await compileWorkflow({
         repositoryRoot: stagingRoot,
         workflowId,
         binaryPath,
+        env,
       });
       const lockPath = `.github/workflows/${workflowId}.lock.yml`;
       files.set(

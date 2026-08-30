@@ -115,6 +115,23 @@ test("validates one workflow with machine-readable strict output", async () => {
   ]);
 });
 
+test("runs the pinned compiler with the supplied sanitized environment", async () => {
+  const env = { PATH: "/usr/bin", GH_HOST: "github.com" };
+  let commandOptions;
+  await validateGhAwWorkflow({
+    repositoryRoot: "/repository",
+    workflowId: "rivet-review",
+    binaryPath: "/cache/gh-aw",
+    env,
+    execFileImpl: async (_binary, _args, options) => {
+      commandOptions = options;
+      return { stdout: successReport({ compiled: false }), stderr: "" };
+    },
+  });
+
+  assert.equal(commandOptions.env, env);
+});
+
 test("rejects invalid workflow ids and compiler reports", async () => {
   await assert.rejects(
     compileGhAwWorkflow({

@@ -6,7 +6,11 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { createReviewSetupPullRequest } from "../src/setup-pr.mjs";
+import { prepareReviewInstallation } from "../src/install.mjs";
+import {
+  createReviewSetupPullRequest,
+  repositoryFromGitHubOrigin,
+} from "../src/setup-pr.mjs";
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_ROOT = path.resolve(
@@ -62,6 +66,9 @@ function runner(calls) {
         defaultBranchRef: { name: "main" },
       });
     }
+    if (command === "git" && args[0] === "remote") {
+      return "https://github.com/acme/example.git";
+    }
     if (command === "gh" && args[0] === "pr" && args[1] === "create") {
       return "https://github.com/acme/example/pull/17";
     }
@@ -78,6 +85,27 @@ function runner(calls) {
     return git(cwd, args);
   };
 }
+
+test("accepts only exact github.com origin identities", () => {
+  for (const remote of [
+    "https://github.com/acme/example.git",
+    "ssh://git@github.com/acme/example.git",
+    "git@github.com:acme/example.git",
+  ]) {
+    assert.equal(repositoryFromGitHubOrigin(remote), "acme/example");
+  }
+  for (const remote of [
+    "https://github.example/acme/example.git",
+    "https://token@github.com/acme/example.git",
+    "git@github.com:acme/../example.git",
+    "/tmp/example.git",
+  ]) {
+    assert.throws(
+      () => repositoryFromGitHubOrigin(remote),
+      /origin must be an exact github\.com repository URL/,
+    );
+  }
+});
 
 test("creates a verified draft setup pull request without merging", async (t) => {
   const { root, remote } = await repository(t);
@@ -126,6 +154,32 @@ test("creates a verified draft setup pull request without merging", async (t) =>
     pullRequestCall[1][pullRequestCall[1].indexOf("--body") + 1],
     /Merge is impossible/,
   );
+});
+
+test("reuses a prepared review plan without compiling it again", async (t) => {
+  const { root } = await repository(t);
+  let compileCalls = 0;
+  const preparedPlan = await prepareReviewInstallation({
+    repositoryRoot: root,
+    compileWorkflow: async (options) => {
+      compileCalls += 1;
+      await fixtureCompiler(options);
+    },
+    validateWorkflow: async () => {},
+  });
+
+  const result = await createReviewSetupPullRequest({
+    preparedPlan,
+    branch: "rivet/setup-test",
+    compileWorkflow: async () => {
+      throw new Error("prepared plan should not be compiled again");
+    },
+    validateWorkflow: async () => {},
+    run: runner([]),
+  });
+
+  assert.equal(compileCalls, 1);
+  assert.equal(result.branch, "rivet/setup-test");
 });
 
 test("refuses setup from a dirty repository before creating a branch", async (t) => {
