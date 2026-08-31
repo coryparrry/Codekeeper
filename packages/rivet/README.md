@@ -37,6 +37,21 @@ and it keeps no local copy. An exported value is read only to pass it to
 `gh secret set` over standard input. Review starts with least authority. Repair
 is a separate, explicit App authority upgrade.
 
+## Maintenance reports
+
+The repository-auditor identity supports a manual or weekly report-only
+maintenance run. It produces a validated JSON artifact for review and does not
+create an issue, pull request, comment, commit, label, or merge. It needs no
+GitHub App permission; use the configured `models.review` engine and model
+(Codex `gpt-5.6-luna` by default).
+
+```bash
+npx @coryparry/rivet init --review-only --maintenance scheduled --setup-pr
+```
+
+Use `--maintenance disabled` to remove a previously enabled Rivet-owned
+maintenance workflow.
+
 ## Issue triage
 
 With `issues.triage` set to `automatic`, Rivet installs a workflow for newly

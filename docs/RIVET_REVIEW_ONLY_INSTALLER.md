@@ -3,9 +3,10 @@
 ## Scope
 
 Rivet installs review-only mode with automatic issue triage or enables
-owner-authorized repair on top of a verified review installation. Issue
-implementation, maintenance, and merge behavior remain disabled in
-`.github/rivet.json`.
+owner-authorized repair on top of a verified review installation. Maintenance
+is a separate manual or weekly report-only artifact; it has no GitHub App
+permission or mutation path. Issue implementation and merge behavior remain
+disabled in `.github/rivet.json`.
 
 ```bash
 rivet init --review-only --repository /path/to/repository --dry-run
@@ -38,8 +39,9 @@ upgrade pull request on `rivet/setup-repair` by default.
 The installer renders and validates these Rivet-owned surfaces:
 
 - `.github/rivet.json` with review and automatic issue triage enabled, issue
-  implementation, maintenance, and merge disabled, and repair either disabled
-  in review-only mode or owner-authorized in repair mode;
+  implementation and merge disabled, optional report-only maintenance, and
+  repair either disabled in review-only mode or owner-authorized in repair
+  mode;
 - `.github/rivet/installation.json` with the compiler/action receipt and exact
   managed-file inventory;
 - the review workflow Markdown source and compiled lock;
@@ -54,6 +56,11 @@ write, and records owner authorization explicitly.
 
 The package assets are the canonical extension source. Tests and installation
 use that same copy.
+
+When maintenance is enabled, the installer manages the scheduled or manual
+report-only workflow and its validator action. The workflow uses the packaged
+`repository-auditor` identity, uploads the validated artifact, and adds no App
+authority or mutation path.
 
 ## Safety order
 

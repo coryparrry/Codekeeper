@@ -163,8 +163,23 @@ npx @coryparry/rivet init --repair --setup-pr
 
 The default branch is `rivet/setup-repair`. After that pull request merges, a
 repository administrator can post the exact `/rivet-repair` command on an
-eligible pull request. Issue implementation, maintenance, and merge remain
-disabled in the shipped configuration; Rivet never merges.
+eligible pull request. Issue implementation and merge remain disabled; Rivet
+never merges.
+
+### Report-only maintenance
+
+Maintenance is disabled by default. Enable a manual or weekly audit in the
+setup pull request without adding GitHub App authority:
+
+```bash
+npx @coryparry/rivet init --review-only --maintenance scheduled --setup-pr
+```
+
+Use `manual` instead of `scheduled` to omit the weekly trigger. Both modes run
+the repository-auditor identity on the default branch and retain one validated
+seven-day JSON artifact. They cannot create or change GitHub objects or code.
+Use `--maintenance disabled` to remove an existing Rivet-owned maintenance
+workflow through the same verified setup flow.
 
 ## Prove the first live review
 
@@ -177,7 +192,8 @@ independently required.
 
 ## Supported limits
 
-- Issue implementation, maintenance, and merge remain disabled.
+- Issue implementation and merge remain disabled.
+- Maintenance is disabled by default and report-only when enabled.
 - Persistent shared self-hosted runners are outside the supported trust
   boundary.
 - Repair must use repository-specific deterministic validation commands; the
