@@ -5,6 +5,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   renderRivetReviewWorkflow,
+  renderRivetReviewWorkflowV012,
+  RIVET_REVIEW_NATIVE_IMPORTS,
   RIVET_REVIEW_WORKFLOW_ID,
 } from "../src/workflows/review.mjs";
 import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
@@ -13,7 +15,7 @@ const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const NATIVE_IMPORT = ".github/rivet/aw/review-extension.md";
+const LEGACY_NATIVE_IMPORTS = [".github/rivet/aw/review-extension.md"];
 
 test("renders the checked-in Rivet review workflow source", async () => {
   const fixture = await readFile(
@@ -28,10 +30,7 @@ test("renders the checked-in Rivet review workflow source", async () => {
     ),
     "utf8",
   );
-  assert.equal(
-    renderRivetReviewWorkflow({ nativeImport: NATIVE_IMPORT }),
-    fixture,
-  );
+  assert.equal(renderRivetReviewWorkflow(), fixture);
   assert.doesNotMatch(fixture, /Codekeeper/i);
   assert.match(fixture, /pull_request_target:/);
   assert.match(fixture, /bots: \[\"\$\{\{ vars\.RIVET_APP_BOT_LOGIN \}\}\"\]/);
@@ -55,7 +54,10 @@ test("renders the checked-in Rivet review workflow source", async () => {
     fixture,
     /create-issue:\n    title-prefix: "\[rivet\] "\n    max: 1\n    deduplicate-by-title: true/,
   );
-  assert.match(fixture, new RegExp(NATIVE_IMPORT.replaceAll(".", "\\.")));
+  assert.match(
+    fixture,
+    /imports:\n  - \.github\/rivet\/agents\/pr-reviewer\.md\n  - \.github\/rivet\/aw\/review-extension\.md/,
+  );
   assert.match(fixture, /Publish no more than 8 inline findings/);
   assert.match(fixture, /submit_pull_request_review/);
   assert.match(fixture, /Triage each supported finding before publication/);
@@ -81,7 +83,18 @@ test("projects domain review controls into gh-aw frontmatter", () => {
 });
 
 test("accepts only managed local native imports", () => {
-  assert.doesNotMatch(renderRivetReviewWorkflow(), /^imports:/m);
+  assert.deepEqual(RIVET_REVIEW_NATIVE_IMPORTS, [
+    ".github/rivet/agents/pr-reviewer.md",
+    ".github/rivet/aw/review-extension.md",
+  ]);
+  assert.doesNotMatch(
+    renderRivetReviewWorkflow({ nativeImports: [] }),
+    /^imports:/m,
+  );
+  assert.match(
+    renderRivetReviewWorkflow({ nativeImports: LEGACY_NATIVE_IMPORTS }),
+    /imports:\n  - \.github\/rivet\/aw\/review-extension\.md/,
+  );
   for (const nativeImport of [
     "../other.md",
     ".github/other.md",
@@ -90,8 +103,22 @@ test("accepts only managed local native imports", () => {
     ".github/rivet/aw/group/.md",
   ]) {
     assert.throws(
-      () => renderRivetReviewWorkflow({ nativeImport }),
+      () => renderRivetReviewWorkflow({ nativeImports: [nativeImport] }),
       /must be a managed local Markdown path/,
     );
   }
+  assert.throws(
+    () => renderRivetReviewWorkflow({ nativeImports: null }),
+    /must be an ordered array/,
+  );
+});
+
+test("freezes the 0.1.2 review source used for upgrades", async () => {
+  assert.equal(
+    renderRivetReviewWorkflowV012(),
+    await readFile(
+      path.join(PACKAGE_ROOT, "test/fixtures/v0.1.2/rivet-review.md"),
+      "utf8",
+    ),
+  );
 });

@@ -3,8 +3,12 @@ import {
   RIVET_APP_PRIVATE_KEY_SECRET,
 } from "../app-authority.mjs";
 import { normalizeValidationCommands } from "../validation-runner.mjs";
+import { nativeImportsFrontmatter } from "./review.mjs";
 
 export const RIVET_REPAIR_WORKFLOW_ID = "rivet-repair";
+export const RIVET_REPAIR_NATIVE_IMPORTS = Object.freeze([
+  ".github/rivet/agents/fixer.md",
+]);
 
 function validationCommands(commands) {
   return normalizeValidationCommands(commands)
@@ -18,7 +22,10 @@ function encodedValidationCommands(commands) {
   ).toString("base64");
 }
 
-export function renderRivetRepairWorkflow({ validation = ["npm test"] } = {}) {
+export function renderRivetRepairWorkflow({
+  nativeImports = RIVET_REPAIR_NATIVE_IMPORTS,
+  validation = ["npm test"],
+} = {}) {
   const commands = validationCommands(validation);
   const encodedCommands = encodedValidationCommands(validation);
   return `---
@@ -36,7 +43,7 @@ checkout:
   fetch-depth: 0
 engine: codex
 model: gpt-5.6-luna
-safe-outputs:
+${nativeImportsFrontmatter(nativeImports)}safe-outputs:
   max-patch-files: 25
   report-failure-as-issue: false
   report-failed-jobs: false
@@ -111,4 +118,10 @@ Prepare one unified diff that modifies only existing, non-protected files. Do no
 
 Call \`validate_repair\` exactly once with the patch, then call \`publish_repair\` exactly once with confirmation \`publish-validated-repair\`. Rivet validates without write credentials on an isolated runner. A second runner independently binds the App-authored review and owner authorization to the unchanged head, accepts only the immutable validated artifact, and publishes one App-authored commit. The automatic review workflow will review the resulting head.
 `;
+}
+
+export function renderRivetRepairWorkflowV012({
+  validation = ["npm test"],
+} = {}) {
+  return renderRivetRepairWorkflow({ nativeImports: [], validation });
 }

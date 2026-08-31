@@ -14,6 +14,7 @@ const CONTRACT_PATH = path.join(
   "aw",
   "review-extension.md",
 );
+const PROFILE_PATH = path.join(".github", "rivet", "agents", "pr-reviewer.md");
 
 async function readContract(root) {
   return readFile(path.join(PACKAGE_ROOT, root, CONTRACT_PATH), "utf8");
@@ -26,6 +27,37 @@ test("keeps the packaged and compiled review contracts identical", async () => {
   ]);
   assert.equal(asset, fixture);
   assert.doesNotMatch(asset, /Codekeeper/i);
+});
+
+test("keeps the canonical reviewer profile ahead of the Rivet contract", async () => {
+  const [asset, fixture, lock] = await Promise.all([
+    readFile(
+      path.join(PACKAGE_ROOT, "assets", "agents", "pr-reviewer.md"),
+      "utf8",
+    ),
+    readFile(
+      path.join(PACKAGE_ROOT, "test", "fixtures", "review", PROFILE_PATH),
+      "utf8",
+    ),
+    readFile(
+      path.join(
+        PACKAGE_ROOT,
+        "test",
+        "fixtures",
+        "review",
+        ".github",
+        "workflows",
+        "rivet-review.lock.yml",
+      ),
+      "utf8",
+    ),
+  ]);
+  assert.equal(asset, fixture);
+  assert.ok(
+    lock.indexOf("# Pull request reviewer profile") <
+      lock.indexOf("# Rivet review contract"),
+  );
+  assert.match(lock, /Profile version: 8/);
 });
 
 test("freezes the Rivet review evidence and finding gates", async () => {

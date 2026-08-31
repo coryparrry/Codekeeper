@@ -14,7 +14,6 @@ engine: codex
 model: gpt-5.6-luna
 inlined-imports: true
 imports:
-  - .github/rivet/agents/pr-reviewer.md
   - .github/rivet/aw/review-extension.md
 safe-outputs:
   github-app:
