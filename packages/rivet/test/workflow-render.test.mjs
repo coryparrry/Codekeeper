@@ -80,6 +80,11 @@ test("projects domain review controls into gh-aw frontmatter", () => {
   const issueTriageDisabled = renderRivetReviewWorkflow({ configuration });
   assert.doesNotMatch(issueTriageDisabled, /^  create-issue:/m);
   assert.match(issueTriageDisabled, /issue triage is disabled/);
+  const legacyIssueTriageDisabled = renderRivetReviewWorkflowV012({
+    configuration,
+  });
+  assert.doesNotMatch(legacyIssueTriageDisabled, /^  create-issue:/m);
+  assert.doesNotMatch(legacyIssueTriageDisabled, /issue triage is disabled/);
 });
 
 test("accepts only managed local native imports", () => {

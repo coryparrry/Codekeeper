@@ -26,10 +26,13 @@ Guided setup:
 
 Explicit commands (advanced/noninteractive):
   init --review-only [--repository <path>] [--dry-run | --setup-pr]
+             [--issues <disabled|automatic>]
              [--maintenance <disabled|manual|scheduled>]
              [--setup-branch <name>]
                                Install review workflows with explicit options.
   init --repair [--repository <path>] [--dry-run | --setup-pr]
+             [--issues <disabled|automatic>]
+             [--maintenance <disabled|manual|scheduled>]
              [--setup-branch <name>]
                                Upgrade an existing install with explicit options.
   app-plan --repository <owner/repository> [--owner-type <User|Organization>]
@@ -131,6 +134,11 @@ function parseInit(args) {
       index += 1;
       continue;
     }
+    if (argument === "--issues" && args[index + 1]) {
+      options.issues = args[index + 1];
+      index += 1;
+      continue;
+    }
     throw new Error(`Rivet: unknown argument ${argument}\n${usage()}`);
   }
   if (!options.mode) {
@@ -150,6 +158,11 @@ function parseInit(args) {
   ) {
     throw new Error(
       `Rivet: --maintenance must be disabled, manual, or scheduled\n${usage()}`,
+    );
+  }
+  if (options.issues && !["disabled", "automatic"].includes(options.issues)) {
+    throw new Error(
+      `Rivet: --issues must be disabled or automatic\n${usage()}`,
     );
   }
   return options;
@@ -213,11 +226,17 @@ export async function runCli(
     });
   }
   const options = parseInit(args);
-  const { setupPullRequest, mode, maintenance, ...installationOptions } =
-    options;
-  if (maintenance) {
+  const {
+    setupPullRequest,
+    mode,
+    issues,
+    maintenance,
+    ...installationOptions
+  } = options;
+  if (issues || maintenance) {
     const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
-    configuration.maintenance.mode = maintenance;
+    if (issues) configuration.issues.triage = issues;
+    if (maintenance) configuration.maintenance.mode = maintenance;
     if (mode === "repair") configuration.repair.authority = "owner";
     installationOptions.configuration = configuration;
   }
