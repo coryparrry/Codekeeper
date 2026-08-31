@@ -179,15 +179,11 @@ function terminalPrompt({ stdin, stdout }) {
   });
 }
 
-async function openInBrowser(url, platform, env) {
-  const [command, args] =
-    platform === "darwin"
-      ? ["open", [url]]
-      : platform === "win32"
-        ? ["explorer.exe", [url]]
-        : ["xdg-open", [url]];
+async function openInBrowser(url, platform, env, spawnImpl) {
+  if (platform !== "darwin")
+    throw new Error("Automatic browser launch unavailable");
   await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawnImpl("/usr/bin/open", [url], {
       stdio: "ignore",
       detached: true,
       env,
@@ -541,6 +537,7 @@ export async function runGuidedInit(options = {}) {
         url,
         options.platform ?? process.platform,
         browserEnvironment,
+        options.spawnBrowser ?? spawn,
       ),
     configureReviewAppImpl = configureReviewApp,
     verifyReviewAppImpl = verifyReviewApp,
