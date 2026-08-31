@@ -145,8 +145,7 @@ export function reviewWorkflowProjection(value) {
   if (
     config.repair.authority !== "never" ||
     config.issues.triage === "owner" ||
-    config.issues.implementation !== "disabled" ||
-    config.maintenance.mode !== "disabled"
+    config.issues.implementation !== "disabled"
   ) {
     throw new Error(
       "Rivet config: review-only installation cannot enable unsupported mutation modes",
@@ -166,15 +165,25 @@ export function issueTriageWorkflowProjection(value) {
       "Rivet config: issue triage workflow requires automatic triage",
     );
   }
-  if (
-    config.issues.implementation !== "disabled" ||
-    config.maintenance.mode !== "disabled"
-  ) {
+  if (config.issues.implementation !== "disabled") {
     throw new Error(
-      "Rivet config: issue triage cannot enable implementation or maintenance",
+      "Rivet config: issue triage cannot enable issue implementation",
     );
   }
   return Object.freeze({ ...config.models.review });
+}
+
+export function maintenanceWorkflowProjection(value) {
+  const config = validateRivetConfig(value);
+  if (config.maintenance.mode === "disabled") {
+    throw new Error(
+      "Rivet config: maintenance workflow requires manual or scheduled mode",
+    );
+  }
+  return Object.freeze({
+    ...config.maintenance,
+    ...config.models.review,
+  });
 }
 
 export function productAuthoritySummary(value) {

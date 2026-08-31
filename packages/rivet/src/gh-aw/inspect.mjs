@@ -67,6 +67,70 @@ function references(source, namespace) {
     .sort();
 }
 
+function jobCondition(value) {
+  return value === undefined ? null : value;
+}
+
+function jobNeeds(value) {
+  if (value === undefined) return null;
+  if (Array.isArray(value)) return [...value];
+  return value;
+}
+
+function stepById(jobs, jobId, stepId) {
+  const steps = jobs[jobId]?.steps;
+  if (!Array.isArray(steps)) return null;
+  return (
+    steps.find(
+      (step) => step && typeof step === "object" && step.id === stepId,
+    ) ?? null
+  );
+}
+
+function parseJsonValue(value) {
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function safeOutputDetails(jobs) {
+  const processStep = stepById(jobs, "safe_outputs", "process_safe_outputs");
+  const processEnvironment = processStep?.env ?? {};
+  const noopStep = stepById(jobs, "conclusion", "noop");
+  const incompleteStep = stepById(jobs, "conclusion", "report_incomplete");
+  const failureStep = stepById(jobs, "conclusion", "handle_agent_failure");
+  return {
+    config: parseJsonValue(
+      processEnvironment.GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG,
+    ),
+    settings: {
+      failureReportAsIssue:
+        failureStep?.env?.GH_AW_FAILURE_REPORT_AS_ISSUE ?? null,
+      missingDataReportAsFailure:
+        failureStep?.env?.GH_AW_MISSING_DATA_REPORT_AS_FAILURE ?? null,
+      missingToolReportAsFailure:
+        failureStep?.env?.GH_AW_MISSING_TOOL_REPORT_AS_FAILURE ?? null,
+      noopReportAsIssue: noopStep?.env?.GH_AW_NOOP_REPORT_AS_ISSUE ?? null,
+      reportIncompleteCreateIssue:
+        incompleteStep?.env?.GH_AW_REPORT_INCOMPLETE_CREATE_ISSUE ?? null,
+    },
+  };
+}
+
+function jobAuthority(job, workflowPermissions) {
+  return {
+    container: job.container ?? null,
+    env: job.env ?? {},
+    environment: job.environment ?? null,
+    permissions: permissions(job.permissions ?? workflowPermissions),
+    runsOn: job["runs-on"] ?? null,
+    services: job.services ?? null,
+  };
+}
+
 function resolvedImports(source) {
   const lines = source.split("\n");
   const start = lines.indexOf("#   Imports:");
@@ -87,15 +151,24 @@ export function inspectCompiledWorkflow(source) {
   const jobs =
     workflow.jobs && typeof workflow.jobs === "object" ? workflow.jobs : {};
   const actions = [];
+  const scripts = [];
+  const jobConditions = {};
+  const jobAuthorityById = {};
   const checkouts = [];
   const writeCapableJobs = [];
   const rootPermissions = permissions(workflow.permissions);
   const containers = Array.isArray(manifest.containers)
     ? manifest.containers
     : [];
+  const safeOutputDetailsValue = safeOutputDetails(jobs);
 
   for (const [jobId, job] of Object.entries(jobs)) {
     if (!job || typeof job !== "object" || Array.isArray(job)) continue;
+    jobConditions[jobId] = {
+      if: jobCondition(job.if),
+      needs: jobNeeds(job.needs),
+    };
+    jobAuthorityById[jobId] = jobAuthority(job, workflow.permissions);
     const jobPermissions = permissions(job.permissions ?? workflow.permissions);
     if (
       Object.values(jobPermissions).some(
@@ -106,13 +179,34 @@ export function inspectCompiledWorkflow(source) {
     }
     const usesValues = [];
     if (typeof job.uses === "string")
-      usesValues.push({ uses: job.uses, with: job.with ?? {} });
+      usesValues.push({
+        uses: job.uses,
+        with: job.with ?? {},
+        env: job.env ?? {},
+        if: jobCondition(job.if),
+      });
     for (const step of Array.isArray(job.steps) ? job.steps : []) {
+      if (step && typeof step.run === "string") {
+        scripts.push({
+          job: jobId,
+          name: step.name ?? null,
+          if: jobCondition(step.if),
+          run: step.run,
+          shell: step.shell ?? null,
+          env: step.env ?? {},
+        });
+      }
       if (step && typeof step.uses === "string") usesValues.push(step);
     }
     for (const step of usesValues) {
       const action = actionReference(step.uses);
-      actions.push({ job: jobId, ...action, with: step.with ?? {} });
+      actions.push({
+        job: jobId,
+        ...action,
+        with: step.with ?? {},
+        env: step.env ?? {},
+        if: jobCondition(step.if),
+      });
       if (action.action === "actions/checkout") {
         checkouts.push({
           job: jobId,
@@ -132,9 +226,16 @@ export function inspectCompiledWorkflow(source) {
     resolvedImports: resolvedImports(source),
     triggers: Object.keys(workflow.on ?? {}).sort(),
     permissions: rootPermissions,
+    workflowEnv: workflow.env ?? {},
     secrets: references(source, "secrets"),
+    manifestSecrets: Array.isArray(manifest.secrets)
+      ? [...manifest.secrets].sort()
+      : [],
     variables: references(source, "vars"),
+    jobConditions,
+    jobAuthority: jobAuthorityById,
     actions,
+    scripts,
     localActions: [
       ...new Set(
         actions.filter((action) => action.local).map((action) => action.uses),
@@ -158,6 +259,8 @@ export function inspectCompiledWorkflow(source) {
       ),
     ].sort(),
     writeCapableJobs,
+    safeOutputConfig: safeOutputDetailsValue.config,
+    safeOutputSettings: safeOutputDetailsValue.settings,
     safeOutputJobs: Object.keys(jobs).filter(
       (job) => job === "safe_outputs" || job.startsWith("safe_output_"),
     ),

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   DEFAULT_RIVET_CONFIG,
   issueTriageWorkflowProjection,
+  maintenanceWorkflowProjection,
   productAuthoritySummary,
   reviewWorkflowProjection,
   validateRivetConfig,
@@ -90,6 +91,32 @@ test("allows automatic issue triage but never implementation", () => {
   );
 });
 
+test("projects enabled report-only maintenance with the configured model", () => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.maintenance.mode = "scheduled";
+  assert.deepEqual(maintenanceWorkflowProjection(configuration), {
+    mode: "scheduled",
+    engine: "codex",
+    model: "gpt-5.6-luna",
+    effort: "default",
+  });
+
+  assert.throws(
+    () => maintenanceWorkflowProjection(DEFAULT_RIVET_CONFIG),
+    /requires manual or scheduled mode/,
+  );
+});
+
+test("allows report-only maintenance alongside review and issue triage", () => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.maintenance.mode = "manual";
+  assert.equal(reviewWorkflowProjection(configuration).issueTriage, true);
+  assert.equal(
+    issueTriageWorkflowProjection(configuration).model,
+    "gpt-5.6-luna",
+  );
+});
+
 test("projects only automatic incoming issue triage", () => {
   assert.deepEqual(issueTriageWorkflowProjection(DEFAULT_RIVET_CONFIG), {
     engine: "codex",
@@ -108,7 +135,7 @@ test("projects only automatic incoming issue triage", () => {
   implementation.issues.implementation = "owner";
   assert.throws(
     () => issueTriageWorkflowProjection(implementation),
-    /cannot enable implementation or maintenance/,
+    /cannot enable issue implementation/,
   );
 });
 

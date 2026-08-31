@@ -35,6 +35,7 @@ test("binds public Rivet metadata to its exact release tag", async () => {
   assert.equal(pkg.private, undefined);
   assert.deepEqual(pkg.files, ["assets", "bin", "evals", "src"]);
   assert.equal(pkg.bin["rivet-review-eval"], "evals/review-safe-outputs.mjs");
+  assert.equal(pkg.bin["rivet-audit-eval"], "evals/audit-safe-outputs.mjs");
   assert.deepEqual(pkg.repository, {
     type: "git",
     url: "git+https://github.com/coryparrry/Rivet.git",
@@ -92,6 +93,12 @@ test("packs the executable and production payload without package tests", async 
 
     assert(paths.has("bin/rivet.mjs"));
     assert(paths.has("evals/review-safe-outputs.mjs"));
+    assert(paths.has("evals/audit-safe-outputs.mjs"));
+    assert(
+      paths.has(
+        "assets/maintenance/.github/rivet/actions/validate-audit/index.mjs",
+      ),
+    );
     assert(paths.has("README.md"));
     assert([...paths].some((path) => path.startsWith("src/")));
     assert([...paths].some((path) => path.startsWith("assets/")));

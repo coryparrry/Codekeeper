@@ -41,6 +41,16 @@ test("inspects the pinned Rivet review fixture authority", async () => {
     "./.github/rivet/actions/authority-receipt",
   ]);
   assert.deepEqual(authority.additionalRepositories, []);
+  assert.deepEqual(authority.workflowEnv, {});
+  assert.equal(authority.jobAuthority.activation.runsOn, "ubuntu-slim");
+  assert.equal(authority.jobAuthority.agent.runsOn, "ubuntu-latest");
+  assert.deepEqual(authority.jobAuthority.agent.container, null);
+  assert.deepEqual(authority.jobAuthority.agent.environment, null);
+  assert.deepEqual(authority.jobAuthority.agent.services, null);
+  assert.deepEqual(authority.jobAuthority.agent.permissions, {
+    contents: "read",
+    "pull-requests": "read",
+  });
   assert.ok(authority.actionRepositories.includes("github/gh-aw-actions"));
   assert.ok(
     authority.actionRepositories.includes("actions/create-github-app-token"),

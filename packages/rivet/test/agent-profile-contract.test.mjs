@@ -18,7 +18,7 @@ const profiles = {
   },
   "repository-auditor.md": {
     version: 4,
-    sha256: "6aade309d79b96e507e286a29ebd168a9d84f9e2afaaacbf594e99ffe5997208",
+    sha256: "5b1b7f8fc57b68e33ada30ea926a22f3b41a486288dc676ada0850c6ba7f9197",
   },
 };
 

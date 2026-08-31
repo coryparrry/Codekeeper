@@ -76,6 +76,24 @@ test("runs an explicit review-only dry-run", async () => {
   assert.deepEqual(JSON.parse(stdout.read()), expected);
 });
 
+test("enables report-only maintenance through explicit init", async () => {
+  for (const mode of ["disabled", "manual", "scheduled"]) {
+    let options;
+    await runCli(
+      ["init", "--review-only", "--maintenance", mode, "--dry-run"],
+      {
+        stdout: output().stream,
+        installReviewImpl: async (value) => {
+          options = value;
+          return { mode: "review", files: [] };
+        },
+      },
+    );
+    assert.equal(options.configuration.maintenance.mode, mode);
+    assert.equal(options.configuration.models.review.model, "gpt-5.6-luna");
+  }
+});
+
 test("creates an explicit setup pull request", async () => {
   const stdout = output();
   let options;
@@ -239,6 +257,10 @@ test("rejects conflicting explicit modes and unknown arguments", async () => {
   await assert.rejects(
     runCli(["init", "--review-only", "--setup-branch", "rivet/test"]),
     /requires --setup-pr/,
+  );
+  await assert.rejects(
+    runCli(["init", "--review-only", "--maintenance", "daily"]),
+    /must be disabled, manual, or scheduled/,
   );
   await assert.rejects(runCli(["install"]), /unknown command/);
   await assert.rejects(runCli(["app-plan"]), /--repository is required/);
