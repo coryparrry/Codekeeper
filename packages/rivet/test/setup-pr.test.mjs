@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
+import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 import { prepareReviewInstallation } from "../src/install.mjs";
 import {
   createReviewSetupPullRequest,
@@ -27,7 +29,24 @@ async function git(cwd, args) {
   return stdout.trim();
 }
 
-async function fixtureCompiler({ repositoryRoot }) {
+async function fixtureCompiler({ repositoryRoot, workflowId }) {
+  if (workflowId === "rivet-issue-triage") {
+    const encoded = await readFile(
+      path.join(
+        PACKAGE_ROOT,
+        "test/fixtures/issue-triage/rivet-issue-triage.lock.yml.gz.b64",
+      ),
+      "utf8",
+    );
+    await writeFile(
+      path.join(
+        repositoryRoot,
+        ".github/workflows/rivet-issue-triage.lock.yml",
+      ),
+      gunzipSync(Buffer.from(encoded, "base64")),
+    );
+    return;
+  }
   const source = await readFile(
     path.join(
       PACKAGE_ROOT,
@@ -154,13 +173,20 @@ test("creates a verified draft setup pull request without merging", async (t) =>
     pullRequestCall[1][pullRequestCall[1].indexOf("--body") + 1],
     /Merge is impossible/,
   );
+  assert.match(
+    pullRequestCall[1][pullRequestCall[1].indexOf("--body") + 1],
+    /workflows selected in the configuration/,
+  );
 });
 
 test("reuses a prepared review plan without compiling it again", async (t) => {
   const { root } = await repository(t);
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.issues.triage = "disabled";
   let compileCalls = 0;
   const preparedPlan = await prepareReviewInstallation({
     repositoryRoot: root,
+    configuration,
     compileWorkflow: async (options) => {
       compileCalls += 1;
       await fixtureCompiler(options);
@@ -168,6 +194,7 @@ test("reuses a prepared review plan without compiling it again", async (t) => {
     validateWorkflow: async () => {},
   });
 
+  const calls = [];
   const result = await createReviewSetupPullRequest({
     preparedPlan,
     branch: "rivet/setup-test",
@@ -175,11 +202,19 @@ test("reuses a prepared review plan without compiling it again", async (t) => {
       throw new Error("prepared plan should not be compiled again");
     },
     validateWorkflow: async () => {},
-    run: runner([]),
+    run: runner(calls),
   });
 
+  const pullRequestCall = calls.find(
+    ([command, args]) =>
+      command === "gh" && args[0] === "pr" && args[1] === "create",
+  );
   assert.equal(compileCalls, 1);
   assert.equal(result.branch, "rivet/setup-test");
+  assert.doesNotMatch(
+    pullRequestCall[1][pullRequestCall[1].indexOf("--body") + 1],
+    /issue-triage workflows/,
+  );
 });
 
 test("refuses setup from a dirty repository before creating a branch", async (t) => {

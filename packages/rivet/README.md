@@ -1,8 +1,9 @@
 # Rivet
 
 Rivet installs GitHub Agentic Workflows for bounded pull-request review and
-owner-authorized repair. It compiles the managed workflows with a pinned,
-checksum-verified `gh-aw` release; you do not need to install `gh-aw`.
+incoming issue triage. Owner-authorized repair is optional. Rivet compiles the
+managed workflows with a pinned, checksum-verified `gh-aw` release; you do not
+need to install `gh-aw`.
 
 ## Quick start
 
@@ -35,6 +36,19 @@ secret or asks the GitHub CLI to create one; manual setups can use
 and it keeps no local copy. An exported value is read only to pass it to
 `gh secret set` over standard input. Review starts with least authority. Repair
 is a separate, explicit App authority upgrade.
+
+## Issue triage
+
+With `issues.triage` set to `automatic`, Rivet installs a workflow for newly
+opened issues. It may publish at most one App-authored triage comment; it does
+not label or close the issue, implement a fix, open a pull request, or merge.
+
+The same setting lets a pull-request review defer at most one verified,
+out-of-scope finding to a new issue. That is separate from triaging an incoming
+issue and does not authorize implementation. Set triage to `disabled` to
+install neither issue workflow nor Issues permission. Enabling it requires the
+GitHub App to have Issues: write; an existing installation may need explicit
+approval from a GitHub administrator.
 
 ## Advanced/manual setup
 

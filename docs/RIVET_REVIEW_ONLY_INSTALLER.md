@@ -43,6 +43,8 @@ The installer renders and validates these Rivet-owned surfaces:
 - `.github/rivet/installation.json` with the compiler/action receipt and exact
   managed-file inventory;
 - the review workflow Markdown source and compiled lock;
+- the incoming issue-triage profile, Markdown source, and compiled lock when
+  automatic triage is enabled;
 - the local native import and dependency-free authority-receipt action.
 
 Repair mode also manages the repair workflow source and compiled lock plus the
@@ -60,9 +62,10 @@ Before changing the adopter repository, Rivet:
 1. creates an isolated staging directory;
 2. renders the managed source and extension assets;
 3. validates and compiles with the pinned gh-aw binary;
-4. inspects the generated lock file;
-5. requires the base-branch `pull_request_target` trust contract, including
-   immutable action and container pins;
+4. inspects the generated lock files;
+5. requires the base-branch `pull_request_target` review trust contract and,
+   when enabled, the issues-only triage trust contract, including immutable
+   action and container pins;
 6. compares every managed destination with the planned bytes;
 7. refuses any adopter-owned collision;
 8. rechecks every destination immediately before applying the plan;

@@ -3,8 +3,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { inspectCompiledWorkflow } from "../src/gh-aw/inspect.mjs";
-import { assessPullRequestTargetTrust } from "../src/gh-aw/trust.mjs";
+import {
+  assessIssueTriageTrust,
+  assessPullRequestTargetTrust,
+} from "../src/gh-aw/trust.mjs";
+import { RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT } from "../src/workflows/issue-triage.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -31,6 +36,89 @@ async function compiledAuthority() {
   );
   return { source, authority: inspectCompiledWorkflow(source) };
 }
+
+async function issueTriageAuthority() {
+  const encoded = await readFile(
+    path.join(
+      PACKAGE_ROOT,
+      "test/fixtures/issue-triage/rivet-issue-triage.lock.yml.gz.b64",
+    ),
+    "utf8",
+  );
+  return inspectCompiledWorkflow(
+    gunzipSync(Buffer.from(encoded, "base64")).toString("utf8"),
+  );
+}
+
+test("accepts pinned incoming issue-triage authority", async () => {
+  const trust = assessIssueTriageTrust({
+    authority: await issueTriageAuthority(),
+    expectedEngine: "codex",
+    expectedImports: [".github/rivet/agents/issue-triager.md"],
+    expectedModel: "gpt-5.6-luna",
+    expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
+  });
+  assert.deepEqual(trust, {
+    trusted: true,
+    baseContext: "issues event default branch",
+    violations: [],
+  });
+});
+
+test("rejects expanded issue-triage trigger, import, and write authority", async () => {
+  const authority = await issueTriageAuthority();
+  for (const [change, violation] of [
+    [
+      { triggers: ["issues", "workflow_dispatch"] },
+      "workflow must use only issues",
+    ],
+    [
+      {
+        resolvedImports: [
+          ...authority.resolvedImports,
+          ".github/rivet/aw/unreviewed-extension.md",
+        ],
+      },
+      "resolved native imports must contain only issue-triager",
+    ],
+    [
+      {
+        writeCapableJobs: authority.writeCapableJobs.map((job) =>
+          job.job === "conclusion"
+            ? {
+                ...job,
+                permissions: { actions: "write", contents: "write" },
+              }
+            : job,
+        ),
+      },
+      "only conclusion may use workflow write authority for cancellation",
+    ],
+    [
+      {
+        actions: authority.actions.map((action) =>
+          action.action === "actions/create-github-app-token"
+            ? {
+                ...action,
+                with: { ...action.with, repositories: "other" },
+              }
+            : action,
+        ),
+      },
+      "issue triage publisher must target only the triggering repository and issue",
+    ],
+  ]) {
+    const trust = assessIssueTriageTrust({
+      authority: { ...authority, ...change },
+      expectedEngine: "codex",
+      expectedImports: [".github/rivet/agents/issue-triager.md"],
+      expectedModel: "gpt-5.6-luna",
+      expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
+    });
+    assert.equal(trust.trusted, false);
+    assert.deepEqual(trust.violations, [violation]);
+  }
+});
 
 test("accepts the self-contained base-branch Rivet review authority", async () => {
   const { source, authority } = await compiledAuthority();

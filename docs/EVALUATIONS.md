@@ -1,10 +1,11 @@
 # Evaluating Rivet reviews
 
-Rivet packages four stable agent identities under `assets/agents/`. Review and
-repair currently consume the reviewer and fixer identities. The issue-triager
-and repository-auditor identities remain versioned contract assets until their
-workflows ship. Embedded versions and raw SHA-256 digests are contract-tested
-so evaluation results stay bound to the identity that produced them.
+Rivet packages four stable agent identities under `assets/agents/`. Review,
+repair, and incoming issue triage consume the reviewer, fixer, and
+issue-triager identities. The repository-auditor remains a versioned contract
+asset until its workflow ships. Embedded versions and raw SHA-256 digests are
+contract-tested so evaluation results stay bound to the identity that produced
+them.
 
 The live review evaluator grades complete gh-aw safe-output artifacts. It does
 not call a model, publish GitHub output, or replace live adopter testing.

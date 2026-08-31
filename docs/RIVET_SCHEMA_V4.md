@@ -1,8 +1,8 @@
 # Rivet configuration schema v4
 
 Rivet configuration describes product intent rather than gh-aw implementation
-details. The review-only installer writes `.github/rivet.json` with the closed
-schema v4 surface and rejects unknown fields.
+details. The installer writes `.github/rivet.json` with the closed schema v4
+surface and rejects unknown fields.
 
 ## Review-only default
 
@@ -16,7 +16,7 @@ schema v4 surface and rejects unknown fields.
     "maximumFindings": 8
   },
   "repair": { "authority": "never" },
-  "issues": { "triage": "disabled", "implementation": "disabled" },
+  "issues": { "triage": "automatic", "implementation": "disabled" },
   "maintenance": { "mode": "disabled" },
   "merge": { "authority": "never" },
   "models": {
@@ -51,9 +51,23 @@ Rivet does not recreate provider SDKs or expose arbitrary engine configuration.
 Advanced upstream features remain native gh-aw imports until Rivet promotes a
 stable product-level control.
 
-## Review-only boundary
+## Issue boundary
 
-Schema v4 can represent future owner-authorized repair, issue triage, issue
-implementation, and maintenance modes. The current installer rejects any such
-configuration until the corresponding workflow and authority verification land.
-Merge authority has only one accepted value: `never`.
+`issues.triage` may be `automatic` or `disabled` for an installation.
+Automatic mode has two separate bounded effects: it installs a workflow that
+may add at most one App-authored comment to a newly opened issue, and it lets a
+pull-request review defer at most one verified, out-of-scope finding to a new
+issue. Neither path implements the issue.
+
+Disabled mode installs no issue-triage workflow, disables review deferral, and
+requires no GitHub App Issues permission. Enabling automatic triage requires
+Issues: write; an existing installation may require explicit GitHub admin
+approval for that permission change. `issues.implementation` must remain
+`disabled`.
+
+## Remaining boundary
+
+Schema v4 can represent future owner-authorized maintenance and issue
+implementation modes. The current installer rejects those configurations.
+Repair is a separate explicit authority upgrade. Merge authority has only one
+accepted value: `never`.
