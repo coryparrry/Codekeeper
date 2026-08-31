@@ -154,6 +154,27 @@ async function writeProfiledV013Installation(
   );
 }
 
+async function writeProfiledV015Installation(
+  repositoryRoot,
+  configuration,
+  install = installRepair,
+) {
+  await install({
+    repositoryRoot,
+    configuration,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  await writeFile(
+    path.join(repositoryRoot, ".github/rivet/aw/review-extension.md"),
+    await readFile(V015_EXTENSION, "utf8"),
+  );
+  await writeFile(
+    path.join(repositoryRoot, ".github/workflows/rivet-review.lock.yml"),
+    await frozenV015ReviewLock(),
+  );
+}
+
 async function writeAsset(repositoryRoot, group, relativePath) {
   const destination = path.join(repositoryRoot, relativePath);
   await mkdir(path.dirname(destination), { recursive: true });
@@ -349,21 +370,7 @@ test("upgrades an exact 0.1.5 profiled repair installation", async (t) => {
   configuration.issues.triage = "disabled";
   configuration.repair.authority = "owner";
   const repositoryRoot = await repository(t);
-  await installRepair({
-    repositoryRoot,
-    configuration,
-    compileWorkflow: fixtureCompiler,
-    validateWorkflow: async () => {},
-  });
-  const extensionPath = path.join(
-    repositoryRoot,
-    ".github/rivet/aw/review-extension.md",
-  );
-  await writeFile(extensionPath, await readFile(V015_EXTENSION, "utf8"));
-  await writeFile(
-    path.join(repositoryRoot, ".github/workflows/rivet-review.lock.yml"),
-    await frozenV015ReviewLock(),
-  );
+  await writeProfiledV015Installation(repositoryRoot, configuration);
 
   const result = await installRepair({
     repositoryRoot,
@@ -388,21 +395,8 @@ test("upgrades an exact 0.1.5 profiled repair installation", async (t) => {
   ]) {
     await t.test(`rejects modified ${relativePath}`, async () => {
       const modifiedRoot = await repository(t);
-      await installRepair({
-        repositoryRoot: modifiedRoot,
-        configuration,
-        compileWorkflow: fixtureCompiler,
-        validateWorkflow: async () => {},
-      });
+      await writeProfiledV015Installation(modifiedRoot, configuration);
       const target = path.join(modifiedRoot, relativePath);
-      await writeFile(
-        path.join(modifiedRoot, ".github/rivet/aw/review-extension.md"),
-        await readFile(V015_EXTENSION, "utf8"),
-      );
-      await writeFile(
-        path.join(modifiedRoot, ".github/workflows/rivet-review.lock.yml"),
-        await frozenV015ReviewLock(),
-      );
       const modified = `${await readFile(target, "utf8")}modified\n`;
       await writeFile(target, modified);
       await assert.rejects(
@@ -418,4 +412,35 @@ test("upgrades an exact 0.1.5 profiled repair installation", async (t) => {
       assert.equal(await readFile(target, "utf8"), modified);
     });
   }
+});
+
+test("upgrades an exact 0.1.5 review installation to repair", async (t) => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.issues.triage = "disabled";
+  const repositoryRoot = await repository(t);
+  await writeProfiledV015Installation(
+    repositoryRoot,
+    configuration,
+    installReview,
+  );
+  configuration.repair.authority = "owner";
+
+  const result = await installRepair({
+    repositoryRoot,
+    configuration,
+    dryRun: true,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  assert.deepEqual(
+    result.files
+      .filter(({ status }) => status === "update")
+      .map(({ path: relativePath }) => relativePath),
+    [
+      ".github/rivet.json",
+      ".github/rivet/aw/review-extension.md",
+      ".github/rivet/installation.json",
+      ".github/workflows/rivet-review.lock.yml",
+    ],
+  );
 });

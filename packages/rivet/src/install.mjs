@@ -537,6 +537,28 @@ async function prepareInstallation({
       });
       completeInstallationFiles(profiledV015, { mode, config });
       baselines.push(profiledV015);
+      if (mode === "repair") {
+        const profiledReviewV015 = await buildWorkflowFiles({
+          stagingRoot: path.join(stagingRoot, "profiled-review-v0.1.5"),
+          mode: "review",
+          config: reviewConfig,
+          reviewConfig,
+          validation,
+          binaryPath,
+          compileWorkflow,
+          validateWorkflow,
+          env,
+          profiles: true,
+          includeIssueTriage: reviewConfig.issues.triage === "automatic",
+          includeMaintenance: reviewConfig.maintenance.mode !== "disabled",
+          reviewExtension: await readFile(V015_REVIEW_EXTENSION, "utf8"),
+        });
+        completeInstallationFiles(profiledReviewV015, {
+          mode: "review",
+          config: reviewConfig,
+        });
+        baselines.push(profiledReviewV015);
+      }
 
       const profiledV013 = await buildWorkflowFiles({
         stagingRoot: path.join(stagingRoot, "profiled-v0.1.3"),
