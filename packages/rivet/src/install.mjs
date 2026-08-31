@@ -20,8 +20,17 @@ import {
 } from "./config.mjs";
 import { compileGhAwWorkflow, validateGhAwWorkflow } from "./gh-aw/compile.mjs";
 import { inspectCompiledWorkflow } from "./gh-aw/inspect.mjs";
-import { assessPullRequestTargetTrust } from "./gh-aw/trust.mjs";
+import {
+  assessIssueTriageTrust,
+  assessPullRequestTargetTrust,
+} from "./gh-aw/trust.mjs";
 import { GH_AW_RELEASE } from "./gh-aw/versions.mjs";
+import {
+  renderRivetIssueTriageWorkflow,
+  RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
+  RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
+  RIVET_ISSUE_TRIAGE_WORKFLOW_ID,
+} from "./workflows/issue-triage.mjs";
 import {
   renderRivetRepairWorkflow,
   renderRivetRepairWorkflowV012,
@@ -36,6 +45,7 @@ import {
 } from "./workflows/review.mjs";
 
 const [REVIEWER_IMPORT, REVIEW_EXTENSION_IMPORT] = RIVET_REVIEW_NATIVE_IMPORTS;
+const [ISSUE_TRIAGER_IMPORT] = RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS;
 const [FIXER_IMPORT] = RIVET_REPAIR_NATIVE_IMPORTS;
 const LOCAL_ACTION = "./.github/rivet/actions/authority-receipt";
 const AGENT_ASSET_ROOT = new URL("../assets/agents/", import.meta.url);
@@ -192,9 +202,20 @@ function completeInstallationFiles(files, { mode, config }) {
   return files;
 }
 
+function withoutIssueTriage(files) {
+  return new Map(
+    [...files].filter(
+      ([relativePath]) =>
+        relativePath !== ISSUE_TRIAGER_IMPORT &&
+        !relativePath.includes(`/${RIVET_ISSUE_TRIAGE_WORKFLOW_ID}.`),
+    ),
+  );
+}
+
 async function buildWorkflowFiles({
   stagingRoot,
   mode,
+  config,
   reviewConfig,
   validation,
   binaryPath,
@@ -202,6 +223,7 @@ async function buildWorkflowFiles({
   validateWorkflow,
   env,
   profiles,
+  includeIssueTriage,
 }) {
   const files = await assetFiles(REVIEW_ASSET_PATHS, REVIEW_ASSET_ROOT);
   if (profiles) {
@@ -216,6 +238,13 @@ async function buildWorkflowFiles({
         })
       : renderRivetReviewWorkflowV012({ configuration: reviewConfig }),
   );
+  if (includeIssueTriage) {
+    files.set(ISSUE_TRIAGER_IMPORT, await agentProfile("issue-triager.md"));
+    files.set(
+      `.github/workflows/${RIVET_ISSUE_TRIAGE_WORKFLOW_ID}.md`,
+      renderRivetIssueTriageWorkflow({ configuration: config }),
+    );
+  }
   if (mode === "repair") {
     for (const [relativePath, content] of await assetFiles(
       REPAIR_ASSET_PATHS,
@@ -237,6 +266,7 @@ async function buildWorkflowFiles({
   await writeNewFiles(stagingRoot, files);
   const workflowIds = [
     RIVET_REVIEW_WORKFLOW_ID,
+    ...(includeIssueTriage ? [RIVET_ISSUE_TRIAGE_WORKFLOW_ID] : []),
     ...(mode === "repair" ? [RIVET_REPAIR_WORKFLOW_ID] : []),
   ];
   for (const workflowId of workflowIds) {
@@ -288,6 +318,7 @@ async function prepareInstallation({
     const files = await buildWorkflowFiles({
       stagingRoot: path.join(stagingRoot, "target"),
       mode,
+      config,
       reviewConfig,
       validation,
       binaryPath,
@@ -295,6 +326,7 @@ async function prepareInstallation({
       validateWorkflow,
       env,
       profiles: true,
+      includeIssueTriage: config.issues.triage === "automatic",
     });
     const authority = inspectCompiledWorkflow(
       files.get(`.github/workflows/${RIVET_REVIEW_WORKFLOW_ID}.lock.yml`),
@@ -308,6 +340,25 @@ async function prepareInstallation({
       throw new Error(
         `Rivet installer: compiled review workflow is not trusted: ${trust.violations.join("; ")}`,
       );
+    }
+    if (config.issues.triage === "automatic") {
+      const issueAuthority = inspectCompiledWorkflow(
+        files.get(
+          `.github/workflows/${RIVET_ISSUE_TRIAGE_WORKFLOW_ID}.lock.yml`,
+        ),
+      );
+      const issueTrust = assessIssueTriageTrust({
+        authority: issueAuthority,
+        expectedEngine: config.models.review.engine,
+        expectedImports: RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
+        expectedModel: config.models.review.model,
+        expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
+      });
+      if (!issueTrust.trusted) {
+        throw new Error(
+          `Rivet installer: compiled issue triage workflow is not trusted: ${issueTrust.violations.join("; ")}`,
+        );
+      }
     }
     completeInstallationFiles(files, { mode, config });
 
@@ -325,8 +376,9 @@ async function prepareInstallation({
         existingFiles.get(relativePath) !== null &&
         existingFiles.get(relativePath) !== content,
     );
+    let reviewBaseline = null;
     if (requiresUpgrade && mode === "repair") {
-      const baselineFiles = new Map(
+      reviewBaseline = new Map(
         [...files].filter(
           ([relativePath]) =>
             !REPAIR_ASSET_PATHS.includes(relativePath) &&
@@ -334,18 +386,35 @@ async function prepareInstallation({
             !relativePath.includes(`/${RIVET_REPAIR_WORKFLOW_ID}.`),
         ),
       );
-      baselineFiles.delete(".github/rivet/installation.json");
-      completeInstallationFiles(baselineFiles, {
+      reviewBaseline.delete(".github/rivet/installation.json");
+      completeInstallationFiles(reviewBaseline, {
         mode: "review",
         config: reviewConfig,
       });
-      baselines.push(baselineFiles);
+      baselines.push(reviewBaseline);
+    }
+
+    if (requiresUpgrade && config.issues.triage === "automatic") {
+      const previousFiles = withoutIssueTriage(files);
+      previousFiles.delete(".github/rivet/installation.json");
+      completeInstallationFiles(previousFiles, { mode, config });
+      baselines.push(previousFiles);
+      if (mode === "repair") {
+        const previousReview = withoutIssueTriage(reviewBaseline);
+        previousReview.delete(".github/rivet/installation.json");
+        completeInstallationFiles(previousReview, {
+          mode: "review",
+          config: reviewConfig,
+        });
+        baselines.push(previousReview);
+      }
     }
 
     if (requiresUpgrade) {
       const legacyReview = await buildWorkflowFiles({
         stagingRoot: path.join(stagingRoot, "legacy-review"),
         mode: "review",
+        config: reviewConfig,
         reviewConfig,
         validation,
         binaryPath,
@@ -353,6 +422,7 @@ async function prepareInstallation({
         validateWorkflow,
         env,
         profiles: false,
+        includeIssueTriage: false,
       });
       completeInstallationFiles(legacyReview, {
         mode: "review",
@@ -364,6 +434,7 @@ async function prepareInstallation({
       const legacyRepair = await buildWorkflowFiles({
         stagingRoot: path.join(stagingRoot, "legacy-repair"),
         mode: "repair",
+        config,
         reviewConfig,
         validation,
         binaryPath,
@@ -371,6 +442,7 @@ async function prepareInstallation({
         validateWorkflow,
         env,
         profiles: false,
+        includeIssueTriage: false,
       });
       completeInstallationFiles(legacyRepair, { mode, config });
       baselines.push(legacyRepair);

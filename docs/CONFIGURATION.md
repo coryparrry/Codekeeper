@@ -1,166 +1,49 @@
 # Configuration
 
-The adopter-owned `.github/codekeeper.json` is the runtime policy file. Each coordinator has a packaged Markdown default and may have an adopter-owned override under `.github/codekeeper/agents/`. The workflow freezes the selected source into the run and revalidates its provenance and digest before publication.
+Rivet writes adopter-owned policy to `.github/rivet.json`. Schema v4 is closed:
+unknown or missing fields fail validation. Start with the guided installer:
 
-## Validation and resource bounds
-
-Version 3 treats every named policy object as closed: unknown keys fail validation. Its `automation` section controls automatic PR review, review-feedback triage, issue triage, owner requests, and the maintenance schedule. The intentional extension points are the provider names in `ai.providers`, label names in `labels`, and provider-specific JSON in `modelSettings`; these dynamic maps remain supported but have bounded entry counts, nesting, strings, arrays, and numeric values. `modelSettings` numbers may be negative or fractional when a provider supports them, but their absolute magnitude may not exceed 1,000,000. Lists, strings, provider and label counts, and validation-command count are also bounded before a coordinator can consume them.
-
-The former local Codekeeper tarball path is retired while Rivet's package release
-boundary is established. Follow the [Rivet migration authority](RIVET_GH_AW_MIGRATION.md)
-for current delivery gates. A fresh setup first offers the conservative
-Recommended path or Customize. Customize opens the tabbed Settings screen;
-simple mode hides inactive agents, while advanced mode keeps inactive settings
-visible and read-only. The final authority summary can return to Settings and
-remains the only mutation boundary.
-
-Every operation limit has a global ceiling. Review context is limited to 20 findings of each kind, 5 MiB of diff, and 1,000 files. Audit publication is limited to 20 issues and issue triage to 200 open-issue summaries. A repair can be at most 100 files, 10,000 changed lines, 5 MiB total, and 1 MiB per file. Auto-merge is limited to 50 files and 5,000 changed lines. These ceilings are intentionally above the starter policy while preventing a trusted-policy mistake from turning into unbounded work.
-
-`repository.automationBranchPrefix` must be a repository-relative, slash-terminated safe Git-ref prefix. Configured owner logins are trimmed and normalized to lowercase; duplicate owners after normalization are rejected, and manual issue/fix authorization compares actors with that same case-insensitive form.
-
-## Provider and coordinator settings
-
-Each coordinator mode is independent under `ai.agents.review`, `audit`, `issue`, and `fix`. It selects a provider from `ai.providers`, a model, a bounded retry limit, JSON model settings, and an optional Codex workspace specialist. `maxTurns` is a fixed compatibility field and must be `1`; coordinators never run a multi-turn loop. The JSON below is a partial excerpt; use the [starter policy](../.github/codekeeper.json) for the complete required four-mode `agents` object.
-
-The installer lists every supported provider and model for every role. The starting preset supplies defaults only. It does not lock a role to a provider.
-
-```json
-{
-  "ai": {
-    "tracing": {
-      "enabled": true,
-      "includeSensitiveData": false
-    },
-    "providers": {
-      "openai": {
-        "baseUrl": "https://api.openai.com/v1",
-        "api": "responses",
-        "structuredOutputs": true,
-        "supportsReasoningEffort": true
-      },
-      "deepseek": {
-        "baseUrl": "https://api.deepseek.com",
-        "api": "chat_completions",
-        "structuredOutputs": false,
-        "supportsReasoningEffort": false
-      },
-      "openrouter": {
-        "baseUrl": "https://openrouter.ai/api/v1",
-        "api": "chat_completions",
-        "structuredOutputs": false,
-        "supportsReasoningEffort": false
-      }
-    },
-    "agents": {
-      "issue": {
-        "provider": "deepseek",
-        "model": "deepseek-v4-flash",
-        "effort": "none",
-        "maxTurns": 1,
-        "maximumAttempts": 2,
-        "workspace": {
-          "enabled": false,
-          "allowWrites": false,
-          "model": "gpt-5.6-sol",
-          "effort": "low"
-        }
-      }
-    }
-  }
-}
+```bash
+npx @coryparry/rivet init
 ```
 
-Provider base URLs must use HTTPS. Explicit loopback HTTP is accepted only for local self-hosted development (`localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`); embedded credentials and URL fragments are rejected. OpenRouter uses Chat Completions with local JSON parsing and schema validation because structured outputs are disabled. Incompatible output exhausts only the bounded retry policy and then fails closed. Non-compatible protocols need a deliberately scoped `ModelProvider` implementation in `agents-runtime.mjs`.
+The default policy enables automatic pull-request review and incoming issue
+triage. Repair, issue implementation, maintenance, and merge remain disabled.
 
-`model_api_key` maps the selected mode’s provider credential. It is required in every reusable workflow and never falls back to an OpenAI key. The optional Codex specialist uses `workspace_api_key`; `openai_api_key` remains only as a compatibility fallback for that OpenAI-only workspace action.
+## Issue controls
 
-## Packaged profiles and optional adopter overrides
+`issues.triage` currently supports two installable modes:
 
-The package contains all four default profiles. A new installation leaves the adopter paths absent, and the runtime loads the matching packaged default into the Agents SDK coordinator instructions inside an immutable safety and authorization envelope. Editing one profile in Settings creates only that adopter override.
+- `automatic` installs the incoming issue-triage workflow for newly opened
+  issues. It may publish at most one App-authored comment. It cannot label,
+  close, implement, open a pull request, or merge.
+- `disabled` installs no issue-triage workflow. Pull-request review cannot
+  defer a finding to a new issue, and the GitHub App needs no Issues
+  permission.
 
-| Mode | Optional adopter override | Judgment responsibility |
-|---|---|---|
-| review | `.github/codekeeper/agents/pr-reviewer.md` | PR summary, evidence-backed findings, risk, test adequacy, and merge recommendation. |
-| issue | `.github/codekeeper/agents/issue-triager.md` | Issue classification, actionability, missing information, and duplicate assessment. |
-| audit | `.github/codekeeper/agents/repository-auditor.md` | Audit evidence, category and priority calibration, and report/no-action decisions. |
-| fix | `.github/codekeeper/agents/fixer.md` | Problem proof, bounded implementation, validation evidence, risk, and no-change decisions. |
+Automatic triage also lets a pull-request review defer at most one verified,
+out-of-scope finding to a new issue. Deferral creates the issue; incoming
+triage comments on a newly opened issue. They are separate actions governed by
+the same permission, and neither authorizes implementation.
 
-An absent override is valid and selects the packaged default from the installed release. Updates can therefore change defaults without modifying adopter files. When an override exists, edit it through the adopter's normal review process; a merged default-branch edit affects later runs without a runtime release. In Settings, press `R` on a profile to reset it to the packaged default; the reviewed update deletes the existing override with a digest-bound precondition, so later releases resume advancing that profile automatically. The workflow rejects empty, non-UTF-8, oversized, symlinked, or wrong-path overrides. It records whether the selected source is `package` or `repository`, its exact logical path, source identity, and SHA-256; freezes those bytes for the workspace and coordinator; carries that provenance through sealing; and refuses publication if the selected source has changed since preparation.
+Enabling automatic triage requires GitHub App Issues: write. Existing App
+installations may require explicit approval from a GitHub administrator before
+the new permission takes effect. `issues.implementation` must remain
+`disabled`; Rivet does not install an issue implementation workflow.
 
-Profiles may tune evidence thresholds, severity and priority calibration, test expectations, duplicate criteria, repair-risk judgment, positive no-action cases, and report wording. They may not:
+## Other controls
 
-- Enable a caller or authorize a repair, issue closure, push, pull request, or merge.
-- Expand `allowedPaths`, bypass `protectedPaths`, raise resource limits, or skip deterministic validation.
-- Change the frozen event, task mode, issue or pull-request target, source commit, or configured owner.
-- Grant tools, credentials, network access, or permission to follow instructions found in repository, issue, pull-request, comment, diff, specialist, or model content.
+| Setting                  | Current behavior                                                            |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `review.automatic`       | Runs review on eligible pull-request events.                                |
+| `review.inlineFindings`  | Allows bounded inline review comments.                                      |
+| `review.requestChanges`  | Chooses comment-only or request-changes review.                             |
+| `review.maximumFindings` | Limits findings to an integer from 1 to 20.                                 |
+| `repair.authority`       | `never` by default; `owner` requires the separate repair authority upgrade. |
+| `maintenance.mode`       | Must remain `disabled`.                                                     |
+| `merge.authority`        | Must remain `never`.                                                        |
 
-Those permissions remain deterministic in the caller, frozen policy, schema, validator, and publication code. If a profile conflicts with one of those controls, the run ignores the conflicting instruction and fails safely.
-
-Existing overrides are never replaced by a package refresh, including when their bytes happen to equal an earlier packaged default.
-
-## Caller automation controls
-
-Reusable workflow callers expose explicit controls alongside `enabled`:
-
-- `auto_review` defaults to `true` and permits eligible pull-request events to run the review workflow. Setting it to `false` skips automatic review; the supplied required review gate then fails closed.
-- `feedback_triage` defaults to `true` and permits review and review-comment events to inventory and triage the complete current review surface.
-- `auto_triage` defaults to `true` and permits issue lifecycle events plus a bounded `issue_comment.created` follow-up. A comment follow-up runs only after an App-owned missing-information result and only for a newer reporter or trusted-maintainer reply; Codekeeper comments, owner commands, stale replies, and unrelated issues fail closed. Setting `auto_triage=false` skips those automatic events, while exact owner commands remain available.
-- `dry_run=true` makes maintenance report-only. A live run can repair only when `audit.repair.enabled=true` and every patch limit passes.
-
-`review.autoRepair=true` permits one automatic repair pass after a blocking review. A second blocking review stops for a maintainer.
-
-Configured owners can use `/codekeeper help`, `/codekeeper status`, `/codekeeper review`, `/codekeeper implement`, `/codekeeper repair`, `/codekeeper defer`, and `/codekeeper pause`. The compatibility aliases `rerun`, `triage`, `fix`, and `stop` remain accepted. Slash commands must be the complete comment. The always-installed assistant caller also accepts the exact mention form `@<app-slug> <action>` for one supported action. It ignores extra prose and ambiguous actions; non-owner content cannot authorize writes.
-
-Automated feedback-triage `defer` results create or update one issue using a hidden root-cause fingerprint, add `codekeeper:deferred`, link the originating PR thread, and then enter the normal issue-triage workflow. Stale, duplicate, preference-only, false-positive, and unverified comments receive an explanatory PR reply and never create an issue through that automated path. A direct owner `/codekeeper defer` reply is an unconditional owner-authorized deferral and does not ask the reviewer or model to verify the claim. Deferred and ignored threads are not automatically resolved.
-
-Automatic issue triage may label, publish a sticky comment, and mark a high-confidence duplicate candidate. With the starter policy's `issues.closeResolvedIssues=true`, it closes an issue as completed only when GitHub's closing-reference metadata identifies a merged pull request, and revalidates that exact reference immediately before publication. `issues.closeExactDuplicates` is independent and remains `false` in the starter policy.
-
-## Explicit repair targets
-
-Capabilities decide which automatic actions can run.
-
-- **Maintenance:** a live scheduled or manual run may create one repair when `audit.repair.enabled=true`. A dry run remains report-only.
-- **Issue:** when `issues.allowAiImplementation=true`, trusted triage may add `codekeeper:ready` to a clear, bounded issue. Only that Codekeeper-owned label can start a policy-authorized fix run; a generic human-owned `ready` label never grants authority. A configured owner may also provide an issue through manual dispatch.
-- **Same-repository pull request:** the same exact owner command may target an eligible open, non-draft pull request to the default branch. A valid repair is committed and pushed to that pull request's existing head branch. The publisher never calls the create-pull-request path for this target and has no fallback that opens a second pull request. Forks, default/protected head branches, stale heads, branch movement, or target drift fail closed.
-- **Automatic review repair:** when `review.autoRepair=true`, a blocking review can request one repair for the exact PR head. The next blocking review requires a maintainer.
-
-Profiles can decide that an enabled repair is too risky and return no change. They cannot turn on a disabled capability or bypass its fixed limits.
-
-Any enabled review repair, maintenance repair, or issue implementation also requires a maintainer-confirmed repository validation command beyond `git diff --check`. The fresh credential-free verifier runs the exact allowed commands and publication accepts only its bound machine receipt.
-
-## Workspace specialists
-
-The coordinator itself is one tool-less Agents SDK `Agent` per mode. Codex is optional and is used only as a checkout-aware specialist whose result remains untrusted evidence for the coordinator. Its job starts the pinned Codex CLI as a local stdio MCP server through the Agents SDK, then closes it before handing off the bounded result. The Codex job and coordinator run on separate fresh runners: the coordinator rebuilds trusted context, checks its digest against the workspace job output, consumes specialist JSON and any audit/fix patch as untrusted artifacts, and applies that patch only after model execution.
-
-| Mode | Default provider | Workspace behavior |
-|---|---|---|
-| review | OpenAI | Read-only inspection of the exact PR head. When disabled, Codekeeper returns a deterministic manual-review result without findings or test claims. |
-| audit | OpenAI | Inspection; write access requires `audit.repair.enabled=true` and a live run. When disabled, Codekeeper returns a deterministic no-action audit. |
-| issue | DeepSeek V4 Flash | Disabled by default, so the coordinator triages the bounded issue context directly. If a read-only workspace is enabled manually, the coordinator receives only compact target metadata plus its evidence. |
-| fix | OpenAI | Implementation; write access also requires `issues.allowAiImplementation=true`. When disabled, Codekeeper returns a deterministic no-change result. |
-
-Review and issue workspace writes are rejected by config validation. The installer lets the adopter choose `audit.repair.enabled`, `issues.allowAiImplementation`, and `merge.enabled`. A capability that is on is active for its matching live workflow.
-
-Upgrades from the former five-role flow remove the inert `ai.agents.plan` policy entry. An adopter-owned `.github/codekeeper/agents/maintenance-planner.md` file is never deleted automatically: the installer reports it as inactive and leaves it for removal in a separately reviewed pull request.
-
-## Bounded review context and auto-merge
-
-`review.maximumDiffBytes` is a streaming capture bound: only that many diff bytes are retained in frozen coordinator context, and exceeding it terminates the diff process. When capture completes, `bytes` is exact; when it terminates, `truncated=true`, `bytesExact=false`, and `bytes` is an observed lower bound. `review.maximumChangedFiles` bounds the changed-file list; a review fails safely before prompting if that bound is exceeded. Set `includeDiffInAgentContext=false` only for a deliberate no-diff workflow; it makes deterministic auto-merge ineligible.
-
-`review.reasoningEscalation` keeps ordinary reviews on their configured agent and routes exceptional reviews to a stronger provider/model/effort tuple. Before model execution, the starter uses OpenAI Luna Max when the frozen pull request already has the `security` or `risk high` label, matches a configured security/high-risk path, changes at least 5,000 lines, or concentrates at least 1,000 changed lines in one file. These inputs come from GitHub and the frozen comparison, not from labels proposed by the model. This pre-review decision applies to both the coordinator and read-only workspace specialist.
-
-A standard Medium workspace review can also trigger one focused Max follow-up in the same isolated checkout. This gate is intentionally narrower than the model's overall risk assessment: the validated Medium JSON must contain at least one blocking finding that is `high` or `critical`, classified `current`, marked with `high` confidence, and located at a positive line number in a file from the frozen changed-file list. `risk=high`, proposed `security` or `risk high` labels, actionable security feedback, non-blocking findings, lower confidence, file-level findings without a line, and findings outside the changed-file list do not trigger Max. The Max pass treats the Medium result as untrusted hypotheses and returns a complete replacement review; only that replacement reaches the coordinator. A review already pre-routed to Max does not run a duplicate Max pass.
-
-Disable all escalation with `enabled=false` or adjust its pre-review labels, glob patterns, thresholds, provider, model, and effort to fit the repository. Lower pre-review thresholds increase latency and cost because the complete review starts at the escalated tier. Each workspace pass records its tier, model, effort, and duration in `workspace-runtime-metadata.json`; the coordinator embeds that record in `runtime-metadata.json` and adds `totalModelDurationMs` for the sequential specialist-plus-coordinator model time.
-
-Auto-merge additionally fails closed when frozen diff context is truncated. It never relies on model compliance or the presence of a workspace specialist.
-
-Version 3 auto-merge is intentionally limited to a same-repository pull request opened by the configured GitHub App bot from the configured automation branch prefix. `merge.allowUserPullRequests` must remain `false`; user pull-request auto-merge needs byte- and binary-aware metadata that this version does not transport.
-
-## Tracing
-
-Tracing is enabled by default with `includeSensitiveData=false`. OpenAI trace export requires a separate `trace_api_key`, including modes that use DeepSeek or another model provider.
-
-An installation migrating from the retired alternate exporter must set this key or disable tracing before the update merges. Old alternate-exporter variables and secrets are ignored and can be removed after merge.
-
-View runs at [OpenAI Platform Traces](https://platform.openai.com/traces), under **Logs > Traces**. Treat trace access as operationally sensitive.
+The `models.review` engine, model, and effort are also used for incoming issue
+triage. The current default is Codex with `gpt-5.6-luna` and `default` effort.
+See [schema v4](RIVET_SCHEMA_V4.md) for the complete JSON shape and
+[GitHub App authority](RIVET_GITHUB_APP_AUTHORITY.md) for permissions.

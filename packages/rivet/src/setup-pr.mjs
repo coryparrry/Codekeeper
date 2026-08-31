@@ -91,7 +91,7 @@ function pullRequestBody(plan) {
   const authority = plan.productAuthority.map((line) => `- ${line}`).join("\n");
   return `## Summary
 
-This draft installs Rivet's ${plan.mode === "repair" ? "owner-authorized review and repair workflows" : "review-only workflow"}. Issue implementation, maintenance, and merge authority remain disabled.
+This draft installs the Rivet workflows selected in the configuration. Issue implementation, maintenance, and merge authority remain disabled.
 
 ## Product authority
 

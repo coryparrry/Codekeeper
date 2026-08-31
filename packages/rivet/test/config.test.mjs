@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_RIVET_CONFIG,
+  issueTriageWorkflowProjection,
   productAuthoritySummary,
   reviewWorkflowProjection,
   validateRivetConfig,
@@ -86,6 +87,28 @@ test("allows automatic issue triage but never implementation", () => {
   assert.throws(
     () => reviewWorkflowProjection(implementation),
     /cannot enable unsupported mutation modes/,
+  );
+});
+
+test("projects only automatic incoming issue triage", () => {
+  assert.deepEqual(issueTriageWorkflowProjection(DEFAULT_RIVET_CONFIG), {
+    engine: "codex",
+    model: "gpt-5.6-luna",
+    effort: "default",
+  });
+
+  const disabled = structuredClone(DEFAULT_RIVET_CONFIG);
+  disabled.issues.triage = "disabled";
+  assert.throws(
+    () => issueTriageWorkflowProjection(disabled),
+    /requires automatic triage/,
+  );
+
+  const implementation = structuredClone(DEFAULT_RIVET_CONFIG);
+  implementation.issues.implementation = "owner";
+  assert.throws(
+    () => issueTriageWorkflowProjection(implementation),
+    /cannot enable implementation or maintenance/,
   );
 });
 

@@ -159,6 +159,24 @@ export function reviewWorkflowProjection(value) {
   });
 }
 
+export function issueTriageWorkflowProjection(value) {
+  const config = validateRivetConfig(value);
+  if (config.issues.triage !== "automatic") {
+    throw new Error(
+      "Rivet config: issue triage workflow requires automatic triage",
+    );
+  }
+  if (
+    config.issues.implementation !== "disabled" ||
+    config.maintenance.mode !== "disabled"
+  ) {
+    throw new Error(
+      "Rivet config: issue triage cannot enable implementation or maintenance",
+    );
+  }
+  return Object.freeze({ ...config.models.review });
+}
+
 export function productAuthoritySummary(value) {
   const config = validateRivetConfig(value);
   return Object.freeze([

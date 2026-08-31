@@ -112,7 +112,7 @@ export function inspectCompiledWorkflow(source) {
     }
     for (const step of usesValues) {
       const action = actionReference(step.uses);
-      actions.push({ job: jobId, ...action });
+      actions.push({ job: jobId, ...action, with: step.with ?? {} });
       if (action.action === "actions/checkout") {
         checkouts.push({
           job: jobId,

@@ -2,17 +2,37 @@
 
 Rivet review workflows authenticate GitHub operations with short-lived installation tokens. The workflow never stores an installation token as a secret.
 
-## Review-only authority
+## Review authority
 
-The review-only App requires:
+Review requires:
 
 - Contents: read
-- Issues: write
 - Metadata: read
 - Pull requests: write
 - Webhooks: disabled
 
-Pull-request write access is required for bounded inline findings and the final review. Issues write access supports automatic triage by deferring a verified concern to an issue; it does not authorize issue implementation. Repair, issue implementation, maintenance, contents-write, and merge authority remain disabled.
+Pull-request write access is required for bounded inline findings and the final
+review. Repair, issue implementation, maintenance, contents-write, and merge
+authority remain disabled.
+
+## Optional issue authority
+
+When `issues.triage` is `automatic`, Rivet also requires Issues: write. It uses
+that permission for two distinct bounded actions:
+
+- Incoming triage may publish at most one App-authored comment on a newly
+  opened issue.
+- Pull-request review may defer at most one verified, out-of-scope finding to a
+  new issue.
+
+Neither action may label or close an issue, implement a fix, open a pull
+request, or merge. When triage is `disabled`, Rivet installs no incoming issue
+workflow, review cannot create a deferred issue, and the App needs no Issues
+permission.
+
+Adding Issues: write to an existing App installation can require explicit
+approval from a GitHub administrator. The workflow is not operational until
+GitHub applies that permission change.
 
 Rivet expects the repository variables `RIVET_APP_CLIENT_ID` and `RIVET_APP_BOT_LOGIN` plus the repository secret `RIVET_APP_PRIVATE_KEY`. The bot-login variable names the verified App slug and permits that App to trigger the review that follows a repair. The pinned gh-aw compiler uses the credentials to generate immutable `actions/create-github-app-token` steps for activation and safe outputs. Missing credentials fail token minting; Rivet does not fall back to differently named legacy App credentials.
 
@@ -55,7 +75,8 @@ rivet app-verify \
 Owner-authorized repair requires one explicit authority widening. After GitHub
 shows and applies the Contents permission change from read to write, verify the
 exact repair scope before enabling the repair workflow. Issues remains write
-for automatic triage; Metadata read and Pull requests write are unchanged:
+only when automatic triage is enabled; Metadata read and Pull requests write
+are unchanged:
 
 ```bash
 rivet app-verify \
