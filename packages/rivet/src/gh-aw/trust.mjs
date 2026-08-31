@@ -356,6 +356,13 @@ export function assessPullRequestTargetTrust({
     violations.push("additional repository checkouts are not allowed");
   }
   if (
+    !authority.jobConditions?.safe_outputs?.if?.includes(
+      "needs.agent.result == 'success'",
+    )
+  ) {
+    violations.push("review publication requires a successful agent run");
+  }
+  if (
     authority.checkouts.length === 0 ||
     authority.checkouts.some(
       ({ repository, ref, path, persistCredentials }) =>

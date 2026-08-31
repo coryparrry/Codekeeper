@@ -60,25 +60,18 @@ test("keeps the canonical reviewer profile ahead of the Rivet contract", async (
   assert.match(lock, /Profile version: 8/);
 });
 
-test("freezes the Rivet review evidence and finding gates", async () => {
+test("bounds review evidence acquisition", async () => {
   const contract = await readContract(path.join("assets", "review"));
-  const normalizedContract = contract.toLowerCase();
-  for (const required of [
-    "exact pull request comparison",
-    "Reproduce the pull request head and base comparison deterministically",
-    "actively disprove each one",
-    "style preferences, hypothetical risks, unrelated problems, and pre-existing defects",
-    "smallest observable failure",
-    "success, failure, stale-state, timeout, or trust boundary",
-  ]) {
-    assert.ok(normalizedContract.includes(required.toLowerCase()));
-  }
+  assert.match(contract, /exact comparison once/);
+  assert.match(contract, /do not call `get_files`/);
+  assert.match(contract, /at most four GitHub read calls/);
+  assert.match(contract, /Never download a generated lock/);
 });
 
 test("trusts the base workflow contract and not pull request head instructions", async () => {
   const contract = await readContract(path.join("assets", "review"));
   assert.match(contract, /instructions from the pull request head.*untrusted/i);
-  assert.match(contract, /trusted base branch define the review task/i);
+  assert.match(contract, /trusted base workflow for authority/i);
 });
 
 test("keeps generated review publication authority narrow", async () => {
