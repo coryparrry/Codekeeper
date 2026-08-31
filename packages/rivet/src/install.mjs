@@ -56,6 +56,10 @@ const V013_REVIEW_EXTENSION = new URL(
   "../assets/upgrades/v0.1.3/review-extension.md",
   import.meta.url,
 );
+const V015_REVIEW_EXTENSION = new URL(
+  "../assets/upgrades/v0.1.5/review-extension.md",
+  import.meta.url,
+);
 const MAINTENANCE_LOCAL_ACTION = "./.github/rivet/actions/validate-audit";
 const MAINTENANCE_MANAGED_PATHS = Object.freeze([
   RIVET_MAINTENANCE_NATIVE_IMPORTS[0],
@@ -516,6 +520,46 @@ async function prepareInstallation({
       }
     }
     if (requiresUpgrade) {
+      const profiledV015 = await buildWorkflowFiles({
+        stagingRoot: path.join(stagingRoot, "profiled-v0.1.5"),
+        mode,
+        config,
+        reviewConfig,
+        validation,
+        binaryPath,
+        compileWorkflow,
+        validateWorkflow,
+        env,
+        profiles: true,
+        includeIssueTriage: config.issues.triage === "automatic",
+        includeMaintenance: config.maintenance.mode !== "disabled",
+        reviewExtension: await readFile(V015_REVIEW_EXTENSION, "utf8"),
+      });
+      completeInstallationFiles(profiledV015, { mode, config });
+      baselines.push(profiledV015);
+      if (mode === "repair") {
+        const profiledReviewV015 = await buildWorkflowFiles({
+          stagingRoot: path.join(stagingRoot, "profiled-review-v0.1.5"),
+          mode: "review",
+          config: reviewConfig,
+          reviewConfig,
+          validation,
+          binaryPath,
+          compileWorkflow,
+          validateWorkflow,
+          env,
+          profiles: true,
+          includeIssueTriage: reviewConfig.issues.triage === "automatic",
+          includeMaintenance: reviewConfig.maintenance.mode !== "disabled",
+          reviewExtension: await readFile(V015_REVIEW_EXTENSION, "utf8"),
+        });
+        completeInstallationFiles(profiledReviewV015, {
+          mode: "review",
+          config: reviewConfig,
+        });
+        baselines.push(profiledReviewV015);
+      }
+
       const profiledV013 = await buildWorkflowFiles({
         stagingRoot: path.join(stagingRoot, "profiled-v0.1.3"),
         mode,
