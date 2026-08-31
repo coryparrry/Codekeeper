@@ -54,6 +54,7 @@ test("prints useful help without starting guided setup", async () => {
     assert.match(stdout.read(), /npx @coryparry\/rivet init/);
     assert.match(stdout.read(), /init --review-only/);
     assert.match(stdout.read(), /init --repair/);
+    assert.match(stdout.read(), /--issues <disabled\|automatic>/);
   }
 });
 
@@ -92,6 +93,44 @@ test("enables report-only maintenance through explicit init", async () => {
     assert.equal(options.configuration.maintenance.mode, mode);
     assert.equal(options.configuration.models.review.model, "gpt-5.6-luna");
   }
+});
+
+test("passes explicit issue and maintenance modes through init", async () => {
+  for (const issues of ["disabled", "automatic"]) {
+    let options;
+    await runCli(["init", "--review-only", "--issues", issues, "--dry-run"], {
+      stdout: output().stream,
+      installReviewImpl: async (value) => {
+        options = value;
+        return { mode: "review", files: [] };
+      },
+    });
+    assert.equal(options.configuration.issues.triage, issues);
+    assert.equal(options.configuration.maintenance.mode, "disabled");
+  }
+
+  let options;
+  await runCli(
+    [
+      "init",
+      "--repair",
+      "--issues",
+      "disabled",
+      "--maintenance",
+      "manual",
+      "--dry-run",
+    ],
+    {
+      stdout: output().stream,
+      installRepairImpl: async (value) => {
+        options = value;
+        return { mode: "repair", files: [] };
+      },
+    },
+  );
+  assert.equal(options.configuration.issues.triage, "disabled");
+  assert.equal(options.configuration.maintenance.mode, "manual");
+  assert.equal(options.configuration.repair.authority, "owner");
 });
 
 test("creates an explicit setup pull request", async () => {
@@ -261,6 +300,10 @@ test("rejects conflicting explicit modes and unknown arguments", async () => {
   await assert.rejects(
     runCli(["init", "--review-only", "--maintenance", "daily"]),
     /must be disabled, manual, or scheduled/,
+  );
+  await assert.rejects(
+    runCli(["init", "--review-only", "--issues", "owner"]),
+    /must be disabled or automatic/,
   );
   await assert.rejects(runCli(["install"]), /unknown command/);
   await assert.rejects(runCli(["app-plan"]), /--repository is required/);

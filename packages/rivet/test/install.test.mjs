@@ -159,6 +159,7 @@ async function writeLegacyInstallation({
 }) {
   const expectedConfiguration = structuredClone(DEFAULT_RIVET_CONFIG);
   if (mode === "repair") expectedConfiguration.repair.authority = "owner";
+  expectedConfiguration.issues.triage = configuration.issues.triage;
   assert.deepEqual(configuration, expectedConfiguration);
   for (const relativePath of REVIEW_ASSETS) {
     await writeAsset(repositoryRoot, "review", relativePath);
@@ -171,9 +172,23 @@ async function writeLegacyInstallation({
   await mkdir(path.join(repositoryRoot, ".github/workflows"), {
     recursive: true,
   });
+  let reviewWorkflow = await readFile(
+    path.join(V012_FIXTURES, "rivet-review.md"),
+    "utf8",
+  );
+  if (configuration.issues.triage === "disabled") {
+    reviewWorkflow = reviewWorkflow.replace(
+      /\n  create-issue:\n    title-prefix: "\[rivet\] "\n    max: 1\n    deduplicate-by-title: true\n/,
+      "\n",
+    );
+    reviewWorkflow = reviewWorkflow.replace(
+      /\nTriage each supported finding before publication\.[\s\S]*?implementation\.\n/,
+      "",
+    );
+  }
   await writeFile(
     path.join(repositoryRoot, ".github/workflows/rivet-review.md"),
-    await readFile(path.join(V012_FIXTURES, "rivet-review.md"), "utf8"),
+    reviewWorkflow,
   );
   await writeFile(
     path.join(repositoryRoot, ".github/workflows/rivet-review.lock.yml"),
@@ -193,12 +208,24 @@ async function writeLegacyInstallation({
     path.join(repositoryRoot, ".github/rivet.json"),
     `${JSON.stringify(configuration, null, 2)}\n`,
   );
-  await writeFile(
-    path.join(repositoryRoot, ".github/rivet/installation.json"),
+  const installation = JSON.parse(
     await readFile(
       path.join(V012_FIXTURES, `${mode}-installation.json`),
       "utf8",
     ),
+  );
+  if (configuration.issues.triage === "disabled") {
+    installation.productAuthority = installation.productAuthority.map(
+      (authority) =>
+        authority === "Issue triage is automatic."
+          ? "Issue triage is disabled."
+          : authority,
+    );
+    delete installation.githubApp.permissions.issues;
+  }
+  await writeFile(
+    path.join(repositoryRoot, ".github/rivet/installation.json"),
+    `${JSON.stringify(installation, null, 2)}\n`,
   );
 }
 test("installs only the trusted Rivet review mode", async (t) => {
@@ -673,6 +700,56 @@ test("upgrades an exact 0.1.2 repair installation", async (t) => {
     result.files.filter(({ status }) => status === "unchanged").length,
     8,
   );
+});
+test("dry-runs an explicit pre-triage repair upgrade", async (t) => {
+  const repositoryRoot = await repository(t);
+  const disabledConfiguration = structuredClone(DEFAULT_RIVET_CONFIG);
+  disabledConfiguration.issues.triage = "disabled";
+  disabledConfiguration.repair.authority = "owner";
+  await writeLegacyInstallation({
+    repositoryRoot,
+    mode: "repair",
+    configuration: disabledConfiguration,
+  });
+  const result = await installRepair({
+    repositoryRoot,
+    configuration: disabledConfiguration,
+    dryRun: true,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: fixtureValidator,
+  });
+  assert.equal(result.dryRun, true);
+  assert.equal(result.files.length, 15);
+  assert.ok(
+    result.files.every(
+      ({ path: relativePath }) => !ISSUE_TRIAGE_PATHS.includes(relativePath),
+    ),
+  );
+  assert.deepEqual(result.githubApp.permissions, {
+    contents: "write",
+    metadata: "read",
+    pullRequests: "write",
+  });
+  const reviewPath = path.join(
+    repositoryRoot,
+    ".github/workflows/rivet-review.md",
+  );
+  const modifiedReview = `${await readFile(reviewPath, "utf8")}modified\n`;
+  await writeFile(reviewPath, modifiedReview);
+  await assert.rejects(
+    installRepair({
+      repositoryRoot,
+      configuration: disabledConfiguration,
+      dryRun: true,
+      compileWorkflow: fixtureCompiler,
+      validateWorkflow: fixtureValidator,
+    }),
+    /refusing to overwrite/,
+  );
+  assert.equal(await readFile(reviewPath, "utf8"), modifiedReview);
+  await assert.rejects(access(path.join(repositoryRoot, FIXER_PATH)), {
+    code: "ENOENT",
+  });
 });
 test("refuses a modified 0.1.2 installation before upgrading", async (t) => {
   const repositoryRoot = await repository(t);
