@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { checkReviewLock } from "../scripts/check-review-lock.mjs";
+import { gzipSync } from "node:zlib";
+import {
+  checkMaintenanceLocks,
+  checkReviewLock,
+} from "../scripts/check-review-lock.mjs";
 
 const LOCK_PATH = path.join(".github", "workflows", "rivet-review.lock.yml");
 
@@ -45,6 +49,48 @@ test("rejects a stale review lock and removes its temporary repository", async (
       /checked-in rivet-review\.lock\.yml does not match/,
     );
     assert.equal(validated, true);
+    assert.deepEqual(await readdir(temporaryParent), []);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("rejects stale maintenance locks from the pinned compiler", async () => {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "rivet-maintenance-lock-test-"),
+  );
+  const fixtureRoot = path.join(root, "fixture");
+  const temporaryParent = path.join(root, "temporary");
+  try {
+    await mkdir(fixtureRoot, { recursive: true });
+    await mkdir(temporaryParent);
+    for (const mode of ["manual", "scheduled"]) {
+      await writeFile(
+        path.join(fixtureRoot, `rivet-maintenance-${mode}.lock.yml.gz.b64`),
+        gzipSync("checked-in\n").toString("base64"),
+      );
+    }
+    await assert.rejects(
+      checkMaintenanceLocks({
+        fixtureRoot,
+        temporaryParent,
+        ensureBinary: async () => "/verified/gh-aw",
+        compileWorkflow: async ({ repositoryRoot, binaryPath }) => {
+          assert.equal(binaryPath, "/verified/gh-aw");
+          await writeFile(
+            path.join(
+              repositoryRoot,
+              ".github",
+              "workflows",
+              "rivet-maintenance.lock.yml",
+            ),
+            "regenerated\n",
+          );
+        },
+        validateWorkflow: async () => {},
+      }),
+      /rivet-maintenance-manual\.lock\.yml fixture does not match/,
+    );
     assert.deepEqual(await readdir(temporaryParent), []);
   } finally {
     await rm(root, { force: true, recursive: true });

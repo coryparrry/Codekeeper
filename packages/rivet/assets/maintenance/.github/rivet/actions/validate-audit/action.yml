@@ -1,0 +1,5 @@
+name: Validate a Rivet audit
+description: Validate and retain one bounded report-only Rivet audit
+runs:
+  using: node24
+  main: index.mjs

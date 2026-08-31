@@ -2,6 +2,7 @@ import {
   reviewAppAuthority,
   reviewAppRegistrationUrl,
 } from "./app-authority.mjs";
+import { DEFAULT_RIVET_CONFIG } from "./config.mjs";
 import { installRepair, installReview } from "./install.mjs";
 import {
   createRepairSetupPullRequest,
@@ -25,6 +26,7 @@ Guided setup:
 
 Explicit commands (advanced/noninteractive):
   init --review-only [--repository <path>] [--dry-run | --setup-pr]
+             [--maintenance <disabled|manual|scheduled>]
              [--setup-branch <name>]
                                Install review workflows with explicit options.
   init --repair [--repository <path>] [--dry-run | --setup-pr]
@@ -124,6 +126,11 @@ function parseInit(args) {
       index += 1;
       continue;
     }
+    if (argument === "--maintenance" && args[index + 1]) {
+      options.maintenance = args[index + 1];
+      index += 1;
+      continue;
+    }
     throw new Error(`Rivet: unknown argument ${argument}\n${usage()}`);
   }
   if (!options.mode) {
@@ -136,6 +143,14 @@ function parseInit(args) {
   }
   if (options.branch && !options.setupPullRequest) {
     throw new Error(`Rivet: --setup-branch requires --setup-pr\n${usage()}`);
+  }
+  if (
+    options.maintenance &&
+    !["disabled", "manual", "scheduled"].includes(options.maintenance)
+  ) {
+    throw new Error(
+      `Rivet: --maintenance must be disabled, manual, or scheduled\n${usage()}`,
+    );
   }
   return options;
 }
@@ -198,7 +213,14 @@ export async function runCli(
     });
   }
   const options = parseInit(args);
-  const { setupPullRequest, mode, ...installationOptions } = options;
+  const { setupPullRequest, mode, maintenance, ...installationOptions } =
+    options;
+  if (maintenance) {
+    const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+    configuration.maintenance.mode = maintenance;
+    if (mode === "repair") configuration.repair.authority = "owner";
+    installationOptions.configuration = configuration;
+  }
   const result = setupPullRequest
     ? await (mode === "repair"
         ? createRepairSetupPullRequestImpl(installationOptions)
