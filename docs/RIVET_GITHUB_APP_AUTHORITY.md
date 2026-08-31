@@ -12,8 +12,9 @@ Review requires:
 - Webhooks: disabled
 
 Pull-request write access is required for bounded inline findings and the final
-review. Repair, issue implementation, maintenance, contents-write, and merge
-authority remain disabled.
+review. Repair, issue implementation, contents-write, and merge authority
+remain disabled. Report-only maintenance uses no App permission and cannot
+publish an issue, pull request, comment, commit, label, or merge.
 
 ## Optional issue authority
 

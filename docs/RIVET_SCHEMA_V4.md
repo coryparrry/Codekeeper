@@ -67,7 +67,14 @@ approval for that permission change. `issues.implementation` must remain
 
 ## Remaining boundary
 
-Schema v4 can represent future owner-authorized maintenance and issue
-implementation modes. The current installer rejects those configurations.
-Repair is a separate explicit authority upgrade. Merge authority has only one
-accepted value: `never`.
+Maintenance report runs are manual or weekly, use the repository-auditor
+identity, and emit only a validated JSON artifact plus receipt. They do not
+create an issue, pull request, comment, commit, label, or merge and require no
+GitHub App permission. Incoming issue triage and pull-request deferral remain
+separate capabilities: triage comments on newly opened issues, while deferral
+creates an issue for a verified out-of-scope pull-request finding. Neither
+authorizes implementation.
+
+Schema v4 can represent a future owner-authorized issue implementation mode;
+the current installer rejects it. Repair is a separate explicit authority
+upgrade. Merge authority has only one accepted value: `never`.

@@ -1,81 +1,42 @@
 # Authority, data, and cost
 
-Codekeeper is designed to make authority explicit. It is still automation that
-can send repository information to providers and, when enabled, mutate GitHub.
-Review this document before merging an installation.
+Rivet sends repository-derived context to the configured model provider and can
+publish through a repository-scoped GitHub App. Review those boundaries before
+installing it.
 
 ## Authority
 
-| Capability | Initial recommendation | What to review before enabling |
-|---|---|---|
-| Automatic PR review | On | Which repository PRs are in the supported surface and whether its gate is required. |
-| Manual maintenance | Available | A live run may publish bounded maintenance issues; use `dry_run=true` for report-only output. |
-| Scheduled maintenance | Off | Frequency and whether the run is dry or live. |
-| Repository repair | Off | Allowed/protected paths, size limits, and deterministic validation commands. |
-| Issue implementation | Off | Issue readiness policy, allowed paths, and validation commands. |
-| Automatic merge | Off | Branch protection and independent CI requirements. |
-| Tracing | Off | Provider access, retention, and the separate trace credential. |
+| Capability            | Default   | Authority                                                                                            |
+| --------------------- | --------- | ---------------------------------------------------------------------------------------------------- |
+| Pull-request review   | Automatic | App-authored review comments; deferred findings may create one issue when issue triage is enabled.   |
+| Incoming issue triage | Automatic | One App-authored comment on a newly opened issue.                                                    |
+| Repair                | Optional  | An owner-authorized command may publish one validated repair commit to the same pull-request branch. |
+| Maintenance           | Disabled  | Manual or weekly report-only audit artifact; no App token or GitHub mutation.                        |
+| Issue implementation  | Disabled  | Unsupported.                                                                                         |
+| Automatic merge       | Disabled  | Unsupported.                                                                                         |
 
-The GitHub App is installed only on the selected repository, but its configured
-permissions are still real authority. The installer requests contents write
-only when a code-changing capability needs it and shows the exact contents,
-issues, and pull-request levels before mutation. Codekeeper's policy cannot
-grant a missing permission, and it should not be used as a reason to grant
-authority a team would not otherwise accept.
+The installer shows the requested App permissions before any GitHub App setup.
+Rivet cannot grant a missing permission. Expanding an existing installation may
+require a repository administrator to approve the changed App authority.
 
 ## Data sent to providers
 
-Codekeeper does not run a hosted service, but selected model providers may
-receive repository-derived data:
-
-- the coordinator receives frozen event context and bounded specialist
-  evidence;
-- an enabled Codex workspace specialist can inspect the checked-out repository
-  for its assigned task;
-- issue titles, bodies, and eligible conversation context are model input for
-  triage; and
-- review context can include PR metadata, diffs, and workspace evidence.
+Review may include pull-request metadata and diffs. Issue triage may include the
+issue title and body. Maintenance inspects the default-branch snapshot. Repair
+uses the reviewed finding and the checked-out pull-request branch.
 
 Provider retention, training, regional processing, and contractual terms are
-set by the selected provider and account. Codekeeper does not make those
-guarantees on an adopter's behalf. Do not enable it for repositories containing
-data that your provider policy does not permit leaving GitHub. A changed path
-that needs manual handling should stay manual; do not rely on silent omission
-as a privacy control.
-
-Tracing is separately opt-in and needs its own credential. Treat trace access
-as operationally sensitive. Do not reuse a model-provider key as a trace key.
+controlled by the selected provider account. Do not enable Rivet where those
+terms do not permit the repository data to leave GitHub.
 
 ## Cost and latency
 
-There is no published, repository-independent cost or latency benchmark yet.
-Total cost depends on the selected providers and models, repository size and
-change shape, enabled workflows, retries, GitHub Actions usage, and any tracing
-or external tooling.
+Rivet has no repository-independent cost or latency guarantee. Usage depends on
+the selected model, repository and change size, enabled workflows, retries, and
+GitHub Actions usage. Start with a controlled adopter repository, inspect the
+provider and Actions billing records, and enable scheduled maintenance only when
+the report is useful enough to justify the recurring run.
 
-Start with the smallest useful surface:
-
-1. Enable automatic PR review only after a controlled proof PR.
-2. Keep maintenance manual and start with `dry_run=true`; a live audit may publish maintenance issues.
-3. Keep scheduled maintenance, repair, issue implementation, and automatic
-   merge off until the team has reviewed real outcomes.
-4. Choose lower-cost coordinator and workspace models where their observed
-   quality is sufficient.
-5. Inspect provider billing and GitHub Actions usage in the accounts that pay
-   for them.
-
-The installer exposes model choices and workflow controls, but it does not turn
-an estimated spend into a guaranteed ceiling. Set organisational billing limits
-outside Codekeeper until per-run budget controls and public measurements are
-available.
-
-A local tarball evaluation does not establish a real workflow cost or latency
-result. Measure spend from live GitHub Actions and provider billing after a
-controlled adopter run.
-
-## Before enabling a mutation
-
-Require a small pull request, reviewed policy, deterministic validation beyond
-`git diff --check`, and normal branch protection. A successful setup pull
-request or dry run is not a substitute for an App-authored publication on a
-controlled same-repository PR.
+A local evaluator or installer dry-run proves only its local boundary. Live
+publication requires a controlled GitHub run bound to the exact installed
+workflow and commit.
