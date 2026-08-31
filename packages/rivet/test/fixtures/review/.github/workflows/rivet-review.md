@@ -12,6 +12,10 @@ checkout:
     .github/rivet/actions/authority-receipt
 engine: codex
 model: gpt-5.6-luna
+max-turns: 6
+jobs:
+  safe_outputs:
+    if: needs.agent.result == 'success'
 inlined-imports: true
 imports:
   - .github/rivet/agents/pr-reviewer.md

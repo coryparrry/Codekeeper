@@ -85,6 +85,7 @@ export function renderRivetReviewWorkflow({
   nativeImports = RIVET_REVIEW_NATIVE_IMPORTS,
   configuration = DEFAULT_RIVET_CONFIG,
   includeDisabledIssueTriageNotice = true,
+  includeReviewBudget = true,
 } = {}) {
   const review = reviewWorkflowProjection(configuration);
   const reviewEvents = review.requestChanges
@@ -102,7 +103,7 @@ permissions:
 checkout:
   sparse-checkout: |
     .github/rivet/actions/authority-receipt
-${engineFrontmatter(review)}${nativeImportsFrontmatter(nativeImports)}safe-outputs:
+${engineFrontmatter(review)}${includeReviewBudget ? "max-turns: 6\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : ""}${nativeImportsFrontmatter(nativeImports)}safe-outputs:
 ${safeOutputsAppFrontmatter()}  report-failure-as-issue: false
   report-failed-jobs: false
   report-incomplete:
@@ -126,5 +127,6 @@ export function renderRivetReviewWorkflowV012({
     nativeImports: RIVET_REVIEW_V012_NATIVE_IMPORTS,
     configuration,
     includeDisabledIssueTriageNotice: false,
+    includeReviewBudget: false,
   });
 }

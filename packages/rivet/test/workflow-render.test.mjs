@@ -40,6 +40,8 @@ test("renders the checked-in Rivet review workflow source", async () => {
   );
   assert.match(fixture, /inlined-imports: true/);
   assert.match(fixture, /model: gpt-5\.6-luna/);
+  assert.match(fixture, /max-turns: 6/);
+  assert.match(fixture, /needs\.agent\.result == 'success'/);
   assert.match(fixture, /vars\.RIVET_APP_CLIENT_ID/);
   assert.match(fixture, /secrets\.RIVET_APP_PRIVATE_KEY/);
   assert.match(
@@ -83,6 +85,8 @@ test("projects domain review controls into gh-aw frontmatter", () => {
   const legacyIssueTriageDisabled = renderRivetReviewWorkflowV012({
     configuration,
   });
+  assert.doesNotMatch(legacyIssueTriageDisabled, /max-turns:/);
+  assert.doesNotMatch(legacyIssueTriageDisabled, /^jobs:/m);
   assert.doesNotMatch(legacyIssueTriageDisabled, /^  create-issue:/m);
   assert.doesNotMatch(legacyIssueTriageDisabled, /issue triage is disabled/);
 });

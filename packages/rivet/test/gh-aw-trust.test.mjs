@@ -317,7 +317,9 @@ test("accepts the self-contained base-branch Rivet review authority", async () =
     violations: [],
   });
   assert.match(source, /Rivet review contract/);
-  assert.match(source, /actively disprove each one/);
+  assert.match(source, /actively try to disprove it/);
+  assert.match(source, /GH_AW_MAX_TURNS: 6/);
+  assert.match(source, /needs\.agent\.result == 'success'/);
   assert.match(source, /"toolTimeout": 240/);
   assert.ok(
     source.indexOf("- name: Checkout repository") <
@@ -339,6 +341,10 @@ test("rejects PR-head prompt loading and mutable action authority", async () => 
     runtimeImports: [".github/workflows/rivet-review.md"],
     unpinnedActions: [{ uses: "owner/action@main" }],
     unpinnedContainers: [{ image: "owner/image:latest" }],
+    jobConditions: {
+      ...authority.jobConditions,
+      safe_outputs: { ...authority.jobConditions.safe_outputs, if: null },
+    },
     checkouts: authority.checkouts.map((checkout, index) =>
       index === 0
         ? { ...checkout, ref: "${{ github.event.pull_request.head.sha }}" }
@@ -355,6 +361,7 @@ test("rejects PR-head prompt loading and mutable action authority", async () => 
     "runtime prompt imports are not allowed",
     "all actions must use immutable commit pins",
     "all containers must use immutable digest pins",
+    "review publication requires a successful agent run",
     "checkouts must use the base context without persisted credentials",
   ]);
 });
