@@ -33,7 +33,8 @@ test("binds public Rivet metadata to its exact release tag", async () => {
     tag,
   });
   assert.equal(pkg.private, undefined);
-  assert.deepEqual(pkg.files, ["assets", "bin", "src"]);
+  assert.deepEqual(pkg.files, ["assets", "bin", "evals", "src"]);
+  assert.equal(pkg.bin["rivet-review-eval"], "evals/review-safe-outputs.mjs");
   assert.deepEqual(pkg.repository, {
     type: "git",
     url: "git+https://github.com/coryparrry/Rivet.git",
@@ -90,9 +91,18 @@ test("packs the executable and production payload without package tests", async 
     );
 
     assert(paths.has("bin/rivet.mjs"));
+    assert(paths.has("evals/review-safe-outputs.mjs"));
     assert(paths.has("README.md"));
     assert([...paths].some((path) => path.startsWith("src/")));
     assert([...paths].some((path) => path.startsWith("assets/")));
+    for (const profile of [
+      "fixer.md",
+      "issue-triager.md",
+      "pr-reviewer.md",
+      "repository-auditor.md",
+    ]) {
+      assert(paths.has(`assets/agents/${profile}`));
+    }
     assert(![...paths].some((path) => path.startsWith("test/")));
     assert(!paths.has("package-lock.json"));
 

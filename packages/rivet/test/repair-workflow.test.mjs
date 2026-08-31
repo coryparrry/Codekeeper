@@ -3,7 +3,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { renderRivetRepairWorkflow } from "../src/workflows/repair.mjs";
+import {
+  renderRivetRepairWorkflow,
+  renderRivetRepairWorkflowV012,
+  RIVET_REPAIR_NATIVE_IMPORTS,
+} from "../src/workflows/repair.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -15,6 +19,13 @@ test("renders isolated validation before the App-authorized publisher", () => {
     validation: ["npm test", "npm run check"],
   });
   assert.match(source, /name: rivet-repair/);
+  assert.deepEqual(RIVET_REPAIR_NATIVE_IMPORTS, [
+    ".github/rivet/agents/fixer.md",
+  ]);
+  assert.match(
+    source,
+    /inlined-imports: true\nimports:\n  - \.github\/rivet\/agents\/fixer\.md/,
+  );
   assert.match(source, /events: \[pull_request_comment\]/);
   assert.match(source, /roles: \[admin\]/);
   assert.match(source, /if: github\.event\.comment\.body == '\/rivet-repair'/);
@@ -71,6 +82,22 @@ test("rejects missing or multiline validation commands", () => {
   assert.throws(
     () => renderRivetRepairWorkflow({ validation: ["npm test\nrm output"] }),
     /bounded validation commands/,
+  );
+  assert.throws(
+    () => renderRivetRepairWorkflow({ nativeImports: ["../fixer.md"] }),
+    /must be a managed local Markdown path/,
+  );
+});
+
+test("freezes the 0.1.2 repair source used for upgrades", async () => {
+  const source = renderRivetRepairWorkflowV012();
+  assert.doesNotMatch(source, /^inlined-imports:|^imports:/m);
+  assert.equal(
+    source,
+    await readFile(
+      path.join(PACKAGE_ROOT, "test/fixtures/v0.1.2/rivet-repair.md"),
+      "utf8",
+    ),
   );
 });
 

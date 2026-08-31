@@ -24,21 +24,27 @@ import { assessPullRequestTargetTrust } from "./gh-aw/trust.mjs";
 import { GH_AW_RELEASE } from "./gh-aw/versions.mjs";
 import {
   renderRivetRepairWorkflow,
+  renderRivetRepairWorkflowV012,
+  RIVET_REPAIR_NATIVE_IMPORTS,
   RIVET_REPAIR_WORKFLOW_ID,
 } from "./workflows/repair.mjs";
 import {
   renderRivetReviewWorkflow,
+  renderRivetReviewWorkflowV012,
+  RIVET_REVIEW_NATIVE_IMPORTS,
   RIVET_REVIEW_WORKFLOW_ID,
 } from "./workflows/review.mjs";
 
-const NATIVE_IMPORT = ".github/rivet/aw/review-extension.md";
+const [REVIEWER_IMPORT, REVIEW_EXTENSION_IMPORT] = RIVET_REVIEW_NATIVE_IMPORTS;
+const [FIXER_IMPORT] = RIVET_REPAIR_NATIVE_IMPORTS;
 const LOCAL_ACTION = "./.github/rivet/actions/authority-receipt";
+const AGENT_ASSET_ROOT = new URL("../assets/agents/", import.meta.url);
 const REVIEW_ASSET_ROOT = new URL("../assets/review/", import.meta.url);
 const REPAIR_ASSET_ROOT = new URL("../assets/repair/", import.meta.url);
 const REVIEW_ASSET_PATHS = Object.freeze([
   ".github/rivet/actions/authority-receipt/action.yml",
   ".github/rivet/actions/authority-receipt/index.mjs",
-  NATIVE_IMPORT,
+  REVIEW_EXTENSION_IMPORT,
 ]);
 const REPAIR_ASSET_PATHS = Object.freeze([
   ".github/rivet/actions/publish-repair/action.yml",
@@ -58,6 +64,15 @@ function knownCompilerDrift(relativePath, current, planned) {
   } catch {
     return false;
   }
+}
+
+function matchesBaseline(relativePath, current, baseline) {
+  const planned = baseline.get(relativePath);
+  return (
+    planned === current ||
+    (planned !== undefined &&
+      knownCompilerDrift(relativePath, current, planned))
+  );
 }
 
 async function writeNewFiles(root, files) {
@@ -102,6 +117,10 @@ async function assetFiles(paths, root) {
       ]),
     ),
   );
+}
+
+async function agentProfile(name) {
+  return readFile(new URL(name, AGENT_ASSET_ROOT), "utf8");
 }
 
 async function existingFile(filePath) {
@@ -161,6 +180,87 @@ function installationReceipt({
   )}\n`;
 }
 
+function completeInstallationFiles(files, { mode, config }) {
+  const productAuthority = productAuthoritySummary(config);
+  const githubApp =
+    mode === "repair" ? repairAppAuthority(config) : reviewAppAuthority(config);
+  files.set(".github/rivet.json", `${JSON.stringify(config, null, 2)}\n`);
+  files.set(
+    ".github/rivet/installation.json",
+    installationReceipt({ mode, config, productAuthority, githubApp, files }),
+  );
+  return files;
+}
+
+async function buildWorkflowFiles({
+  stagingRoot,
+  mode,
+  reviewConfig,
+  validation,
+  binaryPath,
+  compileWorkflow,
+  validateWorkflow,
+  env,
+  profiles,
+}) {
+  const files = await assetFiles(REVIEW_ASSET_PATHS, REVIEW_ASSET_ROOT);
+  if (profiles) {
+    files.set(REVIEWER_IMPORT, await agentProfile("pr-reviewer.md"));
+  }
+  files.set(
+    `.github/workflows/${RIVET_REVIEW_WORKFLOW_ID}.md`,
+    profiles
+      ? renderRivetReviewWorkflow({
+          nativeImports: RIVET_REVIEW_NATIVE_IMPORTS,
+          configuration: reviewConfig,
+        })
+      : renderRivetReviewWorkflowV012({ configuration: reviewConfig }),
+  );
+  if (mode === "repair") {
+    for (const [relativePath, content] of await assetFiles(
+      REPAIR_ASSET_PATHS,
+      REPAIR_ASSET_ROOT,
+    )) {
+      files.set(relativePath, content);
+    }
+    if (profiles) files.set(FIXER_IMPORT, await agentProfile("fixer.md"));
+    files.set(
+      `.github/workflows/${RIVET_REPAIR_WORKFLOW_ID}.md`,
+      profiles
+        ? renderRivetRepairWorkflow({
+            nativeImports: RIVET_REPAIR_NATIVE_IMPORTS,
+            validation,
+          })
+        : renderRivetRepairWorkflowV012({ validation }),
+    );
+  }
+  await writeNewFiles(stagingRoot, files);
+  const workflowIds = [
+    RIVET_REVIEW_WORKFLOW_ID,
+    ...(mode === "repair" ? [RIVET_REPAIR_WORKFLOW_ID] : []),
+  ];
+  for (const workflowId of workflowIds) {
+    await validateWorkflow({
+      repositoryRoot: stagingRoot,
+      workflowId,
+      binaryPath,
+      env,
+    });
+    await compileWorkflow({
+      repositoryRoot: stagingRoot,
+      workflowId,
+      binaryPath,
+      env,
+    });
+    const lockPath = `.github/workflows/${workflowId}.lock.yml`;
+    files.set(
+      lockPath,
+      await readFile(path.join(stagingRoot, lockPath), "utf8"),
+    );
+  }
+  return files;
+}
+
 async function prepareInstallation({
   mode,
   repositoryRoot,
@@ -185,56 +285,23 @@ async function prepareInstallation({
     await mkdtemp(path.join(os.tmpdir(), `rivet-${mode}-install-`)),
   );
   try {
-    const files = await assetFiles(REVIEW_ASSET_PATHS, REVIEW_ASSET_ROOT);
-    files.set(
-      `.github/workflows/${RIVET_REVIEW_WORKFLOW_ID}.md`,
-      renderRivetReviewWorkflow({
-        nativeImport: NATIVE_IMPORT,
-        configuration: reviewConfig,
-      }),
-    );
-    if (mode === "repair") {
-      for (const [relativePath, content] of await assetFiles(
-        REPAIR_ASSET_PATHS,
-        REPAIR_ASSET_ROOT,
-      )) {
-        files.set(relativePath, content);
-      }
-      files.set(
-        `.github/workflows/${RIVET_REPAIR_WORKFLOW_ID}.md`,
-        renderRivetRepairWorkflow({ validation }),
-      );
-    }
-    await writeNewFiles(stagingRoot, files);
-    const workflowIds = [
-      RIVET_REVIEW_WORKFLOW_ID,
-      ...(mode === "repair" ? [RIVET_REPAIR_WORKFLOW_ID] : []),
-    ];
-    for (const workflowId of workflowIds) {
-      await validateWorkflow({
-        repositoryRoot: stagingRoot,
-        workflowId,
-        binaryPath,
-        env,
-      });
-      await compileWorkflow({
-        repositoryRoot: stagingRoot,
-        workflowId,
-        binaryPath,
-        env,
-      });
-      const lockPath = `.github/workflows/${workflowId}.lock.yml`;
-      files.set(
-        lockPath,
-        await readFile(path.join(stagingRoot, lockPath), "utf8"),
-      );
-    }
+    const files = await buildWorkflowFiles({
+      stagingRoot: path.join(stagingRoot, "target"),
+      mode,
+      reviewConfig,
+      validation,
+      binaryPath,
+      compileWorkflow,
+      validateWorkflow,
+      env,
+      profiles: true,
+    });
     const authority = inspectCompiledWorkflow(
       files.get(`.github/workflows/${RIVET_REVIEW_WORKFLOW_ID}.lock.yml`),
     );
     const trust = assessPullRequestTargetTrust({
       authority,
-      expectedImports: [NATIVE_IMPORT],
+      expectedImports: RIVET_REVIEW_NATIVE_IMPORTS,
       expectedLocalActions: [LOCAL_ACTION],
     });
     if (!trust.trusted) {
@@ -242,52 +309,96 @@ async function prepareInstallation({
         `Rivet installer: compiled review workflow is not trusted: ${trust.violations.join("; ")}`,
       );
     }
-    files.set(".github/rivet.json", `${JSON.stringify(config, null, 2)}\n`);
-    files.set(
-      ".github/rivet/installation.json",
-      installationReceipt({ mode, config, productAuthority, githubApp, files }),
-    );
+    completeInstallationFiles(files, { mode, config });
 
-    let reviewBaseline = null;
-    if (mode === "repair") {
+    const baselines = [];
+    const existingFiles = new Map(
+      await Promise.all(
+        [...files].map(async ([relativePath]) => [
+          relativePath,
+          await existingFile(path.join(root, relativePath)),
+        ]),
+      ),
+    );
+    const requiresUpgrade = [...files].some(
+      ([relativePath, content]) =>
+        existingFiles.get(relativePath) !== null &&
+        existingFiles.get(relativePath) !== content,
+    );
+    if (requiresUpgrade && mode === "repair") {
       const baselineFiles = new Map(
         [...files].filter(
           ([relativePath]) =>
             !REPAIR_ASSET_PATHS.includes(relativePath) &&
+            relativePath !== FIXER_IMPORT &&
             !relativePath.includes(`/${RIVET_REPAIR_WORKFLOW_ID}.`),
         ),
       );
-      baselineFiles.set(
-        ".github/rivet.json",
-        `${JSON.stringify(reviewConfig, null, 2)}\n`,
-      );
-      baselineFiles.set(
-        ".github/rivet/installation.json",
-        installationReceipt({
-          mode: "review",
-          config: reviewConfig,
-          productAuthority: productAuthoritySummary(reviewConfig),
-          githubApp: reviewAppAuthority(reviewConfig),
-          files: new Map(
-            [...baselineFiles].filter(
-              ([relativePath]) =>
-                relativePath !== ".github/rivet/installation.json",
-            ),
-          ),
-        }),
-      );
-      reviewBaseline = baselineFiles;
+      baselineFiles.delete(".github/rivet/installation.json");
+      completeInstallationFiles(baselineFiles, {
+        mode: "review",
+        config: reviewConfig,
+      });
+      baselines.push(baselineFiles);
     }
+
+    if (requiresUpgrade) {
+      const legacyReview = await buildWorkflowFiles({
+        stagingRoot: path.join(stagingRoot, "legacy-review"),
+        mode: "review",
+        reviewConfig,
+        validation,
+        binaryPath,
+        compileWorkflow,
+        validateWorkflow,
+        env,
+        profiles: false,
+      });
+      completeInstallationFiles(legacyReview, {
+        mode: "review",
+        config: reviewConfig,
+      });
+      baselines.push(legacyReview);
+    }
+    if (requiresUpgrade && mode === "repair") {
+      const legacyRepair = await buildWorkflowFiles({
+        stagingRoot: path.join(stagingRoot, "legacy-repair"),
+        mode: "repair",
+        reviewConfig,
+        validation,
+        binaryPath,
+        compileWorkflow,
+        validateWorkflow,
+        env,
+        profiles: false,
+      });
+      completeInstallationFiles(legacyRepair, { mode, config });
+      baselines.push(legacyRepair);
+    }
+
+    const compatibleBaselines = baselines.filter((baseline) =>
+      [...files].every(([relativePath, content]) => {
+        const current = existingFiles.get(relativePath);
+        return (
+          current === null ||
+          current === content ||
+          knownCompilerDrift(relativePath, current, content) ||
+          matchesBaseline(relativePath, current, baseline)
+        );
+      }),
+    );
 
     const plannedFiles = [];
     for (const [relativePath, content] of [...files].sort(([left], [right]) =>
       left < right ? -1 : left > right ? 1 : 0,
     )) {
-      const current = await existingFile(path.join(root, relativePath));
+      const current = existingFiles.get(relativePath);
       const canUpgrade =
-        reviewBaseline?.get(relativePath) === current ||
-        (current !== null &&
-          knownCompilerDrift(relativePath, current, content));
+        current !== null &&
+        (knownCompilerDrift(relativePath, current, content) ||
+          compatibleBaselines.some((baseline) =>
+            matchesBaseline(relativePath, current, baseline),
+          ));
       if (current !== null && current !== content && !canUpgrade) {
         throw new Error(
           `Rivet installer: refusing to overwrite ${relativePath}`,

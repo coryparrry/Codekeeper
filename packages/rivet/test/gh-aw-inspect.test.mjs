@@ -31,6 +31,7 @@ test("inspects the pinned Rivet review fixture authority", async () => {
   assert.equal(authority.manifest.has_pull_request_target, true);
   assert.equal(authority.inlinedImports, true);
   assert.deepEqual(authority.resolvedImports, [
+    ".github/rivet/agents/pr-reviewer.md",
     ".github/rivet/aw/review-extension.md",
   ]);
   assert.deepEqual(authority.unpinnedActions, []);
