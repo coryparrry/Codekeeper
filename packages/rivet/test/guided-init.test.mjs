@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -220,6 +221,55 @@ test("prints an organization registration URL when opening the browser fails", a
     /Create the Rivet GitHub App: https:\/\/github\.com\/organizations\/acme\/settings\/apps\/new/,
   );
   assert.match(stdout.read(), /Could not open a browser/);
+});
+
+test("opens browsers through the native macOS executable", async () => {
+  const calls = [];
+  const spawnBrowser = (command, args, options) => {
+    calls.push({ command, args, options });
+    const child = new EventEmitter();
+    child.unref = () => {};
+    queueMicrotask(() => child.emit("spawn"));
+    return child;
+  };
+  const result = await runGuidedInit({
+    platform: "darwin",
+    env: { PATH: "/tmp/untrusted" },
+    runner: runner().run,
+    prompt: prompt({ confirmations: [false] }),
+    stdout: output().stream,
+    spawnBrowser,
+    ...dependencies(),
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "/usr/bin/open");
+  assert.deepEqual(calls[0].args, [result.registrationUrl]);
+  assert.equal(calls[0].options.detached, true);
+});
+
+test("prints the URL without spawning a PATH-resolved opener elsewhere", async () => {
+  for (const platform of ["linux", "win32"]) {
+    const stdout = output();
+    let spawned = false;
+    const result = await runGuidedInit({
+      platform,
+      env: { PATH: "/tmp/untrusted" },
+      runner: runner().run,
+      prompt: prompt({ confirmations: [false] }),
+      stdout: stdout.stream,
+      spawnBrowser: () => {
+        spawned = true;
+      },
+      ...dependencies(),
+    });
+
+    assert.equal(result.status, "cancelled");
+    assert.equal(spawned, false);
+    assert.match(stdout.read(), /Could not open a browser/);
+    assert.ok(stdout.read().includes(result.registrationUrl));
+  }
 });
 
 test("stops before App mutation when the repository preflight fails", async () => {
