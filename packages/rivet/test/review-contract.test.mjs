@@ -62,10 +62,15 @@ test("keeps the canonical reviewer profile ahead of the Rivet contract", async (
 
 test("bounds review evidence acquisition", async () => {
   const contract = await readContract(path.join("assets", "review"));
-  assert.match(contract, /exact comparison once/);
-  assert.match(contract, /do not call `get_files`/);
+  assert.match(contract, /method `get_files`, `perPage: 100`, and page 1/);
+  assert.match(contract, /Never call `get_diff` or repeat a page/);
+  assert.match(contract, /page 2 also contains 100 files/);
   assert.match(contract, /at most four GitHub read calls/);
-  assert.match(contract, /Never download a generated lock/);
+  assert.match(
+    contract,
+    /missing patch is acceptable only for a generated lock/,
+  );
+  assert.match(contract, /Never download those files in full/);
 });
 
 test("trusts the base workflow contract and not pull request head instructions", async () => {
