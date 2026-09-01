@@ -28,7 +28,7 @@ test("renders bounded incoming issue triage", () => {
   assert.match(source, /tools:\n  bash: \[\]\n  cli-proxy: false/);
   assert.match(
     source,
-    /github:\n    toolsets: \[issues\]\n    allowed-repos: "\$\{\{ github\.repository \}\}"\n    min-integrity: none\n    allowed:\n      - name: issue_read\n        max-calls: 2\n      - name: search_issues\n        max-calls: 3/,
+    /github:\n    toolsets: \[issues\]\n    allowed-repos:\n      - "\$\{\{ github\.repository \}\}"\n    min-integrity: none\n    allowed:\n      - name: issue_read\n        max-calls: 2\n      - name: search_issues\n        max-calls: 3/,
   );
   assert.match(source, /report-incomplete:\n    create-issue: false/);
   assert.match(
