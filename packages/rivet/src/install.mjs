@@ -26,7 +26,7 @@ import {
   assessMaintenanceTrust,
   assessPullRequestTargetTrust,
 } from "./gh-aw/trust.mjs";
-import { GH_AW_RELEASE } from "./gh-aw/versions.mjs";
+import { completeInstallationFiles } from "./installation-receipt.mjs";
 import {
   RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
   RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
@@ -62,6 +62,10 @@ const V013_REVIEW_EXTENSION = new URL(
 );
 const V012_PUBLISH_REPAIR = new URL(
   "../assets/upgrades/v0.1.12/publish-repair-index.mjs",
+  import.meta.url,
+);
+const V013_PREPARE_REVIEW_CONTEXT = new URL(
+  "../assets/upgrades/v0.1.13/prepare-review-context-index.mjs",
   import.meta.url,
 );
 const PROFILED_REVIEW_EXTENSIONS = Object.freeze([
@@ -180,43 +184,6 @@ function reviewConfiguration(mode, config) {
     throw new Error("Rivet installer: repair mode requires owner authority");
   }
   return { ...structuredClone(config), repair: { authority: "never" } };
-}
-function installationReceipt({
-  mode,
-  config,
-  productAuthority,
-  githubApp,
-  files,
-}) {
-  return `${JSON.stringify(
-    {
-      schemaVersion: 1,
-      product: "Rivet",
-      mode,
-      configSchemaVersion: config.schemaVersion,
-      productAuthority,
-      githubApp,
-      compiler: {
-        version: GH_AW_RELEASE.version,
-        commit: GH_AW_RELEASE.commit,
-        actionsCommit: GH_AW_RELEASE.actionsCommit,
-      },
-      managedFiles: [...files.keys(), ".github/rivet/installation.json"].sort(),
-    },
-    null,
-    2,
-  )}\n`;
-}
-function completeInstallationFiles(files, { mode, config }) {
-  const productAuthority = productAuthoritySummary(config);
-  const githubApp =
-    mode === "repair" ? repairAppAuthority(config) : reviewAppAuthority(config);
-  files.set(".github/rivet.json", `${JSON.stringify(config, null, 2)}\n`);
-  files.set(
-    ".github/rivet/installation.json",
-    installationReceipt({ mode, config, productAuthority, githubApp, files }),
-  );
-  return files;
 }
 function withoutIssueTriage(files) {
   return new Map(
@@ -680,6 +647,22 @@ async function prepareInstallation({
       const previousLegacyRepair = withoutReviewContext(legacyRepair);
       completeInstallationFiles(previousLegacyRepair, { mode, config });
       baselines.push(previousLegacyRepair);
+    }
+    if (requiresUpgrade) {
+      const relativePath =
+        ".github/rivet/actions/prepare-review-context/index.mjs";
+      const previousContent = await readFile(
+        V013_PREPARE_REVIEW_CONTEXT,
+        "utf8",
+      );
+      const previousFiles = new Map(files);
+      previousFiles.set(relativePath, previousContent);
+      previousFiles.delete(".github/rivet/installation.json");
+      completeInstallationFiles(previousFiles, { mode, config });
+      baselines.push(previousFiles);
+      for (const baseline of baselines) {
+        baseline.set(relativePath, previousContent);
+      }
     }
     if (requiresUpgrade && mode === "repair") {
       const relativePath = ".github/rivet/actions/publish-repair/index.mjs";

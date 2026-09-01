@@ -329,6 +329,65 @@ test("writes one newline-free bounded snapshot to GitHub output", async () => {
   assert.equal(writes[0][1].split("\n").length, 2);
 });
 
+test("escapes untrusted gh-aw placeholders only in prompt transport", async () => {
+  const writes = [];
+  const placeholderComparison = comparison([
+    {
+      filename: "src/placeholder.mjs",
+      status: "modified",
+      additions: 1,
+      deletions: 0,
+      changes: 1,
+      patch: "@@ -0,0 +1,2 @@\n+__GH_AW_UNTRUSTED__\n+__GH_AW_SECOND__",
+    },
+  ]);
+  const snapshot = await runPrepareReviewContextAction({
+    env: {
+      GITHUB_EVENT_PATH: "/github/event.json",
+      GITHUB_OUTPUT: "/github/output",
+      GITHUB_API_URL: "https://api.github.com",
+      GITHUB_REPOSITORY: "owner/repository",
+      GITHUB_TOKEN: "secret-token",
+    },
+    statImpl: async () => ({ isFile: () => true, size: 512 }),
+    readFileImpl: async () => JSON.stringify(event(1)),
+    appendFileImpl: async (...args) => writes.push(args),
+    fetchImpl: async () =>
+      new Response(JSON.stringify(placeholderComparison), { status: 200 }),
+  });
+  const encoded = writes[0][1].slice("snapshot=".length, -1);
+  assert.doesNotMatch(encoded, /__GH_AW_/);
+  assert.match(encoded, /\\u005f_GH_AW_UNTRUSTED__/);
+  assert.match(encoded, /\\u005f_GH_AW_SECOND__/);
+  assert.deepEqual(JSON.parse(encoded), snapshot);
+  assert.match(snapshot.files[0].patch, /__GH_AW_UNTRUSTED__/);
+
+  const encodedBytes = Buffer.byteLength(encoded, "utf8");
+  const atBudget = await createReviewContext({
+    event: event(1),
+    expectedRepository: "owner/repository",
+    token: "secret-token",
+    maxSnapshotBytes: encodedBytes,
+    fetchImpl: async () =>
+      new Response(JSON.stringify(placeholderComparison), { status: 200 }),
+  });
+  assert.equal(atBudget.complete, true);
+
+  const overBudget = await createReviewContext({
+    event: event(1),
+    expectedRepository: "owner/repository",
+    token: "secret-token",
+    maxSnapshotBytes: encodedBytes - 1,
+    fetchImpl: async () =>
+      new Response(JSON.stringify(placeholderComparison), { status: 200 }),
+  });
+  assert.equal(overBudget.complete, false);
+  assert.match(
+    overBudget.reason,
+    new RegExp(`${encodedBytes - 1}-byte review budget`),
+  );
+});
+
 test("does not start the model when bounded context is incomplete", async () => {
   let wroteOutput = false;
   await assert.rejects(
