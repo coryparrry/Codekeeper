@@ -60,6 +60,10 @@ const V013_REVIEW_EXTENSION = new URL(
   "../assets/upgrades/v0.1.3/review-extension.md",
   import.meta.url,
 );
+const V012_PUBLISH_REPAIR = new URL(
+  "../assets/upgrades/v0.1.12/publish-repair-index.mjs",
+  import.meta.url,
+);
 const PROFILED_REVIEW_EXTENSIONS = Object.freeze([
   {
     version: "v0.1.11",
@@ -669,6 +673,19 @@ async function prepareInstallation({
       const previousLegacyRepair = withoutReviewContext(legacyRepair);
       completeInstallationFiles(previousLegacyRepair, { mode, config });
       baselines.push(previousLegacyRepair);
+    }
+    if (requiresUpgrade && mode === "repair") {
+      const relativePath = ".github/rivet/actions/publish-repair/index.mjs";
+      const previousContent = await readFile(V012_PUBLISH_REPAIR, "utf8");
+      const previousFiles = new Map(files);
+      previousFiles.set(relativePath, previousContent);
+      previousFiles.delete(".github/rivet/installation.json");
+      completeInstallationFiles(previousFiles, { mode, config });
+      baselines.push(previousFiles);
+      for (const baseline of baselines) {
+        if (baseline.has(relativePath))
+          baseline.set(relativePath, previousContent);
+      }
     }
     const compatibleBaselines = baselines.filter((baseline) =>
       [...files].every(([relativePath, content]) => {
