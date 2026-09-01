@@ -28,6 +28,11 @@ import {
 } from "./gh-aw/trust.mjs";
 import { completeInstallationFiles } from "./installation-receipt.mjs";
 import {
+  buildDisabledIssueTriageBaselines,
+  matchesHistoricalManagedFile,
+  PROFILED_REVIEW_EXTENSIONS,
+} from "./issue-triage-upgrade.mjs";
+import {
   RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
   RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
   RIVET_ISSUE_TRIAGE_WORKFLOW_ID,
@@ -72,43 +77,6 @@ const V013_PREPARE_REVIEW_CONTEXT = new URL(
   "../assets/upgrades/v0.1.13/prepare-review-context-index.mjs",
   import.meta.url,
 );
-const PROFILED_REVIEW_EXTENSIONS = Object.freeze([
-  {
-    version: "v0.1.13",
-    url: new URL(
-      "../assets/upgrades/v0.1.13/review-extension.md",
-      import.meta.url,
-    ),
-  },
-  {
-    version: "v0.1.11",
-    url: new URL(
-      "../assets/upgrades/v0.1.11/review-extension.md",
-      import.meta.url,
-    ),
-  },
-  {
-    version: "v0.1.9",
-    url: new URL(
-      "../assets/upgrades/v0.1.9/review-extension.md",
-      import.meta.url,
-    ),
-  },
-  {
-    version: "v0.1.7",
-    url: new URL(
-      "../assets/upgrades/v0.1.7/review-extension.md",
-      import.meta.url,
-    ),
-  },
-  {
-    version: "v0.1.5",
-    url: new URL(
-      "../assets/upgrades/v0.1.5/review-extension.md",
-      import.meta.url,
-    ),
-  },
-]);
 const MAINTENANCE_LOCAL_ACTION = "./.github/rivet/actions/validate-audit";
 const MAINTENANCE_MANAGED_PATHS = Object.freeze([
   RIVET_MAINTENANCE_NATIVE_IMPORTS[0],
@@ -182,13 +150,6 @@ function repairConfiguration() {
     repair: { authority: "owner" },
   };
 }
-function reviewConfiguration(mode, config) {
-  if (mode !== "repair") return config;
-  if (config.repair.authority !== "owner") {
-    throw new Error("Rivet installer: repair mode requires owner authority");
-  }
-  return { ...structuredClone(config), repair: { authority: "never" } };
-}
 function withoutIssueTriage(files) {
   return new Map(
     [...files].filter(
@@ -198,6 +159,13 @@ function withoutIssueTriage(files) {
         !relativePath.includes(`/${RIVET_ISSUE_TRIAGE_WORKFLOW_ID}.`),
     ),
   );
+}
+function reviewConfiguration(mode, config) {
+  if (mode !== "repair") return config;
+  if (config.repair.authority !== "owner") {
+    throw new Error("Rivet installer: repair mode requires owner authority");
+  }
+  return { ...structuredClone(config), repair: { authority: "never" } };
 }
 function withoutMaintenance(files) {
   return new Map(
@@ -521,6 +489,19 @@ async function prepareInstallation({
         });
         baselines.push(previousReview);
       }
+      baselines.push(
+        ...(await buildDisabledIssueTriageBaselines({
+          stagingRoot,
+          mode,
+          config,
+          reviewConfig,
+          validation,
+          binaryPath,
+          compileWorkflow,
+          validateWorkflow,
+          env,
+        })),
+      );
     }
     if (requiresUpgrade && config.maintenance.mode !== "disabled") {
       const previousConfig = structuredClone(config);
@@ -690,6 +671,7 @@ async function prepareInstallation({
           current === null ||
           current === content ||
           knownCompilerDrift(relativePath, current, content) ||
+          matchesHistoricalManagedFile(relativePath, digest(current)) ||
           matchesBaseline(relativePath, current, baseline)
         );
       }),
@@ -702,6 +684,7 @@ async function prepareInstallation({
       const canUpgrade =
         current !== null &&
         (knownCompilerDrift(relativePath, current, content) ||
+          matchesHistoricalManagedFile(relativePath, digest(current)) ||
           compatibleBaselines.some((baseline) =>
             matchesBaseline(relativePath, current, baseline),
           ));
