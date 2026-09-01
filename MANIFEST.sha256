@@ -100,7 +100,7 @@ d7761bf7e74962ce0b5be774f161a36636c9c7c4e3c6cc71d5a49693a3770b77  packages/rivet
 dcbb18bf3da1da158448ae1814780558f1dc730b1d96c7c6552e34a9837c81d0  packages/rivet/assets/maintenance/.github/rivet/actions/validate-audit/action.yml
 ede77567f2420521dd3d18beb20ee35a81ace2b8719f1ec6c157b3a549a9d1b7  packages/rivet/assets/maintenance/.github/rivet/actions/validate-audit/index.mjs
 52bb33dbaee4ce370594d4e51c173fc502265db58d6ba3557c4bdd924a4d4f79  packages/rivet/assets/repair/.github/rivet/actions/publish-repair/action.yml
-e06e436f2b14cd7dbbcedb67e6cf37e2f747ecbbde12fe66330fe335873a3aac  packages/rivet/assets/repair/.github/rivet/actions/publish-repair/index.mjs
+085905cfc89373753b57014ffc8f4aeeab71c7b7a5d85712b33cf2a52c52bdcc  packages/rivet/assets/repair/.github/rivet/actions/publish-repair/index.mjs
 54334b1aa882a6003c0843dea03ee20f9bea51542da06421757963cabd4bcb82  packages/rivet/assets/repair/.github/rivet/actions/validate-repair/action.yml
 878f443247aacbb3b378b7057c4c3aa1c332a842041b697b81633d36fb79100b  packages/rivet/assets/repair/.github/rivet/actions/validate-repair/index.mjs
 3a3de3f6d43264aa5a0c251ac22c153e1fc2d8db872bdcc2eef6088ff2de71f7  packages/rivet/assets/review/.github/rivet/actions/authority-receipt/action.yml
@@ -110,6 +110,7 @@ ecaefbc8d295e9f27d5f4aaaf00c29f4dde27226642318e82ba4ddddd0d73caa  packages/rivet
 3500abedd0759e6eca5a1e3f3ff4cc6ce39a87bf77df2793f1a0e9620485cdb9  packages/rivet/assets/review/.github/rivet/aw/review-extension.md
 3500abedd0759e6eca5a1e3f3ff4cc6ce39a87bf77df2793f1a0e9620485cdb9  packages/rivet/assets/upgrades/v0.1.11/review-extension.md
 190399757d953186e38f1952d35275690eee2405da6fd79c7aa8234d2a5d4922  packages/rivet/assets/upgrades/v0.1.11/rivet-review.md
+e06e436f2b14cd7dbbcedb67e6cf37e2f747ecbbde12fe66330fe335873a3aac  packages/rivet/assets/upgrades/v0.1.12/publish-repair-index.mjs
 9501509358912c62101756b30f77c7223bd3f981517d1cb58679c941727f1e42  packages/rivet/assets/upgrades/v0.1.3/review-extension.md
 3c7dcbee1dea7ef87870e90a6973b66473fa07b4eb96029d5d78612082e19ec4  packages/rivet/assets/upgrades/v0.1.5/review-extension.md
 babc55f38b078d098bb641411a78f068f3da560cee009076da0c52aec7944fe3  packages/rivet/assets/upgrades/v0.1.7/review-extension.md
@@ -133,7 +134,7 @@ e70ac55100fa5a7a98eacd28cf391dcacd6ee85ad86542467cf8adb11a9178e9  packages/rivet
 47d2538c72db95190b2665b833bc853269fe3f3b3e9cda3be4a2f7f750ed4955  packages/rivet/src/gh-aw/trust.mjs
 1a76926921c84aec7cc04a8f6b892f0c1f2589c47702d911df8fcbe779cb3a2f  packages/rivet/src/gh-aw/versions.mjs
 5d87d129eac85eee08ad3ec7d78399165d80f88ea165e35ceb230339dce9e74c  packages/rivet/src/guided-init.mjs
-10d1c56a102a1846c9fd9f4213c93cef6cd5bdb95ba649ef2017a4975cfe3343  packages/rivet/src/install.mjs
+15fc8abecf858ac0ce5a331558a5fe29bf938a99378667964c802d5e558339ca  packages/rivet/src/install.mjs
 9cca544bc4124ec6149fd884638d5a0924ba5b7be0f89f111b037c88f0bd3de5  packages/rivet/src/repair-lineage.mjs
 c8e5e6361a8d79c7d37fac47e44eaaafae23c99c1916ea497ed7ef6a9f50c33a  packages/rivet/src/runtime-mirror.mjs
 faff67adf898616c837349cfc61767177412bbe0af7daf3cfa1ce9a740f5c493  packages/rivet/src/setup-pr.mjs
@@ -187,8 +188,8 @@ e9a07fa1d0c65dec713f9a3b595f4811bc065268c1ef4582d993dc6c4ba8ed9a  packages/rivet
 1d39dacb3a8fd0b6e49d04916a8050f812985e9a231b0d6b38800fb29ba83430  packages/rivet/test/install.test.mjs
 1f65c59e2953463d1c83ddfb1697b82ac821f02fcb64c3ab2e58a7fce26a2b8a  packages/rivet/test/issue-triage-workflow.test.mjs
 2c0594a9f525d970f0b2f1c7f855850fecf4d82a45b2b8f8ee1b1b858f68a8a7  packages/rivet/test/maintenance-workflow.test.mjs
-7df0527dcdf10b4f3a396ae01ed1e00a84c3c81cb82888c36e42d3a156e0945a  packages/rivet/test/pre-triage-upgrade.test.mjs
-8f648af80ac4b6071aba85f2805dfc37e639f79cb8281aa93873896b6c6ed56e  packages/rivet/test/publish-repair-action.test.mjs
+e2d2fb9db1d38d109b587d7b0ab9cbcb5114aa3d8c12df3ebd23e70c6198b572  packages/rivet/test/pre-triage-upgrade.test.mjs
+fa8e00545f885f3fc7177c6e693739f52f976308f625252e33a4107cd5e54403  packages/rivet/test/publish-repair-action.test.mjs
 b03b46145b1341957f0fd4a71a0f64efba7b8fa3850a15299d8618c7bf9aaa81  packages/rivet/test/release-contract.test.mjs
 b5b3c52f257117e2cfb6d4a4137d35ff49db65dab353e4f00748b9c96d7db011  packages/rivet/test/repair-lineage.test.mjs
 905427b25e22dd65b55a00867084d12da95cbd460db815f4d63e7ec0806e743c  packages/rivet/test/repair-workflow.test.mjs
