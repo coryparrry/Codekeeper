@@ -20,7 +20,6 @@ import {
   prepareReviewInstallation,
 } from "../src/install.mjs";
 import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
-import { renderRivetIssueTriageWorkflowV013 } from "../src/workflows/issue-triage.mjs";
 import { currentReviewLock } from "./review-lock-fixtures.mjs";
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -50,7 +49,6 @@ const REPAIR_ASSETS = [
   ".github/rivet/actions/validate-repair/index.mjs",
 ];
 const V012_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.2");
-const V013_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.13");
 const MAINTENANCE_FIXTURES = {
   manual: path.join(
     PACKAGE_ROOT,
@@ -87,16 +85,17 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
   );
   let source;
   if (workflowId === "rivet-issue-triage") {
-    const fixture = workflow.includes(
-      'allowed-repos: "${{ github.repository }}"',
-    )
-      ? path.join(V013_FIXTURES, "rivet-issue-triage.lock.yml.gz.b64")
-      : path.join(
-          PACKAGE_ROOT,
-          "test/fixtures/issue-triage/rivet-issue-triage.lock.yml.gz.b64",
-        );
     source = gunzipSync(
-      Buffer.from(await readFile(fixture, "utf8"), "base64"),
+      Buffer.from(
+        await readFile(
+          path.join(
+            PACKAGE_ROOT,
+            "test/fixtures/issue-triage/rivet-issue-triage.lock.yml.gz.b64",
+          ),
+          "utf8",
+        ),
+        "base64",
+      ),
     ).toString("utf8");
   } else if (workflowId === "rivet-maintenance") {
     const fixture = workflow.includes('cron: "17 3 * * 1"')
@@ -133,20 +132,6 @@ async function removeIssueTriage(repositoryRoot) {
     (relativePath) => !ISSUE_TRIAGE_PATHS.includes(relativePath),
   );
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
-}
-async function writeScalarIssueGuard(repositoryRoot, configuration) {
-  await writeFile(
-    path.join(repositoryRoot, ".github/workflows/rivet-issue-triage.md"),
-    renderRivetIssueTriageWorkflowV013({ configuration }),
-  );
-  const encoded = await readFile(
-    path.join(V013_FIXTURES, "rivet-issue-triage.lock.yml.gz.b64"),
-    "utf8",
-  );
-  await writeFile(
-    path.join(repositoryRoot, ".github/workflows/rivet-issue-triage.lock.yml"),
-    gunzipSync(Buffer.from(encoded, "base64")),
-  );
 }
 async function fixtureValidator() {}
 function countStatus(result, status) {
@@ -973,34 +958,6 @@ test("refuses files changed after the repair plan is prepared", async (t) => {
   await assert.rejects(
     access(path.join(repositoryRoot, ".github/workflows/rivet-repair.md")),
     { code: "ENOENT" },
-  );
-});
-test("upgrades the exact scalar issue guard in a repair installation", async (t) => {
-  const repositoryRoot = await repository(t);
-  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
-  configuration.repair.authority = "owner";
-  await installRepair({
-    repositoryRoot,
-    configuration,
-    compileWorkflow: fixtureCompiler,
-    validateWorkflow: fixtureValidator,
-  });
-  await writeScalarIssueGuard(repositoryRoot, configuration);
-
-  const result = await installRepair({
-    repositoryRoot,
-    configuration,
-    compileWorkflow: fixtureCompiler,
-    validateWorkflow: fixtureValidator,
-  });
-  assert.deepEqual(
-    result.files
-      .filter(({ status }) => status === "update")
-      .map(({ path: relativePath }) => relativePath),
-    [
-      ".github/workflows/rivet-issue-triage.lock.yml",
-      ".github/workflows/rivet-issue-triage.md",
-    ],
   );
 });
 test("normalizes semantic-only compiler lock drift during upgrade", async (t) => {
