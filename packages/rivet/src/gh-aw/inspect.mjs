@@ -122,12 +122,19 @@ function safeOutputDetails(jobs) {
 
 function jobAuthority(job, workflowPermissions) {
   return {
+    concurrency: job.concurrency ?? null,
     container: job.container ?? null,
+    continueOnError: job["continue-on-error"] ?? null,
+    defaults: job.defaults ?? null,
     env: job.env ?? {},
     environment: job.environment ?? null,
+    outputs: job.outputs ?? {},
     permissions: permissions(job.permissions ?? workflowPermissions),
     runsOn: job["runs-on"] ?? null,
+    secrets: job.secrets ?? null,
     services: job.services ?? null,
+    strategy: job.strategy ?? null,
+    timeoutMinutes: job["timeout-minutes"] ?? null,
   };
 }
 
@@ -184,16 +191,22 @@ export function inspectCompiledWorkflow(source) {
         with: job.with ?? {},
         env: job.env ?? {},
         if: jobCondition(job.if),
+        "continue-on-error": job["continue-on-error"] ?? null,
+        "timeout-minutes": job["timeout-minutes"] ?? null,
       });
     for (const step of Array.isArray(job.steps) ? job.steps : []) {
       if (step && typeof step.run === "string") {
         scripts.push({
           job: jobId,
+          id: step.id ?? null,
           name: step.name ?? null,
           if: jobCondition(step.if),
           run: step.run,
           shell: step.shell ?? null,
           env: step.env ?? {},
+          workingDirectory: step["working-directory"] ?? null,
+          continueOnError: step["continue-on-error"] ?? null,
+          timeoutMinutes: step["timeout-minutes"] ?? null,
         });
       }
       if (step && typeof step.uses === "string") usesValues.push(step);
@@ -202,10 +215,14 @@ export function inspectCompiledWorkflow(source) {
       const action = actionReference(step.uses);
       actions.push({
         job: jobId,
+        id: step.id ?? null,
+        name: step.name ?? null,
         ...action,
         with: step.with ?? {},
         env: step.env ?? {},
         if: jobCondition(step.if),
+        continueOnError: step["continue-on-error"] ?? null,
+        timeoutMinutes: step["timeout-minutes"] ?? null,
       });
       if (action.action === "actions/checkout") {
         checkouts.push({
@@ -219,13 +236,23 @@ export function inspectCompiledWorkflow(source) {
     }
   }
 
+  const gatewayScript = scripts.find(
+    ({ job, name }) => job === "agent" && name === "Start MCP Gateway",
+  )?.run;
+  const codexScript = scripts.find(
+    ({ job, name }) => job === "agent" && name === "Execute Codex CLI",
+  )?.run;
+
   return Object.freeze({
     metadata,
     manifest,
     inlinedImports: /^# inlined-imports: true$/m.test(source),
     resolvedImports: resolvedImports(source),
     triggers: Object.keys(workflow.on ?? {}).sort(),
+    triggerConfig: workflow.on ?? {},
     permissions: rootPermissions,
+    concurrency: workflow.concurrency ?? null,
+    workflowDefaults: workflow.defaults ?? null,
     workflowEnv: workflow.env ?? {},
     secrets: references(source, "secrets"),
     manifestSecrets: Array.isArray(manifest.secrets)
@@ -267,5 +294,13 @@ export function inspectCompiledWorkflow(source) {
     runtimeImports: [
       ...source.matchAll(/\{\{#runtime-import\s+([^}]+)\}\}/g),
     ].map((match) => match[1].trim()),
+    githubMcpEnabled:
+      containers.some(({ image }) =>
+        String(image).startsWith("ghcr.io/github/github-mcp-server"),
+      ) || /\[mcp_servers\.github\]/.test(gatewayScript ?? ""),
+    shellToolDisabled:
+      /codex_harness\.cjs codex exec[^\n]* -c features\.shell_tool=false(?:\s|$)/.test(
+        codexScript ?? "",
+      ),
   });
 }

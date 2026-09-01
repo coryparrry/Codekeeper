@@ -222,7 +222,7 @@ test("installs only the trusted Rivet review mode", async (t) => {
     },
     events: [],
   });
-  assert.equal(result.files.length, 11);
+  assert.equal(result.files.length, 13);
   assert.ok(result.files.every(({ status }) => status === "create"));
   const configuration = JSON.parse(
     await readFile(path.join(repositoryRoot, ".github/rivet.json"), "utf8"),
@@ -305,7 +305,7 @@ test("installs scheduled report-only maintenance without widening App authority"
     compileWorkflow: fixtureCompiler,
     validateWorkflow: fixtureValidator,
   });
-  assert.equal(result.files.length, 16);
+  assert.equal(result.files.length, 18);
   assert.deepEqual(result.githubApp.permissions, {
     contents: "read",
     issues: "write",
@@ -580,7 +580,7 @@ test("installs a fresh repair with both active agent profiles", async (t) => {
     compileWorkflow: fixtureCompiler,
     validateWorkflow: fixtureValidator,
   });
-  assert.equal(result.files.length, 18);
+  assert.equal(result.files.length, 20);
   assert.ok(result.files.every(({ status }) => status === "create"));
   assert.equal(
     await readFile(path.join(repositoryRoot, FIXER_PATH), "utf8"),
@@ -601,10 +601,10 @@ test("upgrades an exact 0.1.2 review installation", async (t) => {
     compileWorkflow: fixtureCompiler,
     validateWorkflow: fixtureValidator,
   });
-  assert.equal(result.files.length, 11);
+  assert.equal(result.files.length, 13);
   assert.equal(
     result.files.filter(({ status }) => status === "create").length,
-    4,
+    6,
   );
   assert.equal(
     result.files.filter(({ status }) => status === "update").length,
@@ -631,10 +631,10 @@ test("upgrades an exact 0.1.2 review installation to repair", async (t) => {
     compileWorkflow: fixtureCompiler,
     validateWorkflow: fixtureValidator,
   });
-  assert.equal(result.files.length, 18);
+  assert.equal(result.files.length, 20);
   assert.equal(
     result.files.filter(({ status }) => status === "create").length,
-    11,
+    13,
   );
   assert.equal(
     result.files.filter(({ status }) => status === "update").length,
@@ -660,10 +660,10 @@ test("upgrades an exact 0.1.2 repair installation", async (t) => {
     compileWorkflow: fixtureCompiler,
     validateWorkflow: fixtureValidator,
   });
-  assert.equal(result.files.length, 18);
+  assert.equal(result.files.length, 20);
   assert.equal(
     result.files.filter(({ status }) => status === "create").length,
-    5,
+    7,
   );
   assert.equal(
     result.files.filter(({ status }) => status === "update").length,
@@ -738,7 +738,7 @@ test("adds issue triage while upgrading the previous review to repair", async (t
     compileWorkflow: fixtureCompiler,
     validateWorkflow: fixtureValidator,
   });
-  assert.equal(result.files.length, 18);
+  assert.equal(result.files.length, 20);
   assert.equal(
     result.files.filter(({ status }) => status === "create").length,
     10,
@@ -835,7 +835,7 @@ test("upgrades an exact review installation to owner-authorized repair", async (
     validateWorkflow: fixtureValidator,
   });
   assert.equal(result.mode, "repair");
-  assert.equal(result.files.length, 18);
+  assert.equal(result.files.length, 20);
   assert.equal(
     result.files.filter(({ status }) => status === "update").length,
     2,
@@ -846,7 +846,7 @@ test("upgrades an exact review installation to owner-authorized repair", async (
   );
   assert.equal(
     result.files.filter(({ status }) => status === "unchanged").length,
-    9,
+    11,
   );
   assert.deepEqual(result.githubApp.permissions, {
     contents: "write",
@@ -865,7 +865,7 @@ test("upgrades an exact review installation to owner-authorized repair", async (
   );
   assert.equal(config.repair.authority, "owner");
   assert.equal(installation.mode, "repair");
-  assert.equal(installation.managedFiles.length, 18);
+  assert.equal(installation.managedFiles.length, 20);
   assert.deepEqual(installation.githubApp.permissions, {
     contents: "write",
     metadata: "read",
@@ -883,7 +883,7 @@ test("upgrades a triage-disabled review without granting Issues", async (t) => {
     compileWorkflow: fixtureCompiler,
     validateWorkflow: fixtureValidator,
   });
-  assert.equal(reviewResult.files.length, 8);
+  assert.equal(reviewResult.files.length, 10);
   assert.ok(
     reviewResult.files.every(
       ({ path: relativePath }) => !ISSUE_TRIAGE_PATHS.includes(relativePath),
@@ -897,7 +897,7 @@ test("upgrades a triage-disabled review without granting Issues", async (t) => {
     compileWorkflow: fixtureCompiler,
     validateWorkflow: fixtureValidator,
   });
-  assert.equal(result.files.length, 15);
+  assert.equal(result.files.length, 17);
   assert.ok(
     result.files.every(
       ({ path: relativePath }) => !ISSUE_TRIAGE_PATHS.includes(relativePath),

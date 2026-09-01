@@ -18,6 +18,7 @@ import {
 } from "./workflows/repair.mjs";
 import {
   renderRivetReviewWorkflow,
+  renderRivetReviewWorkflowV017,
   renderRivetReviewWorkflowV012,
   RIVET_REVIEW_NATIVE_IMPORTS,
   RIVET_REVIEW_WORKFLOW_ID,
@@ -31,9 +32,14 @@ const MAINTENANCE_ASSET_ROOT = new URL(
   "../assets/maintenance/",
   import.meta.url,
 );
+export const REVIEW_CONTEXT_ASSET_PATHS = Object.freeze([
+  ".github/rivet/actions/prepare-review-context/action.yml",
+  ".github/rivet/actions/prepare-review-context/index.mjs",
+]);
 const REVIEW_ASSET_PATHS = Object.freeze([
   ".github/rivet/actions/authority-receipt/action.yml",
   ".github/rivet/actions/authority-receipt/index.mjs",
+  ...REVIEW_CONTEXT_ASSET_PATHS,
   REVIEW_EXTENSION_IMPORT,
 ]);
 export const REPAIR_ASSET_PATHS = Object.freeze([
@@ -83,6 +89,7 @@ export async function buildWorkflowFiles({
   includeMaintenance,
   includeReviewBudget = profiles,
   reviewExtension,
+  reviewWorkflowVersion,
 }) {
   const files = await assetFiles(REVIEW_ASSET_PATHS, REVIEW_ASSET_ROOT);
   if (reviewExtension) {
@@ -97,11 +104,14 @@ export async function buildWorkflowFiles({
   files.set(
     `.github/workflows/${RIVET_REVIEW_WORKFLOW_ID}.md`,
     profiles
-      ? renderRivetReviewWorkflow({
-          nativeImports: RIVET_REVIEW_NATIVE_IMPORTS,
-          configuration: reviewConfig,
-          includeReviewBudget,
-        })
+      ? reviewWorkflowVersion === "v0.1.5" ||
+        reviewWorkflowVersion === "v0.1.7"
+        ? renderRivetReviewWorkflowV017({ configuration: reviewConfig })
+        : renderRivetReviewWorkflow({
+            nativeImports: RIVET_REVIEW_NATIVE_IMPORTS,
+            configuration: reviewConfig,
+            includeReviewBudget,
+          })
       : renderRivetReviewWorkflowV012({ configuration: reviewConfig }),
   );
   if (includeIssueTriage) {
