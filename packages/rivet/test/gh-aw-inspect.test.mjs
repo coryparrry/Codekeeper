@@ -26,7 +26,7 @@ test("inspects the pinned Rivet review fixture authority", async () => {
   const authority = inspectCompiledWorkflow(source);
   assert.deepEqual(authority.triggers, ["pull_request_target"]);
   assert.equal(authority.metadata.compiler_version, "v0.86.2");
-  assert.equal(authority.metadata.agent_model, "gpt-5.6-luna?effort=low");
+  assert.equal(authority.metadata.agent_model, "gpt-5.6-luna");
   assert.equal(authority.metadata.strict, true);
   assert.equal(authority.manifest.has_pull_request_target, true);
   assert.equal(authority.inlinedImports, true);

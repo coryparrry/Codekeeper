@@ -37,7 +37,11 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /needs: \[review_context\]/);
   assert.match(fixture, /checkout: false/);
   assert.match(fixture, /inlined-imports: true/);
-  assert.match(fixture, /model: gpt-5\.6-luna\?effort=low/);
+  assert.match(
+    fixture,
+    /engine: codex\nmodel: gpt-5\.6-luna/,
+  );
+  assert.doesNotMatch(fixture, /\?effort=low|model_reasoning_effort/);
   assert.match(fixture, /max-turns: 3/);
   assert.match(fixture, /needs\.agent\.result == 'success'/);
   assert.match(fixture, /vars\.RIVET_APP_CLIENT_ID/);
@@ -84,7 +88,7 @@ test("projects domain review controls into gh-aw frontmatter", () => {
     configuration,
   });
   assert.match(legacyIssueTriageDisabled, /model: gpt-5\.6-luna\n/);
-  assert.doesNotMatch(legacyIssueTriageDisabled, /\?effort=low/);
+  assert.doesNotMatch(legacyIssueTriageDisabled, /model_reasoning_effort/);
   assert.doesNotMatch(legacyIssueTriageDisabled, /max-turns:/);
   assert.doesNotMatch(legacyIssueTriageDisabled, /needs: \[review_context\]/);
   assert.doesNotMatch(legacyIssueTriageDisabled, /^jobs:/m);

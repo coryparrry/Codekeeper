@@ -92,8 +92,9 @@ test("compiled review disables model-driven repository reads", async () => {
     "utf8",
   );
   const authority = inspectCompiledWorkflow(lock);
-  assert.equal(authority.metadata.agent_model, "gpt-5.6-luna?effort=low");
-  assert.match(lock, /GH_AW_MODEL_AGENT_CODEX: gpt-5\.6-luna\?effort=low/);
+  assert.equal(authority.metadata.agent_model, "gpt-5.6-luna");
+  assert.match(lock, /GH_AW_MODEL_AGENT_CODEX: gpt-5\.6-luna/);
+  assert.doesNotMatch(lock, /\?effort=low|model_reasoning_effort/);
   assert.match(lock, /features\.shell_tool=false/);
   assert.match(
     lock,
