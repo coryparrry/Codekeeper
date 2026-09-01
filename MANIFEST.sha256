@@ -127,7 +127,7 @@ a137bc073fc6dfb46f9c572f5176ee110153d9af50faa5bfe33fd4caee197cc9  packages/rivet
 bd73ea0f35eb026658851e5216c4dc27703b138982d76e68a73ced1233f607f5  packages/rivet/evals/review-safe-outputs.mjs
 8823ae0818bd30f85181474521e1eb41bc4a5e98be2e65e37f6a36b24754ed22  packages/rivet/package-lock.json
 e2a9cb148759177a401f254a643759122f75ba951cf117ea991ab5d5efec46ad  packages/rivet/package.json
-963231aed04921694b68629c0bebeb06e19143fcfcdd71ad27f10eebc42f565e  packages/rivet/scripts/check-review-lock.mjs
+12ce5d1b4ceea4620a3bb157de0605833a183621e602815a336a2ed108b78e85  packages/rivet/scripts/check-review-lock.mjs
 132cd25266e68c8a8797ba3b8c7ee56cb2f3a1163f8462b3ece7c4798f3e5f2a  packages/rivet/scripts/release-check.mjs
 85e450e4804b9ae8013f9565ef0fa1d311a09bd0c11a2203582625cf8499b143  packages/rivet/src/app-authority.mjs
 0070d34b7e2f88541458f49dcadb1adc45e8243801ec5bff03daf1b31d3afe31  packages/rivet/src/app-setup.mjs
@@ -158,6 +158,8 @@ bc4fb9af27a7841c30d9be02fb1fb8a8d0ed93b28bc37520867eb6be89c21bb0  packages/rivet
 8147b45ac8b72f1c73bd7298693e6251f102a281db5a7dc93ed937ee5837bd45  packages/rivet/test/authority-receipt-action.test.mjs
 006130c415ac53a2adf1eba59c04c2d6b2faf29947432e88558267a6cac94c7a  packages/rivet/test/cli.test.mjs
 bb8b6df60009d6d4bee860ac0f978ad1f269a52bfd27716397756515357770c9  packages/rivet/test/config.test.mjs
+657c2b8de94e20a720f0cb9d71aa56789182a8bfe14abbe8fb301c0544a4b7e1  packages/rivet/test/fixtures/issue-triage/rivet-issue-triage-claude.lock.yml.gz.b64
+3986ff81afb1d22872a91a2496a1270bf826109cb2ce71caab48337464244a38  packages/rivet/test/fixtures/issue-triage/rivet-issue-triage-copilot.lock.yml.gz.b64
 06c8c928e4903110ad06af68695b2afb2544a8af23130c82395eed19c8cde8d0  packages/rivet/test/fixtures/issue-triage/rivet-issue-triage-gemini.lock.yml.gz.b64
 dad01826ec48c697b6e60c153fc943159433f29f9ac9f72d78b2fd20847a5af4  packages/rivet/test/fixtures/issue-triage/rivet-issue-triage.lock.yml.gz.b64
 fb7f3e29ca8858c24d6e697794112a2a36289287f65d95de7c3ec18c5c10c0dc  packages/rivet/test/fixtures/maintenance/rivet-maintenance-manual.lock.yml.gz.b64
@@ -207,7 +209,7 @@ b5b3c52f257117e2cfb6d4a4137d35ff49db65dab353e4f00748b9c96d7db011  packages/rivet
 905427b25e22dd65b55a00867084d12da95cbd460db815f4d63e7ec0806e743c  packages/rivet/test/repair-workflow.test.mjs
 b53ee1c4482b1690717bc0b7a7ae28181241fbbf21fd3c467a5dda899b3329d3  packages/rivet/test/review-context-action.test.mjs
 3d960a6d23e747609b8d87f5adcb69e457d5de5b72ce644fa279a09c1c3dc59d  packages/rivet/test/review-contract.test.mjs
-3a49b3596c20923325037599d93b82a290d4b2f17bcfcc69f4f9887177494521  packages/rivet/test/review-lock-check.test.mjs
+dddd98526a532905d740a3f7047f86bdf242ebf097a54dabe13e5711ffb11f89  packages/rivet/test/review-lock-check.test.mjs
 619812acbc03c14186b4d605999a7e15e902c0a342946a1bdfa72e0cc8f646bb  packages/rivet/test/review-lock-fixtures.mjs
 1f829dcca4348c3d9f65aebde9996556c9a060b636490983900d8585457e9902  packages/rivet/test/review-safe-outputs-eval.test.mjs
 d36229f390e73dec4c4c6e4a538295a07a20f12cebf1c665ff2dd1470c4feeaa  packages/rivet/test/review-summary-upgrade.test.mjs
