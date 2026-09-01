@@ -18,7 +18,10 @@ import {
   validateGhAwWorkflow,
 } from "../src/gh-aw/compile.mjs";
 import { knownCompilerDrift } from "../src/install.mjs";
-import { renderRivetIssueTriageWorkflow } from "../src/workflows/issue-triage.mjs";
+import {
+  renderRivetIssueTriageWorkflow,
+  renderRivetIssueTriageWorkflowV013,
+} from "../src/workflows/issue-triage.mjs";
 import { renderRivetMaintenanceWorkflow } from "../src/workflows/maintenance.mjs";
 import { renderRivetReviewWorkflow } from "../src/workflows/review.mjs";
 
@@ -47,6 +50,12 @@ const ISSUE_TRIAGE_FIXTURE_ROOT = path.join(
   "fixtures",
   "issue-triage",
 );
+const HISTORICAL_ISSUE_TRIAGE_FIXTURE_ROOT = path.join(
+  PACKAGE_ROOT,
+  "test",
+  "fixtures",
+  "v0.1.13",
+);
 const ISSUE_TRIAGE_WORKFLOW_ID = "rivet-issue-triage";
 const ISSUE_TRIAGE_LOCK_PATH = path.join(
   ".github",
@@ -60,21 +69,37 @@ function fail(message) {
 
 export async function checkIssueTriageLocks({
   fixtureRoot = ISSUE_TRIAGE_FIXTURE_ROOT,
+  historicalFixtureRoot = HISTORICAL_ISSUE_TRIAGE_FIXTURE_ROOT,
   temporaryParent = os.tmpdir(),
   ensureBinary = ensureGhAwBinary,
   compileWorkflow = compileGhAwWorkflow,
   validateWorkflow = validateGhAwWorkflow,
 } = {}) {
+  const variants = [
+    ["codex", "gpt-5.6-luna", ""],
+    ["claude", "claude-review-model", "-claude"],
+    ["copilot", "copilot-review-model", "-copilot"],
+    ["gemini", "gemini-review-model", "-gemini"],
+  ].map(([engine, model, suffix]) => ({ engine, model, suffix }));
+  variants.push({
+    engine: "codex",
+    model: "gpt-5.6-luna",
+    name: "v0.1.13/rivet-issue-triage",
+    source: renderRivetIssueTriageWorkflowV013(),
+    fixturePath: path.join(
+      historicalFixtureRoot,
+      `${ISSUE_TRIAGE_WORKFLOW_ID}.lock.yml.gz.b64`,
+    ),
+  });
   const binaryPath = await ensureBinary();
-  for (const engine of ["codex", "gemini"]) {
+  for (const variant of variants) {
     const temporaryRoot = await realpath(
       await mkdtemp(path.join(temporaryParent, "rivet-issue-lock-check-")),
     );
     try {
       const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
-      configuration.models.review.engine = engine;
-      configuration.models.review.model =
-        engine === "codex" ? "gpt-5.6-luna" : "gemini-review-model";
+      configuration.models.review.engine = variant.engine;
+      configuration.models.review.model = variant.model;
       await mkdir(path.join(temporaryRoot, ".github", "workflows"), {
         recursive: true,
       });
@@ -98,7 +123,7 @@ export async function checkIssueTriageLocks({
           "workflows",
           `${ISSUE_TRIAGE_WORKFLOW_ID}.md`,
         ),
-        renderRivetIssueTriageWorkflow({ configuration }),
+        variant.source ?? renderRivetIssueTriageWorkflow({ configuration }),
       );
       await compileWorkflow({
         repositoryRoot: temporaryRoot,
@@ -110,15 +135,14 @@ export async function checkIssueTriageLocks({
         workflowId: ISSUE_TRIAGE_WORKFLOW_ID,
         binaryPath,
       });
-      const suffix = engine === "codex" ? "" : `-${engine}`;
+      const fixturePath =
+        variant.fixturePath ??
+        path.join(
+          fixtureRoot,
+          `${ISSUE_TRIAGE_WORKFLOW_ID}${variant.suffix}.lock.yml.gz.b64`,
+        );
       const [encodedFixture, regenerated] = await Promise.all([
-        readFile(
-          path.join(
-            fixtureRoot,
-            `${ISSUE_TRIAGE_WORKFLOW_ID}${suffix}.lock.yml.gz.b64`,
-          ),
-          "utf8",
-        ),
+        readFile(fixturePath, "utf8"),
         readFile(path.join(temporaryRoot, ISSUE_TRIAGE_LOCK_PATH)),
       ]);
       const checkedIn = gunzipSync(Buffer.from(encodedFixture, "base64"));
@@ -131,7 +155,7 @@ export async function checkIssueTriageLocks({
         )
       ) {
         fail(
-          `checked-in ${ISSUE_TRIAGE_WORKFLOW_ID}${suffix}.lock.yml fixture does not match the pinned gh-aw compiler output`,
+          `checked-in ${variant.name ?? `${ISSUE_TRIAGE_WORKFLOW_ID}${variant.suffix}`}.lock.yml fixture does not match the pinned gh-aw compiler output`,
         );
       }
     } finally {
