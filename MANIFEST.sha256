@@ -122,7 +122,7 @@ d5f2d443dc434d24d6bc894c1da5af7371a4943ded79daf6a4e45adf0b318275  packages/rivet
 2804194cdb32fad22fd4f9f85f3435d6e09d484fd0ac0b163e11e7aad3105405  packages/rivet/assets/upgrades/v0.1.9/rivet-review.md
 d5dc47c1191f5a103162723a351b08ef6720f94618b4eeb609d323f035a0512a  packages/rivet/bin/rivet.mjs
 a137bc073fc6dfb46f9c572f5176ee110153d9af50faa5bfe33fd4caee197cc9  packages/rivet/evals/audit-safe-outputs.mjs
-3d6982705b31036b9c9a269a223ea78426d22be0507df16353d98ad7e1b9da96  packages/rivet/evals/review-safe-outputs.mjs
+96d3902795e172e73ae6844078a3f2e9425515cc4d0c65d68a50edc66b0dcec2  packages/rivet/evals/review-safe-outputs.mjs
 8823ae0818bd30f85181474521e1eb41bc4a5e98be2e65e37f6a36b24754ed22  packages/rivet/package-lock.json
 5f9a46b70061157a7e5cebbc8315fa5d0c09de1e0cf60f81a16bc254762b9555  packages/rivet/package.json
 f8137a25cd6b7312d26dad2b9915412a73d272d047bb74775d863a785e745374  packages/rivet/scripts/check-review-lock.mjs
@@ -134,7 +134,7 @@ dd5ea7d413832e33a3848bd1a28515491e946d2aeab5b492023aee62d36fe2e0  packages/rivet
 2ef4b50cfab752bf05559f7d4f493897c8057fe2c9e65eb28a6dcd16b42acd5e  packages/rivet/src/gh-aw/binary.mjs
 498229ff0140ff4db62a3b3795c6b04cdb5a3dd854c60d4ab041db502795e1fd  packages/rivet/src/gh-aw/compile.mjs
 e70ac55100fa5a7a98eacd28cf391dcacd6ee85ad86542467cf8adb11a9178e9  packages/rivet/src/gh-aw/inspect.mjs
-de30cdf3ec0c0e682669624664fb3b47e27364b17852608c3e71bd72c3d32a6c  packages/rivet/src/gh-aw/trust.mjs
+6e1212c396d9ec9aedcfa09b4ad6496ecb2774e99479bc4cc78f28f714a1feee  packages/rivet/src/gh-aw/trust.mjs
 1a76926921c84aec7cc04a8f6b892f0c1f2589c47702d911df8fcbe779cb3a2f  packages/rivet/src/gh-aw/versions.mjs
 5d87d129eac85eee08ad3ec7d78399165d80f88ea165e35ceb230339dce9e74c  packages/rivet/src/guided-init.mjs
 a62b37cb93ad15a2c1e18890baf74d058b4115c7dec5019c584ef490b67d51f4  packages/rivet/src/install.mjs
@@ -147,7 +147,7 @@ d6409042673eed1f426773e7049fa2ec5d294c062b5c3feea0cb4e839191b774  packages/rivet
 f30550ad5b234cd208cd4d2c01558e2e3f267f137b9e0473e6cdf230629db961  packages/rivet/src/workflows/issue-triage.mjs
 2fce95dddbdb12ed326151877b5062e915f71fd14485fb8a309132ef764a57fa  packages/rivet/src/workflows/maintenance.mjs
 5b9841e51c9ccbf542821a4a8a9d3bec5ce0fad6eb44429fea28312e862f7612  packages/rivet/src/workflows/repair.mjs
-9d5870e3049904d756657fa4d3d87836eb99e84c6d3d41e5c3a34c98294524aa  packages/rivet/src/workflows/review.mjs
+753a548d68aa9934112148efeb239d4d7754b3c2423dba96300e6f2fcc0b3080  packages/rivet/src/workflows/review.mjs
 6903f145f360cef45fb769c56735877915c0f076d28ff6d256edad767c36d67e  packages/rivet/test/agent-profile-contract.test.mjs
 3671795d6cdcd448c1fc5f53310dd6b1f6e9f1005cf0ca1fc1a3e7c52d481737  packages/rivet/test/app-authority.test.mjs
 bc4fb9af27a7841c30d9be02fb1fb8a8d0ed93b28bc37520867eb6be89c21bb0  packages/rivet/test/app-setup.test.mjs
@@ -166,9 +166,9 @@ bd7b43c57271ad1d34a1106bc0a0f1ea166732c4fc98788d0a712253913644d4  packages/rivet
 375aa15b58e9cb04db91a56977ef3646a8aabda7493511b45b9dcbaeb13e666e  packages/rivet/test/fixtures/review/.github/rivet/actions/prepare-review-context/index.mjs
 0a5fbe580ffe777c58655ac31f2491438e1fd2d4fc5763b598c93097c7d01581  packages/rivet/test/fixtures/review/.github/rivet/agents/pr-reviewer.md
 3500abedd0759e6eca5a1e3f3ff4cc6ce39a87bf77df2793f1a0e9620485cdb9  packages/rivet/test/fixtures/review/.github/rivet/aw/review-extension.md
-8ad6d8687b9b1eb1cd29f179bad1d2e9fc0d90f9f9fb85bc928ee8dcf2471bc0  packages/rivet/test/fixtures/review/.github/workflows/rivet-review.lock.yml
-8b00e680894c9385127756e5644ccb3a276f4f88ad42f634df0ad0b5277ea8b6  packages/rivet/test/fixtures/review/.github/workflows/rivet-review.md
-5c1463721b89f8027115c3d532ca2090d93d1d6882f5c3b0da2f42dbbdb45a5a  packages/rivet/test/fixtures/review/rivet-review-disabled.lock.yml.gz.b64
+658823fdf7ec73e93a83844bc7ce6edd464f74113d9978ca0ebde85c2d09a4d4  packages/rivet/test/fixtures/review/.github/workflows/rivet-review.lock.yml
+19c2c5092009d9c736822099f1a4b8905bfdf6f1b75679a59391ad7fbaea30ac  packages/rivet/test/fixtures/review/.github/workflows/rivet-review.md
+c594066b81977b06935c2414a748fd3c38c920de86a9842bfa21b4742f526b9d  packages/rivet/test/fixtures/review/rivet-review-disabled.lock.yml.gz.b64
 fbed5493fc5291471d088ca62242d1daec47ec66555e9943d11c68a88d6edf75  packages/rivet/test/fixtures/v0.1.11/rivet-review-disabled.lock.yml.gz.b64
 3a2d6babf7528efa431f57a98f6c1ed9db42524b814b28a6056257e9a778cf82  packages/rivet/test/fixtures/v0.1.11/rivet-review.lock.yml.gz.b64
 0be817f16df003944a7ed3a7003fbf78e3aa09d746c063632676b621da23a507  packages/rivet/test/fixtures/v0.1.13/rivet-review-disabled.lock.yml.gz.b64
@@ -203,14 +203,14 @@ b5b3c52f257117e2cfb6d4a4137d35ff49db65dab353e4f00748b9c96d7db011  packages/rivet
 3d960a6d23e747609b8d87f5adcb69e457d5de5b72ce644fa279a09c1c3dc59d  packages/rivet/test/review-contract.test.mjs
 8cb31cf3e292c904a33230b731bc1378f58e1974a60308df1fac9bc1f17ccd99  packages/rivet/test/review-lock-check.test.mjs
 619812acbc03c14186b4d605999a7e15e902c0a342946a1bdfa72e0cc8f646bb  packages/rivet/test/review-lock-fixtures.mjs
-16f43a8eb0769c50084932db5cd8c18225e495ae0e17f56dc0a89d359967af7a  packages/rivet/test/review-safe-outputs-eval.test.mjs
+4872037f898aac78fb401ef80ae1e730fb5cb1fe936afd4969ec730ee37ce288  packages/rivet/test/review-safe-outputs-eval.test.mjs
 d36229f390e73dec4c4c6e4a538295a07a20f12cebf1c665ff2dd1470c4feeaa  packages/rivet/test/review-summary-upgrade.test.mjs
 accb0333b16ab0c0fe53db760ab5151eaae35573c209d5bfdb6f8d2e328c8634  packages/rivet/test/runtime-mirror.test.mjs
 b7a58767b5159a5f0a8e0abdb82ab20b79e0d8203286a61a3e4cb9f9e3471a49  packages/rivet/test/setup-pr.test.mjs
 c62eab5aaff800d52a122117e615a96cda776ed3189fff996be162369b81adc1  packages/rivet/test/validate-audit-action.test.mjs
 22178bc668174c24545a418db21e73df5082dff2758490782d1921774b178286  packages/rivet/test/validate-repair-action.test.mjs
 6e1a7a15f8ae568b64b69a1f6d77c2ce333521e5307efb8edc5e3e8b6a63150a  packages/rivet/test/validation-runner.test.mjs
-3549554b67d4314095227e31eead080224d0dfbba947ee006433daa9a9770b67  packages/rivet/test/workflow-render.test.mjs
+3c8d1a69443efdc40de21df53058b52a0ce8b8381045c4fc342f9450c2785265  packages/rivet/test/workflow-render.test.mjs
 8c1d23b2539a9f626018177aaf9e72fc7df71753dbc1f6bd727ffcccf465e965  scripts/check-local-import-cycles.mjs
 b004bd7177b978f3ddfc1023d735f98182da21080e6c984357cb4bc56f465bb0  scripts/check-local-import-cycles.test.mjs
 ca2866b7d2082fbe576752111e7945d5bbac8d4e3be42531c692792380142855  scripts/check-module-boundaries.mjs

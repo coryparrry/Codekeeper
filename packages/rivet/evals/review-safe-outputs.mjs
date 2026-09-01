@@ -27,6 +27,13 @@ const REVIEW_BODY_SECTIONS = [
   "## Before merge",
   "<summary><strong>Review details</strong></summary>",
 ];
+const REVIEW_VERIFICATION_LABELS = [
+  "- **Findings:**",
+  "- **Tests:**",
+  "- **Risk:**",
+];
+const MARKDOWN_TABLE_DELIMITER =
+  /^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/mu;
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -116,6 +123,17 @@ function incompleteCount(items) {
   );
 }
 
+function hasReadableVerification(body) {
+  const section =
+    body.match(
+      /(?:^|\n)## Verification[^\n]*\n([\s\S]*?)(?=\n## |\n<details>|$)/u,
+    )?.[1] ?? "";
+  return (
+    REVIEW_VERIFICATION_LABELS.every((label) => section.includes(label)) &&
+    !MARKDOWN_TABLE_DELIMITER.test(section)
+  );
+}
+
 function scoreComments(expected, outputs) {
   const comments = outputs.filter(
     (item) => item.type === "create_pull_request_review_comment",
@@ -191,7 +209,8 @@ export function evaluateReviewRun(
         typeof submits[0].body === "string" &&
         REVIEW_BODY_SECTIONS.every((section) =>
           submits[0].body.includes(section),
-        )),
+        ) &&
+        hasReadableVerification(submits[0].body)),
     issueCount: count(outputs, "create_issue") === expected.createIssueCount,
     terminal:
       expected.terminal === "review"

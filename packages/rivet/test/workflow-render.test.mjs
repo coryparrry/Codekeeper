@@ -77,6 +77,11 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /## What this changes/);
   assert.match(fixture, /## Merge readiness/);
   assert.match(fixture, /## Verification/);
+  assert.match(fixture, /- \*\*Findings:\*\*/);
+  assert.match(fixture, /- \*\*Tests:\*\*/);
+  assert.match(fixture, /- \*\*Risk:\*\*/);
+  assert.match(fixture, /Do not use a Markdown table/);
+  assert.doesNotMatch(fixture, /Check \| Result \| Evidence/);
   assert.match(fixture, /## How this fits together/);
   assert.match(fixture, /flowchart LR/);
   assert.match(fixture, /## Before merge/);
