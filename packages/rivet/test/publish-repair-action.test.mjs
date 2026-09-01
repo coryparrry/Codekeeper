@@ -77,9 +77,18 @@ test("accepts a bounded existing-file patch", () => {
   ].join("\n");
   assert.deepEqual(inspectRepairPatch(patch), ["src/discount.mjs"]);
   assert.equal(normalizeRepairPatch(patch.slice(0, -1)), patch);
+  assert.equal(normalizeRepairPatch(patch.replaceAll("\n", "\\n")), patch);
+  const patchWithSourceEscape = patch.replace("true;", '"\\n";');
+  assert.equal(
+    normalizeRepairPatch(
+      patchWithSourceEscape.replaceAll("\\", "\\\\").replaceAll("\n", "\\n"),
+    ),
+    patchWithSourceEscape,
+  );
 });
 
 test("rejects protected, renamed, binary, and oversized patches", () => {
+  assert.throws(() => normalizeRepairPatch("\\n".repeat(600_000)), /oversized/);
   assert.throws(
     () =>
       inspectRepairPatch(

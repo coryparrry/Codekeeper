@@ -90,6 +90,10 @@ const V0111_WORKFLOW_SOURCE = path.join(
   PACKAGE_ROOT,
   "assets/upgrades/v0.1.11/rivet-review.md",
 );
+const V0112_PUBLISH_REPAIR = path.join(
+  PACKAGE_ROOT,
+  "assets/upgrades/v0.1.12/publish-repair-index.mjs",
+);
 const V017_DISABLED_WORKFLOW_SOURCE = path.join(
   V017_FIXTURES,
   "rivet-review-disabled.md",
@@ -386,6 +390,19 @@ async function writeProfiledV0111Installation(
   );
 }
 
+async function writeV0112Installation(repositoryRoot, configuration) {
+  await installRepair({
+    repositoryRoot,
+    configuration,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  await writeFile(
+    path.join(repositoryRoot, ".github/rivet/actions/publish-repair/index.mjs"),
+    await readFile(V0112_PUBLISH_REPAIR, "utf8"),
+  );
+}
+
 test("freezes the released 0.1.7 review workflow sources", async () => {
   assert.equal(
     renderRivetReviewWorkflowV017(),
@@ -415,6 +432,46 @@ test("freezes the released 0.1.11 review workflow source", async () => {
     renderRivetReviewWorkflowV0111(),
     await readFile(V0111_WORKFLOW_SOURCE, "utf8"),
   );
+});
+
+test("upgrades the exact released 0.1.12 repair action", async (t) => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.issues.triage = "disabled";
+  configuration.repair.authority = "owner";
+  const repositoryRoot = await repository(t);
+  await writeV0112Installation(repositoryRoot, configuration);
+  const result = await installRepair({
+    repositoryRoot,
+    configuration,
+    dryRun: true,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  assert.deepEqual(
+    result.files
+      .filter(({ status }) => status === "update")
+      .map(({ path: relativePath }) => relativePath),
+    [".github/rivet/actions/publish-repair/index.mjs"],
+  );
+  const modifiedRoot = await repository(t);
+  await writeV0112Installation(modifiedRoot, configuration);
+  const target = path.join(
+    modifiedRoot,
+    ".github/rivet/actions/publish-repair/index.mjs",
+  );
+  const modified = `${await readFile(target, "utf8")}modified\n`;
+  await writeFile(target, modified);
+  await assert.rejects(
+    installRepair({
+      repositoryRoot: modifiedRoot,
+      configuration,
+      dryRun: true,
+      compileWorkflow: fixtureCompiler,
+      validateWorkflow: async () => {},
+    }),
+    /refusing to overwrite/,
+  );
+  assert.equal(await readFile(target, "utf8"), modified);
 });
 
 async function writeAsset(repositoryRoot, group, relativePath) {
