@@ -62,6 +62,13 @@ const V013_REVIEW_EXTENSION = new URL(
 );
 const PROFILED_REVIEW_EXTENSIONS = Object.freeze([
   {
+    version: "v0.1.9",
+    url: new URL(
+      "../assets/upgrades/v0.1.9/review-extension.md",
+      import.meta.url,
+    ),
+  },
+  {
     version: "v0.1.7",
     url: new URL(
       "../assets/upgrades/v0.1.7/review-extension.md",

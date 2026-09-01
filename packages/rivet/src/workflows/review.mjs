@@ -128,6 +128,16 @@ export function renderRivetReviewWorkflowV017({
   });
 }
 
+export function renderRivetReviewWorkflowV019({
+  configuration = DEFAULT_RIVET_CONFIG,
+} = {}) {
+  const workflow = renderRivetReviewWorkflow({ configuration });
+  const { engine, model } = reviewWorkflowProjection(configuration);
+  return engine === "codex"
+    ? workflow.replace(`model: ${model}\n`, `model: ${model}?effort=low\n`)
+    : workflow;
+}
+
 export function renderRivetReviewWorkflowV012({
   configuration = DEFAULT_RIVET_CONFIG,
 } = {}) {
