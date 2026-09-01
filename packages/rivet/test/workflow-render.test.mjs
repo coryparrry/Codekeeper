@@ -34,13 +34,11 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.doesNotMatch(fixture, /Codekeeper/i);
   assert.match(fixture, /pull_request_target:/);
   assert.match(fixture, /bots: \[\"\$\{\{ vars\.RIVET_APP_BOT_LOGIN \}\}\"\]/);
-  assert.match(
-    fixture,
-    /checkout:\n  sparse-checkout: \|\n    \.github\/rivet\/actions\/authority-receipt/,
-  );
+  assert.match(fixture, /needs: \[review_context\]/);
+  assert.match(fixture, /checkout: false/);
   assert.match(fixture, /inlined-imports: true/);
-  assert.match(fixture, /model: gpt-5\.6-luna/);
-  assert.match(fixture, /max-turns: 6/);
+  assert.match(fixture, /model: gpt-5\.6-luna\?effort=low/);
+  assert.match(fixture, /max-turns: 3/);
   assert.match(fixture, /needs\.agent\.result == 'success'/);
   assert.match(fixture, /vars\.RIVET_APP_CLIENT_ID/);
   assert.match(fixture, /secrets\.RIVET_APP_PRIVATE_KEY/);
@@ -85,7 +83,10 @@ test("projects domain review controls into gh-aw frontmatter", () => {
   const legacyIssueTriageDisabled = renderRivetReviewWorkflowV012({
     configuration,
   });
+  assert.match(legacyIssueTriageDisabled, /model: gpt-5\.6-luna\n/);
+  assert.doesNotMatch(legacyIssueTriageDisabled, /\?effort=low/);
   assert.doesNotMatch(legacyIssueTriageDisabled, /max-turns:/);
+  assert.doesNotMatch(legacyIssueTriageDisabled, /needs: \[review_context\]/);
   assert.doesNotMatch(legacyIssueTriageDisabled, /^jobs:/m);
   assert.doesNotMatch(legacyIssueTriageDisabled, /^  create-issue:/m);
   assert.doesNotMatch(legacyIssueTriageDisabled, /issue triage is disabled/);

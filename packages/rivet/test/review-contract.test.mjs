@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { inspectCompiledWorkflow } from "../src/gh-aw/inspect.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -62,15 +63,49 @@ test("keeps the canonical reviewer profile ahead of the Rivet contract", async (
 
 test("bounds review evidence acquisition", async () => {
   const contract = await readContract(path.join("assets", "review"));
-  assert.match(contract, /method `get_files`, `perPage: 100`, and page 1/);
-  assert.match(contract, /Never call `get_diff` or repeat a page/);
-  assert.match(contract, /page 2 also contains 100 files/);
-  assert.match(contract, /at most four GitHub read calls/);
+  assert.match(contract, /50-file, 32-KiB model-context budget/);
   assert.match(
     contract,
-    /missing patch is acceptable only for a generated lock/,
+    /\$\{\{ needs\.review_context\.outputs\.snapshot \}\}/,
   );
-  assert.match(contract, /Never download those files in full/);
+  assert.match(contract, /If `complete` is false, call `report_incomplete`/);
+  assert.match(
+    contract,
+    /GitHub read tools are unavailable, and the agent job has no repository checkout/,
+  );
+  assert.match(contract, /Do not fetch repository files/);
+  assert.match(
+    contract,
+    /Never infer omitted ordinary-file content; call `report_incomplete`/,
+  );
+  assert.match(contract, /bash: \[\]/);
+  assert.match(contract, /github: false/);
+  assert.doesNotMatch(contract, /get_diff|perPage|page 2/);
+});
+
+test("compiled review disables model-driven repository reads", async () => {
+  const lock = await readFile(
+    path.join(
+      PACKAGE_ROOT,
+      "test/fixtures/review/.github/workflows/rivet-review.lock.yml",
+    ),
+    "utf8",
+  );
+  const authority = inspectCompiledWorkflow(lock);
+  assert.equal(authority.metadata.agent_model, "gpt-5.6-luna?effort=low");
+  assert.match(lock, /GH_AW_MODEL_AGENT_CODEX: gpt-5\.6-luna\?effort=low/);
+  assert.match(lock, /features\.shell_tool=false/);
+  assert.match(
+    lock,
+    /GH_AW_NEEDS_REVIEW_CONTEXT_OUTPUTS_SNAPSHOT: \$\{\{ needs\.review_context\.outputs\.snapshot \}\}/,
+  );
+  assert.doesNotMatch(lock, /\[mcp_servers\.github\]|github-mcp-server/);
+  assert.equal(authority.jobConditions.review_context.needs, null);
+  assert.equal(authority.jobConditions.pre_activation.needs, "review_context");
+  assert.deepEqual(authority.jobConditions.activation.needs, [
+    "pre_activation",
+    "review_context",
+  ]);
 });
 
 test("trusts the base workflow contract and not pull request head instructions", async () => {

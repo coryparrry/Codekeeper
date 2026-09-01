@@ -26,7 +26,7 @@ test("inspects the pinned Rivet review fixture authority", async () => {
   const authority = inspectCompiledWorkflow(source);
   assert.deepEqual(authority.triggers, ["pull_request_target"]);
   assert.equal(authority.metadata.compiler_version, "v0.86.2");
-  assert.equal(authority.metadata.agent_model, "gpt-5.6-luna");
+  assert.equal(authority.metadata.agent_model, "gpt-5.6-luna?effort=low");
   assert.equal(authority.metadata.strict, true);
   assert.equal(authority.manifest.has_pull_request_target, true);
   assert.equal(authority.inlinedImports, true);
@@ -35,13 +35,20 @@ test("inspects the pinned Rivet review fixture authority", async () => {
     ".github/rivet/aw/review-extension.md",
   ]);
   assert.deepEqual(authority.unpinnedActions, []);
-  assert.equal(authority.containers.length, 6);
+  assert.equal(authority.containers.length, 5);
   assert.deepEqual(authority.unpinnedContainers, []);
   assert.deepEqual(authority.localActions, [
     "./.github/rivet/actions/authority-receipt",
+    "./.github/rivet/actions/prepare-review-context",
   ]);
   assert.deepEqual(authority.additionalRepositories, []);
   assert.deepEqual(authority.workflowEnv, {});
+  assert.deepEqual(authority.triggerConfig.pull_request_target.types, [
+    "opened",
+    "synchronize",
+    "reopened",
+    "ready_for_review",
+  ]);
   assert.equal(authority.jobAuthority.activation.runsOn, "ubuntu-slim");
   assert.equal(authority.jobAuthority.agent.runsOn, "ubuntu-latest");
   assert.deepEqual(authority.jobAuthority.agent.container, null);
@@ -51,6 +58,25 @@ test("inspects the pinned Rivet review fixture authority", async () => {
     contents: "read",
     "pull-requests": "read",
   });
+  assert.deepEqual(authority.jobAuthority.review_context.permissions, {
+    contents: "read",
+    "pull-requests": "read",
+  });
+  assert.deepEqual(authority.jobConditions.review_context, {
+    if: null,
+    needs: null,
+  });
+  assert.equal(authority.jobConditions.pre_activation.needs, "review_context");
+  assert.deepEqual(authority.jobConditions.activation.needs, [
+    "pre_activation",
+    "review_context",
+  ]);
+  assert.deepEqual(authority.jobConditions.agent.needs, [
+    "activation",
+    "review_context",
+  ]);
+  assert.equal(authority.githubMcpEnabled, false);
+  assert.equal(authority.shellToolDisabled, true);
   assert.ok(authority.actionRepositories.includes("github/gh-aw-actions"));
   assert.ok(
     authority.actionRepositories.includes("actions/create-github-app-token"),
@@ -73,6 +99,10 @@ test("inspects the pinned Rivet review fixture authority", async () => {
     authority.checkouts.every(
       ({ persistCredentials }) => persistCredentials === false,
     ),
+  );
+  assert.equal(
+    authority.checkouts.some(({ job }) => job === "agent"),
+    false,
   );
 });
 
@@ -115,6 +145,23 @@ jobs:
   assert.deepEqual(authority.writeCapableJobs, [
     { job: "inspect", permissions: { issues: "write" } },
   ]);
+  assert.equal(authority.githubMcpEnabled, false);
+  assert.equal(authority.shellToolDisabled, false);
+});
+
+test("does not trust repository-read settings mentioned only in comments", () => {
+  const source = `# gh-aw-metadata: {"strict":true}
+# gh-aw-manifest: {"version":1,"containers":[]}
+name: fixture
+on: {workflow_dispatch: {}}
+jobs:
+  agent:
+    steps:
+      - run: echo "[mcp_servers.github] features.shell_tool=false"
+`;
+  const authority = inspectCompiledWorkflow(source);
+  assert.equal(authority.githubMcpEnabled, false);
+  assert.equal(authority.shellToolDisabled, false);
 });
 
 test("rejects malformed YAML and missing compiler metadata", () => {

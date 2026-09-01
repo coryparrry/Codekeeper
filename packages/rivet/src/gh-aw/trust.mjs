@@ -21,6 +21,18 @@ export const RIVET_MAINTENANCE_JOB_CONDITIONS_SHA256 =
   "dcb9f93ac56879b15276b6cb780245b284ea25590ee5e299f7174063a80c3291";
 export const RIVET_MAINTENANCE_JOB_AUTHORITY_SHA256 =
   "74b5d1f0163c93c16b6a7a44aee902ba4f529433bdc0a08748cfad74184771dc";
+export const RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
+  claude: "cc3cc381dd5e3d5234ef35be11de7d53b90f1de44bf4c068aef21cc1b3bd3d8b",
+  codex: "c6b42345d6ada608e86f7474124692b3d78b8088c3e23747e1e93e94c4b2d11c",
+  copilot: "36053405947229ac22f317189a5eb3ecc03815e9a9096fc9462934659e62f53f",
+  gemini: "a60a9f8a1783537575128f6b427085e798b5122d1a1b8ecbe0afa34663f33226",
+});
+export const RIVET_ISSUE_TRIAGE_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
+  claude: "cd9df8fb70fd4966145f934340bf586c8aecc30824d8d1ebb7d0720b3d2f659f",
+  codex: "fabab4602abe657cedf4bc18ebdab9e713413a1fbbe5f4aacdc6673ff0bb2a8f",
+  copilot: "6da2df2f321284182c8b23fe94e4ba391c99aaf87ca475eda1c6c5375cf9c9c7",
+  gemini: "d560be5aa8b2b891ade531d96e4b9f78711d6af8697ddec598ac57c25376475e",
+});
 
 function sameValues(left, right) {
   return (
@@ -28,6 +40,16 @@ function sameValues(left, right) {
     Array.isArray(right) &&
     left.length === right.length &&
     left.every((value, index) => value === right[index])
+  );
+}
+
+function hasExactlyKeys(value, keys) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.hasOwn(value, key))
   );
 }
 
@@ -58,21 +80,266 @@ function maintenanceActionInventory(authority) {
         with: actionWith ?? {},
       }),
     ),
-    scripts: authority.scripts ?? [],
+    scripts: (authority.scripts ?? []).map(
+      ({ env, if: condition, job, name, run, shell }) => ({
+        job,
+        name,
+        if: condition,
+        run,
+        shell,
+        env,
+      }),
+    ),
   };
 }
 
 function maintenanceJobAuthorityInventory(authority) {
   return {
-    jobs: authority.jobAuthority ?? {},
+    jobs: Object.fromEntries(
+      Object.entries(authority.jobAuthority ?? {}).map(
+        ([
+          job,
+          { container, env, environment, permissions, runsOn, services },
+        ]) => [
+          job,
+          { container, env, environment, permissions, runsOn, services },
+        ],
+      ),
+    ),
     workflowEnv: authority.workflowEnv ?? {},
   };
+}
+
+function normalizedSafeOutputConfig(config) {
+  if (!config) return "";
+  const normalized = structuredClone(config);
+  normalized.create_issue = "<ISSUE_TRIAGE>";
+  normalized.create_pull_request_review_comment = "<INLINE_FINDINGS>";
+  if (normalized.submit_pull_request_review) {
+    normalized.submit_pull_request_review.allowed_events = "<REVIEW_EVENTS>";
+  }
+  return JSON.stringify(normalized);
+}
+
+function normalizeReviewEnv(env, authority) {
+  const model = authority.metadata?.agent_model;
+  const config = authority.safeOutputConfig
+    ? JSON.stringify(authority.safeOutputConfig)
+    : "";
+  return Object.fromEntries(
+    Object.entries(env ?? {}).map(([name, value]) => [
+      name,
+      value === model
+        ? "<MODEL>"
+        : name === "GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG" && value === config
+          ? normalizedSafeOutputConfig(authority.safeOutputConfig)
+          : value,
+    ]),
+  );
+}
+
+function reviewAuthorityInventory(authority) {
+  const publicationJobs = new Set(["conclusion", "safe_outputs"]);
+  const actions = (authority.actions ?? []).map((originalAction) => {
+    const action = {
+      ...originalAction,
+      env: normalizeReviewEnv(originalAction.env, authority),
+    };
+    return publicationJobs.has(action.job) &&
+      action.action === "actions/create-github-app-token"
+      ? {
+          ...action,
+          with: {
+            ...action.with,
+            "permission-issues": "<ISSUES_PERMISSION>",
+          },
+        }
+      : action;
+  });
+  const jobAuthority = Object.fromEntries(
+    Object.entries(authority.jobAuthority ?? {}).map(([job, value]) => {
+      const normalizedValue = value
+        ? { ...value, env: normalizeReviewEnv(value.env, authority) }
+        : value;
+      return [
+        job,
+        normalizedValue && publicationJobs.has(job)
+          ? {
+              ...normalizedValue,
+              permissions: {
+                ...normalizedValue.permissions,
+                issues: "<ISSUES_PERMISSION>",
+              },
+            }
+          : normalizedValue,
+      ];
+    }),
+  );
+  return {
+    actions,
+    containers: authority.containers ?? [],
+    jobAuthority,
+    jobConditions: authority.jobConditions ?? {},
+    jobIds: Object.keys(authority.jobAuthority ?? {}).sort(),
+    permissions: authority.permissions ?? {},
+    scripts: (authority.scripts ?? []).map((script) => ({
+      ...script,
+      env: normalizeReviewEnv(script.env, authority),
+    })),
+    triggerConfig: authority.triggerConfig ?? {},
+    workflowConcurrency: authority.concurrency ?? null,
+    workflowDefaults: authority.workflowDefaults ?? null,
+    workflowEnv: normalizeReviewEnv(authority.workflowEnv, authority),
+  };
+}
+
+function issueTriageAuthorityInventory(authority) {
+  const normalize = (value) => normalizeReviewEnv(value, authority);
+  return {
+    actions: (authority.actions ?? []).map((action) => ({
+      ...action,
+      env: normalize(action.env),
+    })),
+    containers: authority.containers ?? [],
+    jobAuthority: Object.fromEntries(
+      Object.entries(authority.jobAuthority ?? {}).map(([job, value]) => [
+        job,
+        value ? { ...value, env: normalize(value.env) } : value,
+      ]),
+    ),
+    jobConditions: authority.jobConditions ?? {},
+    jobIds: Object.keys(authority.jobAuthority ?? {}).sort(),
+    permissions: authority.permissions ?? {},
+    scripts: (authority.scripts ?? []).map((script) => ({
+      ...script,
+      env: normalize(script.env),
+    })),
+    triggerConfig: authority.triggerConfig ?? {},
+    workflowConcurrency: authority.concurrency ?? null,
+    workflowDefaults: authority.workflowDefaults ?? null,
+    workflowEnv: normalize(authority.workflowEnv),
+  };
+}
+
+function reviewWriteAuthorityIsNarrow(authority) {
+  const writeJobs = authority.writeCapableJobs ?? [];
+  if (
+    writeJobs.length !== 2 ||
+    !sameValues(writeJobs.map(({ job }) => job).sort(), [
+      "conclusion",
+      "safe_outputs",
+    ])
+  ) {
+    return false;
+  }
+  for (const { permissions } of writeJobs) {
+    if (
+      permissions["pull-requests"] !== "write" ||
+      (permissions.issues !== undefined && permissions.issues !== "write") ||
+      Object.keys(permissions).some(
+        (permission) =>
+          permission !== "issues" && permission !== "pull-requests",
+      )
+    ) {
+      return false;
+    }
+  }
+  for (const job of ["agent", "conclusion", "safe_outputs"]) {
+    const jobAuthority = authority.jobAuthority?.[job];
+    if (
+      !jobAuthority ||
+      jobAuthority.container !== null ||
+      jobAuthority.environment !== null ||
+      jobAuthority.services !== null
+    ) {
+      return false;
+    }
+  }
+  return (
+    authority.jobAuthority.agent.runsOn === "ubuntu-latest" &&
+    JSON.stringify(authority.jobAuthority.agent.permissions) ===
+      JSON.stringify({ contents: "read", "pull-requests": "read" }) &&
+    authority.jobAuthority.conclusion.runsOn === "ubuntu-slim" &&
+    authority.jobAuthority.safe_outputs.runsOn === "ubuntu-slim"
+  );
+}
+
+function reviewSafeOutputsAreBounded(authority) {
+  const config = authority.safeOutputConfig;
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    return false;
+  const allowed = new Set([
+    "create_issue",
+    "create_pull_request_review_comment",
+    "missing_data",
+    "missing_tool",
+    "noop",
+    "report_incomplete",
+    "submit_pull_request_review",
+  ]);
+  if (Object.keys(config).some((name) => !allowed.has(name))) return false;
+  const inline = config.create_pull_request_review_comment;
+  const issue = config.create_issue;
+  const review = config.submit_pull_request_review;
+  const expectedIssuePermission = issue ? "write" : undefined;
+  const publicationJobs = new Set(["conclusion", "safe_outputs"]);
+  const appTokens = (authority.actions ?? []).filter(
+    ({ action, job }) =>
+      publicationJobs.has(job) && action === "actions/create-github-app-token",
+  );
+  return (
+    sameValues(authority.safeOutputJobs, ["safe_outputs"]) &&
+    appTokens.length === 2 &&
+    appTokens.every(
+      ({ with: actionWith }) =>
+        actionWith?.["permission-issues"] === expectedIssuePermission,
+    ) &&
+    [...publicationJobs].every(
+      (job) =>
+        authority.jobAuthority?.[job]?.permissions?.issues ===
+        expectedIssuePermission,
+    ) &&
+    (!inline ||
+      (hasExactlyKeys(inline, ["max", "side"]) &&
+        Number.isInteger(inline.max) &&
+        inline.max >= 1 &&
+        inline.max <= 20 &&
+        inline.side === "RIGHT")) &&
+    (!issue ||
+      (hasExactlyKeys(issue, ["deduplicate_by_title", "max", "title_prefix"]) &&
+        issue.deduplicate_by_title === true &&
+        issue.max === 1 &&
+        issue.title_prefix === "[rivet] ")) &&
+    hasExactlyKeys(review, ["allowed_events", "max"]) &&
+    review.max === 1 &&
+    (sameValues(review.allowed_events, ["COMMENT"]) ||
+      sameValues(review.allowed_events, ["COMMENT", "REQUEST_CHANGES"])) &&
+    config.noop?.max === 1 &&
+    config.noop?.["report-as-issue"] === "false" &&
+    authority.safeOutputSettings?.failureReportAsIssue === "false" &&
+    authority.safeOutputSettings?.missingDataReportAsFailure === "true" &&
+    authority.safeOutputSettings?.missingToolReportAsFailure === "true" &&
+    authority.safeOutputSettings?.noopReportAsIssue === "false" &&
+    authority.safeOutputSettings?.reportIncompleteCreateIssue === "false"
+  );
 }
 
 function maintenanceSecrets(expectedEngine) {
   const provider = MAINTENANCE_PROVIDER_SECRETS[expectedEngine];
   if (!provider) return null;
   return [...new Set([...MAINTENANCE_SHARED_SECRETS, ...provider])].sort();
+}
+
+function issueTriageSecrets(expectedEngine) {
+  const provider = MAINTENANCE_PROVIDER_SECRETS[expectedEngine];
+  if (!provider) return null;
+  return [
+    ...new Set([
+      ...MAINTENANCE_SHARED_SECRETS,
+      ...provider,
+      "RIVET_APP_PRIVATE_KEY",
+    ]),
+  ].sort();
 }
 
 export function assessMaintenanceTrust({
@@ -249,6 +516,8 @@ export function assessIssueTriageTrust({
   expectedImports = [],
   expectedModel,
   expectedPublisherScript,
+  expectedSecrets,
+  expectedAuthoritySha256,
 }) {
   const violations = [];
   if (!sameValues(authority.triggers, ["issues"])) {
@@ -256,6 +525,28 @@ export function assessIssueTriageTrust({
   }
   if (authority.metadata.strict !== true) {
     violations.push("compiler strict mode is required");
+  }
+  const authoritySha256 =
+    expectedAuthoritySha256 ??
+    RIVET_ISSUE_TRIAGE_AUTHORITY_SHA256_BY_ENGINE[expectedEngine];
+  if (
+    !authoritySha256 ||
+    digest(issueTriageAuthorityInventory(authority)) !== authoritySha256
+  ) {
+    violations.push(
+      "issue triage workflow differs from the approved authority inventory",
+    );
+  }
+  if (JSON.stringify(authority.workflowEnv ?? {}) !== JSON.stringify({})) {
+    violations.push("issue triage workflow environment must remain empty");
+  }
+  const approvedSecrets = expectedSecrets ?? issueTriageSecrets(expectedEngine);
+  if (
+    !approvedSecrets ||
+    !sameValues(authority.secrets, approvedSecrets) ||
+    !sameValues(authority.manifestSecrets, approvedSecrets)
+  ) {
+    violations.push("issue triage secrets differ from the approved inventory");
   }
   if (
     authority.metadata.agent_id !== expectedEngine ||
@@ -319,10 +610,15 @@ export function assessIssueTriageTrust({
 
 export function assessPullRequestTargetTrust({
   authority,
+  expectedEngine,
   expectedImports = [],
   expectedLocalActions = [],
+  expectedModel,
+  expectedReviewAuthoritySha256,
 }) {
   const violations = [];
+  const compiledModel =
+    expectedEngine === "codex" ? `${expectedModel}?effort=low` : expectedModel;
   if (!sameValues(authority.triggers, ["pull_request_target"])) {
     violations.push("workflow must use only pull_request_target");
   }
@@ -331,6 +627,12 @@ export function assessPullRequestTargetTrust({
   }
   if (authority.manifest.has_pull_request_target !== true) {
     violations.push("compiler manifest must record pull_request_target");
+  }
+  if (
+    authority.metadata.agent_id !== expectedEngine ||
+    authority.metadata.agent_model !== compiledModel
+  ) {
+    violations.push("review model differs from the configured model");
   }
   if (!authority.inlinedImports) {
     violations.push("workflow and native imports must be inlined");
@@ -352,15 +654,27 @@ export function assessPullRequestTargetTrust({
   if (!sameValues(authority.localActions, expectedLocalActions)) {
     violations.push("local actions differ from the approved inventory");
   }
-  if (authority.additionalRepositories.length > 0) {
-    violations.push("additional repository checkouts are not allowed");
+  if (
+    !(
+      expectedReviewAuthoritySha256 ??
+      RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE[expectedEngine]
+    ) ||
+    digest(reviewAuthorityInventory(authority)) !==
+      (expectedReviewAuthoritySha256 ??
+        RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE[expectedEngine]) ||
+    !reviewWriteAuthorityIsNarrow(authority) ||
+    !reviewSafeOutputsAreBounded(authority)
+  ) {
+    violations.push("review workflow differs from the approved inventory");
   }
   if (
-    !authority.jobConditions?.safe_outputs?.if?.includes(
-      "needs.agent.result == 'success'",
-    )
+    authority.githubMcpEnabled ||
+    (expectedEngine === "codex" && authority.shellToolDisabled !== true)
   ) {
-    violations.push("review publication requires a successful agent run");
+    violations.push("model-driven repository reads must be disabled");
+  }
+  if (authority.additionalRepositories.length > 0) {
+    violations.push("additional repository checkouts are not allowed");
   }
   if (
     authority.checkouts.length === 0 ||

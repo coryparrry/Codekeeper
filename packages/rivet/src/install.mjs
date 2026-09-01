@@ -48,18 +48,34 @@ import {
   buildWorkflowFiles,
   MAINTENANCE_ASSET_PATHS,
   REPAIR_ASSET_PATHS,
+  REVIEW_CONTEXT_ASSET_PATHS,
 } from "./workflow-files.mjs";
 const [ISSUE_TRIAGER_IMPORT] = RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS;
 const [FIXER_IMPORT] = RIVET_REPAIR_NATIVE_IMPORTS;
-const LOCAL_ACTION = "./.github/rivet/actions/authority-receipt";
+const REVIEW_LOCAL_ACTIONS = Object.freeze([
+  "./.github/rivet/actions/authority-receipt",
+  "./.github/rivet/actions/prepare-review-context",
+]);
 const V013_REVIEW_EXTENSION = new URL(
   "../assets/upgrades/v0.1.3/review-extension.md",
   import.meta.url,
 );
-const V015_REVIEW_EXTENSION = new URL(
-  "../assets/upgrades/v0.1.5/review-extension.md",
-  import.meta.url,
-);
+const PROFILED_REVIEW_EXTENSIONS = Object.freeze([
+  {
+    version: "v0.1.7",
+    url: new URL(
+      "../assets/upgrades/v0.1.7/review-extension.md",
+      import.meta.url,
+    ),
+  },
+  {
+    version: "v0.1.5",
+    url: new URL(
+      "../assets/upgrades/v0.1.5/review-extension.md",
+      import.meta.url,
+    ),
+  },
+]);
 const MAINTENANCE_LOCAL_ACTION = "./.github/rivet/actions/validate-audit";
 const MAINTENANCE_MANAGED_PATHS = Object.freeze([
   RIVET_MAINTENANCE_NATIVE_IMPORTS[0],
@@ -196,6 +212,13 @@ function withoutMaintenance(files) {
     ),
   );
 }
+function withoutReviewContext(files) {
+  const previous = new Map(files);
+  for (const relativePath of REVIEW_CONTEXT_ASSET_PATHS) {
+    previous.delete(relativePath);
+  }
+  return previous;
+}
 async function buildMaintenanceVariant({
   stagingRoot,
   mode,
@@ -265,8 +288,10 @@ async function prepareInstallation({
     );
     const trust = assessPullRequestTargetTrust({
       authority,
+      expectedEngine: config.models.review.engine,
       expectedImports: RIVET_REVIEW_NATIVE_IMPORTS,
-      expectedLocalActions: [LOCAL_ACTION],
+      expectedLocalActions: REVIEW_LOCAL_ACTIONS,
+      expectedModel: config.models.review.model,
     });
     if (!trust.trusted) {
       throw new Error(
@@ -520,28 +545,12 @@ async function prepareInstallation({
       }
     }
     if (requiresUpgrade) {
-      const profiledV015 = await buildWorkflowFiles({
-        stagingRoot: path.join(stagingRoot, "profiled-v0.1.5"),
-        mode,
-        config,
-        reviewConfig,
-        validation,
-        binaryPath,
-        compileWorkflow,
-        validateWorkflow,
-        env,
-        profiles: true,
-        includeIssueTriage: config.issues.triage === "automatic",
-        includeMaintenance: config.maintenance.mode !== "disabled",
-        reviewExtension: await readFile(V015_REVIEW_EXTENSION, "utf8"),
-      });
-      completeInstallationFiles(profiledV015, { mode, config });
-      baselines.push(profiledV015);
-      if (mode === "repair") {
-        const profiledReviewV015 = await buildWorkflowFiles({
-          stagingRoot: path.join(stagingRoot, "profiled-review-v0.1.5"),
-          mode: "review",
-          config: reviewConfig,
+      for (const { version, url } of PROFILED_REVIEW_EXTENSIONS) {
+        const reviewExtension = await readFile(url, "utf8");
+        const profiled = await buildWorkflowFiles({
+          stagingRoot: path.join(stagingRoot, `profiled-${version}`),
+          mode,
+          config,
           reviewConfig,
           validation,
           binaryPath,
@@ -549,15 +558,38 @@ async function prepareInstallation({
           validateWorkflow,
           env,
           profiles: true,
-          includeIssueTriage: reviewConfig.issues.triage === "automatic",
-          includeMaintenance: reviewConfig.maintenance.mode !== "disabled",
-          reviewExtension: await readFile(V015_REVIEW_EXTENSION, "utf8"),
+          includeIssueTriage: config.issues.triage === "automatic",
+          includeMaintenance: config.maintenance.mode !== "disabled",
+          reviewExtension,
+          reviewWorkflowVersion: version,
         });
-        completeInstallationFiles(profiledReviewV015, {
-          mode: "review",
-          config: reviewConfig,
-        });
-        baselines.push(profiledReviewV015);
+        const previousProfiled = withoutReviewContext(profiled);
+        completeInstallationFiles(previousProfiled, { mode, config });
+        baselines.push(previousProfiled);
+        if (mode === "repair") {
+          const profiledReview = await buildWorkflowFiles({
+            stagingRoot: path.join(stagingRoot, `profiled-review-${version}`),
+            mode: "review",
+            config: reviewConfig,
+            reviewConfig,
+            validation,
+            binaryPath,
+            compileWorkflow,
+            validateWorkflow,
+            env,
+            profiles: true,
+            includeIssueTriage: reviewConfig.issues.triage === "automatic",
+            includeMaintenance: reviewConfig.maintenance.mode !== "disabled",
+            reviewExtension,
+            reviewWorkflowVersion: version,
+          });
+          const previousProfiledReview = withoutReviewContext(profiledReview);
+          completeInstallationFiles(previousProfiledReview, {
+            mode: "review",
+            config: reviewConfig,
+          });
+          baselines.push(previousProfiledReview);
+        }
       }
 
       const profiledV013 = await buildWorkflowFiles({
@@ -576,8 +608,9 @@ async function prepareInstallation({
         includeReviewBudget: false,
         reviewExtension: await readFile(V013_REVIEW_EXTENSION, "utf8"),
       });
-      completeInstallationFiles(profiledV013, { mode, config });
-      baselines.push(profiledV013);
+      const previousProfiledV013 = withoutReviewContext(profiledV013);
+      completeInstallationFiles(previousProfiledV013, { mode, config });
+      baselines.push(previousProfiledV013);
 
       const legacyReview = await buildWorkflowFiles({
         stagingRoot: path.join(stagingRoot, "legacy-review"),
@@ -594,11 +627,12 @@ async function prepareInstallation({
         includeMaintenance: false,
         reviewExtension: await readFile(V013_REVIEW_EXTENSION, "utf8"),
       });
-      completeInstallationFiles(legacyReview, {
+      const previousLegacyReview = withoutReviewContext(legacyReview);
+      completeInstallationFiles(previousLegacyReview, {
         mode: "review",
         config: reviewConfig,
       });
-      baselines.push(legacyReview);
+      baselines.push(previousLegacyReview);
     }
     if (requiresUpgrade && mode === "repair") {
       const legacyRepair = await buildWorkflowFiles({
@@ -616,8 +650,9 @@ async function prepareInstallation({
         includeMaintenance: false,
         reviewExtension: await readFile(V013_REVIEW_EXTENSION, "utf8"),
       });
-      completeInstallationFiles(legacyRepair, { mode, config });
-      baselines.push(legacyRepair);
+      const previousLegacyRepair = withoutReviewContext(legacyRepair);
+      completeInstallationFiles(previousLegacyRepair, { mode, config });
+      baselines.push(previousLegacyRepair);
     }
     const compatibleBaselines = baselines.filter((baseline) =>
       [...files].every(([relativePath, content]) => {
