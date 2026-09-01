@@ -66,6 +66,13 @@ const V012_PUBLISH_REPAIR = new URL(
 );
 const PROFILED_REVIEW_EXTENSIONS = Object.freeze([
   {
+    version: "v0.1.13",
+    url: new URL(
+      "../assets/upgrades/v0.1.13/review-extension.md",
+      import.meta.url,
+    ),
+  },
+  {
     version: "v0.1.11",
     url: new URL(
       "../assets/upgrades/v0.1.11/review-extension.md",

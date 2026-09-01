@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   renderRivetReviewWorkflow,
+  renderRivetReviewWorkflowV0113,
   renderRivetReviewWorkflowV012,
   RIVET_REVIEW_NATIVE_IMPORTS,
   RIVET_REVIEW_WORKFLOW_ID,
@@ -71,7 +72,19 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /Use only `COMMENT`; `REQUEST_CHANGES` is forbidden/);
   assert.match(fixture, /Triage each supported finding before publication/);
   assert.match(fixture, /it does not authorize a repair or implementation/);
-  assert.match(fixture, /call only `noop`/);
+  assert.match(fixture, /For every complete comparison/);
+  assert.match(fixture, /# Rivet review/);
+  assert.match(fixture, /## What this changes/);
+  assert.match(fixture, /## Merge readiness/);
+  assert.match(fixture, /## Verification/);
+  assert.match(fixture, /## How this fits together/);
+  assert.match(fixture, /flowchart LR/);
+  assert.match(fixture, /## Before merge/);
+  assert.match(
+    fixture,
+    /<summary><strong>Review details<\/strong><\/summary>/,
+  );
+  assert.doesNotMatch(fixture, /call only `noop`/);
   assert.doesNotMatch(fixture, /  add-comment:/);
 });
 
@@ -83,8 +96,11 @@ test("projects domain review controls into gh-aw frontmatter", () => {
   assert.doesNotMatch(source, /create-pull-request-review-comment/);
   assert.match(source, /inline findings are disabled/);
   assert.match(source, /allowed-events: \[COMMENT, REQUEST_CHANGES\]/);
-  assert.match(source, /event `REQUEST_CHANGES`/);
-  assert.match(source, /Use the configured `REQUEST_CHANGES` event/);
+  assert.match(
+    source,
+    /Use `REQUEST_CHANGES` only when the recommendation is `block`/,
+  );
+  assert.match(source, /use `COMMENT` for `manual` and `auto`/);
   assert.doesNotMatch(source, /`REQUEST_CHANGES` is forbidden/);
 
   configuration.issues.triage = "disabled";
@@ -139,6 +155,16 @@ test("freezes the 0.1.2 review source used for upgrades", async () => {
     renderRivetReviewWorkflowV012(),
     await readFile(
       path.join(PACKAGE_ROOT, "test/fixtures/v0.1.2/rivet-review.md"),
+      "utf8",
+    ),
+  );
+});
+
+test("freezes the 0.1.13 review source used for upgrades", async () => {
+  assert.equal(
+    renderRivetReviewWorkflowV0113(),
+    await readFile(
+      path.join(PACKAGE_ROOT, "assets/upgrades/v0.1.13/rivet-review.md"),
       "utf8",
     ),
   );

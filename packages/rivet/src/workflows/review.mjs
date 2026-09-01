@@ -61,25 +61,50 @@ function publicationContract({
   issueTriage,
   includeDisabledIssueTriageNotice = true,
   includeReviewEventBoundary = true,
+  includeGeneralReview = true,
 }) {
   const inline = inlineFindings
     ? `For each supported finding, call \`create_pull_request_review_comment\` once on the smallest relevant changed line. Publish no more than ${maximumFindings} inline findings.`
     : "Do not call `create_pull_request_review_comment`; inline findings are disabled.";
   const event = requestChanges ? "REQUEST_CHANGES" : "COMMENT";
   const eventBoundary = requestChanges
-    ? "Use the configured `REQUEST_CHANGES` event for the review."
+    ? includeGeneralReview
+      ? "Use `REQUEST_CHANGES` only when the recommendation is `block`; use `COMMENT` for `manual` and `auto`."
+      : "Use the configured `REQUEST_CHANGES` event for the review."
     : "The reviewer profile's `block`, `manual`, or `auto` recommendation is evidence only and does not select the GitHub review event. Use only `COMMENT`; `REQUEST_CHANGES` is forbidden.";
   const triage = issueTriage
     ? `Triage each supported finding before publication. Keep findings that should be fixed in this pull request as inline review comments. When one verified concern is outside this pull request or needs a separate owner decision, defer it by calling \`create_issue\` once. The issue must state the concrete evidence, why it is deferred, and the source pull request; it does not authorize a repair or implementation.`
     : includeDisabledIssueTriageNotice
       ? "Do not call `create_issue`; issue triage is disabled."
       : "";
+  const review = includeGeneralReview
+    ? `For every complete comparison, call \`submit_pull_request_review\` once. Publish the review even when there are no actionable findings; a clean review must not invent work.
+
+Use this review-body structure:
+
+\`# Rivet review\`
+
+\`## What this changes\` — explain the observable change and its main mechanism in plain language, using only the trusted comparison.
+
+\`## Merge readiness\` — use exactly one status: \`⛔ **Changes needed before merge**\` for \`block\`, \`⚠️ **Ready for maintainer review**\` for \`manual\`, or \`✅ **Ready to merge**\` for \`auto\`. Follow it with one sentence explaining the decision.
+
+\`## Verification\` — include a compact \`Check | Result | Evidence\` table with rows for Findings, Tests, and Risk. Distinguish tests visible in the diff from tests actually run; this workflow does not run tests.
+
+When the comparison supports a useful relationship among at least three components or a non-trivial control or state flow, add \`## How this fits together\` with a left-to-right \`flowchart LR\` Mermaid diagram. Use at most four nodes with plain-text labels grounded in the comparison. Never include Mermaid directives, clicks, links, URLs, or HTML. Omit the diagram when it would merely repeat the prose.
+
+\`## Before merge\` — write \`None.\` when no blocker or concrete test gap remains; otherwise use a short checkbox list without repeating inline-comment details.
+
+End with \`<details>\`, \`<summary><strong>Review details</strong></summary>\`, the exact base and head SHAs, changed-file count, recommendation, and any compact non-blocking context, then \`</details>\`. Do not duplicate inline comment text in the review body.`
+    : `After publishing supported findings, call \`submit_pull_request_review\` once with event \`${event}\` and a compact summary that does not duplicate the inline comments.`;
+  const noFindings = includeGeneralReview
+    ? "When the change has no supported actionable finding, submit the same general review with a clean Findings result and a concise evidence-backed reason."
+    : "If the change has no supported actionable finding, call only `noop` with a concise no-action reason. Do not publish a comment or review merely to appear useful.";
   return `## Publication contract
 
 ${inline}
-After publishing supported findings, call \`submit_pull_request_review\` once with event \`${event}\` and a compact summary that does not duplicate the inline comments.${includeReviewEventBoundary ? `\n${eventBoundary}` : ""}
+${review}${includeReviewEventBoundary ? `\n${eventBoundary}` : ""}
 
-${triage ? `${triage}\n\n` : ""}If the change has no supported actionable finding, call only \`noop\` with a concise no-action reason. Do not publish a comment or review merely to appear useful.
+${triage ? `${triage}\n\n` : ""}${noFindings}
 
 If required evidence is unavailable or the comparison is incomplete, call \`report_incomplete\` with the exact missing boundary instead of guessing.
 `;
@@ -92,6 +117,7 @@ export function renderRivetReviewWorkflow({
   includeReviewEventBoundary = true,
   includeReviewBudget = true,
   includeLegacyReviewBudget = false,
+  includeGeneralReview = true,
 } = {}) {
   const review = reviewWorkflowProjection(configuration);
   const reviewEvents = review.requestChanges
@@ -124,7 +150,17 @@ ${publicationContract({
   ...review,
   includeDisabledIssueTriageNotice,
   includeReviewEventBoundary,
+  includeGeneralReview,
 })}`;
+}
+
+export function renderRivetReviewWorkflowV0113({
+  configuration = DEFAULT_RIVET_CONFIG,
+} = {}) {
+  return renderRivetReviewWorkflow({
+    configuration,
+    includeGeneralReview: false,
+  });
 }
 
 export function renderRivetReviewWorkflowV017({
@@ -135,6 +171,7 @@ export function renderRivetReviewWorkflowV017({
     includeReviewEventBoundary: false,
     includeReviewBudget: false,
     includeLegacyReviewBudget: true,
+    includeGeneralReview: false,
   });
 }
 
@@ -144,6 +181,7 @@ export function renderRivetReviewWorkflowV0111({
   return renderRivetReviewWorkflow({
     configuration,
     includeReviewEventBoundary: false,
+    includeGeneralReview: false,
   });
 }
 
@@ -166,5 +204,6 @@ export function renderRivetReviewWorkflowV012({
     includeDisabledIssueTriageNotice: false,
     includeReviewEventBoundary: false,
     includeReviewBudget: false,
+    includeGeneralReview: false,
   });
 }

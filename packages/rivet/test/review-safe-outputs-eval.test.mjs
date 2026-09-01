@@ -41,6 +41,35 @@ function manifest(terminal = "review") {
   };
 }
 
+function reviewBody() {
+  return `# Rivet review
+
+## What this changes
+
+The discount path now handles large values.
+
+## Merge readiness
+
+⚠️ **Ready for maintainer review**
+
+## Verification
+
+| Check | Result | Evidence |
+|---|---|---|
+| Findings | One | Inline review comment |
+
+## Before merge
+
+- [ ] Resolve the inline finding.
+
+<details>
+<summary><strong>Review details</strong></summary>
+
+Exact comparison reviewed.
+
+</details>`;
+}
+
 function reviewArtifacts() {
   return {
     metadata: { headSha: HEAD, runId: 42, conclusion: "success" },
@@ -53,7 +82,11 @@ function reviewArtifacts() {
         line: 2,
         body: "Values above 100 can produce negative totals.",
       },
-      { type: "submit_pull_request_review", event: "COMMENT" },
+      {
+        type: "submit_pull_request_review",
+        event: "COMMENT",
+        body: reviewBody(),
+      },
       { type: "create_issue", title: "Deferred concern" },
     ],
     receipts: [
@@ -132,6 +165,27 @@ test("scores noop and incomplete outcomes without publication receipts", () => {
   });
   assert.equal(unexpectedReceipt.passed, false);
   assert.equal(unexpectedReceipt.checks.knownReceipts, false);
+});
+
+test("requires a useful general review body even without findings", () => {
+  const cleanManifest = manifest();
+  cleanManifest.expected.comments = [];
+  cleanManifest.expected.createIssueCount = 0;
+  const clean = reviewArtifacts();
+  clean.outputs = clean.outputs.filter(
+    ({ type }) =>
+      !["create_pull_request_review_comment", "create_issue"].includes(type),
+  );
+  clean.receipts = clean.receipts.filter(
+    ({ type }) =>
+      !["create_pull_request_review_comment", "create_issue"].includes(type),
+  );
+  assert.equal(evaluateReviewRun(cleanManifest, clean).passed, true);
+
+  clean.outputs[0].body = "No findings.";
+  const weak = evaluateReviewRun(cleanManifest, clean);
+  assert.equal(weak.passed, false);
+  assert.equal(weak.checks.reviewBody, false);
 });
 
 test("CLI emits JSON and exits nonzero when a run fails", async (context) => {
