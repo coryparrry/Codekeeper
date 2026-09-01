@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +15,9 @@ const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const CONTEXT_PATH = ".github/rivet/actions/prepare-review-context/index.mjs";
+const CONTEXT_SHA256 =
+  "ecaefbc8d295e9f27d5f4aaaf00c29f4dde27226642318e82ba4ddddd0d73caa";
 const WORKFLOW_PATH = ".github/workflows/rivet-review.md";
 const LOCK_PATH = ".github/workflows/rivet-review.lock.yml";
 
@@ -32,6 +36,21 @@ async function releasedLock() {
     "utf8",
   );
   return gunzipSync(Buffer.from(encoded, "base64")).toString("utf8");
+}
+
+async function releasedContextAction() {
+  const content = await readFile(
+    path.join(
+      PACKAGE_ROOT,
+      "assets/upgrades/v0.1.13/prepare-review-context-index.mjs",
+    ),
+    "utf8",
+  );
+  assert.equal(
+    createHash("sha256").update(content).digest("hex"),
+    CONTEXT_SHA256,
+  );
+  return content;
 }
 
 async function fixtureCompiler({ repositoryRoot, workflowId }) {
@@ -64,6 +83,10 @@ async function writeReleasedInstallation(repositoryRoot) {
     path.join(repositoryRoot, WORKFLOW_PATH),
     renderRivetReviewWorkflowV0113({ configuration: config }),
   );
+  await writeFile(
+    path.join(repositoryRoot, CONTEXT_PATH),
+    await releasedContextAction(),
+  );
   await writeFile(path.join(repositoryRoot, LOCK_PATH), await releasedLock());
   return config;
 }
@@ -82,10 +105,10 @@ test("upgrades only an exact 0.1.13 review summary", async (t) => {
     result.files
       .filter(({ status }) => status === "update")
       .map(({ path: relativePath }) => relativePath),
-    [LOCK_PATH, WORKFLOW_PATH],
+    [CONTEXT_PATH, LOCK_PATH, WORKFLOW_PATH],
   );
 
-  for (const relativePath of [LOCK_PATH, WORKFLOW_PATH]) {
+  for (const relativePath of [CONTEXT_PATH, LOCK_PATH, WORKFLOW_PATH]) {
     await t.test(`rejects modified ${relativePath}`, async () => {
       const modifiedRoot = await repository(t);
       const modifiedConfig = await writeReleasedInstallation(modifiedRoot);

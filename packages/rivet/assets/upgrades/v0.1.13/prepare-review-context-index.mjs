@@ -72,10 +72,6 @@ function incomplete(metadata, reason) {
   });
 }
 
-function serializePromptSnapshot(snapshot) {
-  return JSON.stringify(snapshot).replaceAll("_" + "_GH_AW_", "\\u005f_GH_AW_");
-}
-
 async function boundedResponseText(response, maximumBytes) {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes)
@@ -229,10 +225,7 @@ export async function createReviewContext({
     headSha: metadata.headSha,
     files,
   };
-  if (
-    Buffer.byteLength(serializePromptSnapshot(snapshot), "utf8") >
-    maxSnapshotBytes
-  )
+  if (Buffer.byteLength(JSON.stringify(snapshot), "utf8") > maxSnapshotBytes)
     return incomplete(
       metadata,
       `comparison exceeds the ${maxSnapshotBytes}-byte review budget`,
@@ -263,7 +256,7 @@ export async function runPrepareReviewContextAction({
   if (!snapshot.complete) fail(snapshot.reason);
   await appendFileImpl(
     env.GITHUB_OUTPUT,
-    `snapshot=${serializePromptSnapshot(snapshot)}\n`,
+    `snapshot=${JSON.stringify(snapshot)}\n`,
     "utf8",
   );
   return snapshot;
