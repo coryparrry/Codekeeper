@@ -27,6 +27,12 @@ export const RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
   copilot: "36053405947229ac22f317189a5eb3ecc03815e9a9096fc9462934659e62f53f",
   gemini: "a60a9f8a1783537575128f6b427085e798b5122d1a1b8ecbe0afa34663f33226",
 });
+export const RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
+  claude: "e704bfe714468aa846a55526afaa597dfe298b869e76e3d6a0fef37778a10df7",
+  codex: "45c0716f8774a9c380bb6078e4f82167c07a3b2aa3f6ac6a5f4412c73f4704ad",
+  copilot: "adf7b2019a7997f6d5512c15c74a19cec2b843e290ac4fecffb65eb2e6f1a0c9",
+  gemini: "e18d7380a5fb818057b1bc2a80ce176c98075f0f4e79b42ba888c189ff47586f",
+});
 export const RIVET_ISSUE_TRIAGE_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
   claude: "cd9df8fb70fd4966145f934340bf586c8aecc30824d8d1ebb7d0720b3d2f659f",
   codex: "fabab4602abe657cedf4bc18ebdab9e713413a1fbbe5f4aacdc6673ff0bb2a8f",
@@ -264,7 +270,7 @@ function reviewWriteAuthorityIsNarrow(authority) {
   );
 }
 
-function reviewSafeOutputsAreBounded(authority) {
+function reviewSafeOutputsAreBounded(authority, expectedIssueTriage) {
   const config = authority.safeOutputConfig;
   if (!config || typeof config !== "object" || Array.isArray(config))
     return false;
@@ -288,6 +294,7 @@ function reviewSafeOutputsAreBounded(authority) {
       publicationJobs.has(job) && action === "actions/create-github-app-token",
   );
   return (
+    Boolean(issue) === (expectedIssueTriage === "automatic") &&
     sameValues(authority.safeOutputJobs, ["safe_outputs"]) &&
     appTokens.length === 2 &&
     appTokens.every(
@@ -614,9 +621,13 @@ export function assessPullRequestTargetTrust({
   expectedImports = [],
   expectedLocalActions = [],
   expectedModel,
+  expectedIssueTriage = "automatic",
   expectedReviewAuthoritySha256,
 }) {
   const violations = [];
+  if (!["automatic", "disabled"].includes(expectedIssueTriage)) {
+    violations.push("expected issue triage mode must be automatic or disabled");
+  }
   const compiledModel =
     expectedEngine === "codex" ? `${expectedModel}?effort=low` : expectedModel;
   if (!sameValues(authority.triggers, ["pull_request_target"])) {
@@ -654,16 +665,18 @@ export function assessPullRequestTargetTrust({
   if (!sameValues(authority.localActions, expectedLocalActions)) {
     violations.push("local actions differ from the approved inventory");
   }
+  const reviewAuthoritySha256 =
+    expectedReviewAuthoritySha256 ??
+    (expectedIssueTriage === "automatic"
+      ? RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE[expectedEngine]
+      : expectedIssueTriage === "disabled"
+        ? RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE[expectedEngine]
+        : undefined);
   if (
-    !(
-      expectedReviewAuthoritySha256 ??
-      RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE[expectedEngine]
-    ) ||
-    digest(reviewAuthorityInventory(authority)) !==
-      (expectedReviewAuthoritySha256 ??
-        RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE[expectedEngine]) ||
+    !reviewAuthoritySha256 ||
+    digest(reviewAuthorityInventory(authority)) !== reviewAuthoritySha256 ||
     !reviewWriteAuthorityIsNarrow(authority) ||
-    !reviewSafeOutputsAreBounded(authority)
+    !reviewSafeOutputsAreBounded(authority, expectedIssueTriage)
   ) {
     violations.push("review workflow differs from the approved inventory");
   }

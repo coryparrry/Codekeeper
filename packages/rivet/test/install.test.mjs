@@ -20,6 +20,7 @@ import {
   prepareReviewInstallation,
 } from "../src/install.mjs";
 import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
+import { currentReviewLock } from "./review-lock-fixtures.mjs";
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -105,13 +106,7 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
     workflowId === "rivet-review" &&
     workflow.includes(REVIEWER_PATH)
   ) {
-    source = await readFile(
-      path.join(
-        PACKAGE_ROOT,
-        "test/fixtures/review/.github/workflows/rivet-review.lock.yml",
-      ),
-      "utf8",
-    );
+    source = await currentReviewLock(PACKAGE_ROOT, workflow);
   } else if (workflow.includes(FIXER_PATH)) {
     source = "name: rivet-repair-current\n";
   } else {

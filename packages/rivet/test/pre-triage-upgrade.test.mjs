@@ -18,6 +18,7 @@ import {
   renderRivetReviewWorkflow,
   renderRivetReviewWorkflowV017,
 } from "../src/workflows/review.mjs";
+import { currentReviewLock } from "./review-lock-fixtures.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -69,6 +70,10 @@ const V017_WORKFLOW_SOURCE = path.join(
   PACKAGE_ROOT,
   "assets/upgrades/v0.1.7/rivet-review.md",
 );
+const V017_DISABLED_WORKFLOW_SOURCE = path.join(
+  V017_FIXTURES,
+  "rivet-review-disabled.md",
+);
 const V013_REVIEW_PATHS = [
   ".github/rivet/aw/review-extension.md",
   ".github/workflows/rivet-review.lock.yml",
@@ -105,9 +110,12 @@ async function frozenV015ReviewLock() {
   return gunzipSync(Buffer.from(encoded, "base64")).toString("utf8");
 }
 
-async function frozenV017ReviewLock() {
+async function frozenV017ReviewLock(issueTriage = "automatic") {
   const encoded = await readFile(
-    path.join(V017_FIXTURES, "rivet-review.lock.yml.gz.b64"),
+    path.join(
+      V017_FIXTURES,
+      `rivet-review${issueTriage === "automatic" ? "" : "-disabled"}.lock.yml.gz.b64`,
+    ),
     "utf8",
   );
   return gunzipSync(Buffer.from(encoded, "base64")).toString("utf8");
@@ -165,6 +173,9 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
           "utf8",
         )
       : "";
+  const issueTriage = workflow.includes("\n  create-issue:\n")
+    ? "automatic"
+    : "disabled";
   const source =
     workflowId === "rivet-maintenance"
       ? await frozenMaintenanceLock(workflow)
@@ -174,19 +185,13 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
           ? workflow.includes("max-turns: 6")
             ? reviewExtension.includes("method `get_diff`")
               ? await frozenV015ReviewLock()
-              : await frozenV017ReviewLock()
+              : await frozenV017ReviewLock(issueTriage)
             : workflow.includes("max-turns: 3")
               ? reviewExtension.includes("method `get_diff`")
                 ? await frozenV015ReviewLock()
                 : reviewExtension.includes("Trusted bounded comparison")
-                  ? await readFile(
-                      path.join(
-                        PACKAGE_ROOT,
-                        "test/fixtures/review/.github/workflows/rivet-review.lock.yml",
-                      ),
-                      "utf8",
-                    )
-                  : await frozenV017ReviewLock()
+                  ? await currentReviewLock(PACKAGE_ROOT, workflow)
+                  : await frozenV017ReviewLock(issueTriage)
               : await frozenV013ReviewLock()
           : workflow.includes(FIXER_PATH)
             ? "name: rivet-repair-current\n"
@@ -278,14 +283,20 @@ async function writeProfiledV017Installation(
   );
   await writeFile(
     path.join(repositoryRoot, ".github/workflows/rivet-review.lock.yml"),
-    await frozenV017ReviewLock(),
+    await frozenV017ReviewLock(configuration.issues.triage),
   );
 }
 
-test("freezes the released 0.1.7 review workflow source", async () => {
+test("freezes the released 0.1.7 review workflow sources", async () => {
   assert.equal(
     renderRivetReviewWorkflowV017(),
     await readFile(V017_WORKFLOW_SOURCE, "utf8"),
+  );
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.issues.triage = "disabled";
+  assert.equal(
+    renderRivetReviewWorkflowV017({ configuration }),
+    await readFile(V017_DISABLED_WORKFLOW_SOURCE, "utf8"),
   );
 });
 

@@ -17,7 +17,9 @@ import {
   compileGhAwWorkflow,
   validateGhAwWorkflow,
 } from "../src/gh-aw/compile.mjs";
+import { knownCompilerDrift } from "../src/install.mjs";
 import { renderRivetMaintenanceWorkflow } from "../src/workflows/maintenance.mjs";
+import { renderRivetReviewWorkflow } from "../src/workflows/review.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -108,8 +110,14 @@ export async function checkMaintenanceLocks({
         ),
         readFile(path.join(temporaryRoot, MAINTENANCE_LOCK_PATH)),
       ]);
+      const checkedIn = gunzipSync(Buffer.from(encodedFixture, "base64"));
       if (
-        !gunzipSync(Buffer.from(encodedFixture, "base64")).equals(regenerated)
+        !checkedIn.equals(regenerated) &&
+        !knownCompilerDrift(
+          MAINTENANCE_LOCK_PATH,
+          checkedIn.toString("utf8"),
+          regenerated.toString("utf8"),
+        )
       ) {
         fail(
           `checked-in rivet-maintenance-${mode}.lock.yml fixture does not match the pinned gh-aw compiler output`,
@@ -128,37 +136,75 @@ export async function checkReviewLock({
   compileWorkflow = compileGhAwWorkflow,
   validateWorkflow = validateGhAwWorkflow,
 } = {}) {
-  const temporaryRoot = await realpath(
-    await mkdtemp(path.join(temporaryParent, "rivet-review-lock-check-")),
-  );
-  try {
-    await cp(fixtureRoot, temporaryRoot, { recursive: true });
-    const temporaryLock = path.join(temporaryRoot, LOCK_PATH);
-    await rm(temporaryLock, { force: true });
+  const disabledConfiguration = structuredClone(DEFAULT_RIVET_CONFIG);
+  disabledConfiguration.issues.triage = "disabled";
+  const variants = [
+    {
+      name: "rivet-review.lock.yml",
+      readFixture: () => readFile(path.join(fixtureRoot, LOCK_PATH)),
+    },
+    {
+      name: "rivet-review-disabled.lock.yml",
+      source: renderRivetReviewWorkflow({
+        configuration: disabledConfiguration,
+      }),
+      readFixture: async () =>
+        gunzipSync(
+          Buffer.from(
+            await readFile(
+              path.join(fixtureRoot, "rivet-review-disabled.lock.yml.gz.b64"),
+              "utf8",
+            ),
+            "base64",
+          ),
+        ),
+    },
+  ];
+  const binaryPath = await ensureBinary();
+  for (const variant of variants) {
+    const temporaryRoot = await realpath(
+      await mkdtemp(path.join(temporaryParent, "rivet-review-lock-check-")),
+    );
+    try {
+      await cp(fixtureRoot, temporaryRoot, { recursive: true });
+      const temporaryLock = path.join(temporaryRoot, LOCK_PATH);
+      await rm(temporaryLock, { force: true });
+      if (variant.source) {
+        await writeFile(
+          path.join(temporaryRoot, ".github", "workflows", `${WORKFLOW_ID}.md`),
+          variant.source,
+        );
+      }
+      await compileWorkflow({
+        repositoryRoot: temporaryRoot,
+        workflowId: WORKFLOW_ID,
+        binaryPath,
+      });
+      await validateWorkflow({
+        repositoryRoot: temporaryRoot,
+        workflowId: WORKFLOW_ID,
+        binaryPath,
+      });
 
-    const binaryPath = await ensureBinary();
-    await compileWorkflow({
-      repositoryRoot: temporaryRoot,
-      workflowId: WORKFLOW_ID,
-      binaryPath,
-    });
-    await validateWorkflow({
-      repositoryRoot: temporaryRoot,
-      workflowId: WORKFLOW_ID,
-      binaryPath,
-    });
-
-    const [checkedIn, regenerated] = await Promise.all([
-      readFile(path.join(fixtureRoot, LOCK_PATH)),
-      readFile(temporaryLock),
-    ]);
-    if (!checkedIn.equals(regenerated)) {
-      fail(
-        "checked-in rivet-review.lock.yml does not match the pinned gh-aw compiler output",
-      );
+      const [checkedIn, regenerated] = await Promise.all([
+        variant.readFixture(),
+        readFile(temporaryLock),
+      ]);
+      if (
+        !checkedIn.equals(regenerated) &&
+        !knownCompilerDrift(
+          LOCK_PATH,
+          checkedIn.toString("utf8"),
+          regenerated.toString("utf8"),
+        )
+      ) {
+        fail(
+          `checked-in ${variant.name} fixture does not match the pinned gh-aw compiler output`,
+        );
+      }
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true });
     }
-  } finally {
-    await rm(temporaryRoot, { force: true, recursive: true });
   }
 }
 

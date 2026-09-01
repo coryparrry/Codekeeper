@@ -23,31 +23,43 @@ test("rejects a stale review lock and removes its temporary repository", async (
     await mkdir(temporaryParent);
     await writeFile(path.join(fixtureRoot, LOCK_PATH), "checked-in\n");
     await writeFile(
+      path.join(fixtureRoot, "rivet-review-disabled.lock.yml.gz.b64"),
+      gzipSync("checked-in\n").toString("base64"),
+    );
+    await writeFile(
       path.join(fixtureRoot, ".github", "workflows", "rivet-review.md"),
       "---\nname: fixture\n---\n",
     );
 
+    const options = {
+      fixtureRoot,
+      temporaryParent,
+      ensureBinary: async () => "/verified/gh-aw",
+      compileWorkflow: async ({ repositoryRoot, workflowId, binaryPath }) => {
+        assert.equal(workflowId, "rivet-review");
+        assert.equal(binaryPath, "/verified/gh-aw");
+        await writeFile(path.join(repositoryRoot, LOCK_PATH), "regenerated\n");
+      },
+      validateWorkflow: async ({ workflowId, binaryPath }) => {
+        assert.equal(workflowId, "rivet-review");
+        assert.equal(binaryPath, "/verified/gh-aw");
+        validated = true;
+      },
+    };
     await assert.rejects(
-      checkReviewLock({
-        fixtureRoot,
-        temporaryParent,
-        ensureBinary: async () => "/verified/gh-aw",
-        compileWorkflow: async ({ repositoryRoot, workflowId, binaryPath }) => {
-          assert.equal(workflowId, "rivet-review");
-          assert.equal(binaryPath, "/verified/gh-aw");
-          await writeFile(
-            path.join(repositoryRoot, LOCK_PATH),
-            "regenerated\n",
-          );
-        },
-        validateWorkflow: async ({ workflowId, binaryPath }) => {
-          assert.equal(workflowId, "rivet-review");
-          assert.equal(binaryPath, "/verified/gh-aw");
-          validated = true;
-        },
-      }),
-      /checked-in rivet-review\.lock\.yml does not match/,
+      checkReviewLock(options),
+      /checked-in rivet-review\.lock\.yml fixture does not match/,
     );
+    await writeFile(path.join(fixtureRoot, LOCK_PATH), "regenerated\n");
+    await assert.rejects(
+      checkReviewLock(options),
+      /checked-in rivet-review-disabled\.lock\.yml fixture does not match/,
+    );
+    await writeFile(
+      path.join(fixtureRoot, "rivet-review-disabled.lock.yml.gz.b64"),
+      gzipSync("# prior compiler formatting\nregenerated\n").toString("base64"),
+    );
+    await checkReviewLock(options);
     assert.equal(validated, true);
     assert.deepEqual(await readdir(temporaryParent), []);
   } finally {
@@ -91,6 +103,29 @@ test("rejects stale maintenance locks from the pinned compiler", async () => {
       }),
       /rivet-maintenance-manual\.lock\.yml fixture does not match/,
     );
+    for (const mode of ["manual", "scheduled"]) {
+      await writeFile(
+        path.join(fixtureRoot, `rivet-maintenance-${mode}.lock.yml.gz.b64`),
+        gzipSync("# prior compiler formatting\nregenerated\n").toString(
+          "base64",
+        ),
+      );
+    }
+    await checkMaintenanceLocks({
+      fixtureRoot,
+      temporaryParent,
+      ensureBinary: async () => "/verified/gh-aw",
+      compileWorkflow: async ({ repositoryRoot }) => {
+        await writeFile(
+          path.join(
+            repositoryRoot,
+            ".github/workflows/rivet-maintenance.lock.yml",
+          ),
+          "regenerated\n",
+        );
+      },
+      validateWorkflow: async () => {},
+    });
     assert.deepEqual(await readdir(temporaryParent), []);
   } finally {
     await rm(root, { force: true, recursive: true });

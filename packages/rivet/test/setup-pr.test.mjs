@@ -13,6 +13,7 @@ import {
   createReviewSetupPullRequest,
   repositoryFromGitHubOrigin,
 } from "../src/setup-pr.mjs";
+import { currentReviewLock } from "./review-lock-fixtures.mjs";
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_ROOT = path.resolve(
@@ -47,13 +48,11 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
     );
     return;
   }
-  const source = await readFile(
-    path.join(
-      PACKAGE_ROOT,
-      "test/fixtures/review/.github/workflows/rivet-review.lock.yml",
-    ),
+  const workflow = await readFile(
+    path.join(repositoryRoot, ".github/workflows/rivet-review.md"),
     "utf8",
   );
+  const source = await currentReviewLock(PACKAGE_ROOT, workflow);
   await writeFile(path.join(repositoryRoot, LOCK_PATH), source);
 }
 
