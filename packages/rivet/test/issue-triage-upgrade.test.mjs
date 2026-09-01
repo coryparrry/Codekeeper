@@ -6,13 +6,18 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
-import { installReview } from "../src/install.mjs";
+import { installRepair, installReview } from "../src/install.mjs";
 import { matchesHistoricalManagedFile } from "../src/issue-triage-upgrade.mjs";
+import { renderRivetIssueTriageWorkflowV013 } from "../src/workflows/issue-triage.mjs";
 import { currentReviewLock } from "./review-lock-fixtures.mjs";
 
 const PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
+);
+const V013_ISSUE_LOCK = path.join(
+  PACKAGE_ROOT,
+  "test/fixtures/v0.1.13/rivet-issue-triage.lock.yml.gz.b64",
 );
 
 async function fixtureCompiler({ repositoryRoot, workflowId }) {
@@ -27,7 +32,9 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
     const fixture =
       workflowId === "rivet-maintenance"
         ? "test/fixtures/maintenance/rivet-maintenance-manual.lock.yml.gz.b64"
-        : "test/fixtures/issue-triage/rivet-issue-triage.lock.yml.gz.b64";
+        : workflow.includes('allowed-repos: "${{ github.repository }}"')
+          ? "test/fixtures/v0.1.13/rivet-issue-triage.lock.yml.gz.b64"
+          : "test/fixtures/issue-triage/rivet-issue-triage.lock.yml.gz.b64";
     source = gunzipSync(
       Buffer.from(
         await readFile(path.join(PACKAGE_ROOT, fixture), "utf8"),
@@ -38,6 +45,18 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
   await writeFile(
     path.join(repositoryRoot, `.github/workflows/${workflowId}.lock.yml`),
     source,
+  );
+}
+
+async function writeScalarIssueGuard(repositoryRoot, configuration) {
+  await writeFile(
+    path.join(repositoryRoot, ".github/workflows/rivet-issue-triage.md"),
+    renderRivetIssueTriageWorkflowV013({ configuration }),
+  );
+  const encoded = await readFile(V013_ISSUE_LOCK, "utf8");
+  await writeFile(
+    path.join(repositoryRoot, ".github/workflows/rivet-issue-triage.lock.yml"),
+    gunzipSync(Buffer.from(encoded, "base64")),
   );
 }
 
@@ -106,6 +125,38 @@ test("enables triage from an exact disabled installation", async (t) => {
     4,
   );
   assert.equal(result.githubApp.permissions.issues, "write");
+});
+
+test("upgrades the exact scalar issue guard in a repair installation", async (t) => {
+  const repositoryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "rivet-scalar-guard-upgrade-test-"),
+  );
+  t.after(() => rm(repositoryRoot, { recursive: true, force: true }));
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.repair.authority = "owner";
+  await installRepair({
+    repositoryRoot,
+    configuration,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  await writeScalarIssueGuard(repositoryRoot, configuration);
+
+  const result = await installRepair({
+    repositoryRoot,
+    configuration,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  assert.deepEqual(
+    result.files
+      .filter(({ status }) => status === "update")
+      .map(({ path: relativePath }) => relativePath),
+    [
+      ".github/workflows/rivet-issue-triage.lock.yml",
+      ".github/workflows/rivet-issue-triage.md",
+    ],
+  );
 });
 
 test("accepts only frozen historical managed-file digests", () => {

@@ -58,6 +58,8 @@ async function buildBaselines({
   reviewExtension,
   reviewWorkflowVersion,
   includeReviewBudget,
+  includeIssueTriage = false,
+  issueTriageWorkflowVersion,
   profiles = true,
   includeWithoutReviewContext = false,
 }) {
@@ -72,11 +74,12 @@ async function buildBaselines({
     validateWorkflow,
     env,
     profiles,
-    includeIssueTriage: false,
+    includeIssueTriage,
     includeMaintenance: config.maintenance.mode !== "disabled",
     reviewExtension,
     reviewWorkflowVersion,
     includeReviewBudget,
+    issueTriageWorkflowVersion,
   });
   const withoutContext = includeWithoutReviewContext
     ? withoutReviewContext(files)
@@ -87,7 +90,25 @@ async function buildBaselines({
   return [files, withoutContext];
 }
 
-export async function buildDisabledIssueTriageBaselines(options) {
+export async function buildIssueTriageUpgradeBaselines(options) {
+  const baselines = await buildBaselines({
+    ...options,
+    suffix: "previous-scalar-issue-triage",
+    includeIssueTriage: true,
+    issueTriageWorkflowVersion: "v0.1.13",
+  });
+  if (options.mode === "repair") {
+    baselines.push(
+      ...(await buildBaselines({
+        ...options,
+        mode: "review",
+        config: options.reviewConfig,
+        suffix: "previous-review-scalar-issue-triage",
+        includeIssueTriage: true,
+        issueTriageWorkflowVersion: "v0.1.13",
+      })),
+    );
+  }
   const previousConfig = structuredClone(options.config);
   previousConfig.issues.triage = "disabled";
   const previousReviewConfig = structuredClone(options.reviewConfig);
@@ -97,10 +118,12 @@ export async function buildDisabledIssueTriageBaselines(options) {
     config: previousConfig,
     reviewConfig: previousReviewConfig,
   };
-  const baselines = await buildBaselines({
-    ...common,
-    suffix: "previous-issue-triage",
-  });
+  baselines.push(
+    ...(await buildBaselines({
+      ...common,
+      suffix: "previous-issue-triage",
+    })),
+  );
   if (options.mode === "repair") {
     baselines.push(
       ...(await buildBaselines({
@@ -189,7 +212,7 @@ export async function buildDisabledIssueTriageBaselines(options) {
     );
     previousMaintenanceReviewConfig.maintenance.mode = "disabled";
     baselines.push(
-      ...(await buildDisabledIssueTriageBaselines({
+      ...(await buildIssueTriageUpgradeBaselines({
         ...options,
         stagingRoot: path.join(
           options.stagingRoot,
