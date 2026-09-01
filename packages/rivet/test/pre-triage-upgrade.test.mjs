@@ -30,6 +30,8 @@ const FIXER_PATH = ".github/rivet/agents/fixer.md";
 const REVIEWER_PATH = ".github/rivet/agents/pr-reviewer.md";
 const ISSUE_TRIAGE_PATHS = [
   ".github/rivet/agents/issue-triager.md",
+  ".github/rivet/actions/prepare-issue-context/action.yml",
+  ".github/rivet/actions/prepare-issue-context/index.mjs",
   ".github/workflows/rivet-issue-triage.md",
   ".github/workflows/rivet-issue-triage.lock.yml",
 ];
@@ -237,7 +239,10 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
               : workflow.includes("max-turns: 3")
                 ? reviewExtension.includes("method `get_diff`")
                   ? await frozenV015ReviewLock()
-                  : reviewExtension.includes("Trusted bounded comparison")
+                  : reviewExtension.includes("Trusted bounded comparison") ||
+                      reviewExtension.includes(
+                        "Trusted bounded review evidence",
+                      )
                     ? workflow.includes(
                         "does not select the GitHub review event",
                       )
@@ -879,6 +884,7 @@ test("upgrades only an exact 0.1.9 profiled repair installation", async (t) => {
       .filter(({ status }) => status === "update")
       .map(({ path: relativePath }) => relativePath),
     [
+      ".github/rivet/aw/review-extension.md",
       ".github/workflows/rivet-review.lock.yml",
       ".github/workflows/rivet-review.md",
     ],
@@ -929,6 +935,7 @@ test("upgrades only exact 0.1.11 profiled installations", async (t) => {
       .filter(({ status }) => status === "update")
       .map(({ path: relativePath }) => relativePath),
     [
+      ".github/rivet/aw/review-extension.md",
       ".github/workflows/rivet-review.lock.yml",
       ".github/workflows/rivet-review.md",
     ],
@@ -954,6 +961,7 @@ test("upgrades only exact 0.1.11 profiled installations", async (t) => {
       .filter(({ status }) => status === "update")
       .map(({ path: relativePath }) => relativePath),
     [
+      ".github/rivet/aw/review-extension.md",
       ".github/workflows/rivet-review.lock.yml",
       ".github/workflows/rivet-review.md",
     ],

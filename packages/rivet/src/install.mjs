@@ -46,6 +46,7 @@ import {
 } from "./workflows/review.mjs";
 import {
   buildWorkflowFiles,
+  ISSUE_CONTEXT_ASSET_PATHS,
   MAINTENANCE_ASSET_PATHS,
   REPAIR_ASSET_PATHS,
   REVIEW_CONTEXT_ASSET_PATHS,
@@ -55,6 +56,9 @@ const [FIXER_IMPORT] = RIVET_REPAIR_NATIVE_IMPORTS;
 const REVIEW_LOCAL_ACTIONS = Object.freeze([
   "./.github/rivet/actions/authority-receipt",
   "./.github/rivet/actions/prepare-review-context",
+]);
+const ISSUE_LOCAL_ACTIONS = Object.freeze([
+  "./.github/rivet/actions/prepare-issue-context",
 ]);
 const V013_REVIEW_EXTENSION = new URL(
   "../assets/upgrades/v0.1.3/review-extension.md",
@@ -190,6 +194,7 @@ function withoutIssueTriage(files) {
     [...files].filter(
       ([relativePath]) =>
         relativePath !== ISSUE_TRIAGER_IMPORT &&
+        !ISSUE_CONTEXT_ASSET_PATHS.includes(relativePath) &&
         !relativePath.includes(`/${RIVET_ISSUE_TRIAGE_WORKFLOW_ID}.`),
     ),
   );
@@ -302,6 +307,7 @@ async function prepareInstallation({
         authority: issueAuthority,
         expectedEngine: config.models.review.engine,
         expectedImports: RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
+        expectedLocalActions: ISSUE_LOCAL_ACTIONS,
         expectedModel: config.models.review.model,
         expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
       });

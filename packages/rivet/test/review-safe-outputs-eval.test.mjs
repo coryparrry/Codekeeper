@@ -36,7 +36,18 @@ function manifest(terminal = "review") {
             ]
           : [],
       submitReviewEvent: terminal === "review" ? "COMMENT" : null,
-      createIssueCount: terminal === "review" ? 1 : 0,
+      deferredIssue:
+        terminal === "review"
+          ? {
+              titleIncludes: ["Deferred concern"],
+              bodyIncludes: [
+                "Evidence:",
+                "Acceptance criteria:",
+                "Test expectation:",
+              ],
+              sourceIncludes: ["Source PR:", "owner/repository#7", HEAD],
+            }
+          : null,
     },
   };
 }
@@ -87,7 +98,11 @@ function reviewArtifacts() {
         event: "COMMENT",
         body: reviewBody(),
       },
-      { type: "create_issue", title: "Deferred concern" },
+      {
+        type: "create_issue",
+        title: "Deferred concern in discount policy",
+        body: `Evidence: the exact comparison exposes an out-of-scope policy gap.\n\nAcceptance criteria: all callers reject negative totals.\n\nTest expectation: cover values above 100.\n\nSource PR: owner/repository#7 at ${HEAD}`,
+      },
     ],
     receipts: [
       { type: "create_pull_request_review_comment" },
@@ -144,6 +159,31 @@ test("scores Rivet review outputs against prompt identity and receipts", () => {
   const tableLayout = evaluateReviewRun(manifest(), squeezedTable);
   assert.equal(tableLayout.passed, false);
   assert.equal(tableLayout.checks.reviewBody, false);
+
+  const weakDeferral = reviewArtifacts();
+  const deferredIssue = weakDeferral.outputs.find(
+    (item) => item.type === "create_issue",
+  );
+  deferredIssue.body = "This should be investigated later.";
+  const ungrounded = evaluateReviewRun(manifest(), weakDeferral);
+  assert.equal(ungrounded.passed, false);
+  assert.equal(ungrounded.checks.deferredIssue, false);
+
+  const untitledDeferral = reviewArtifacts();
+  untitledDeferral.outputs.find((item) => item.type === "create_issue").title =
+    "Follow-up";
+  assert.equal(
+    evaluateReviewRun(manifest(), untitledDeferral).checks.deferredIssue,
+    false,
+  );
+
+  const emptySections = reviewArtifacts();
+  emptySections.outputs.find((item) => item.type === "create_issue").body =
+    `Evidence:\nAcceptance criteria:\nTest expectation:\nSource PR:\nowner/repository#7 ${HEAD}`;
+  assert.equal(
+    evaluateReviewRun(manifest(), emptySections).checks.deferredIssue,
+    false,
+  );
 });
 
 test("scores noop and incomplete outcomes without publication receipts", () => {
@@ -181,7 +221,7 @@ test("scores noop and incomplete outcomes without publication receipts", () => {
 test("requires a useful general review body even without findings", () => {
   const cleanManifest = manifest();
   cleanManifest.expected.comments = [];
-  cleanManifest.expected.createIssueCount = 0;
+  cleanManifest.expected.deferredIssue = null;
   const clean = reviewArtifacts();
   clean.outputs = clean.outputs.filter(
     ({ type }) =>

@@ -30,6 +30,9 @@ const LOCAL_ACTIONS = [
   "./.github/rivet/actions/authority-receipt",
   "./.github/rivet/actions/prepare-review-context",
 ];
+const ISSUE_LOCAL_ACTIONS = [
+  "./.github/rivet/actions/prepare-issue-context",
+];
 const MAINTENANCE_LOCAL_ACTION = "./.github/rivet/actions/validate-audit";
 test("rejects maintenance mutation authority and non-default checkouts", async () => {
   const compiled = await maintenanceFixtureAuthority("scheduled");
@@ -268,6 +271,7 @@ test("accepts pinned incoming issue-triage authority", async () => {
     authority: await issueTriageAuthority(),
     expectedEngine: "codex",
     expectedImports: [".github/rivet/agents/issue-triager.md"],
+    expectedLocalActions: ISSUE_LOCAL_ACTIONS,
     expectedModel: "gpt-5.6-luna",
     expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
   });
@@ -283,6 +287,7 @@ test("accepts Gemini's engine-specific issue-triage authority", async () => {
     authority: await issueTriageAuthority("gemini"),
     expectedEngine: "gemini",
     expectedImports: [".github/rivet/agents/issue-triager.md"],
+    expectedLocalActions: ISSUE_LOCAL_ACTIONS,
     expectedModel: "gemini-review-model",
     expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
   });
@@ -294,7 +299,7 @@ test("rejects expanded issue-triage trigger, import, and write authority", async
   for (const [change, violation] of [
     [
       { triggers: ["issues", "workflow_dispatch"] },
-      "workflow must use only issues",
+      "workflow must use only issues and issue_comment",
     ],
     [
       {
@@ -336,6 +341,7 @@ test("rejects expanded issue-triage trigger, import, and write authority", async
       authority: { ...authority, ...change },
       expectedEngine: "codex",
       expectedImports: [".github/rivet/agents/issue-triager.md"],
+      expectedLocalActions: ISSUE_LOCAL_ACTIONS,
       expectedModel: "gpt-5.6-luna",
       expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
     });
@@ -424,6 +430,7 @@ test("binds the complete issue-triage authority graph", async () => {
       authority: { ...authority, ...change },
       expectedEngine: "codex",
       expectedImports: [".github/rivet/agents/issue-triager.md"],
+      expectedLocalActions: ISSUE_LOCAL_ACTIONS,
       expectedModel: "gpt-5.6-luna",
       expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
     });
@@ -470,6 +477,7 @@ test("binds issue-triage model authority and secrets", async () => {
       authority: { ...authority, ...change },
       expectedEngine: "codex",
       expectedImports: [".github/rivet/agents/issue-triager.md"],
+      expectedLocalActions: ISSUE_LOCAL_ACTIONS,
       expectedModel: "gpt-5.6-luna",
       expectedPublisherScript: RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
     });

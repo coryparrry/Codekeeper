@@ -28,6 +28,7 @@ import {
 } from "./workflows/review.mjs";
 
 const AGENT_ASSET_ROOT = new URL("../assets/agents/", import.meta.url);
+const ISSUE_ASSET_ROOT = new URL("../assets/issue/", import.meta.url);
 const REVIEW_ASSET_ROOT = new URL("../assets/review/", import.meta.url);
 const REVIEW_EXTENSION_IMPORT = RIVET_REVIEW_NATIVE_IMPORTS[1];
 const REPAIR_ASSET_ROOT = new URL("../assets/repair/", import.meta.url);
@@ -38,6 +39,10 @@ const MAINTENANCE_ASSET_ROOT = new URL(
 export const REVIEW_CONTEXT_ASSET_PATHS = Object.freeze([
   ".github/rivet/actions/prepare-review-context/action.yml",
   ".github/rivet/actions/prepare-review-context/index.mjs",
+]);
+export const ISSUE_CONTEXT_ASSET_PATHS = Object.freeze([
+  ".github/rivet/actions/prepare-issue-context/action.yml",
+  ".github/rivet/actions/prepare-issue-context/index.mjs",
 ]);
 const REVIEW_ASSET_PATHS = Object.freeze([
   ".github/rivet/actions/authority-receipt/action.yml",
@@ -124,6 +129,12 @@ export async function buildWorkflowFiles({
       : renderRivetReviewWorkflowV012({ configuration: reviewConfig }),
   );
   if (includeIssueTriage) {
+    for (const [relativePath, content] of await assetFiles(
+      ISSUE_CONTEXT_ASSET_PATHS,
+      ISSUE_ASSET_ROOT,
+    )) {
+      files.set(relativePath, content);
+    }
     files.set(
       RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS[0],
       await agentProfile("issue-triager.md"),
