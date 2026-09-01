@@ -3,6 +3,7 @@ import test from "node:test";
 import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 import {
   renderRivetIssueTriageWorkflow,
+  renderRivetIssueTriageWorkflowV013,
   RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
   RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
   RIVET_ISSUE_TRIAGE_WORKFLOW_ID,
@@ -39,7 +40,10 @@ test("renders bounded incoming issue triage", () => {
     source,
     /jobs:\n  issue_context:[\s\S]*eligible: \$\{\{ steps\.snapshot\.outputs\.eligible \}\}[\s\S]*uses: \.\/\.github\/rivet\/actions\/prepare-issue-context/,
   );
-  assert.match(source, /safe_outputs:\n    if: needs\.agent\.result == 'success'/);
+  assert.match(
+    source,
+    /safe_outputs:\n    if: needs\.agent\.result == 'success'/,
+  );
   assert.match(
     source,
     /actions\/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1/,
@@ -67,6 +71,15 @@ test("renders bounded incoming issue triage", () => {
     source,
     /^  (?:add-comment|create-issue|update-issue|close-issue|add-labels|remove-labels|create-pull-request|push-to-pull-request-branch|merge-pull-request):/m,
   );
+});
+
+test("freezes the scalar repository guard used before the gateway fix", () => {
+  const source = renderRivetIssueTriageWorkflowV013();
+  assert.match(
+    source,
+    /allowed-repos: "\$\{\{ github\.repository \}\}"\n    min-integrity: none/,
+  );
+  assert.doesNotMatch(source, /allowed-repos:\n      -/);
 });
 
 test("projects the configured review model and requires automatic triage", () => {

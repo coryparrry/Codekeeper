@@ -28,7 +28,7 @@ import {
 } from "./gh-aw/trust.mjs";
 import { completeInstallationFiles } from "./installation-receipt.mjs";
 import {
-  buildDisabledIssueTriageBaselines,
+  buildIssueTriageUpgradeBaselines,
   matchesHistoricalManagedFile,
   PROFILED_REVIEW_EXTENSIONS,
 } from "./issue-triage-upgrade.mjs";
@@ -490,7 +490,7 @@ async function prepareInstallation({
         baselines.push(previousReview);
       }
       baselines.push(
-        ...(await buildDisabledIssueTriageBaselines({
+        ...(await buildIssueTriageUpgradeBaselines({
           stagingRoot,
           mode,
           config,

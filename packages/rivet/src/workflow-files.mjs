@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   renderRivetIssueTriageWorkflow,
+  renderRivetIssueTriageWorkflowV013,
   RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
   RIVET_ISSUE_TRIAGE_WORKFLOW_ID,
 } from "./workflows/issue-triage.mjs";
@@ -98,6 +99,7 @@ export async function buildWorkflowFiles({
   includeReviewBudget = profiles,
   reviewExtension,
   reviewWorkflowVersion,
+  issueTriageWorkflowVersion,
 }) {
   const files = await assetFiles(REVIEW_ASSET_PATHS, REVIEW_ASSET_ROOT);
   if (reviewExtension) {
@@ -116,16 +118,16 @@ export async function buildWorkflowFiles({
         ? renderRivetReviewWorkflowV0111({ configuration: reviewConfig })
         : reviewWorkflowVersion === "v0.1.13"
           ? renderRivetReviewWorkflowV0113({ configuration: reviewConfig })
-        : reviewWorkflowVersion === "v0.1.9"
-          ? renderRivetReviewWorkflowV019({ configuration: reviewConfig })
-          : reviewWorkflowVersion === "v0.1.5" ||
-              reviewWorkflowVersion === "v0.1.7"
-            ? renderRivetReviewWorkflowV017({ configuration: reviewConfig })
-            : renderRivetReviewWorkflow({
-                nativeImports: RIVET_REVIEW_NATIVE_IMPORTS,
-                configuration: reviewConfig,
-                includeReviewBudget,
-              })
+          : reviewWorkflowVersion === "v0.1.9"
+            ? renderRivetReviewWorkflowV019({ configuration: reviewConfig })
+            : reviewWorkflowVersion === "v0.1.5" ||
+                reviewWorkflowVersion === "v0.1.7"
+              ? renderRivetReviewWorkflowV017({ configuration: reviewConfig })
+              : renderRivetReviewWorkflow({
+                  nativeImports: RIVET_REVIEW_NATIVE_IMPORTS,
+                  configuration: reviewConfig,
+                  includeReviewBudget,
+                })
       : renderRivetReviewWorkflowV012({ configuration: reviewConfig }),
   );
   if (includeIssueTriage) {
@@ -141,7 +143,9 @@ export async function buildWorkflowFiles({
     );
     files.set(
       `.github/workflows/${RIVET_ISSUE_TRIAGE_WORKFLOW_ID}.md`,
-      renderRivetIssueTriageWorkflow({ configuration: config }),
+      issueTriageWorkflowVersion === "v0.1.13"
+        ? renderRivetIssueTriageWorkflowV013({ configuration: config })
+        : renderRivetIssueTriageWorkflow({ configuration: config }),
     );
   }
   if (includeMaintenance) {

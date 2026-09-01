@@ -18,6 +18,7 @@ import {
   validateGhAwWorkflow,
 } from "../src/gh-aw/compile.mjs";
 import { knownCompilerDrift } from "../src/install.mjs";
+import { renderRivetIssueTriageWorkflow } from "../src/workflows/issue-triage.mjs";
 import { renderRivetMaintenanceWorkflow } from "../src/workflows/maintenance.mjs";
 import { renderRivetReviewWorkflow } from "../src/workflows/review.mjs";
 
@@ -40,9 +41,103 @@ const MAINTENANCE_LOCK_PATH = path.join(
   "workflows",
   `${MAINTENANCE_WORKFLOW_ID}.lock.yml`,
 );
+const ISSUE_TRIAGE_FIXTURE_ROOT = path.join(
+  PACKAGE_ROOT,
+  "test",
+  "fixtures",
+  "issue-triage",
+);
+const ISSUE_TRIAGE_WORKFLOW_ID = "rivet-issue-triage";
+const ISSUE_TRIAGE_LOCK_PATH = path.join(
+  ".github",
+  "workflows",
+  `${ISSUE_TRIAGE_WORKFLOW_ID}.lock.yml`,
+);
 
 function fail(message) {
   throw new Error(`review-lock-check: ${message}`);
+}
+
+export async function checkIssueTriageLocks({
+  fixtureRoot = ISSUE_TRIAGE_FIXTURE_ROOT,
+  temporaryParent = os.tmpdir(),
+  ensureBinary = ensureGhAwBinary,
+  compileWorkflow = compileGhAwWorkflow,
+  validateWorkflow = validateGhAwWorkflow,
+} = {}) {
+  const binaryPath = await ensureBinary();
+  for (const engine of ["codex", "gemini"]) {
+    const temporaryRoot = await realpath(
+      await mkdtemp(path.join(temporaryParent, "rivet-issue-lock-check-")),
+    );
+    try {
+      const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+      configuration.models.review.engine = engine;
+      configuration.models.review.model =
+        engine === "codex" ? "gpt-5.6-luna" : "gemini-review-model";
+      await mkdir(path.join(temporaryRoot, ".github", "workflows"), {
+        recursive: true,
+      });
+      await mkdir(path.join(temporaryRoot, ".github", "rivet", "agents"), {
+        recursive: true,
+      });
+      await cp(
+        path.join(PACKAGE_ROOT, "assets", "agents", "issue-triager.md"),
+        path.join(
+          temporaryRoot,
+          ".github",
+          "rivet",
+          "agents",
+          "issue-triager.md",
+        ),
+      );
+      await writeFile(
+        path.join(
+          temporaryRoot,
+          ".github",
+          "workflows",
+          `${ISSUE_TRIAGE_WORKFLOW_ID}.md`,
+        ),
+        renderRivetIssueTriageWorkflow({ configuration }),
+      );
+      await compileWorkflow({
+        repositoryRoot: temporaryRoot,
+        workflowId: ISSUE_TRIAGE_WORKFLOW_ID,
+        binaryPath,
+      });
+      await validateWorkflow({
+        repositoryRoot: temporaryRoot,
+        workflowId: ISSUE_TRIAGE_WORKFLOW_ID,
+        binaryPath,
+      });
+      const suffix = engine === "codex" ? "" : `-${engine}`;
+      const [encodedFixture, regenerated] = await Promise.all([
+        readFile(
+          path.join(
+            fixtureRoot,
+            `${ISSUE_TRIAGE_WORKFLOW_ID}${suffix}.lock.yml.gz.b64`,
+          ),
+          "utf8",
+        ),
+        readFile(path.join(temporaryRoot, ISSUE_TRIAGE_LOCK_PATH)),
+      ]);
+      const checkedIn = gunzipSync(Buffer.from(encodedFixture, "base64"));
+      if (
+        !checkedIn.equals(regenerated) &&
+        !knownCompilerDrift(
+          ISSUE_TRIAGE_LOCK_PATH,
+          checkedIn.toString("utf8"),
+          regenerated.toString("utf8"),
+        )
+      ) {
+        fail(
+          `checked-in ${ISSUE_TRIAGE_WORKFLOW_ID}${suffix}.lock.yml fixture does not match the pinned gh-aw compiler output`,
+        );
+      }
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
+  }
 }
 
 export async function checkMaintenanceLocks({
@@ -211,5 +306,6 @@ export async function checkReviewLock({
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   await checkReviewLock();
   await checkMaintenanceLocks();
+  await checkIssueTriageLocks();
   process.stdout.write("Rivet workflow locks are current\n");
 }

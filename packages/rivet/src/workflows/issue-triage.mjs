@@ -320,3 +320,10 @@ When a concise triage response would help the author or maintainers, call \`publ
 For an opened event with no useful response, call only \`noop\` with a concise reason. If required evidence is unavailable, call \`report_incomplete\` with the exact missing boundary instead of guessing.
 `;
 }
+
+export function renderRivetIssueTriageWorkflowV013(options = {}) {
+  return renderRivetIssueTriageWorkflow(options).replace(
+    '    allowed-repos:\n      - "${{ github.repository }}"',
+    '    allowed-repos: "${{ github.repository }}"',
+  );
+}
