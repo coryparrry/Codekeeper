@@ -55,7 +55,7 @@ const parseMarker = (commentBody) => {
       typeof missing !== "string" ||
       missing.length < 1 ||
       missing !== missing.trim() ||
-      /[\\r\\n]|<!--|-->/.test(missing) ||
+      /[\\r\\n]|<!--|--!?>/.test(missing) ||
       Buffer.byteLength(missing) > 512
     ) invalid();
   }
@@ -103,7 +103,7 @@ for (const missing of missingInformation) {
     typeof missing !== "string" ||
     missing.length < 1 ||
     missing !== missing.trim() ||
-    /[\\r\\n]|<!--|-->/.test(missing) ||
+    /[\\r\\n]|<!--|--!?>/.test(missing) ||
     Buffer.byteLength(missing) > 512
   ) invalid();
 }

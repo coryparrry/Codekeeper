@@ -93,7 +93,7 @@ function markerState(body) {
       typeof item !== "string" ||
       item.length < 1 ||
       item !== item.trim() ||
-      /[\r\n]|<!--|-->/.test(item) ||
+      /[\r\n]|<!--|--!?>/.test(item) ||
       Buffer.byteLength(item) > MAX_MISSING_ITEM_BYTES
     ) {
       fail("App triage state marker is malformed");

@@ -248,7 +248,7 @@ test("binds opened and follow-up publication to fresh App-owned state", async ()
         {
           type: "publish_triage_comment",
           comment: "stale",
-          missing_information: "not-json",
+          missing_information: '["bad --!>"]',
           previous_marker_comment_id: "50",
         },
       ],
