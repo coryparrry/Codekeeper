@@ -33,9 +33,11 @@ workflow through the same verified installation path.
 
 `issues.triage` currently supports two installable modes:
 
-- `automatic` installs the incoming issue-triage workflow for newly opened
-  issues. It may publish at most one App-authored comment. It cannot label,
-  close, implement, open a pull request, or merge.
+- `automatic` installs incoming issue triage for newly opened issues and
+  authorized follow-up replies. Rivet records its unresolved questions in its
+  App-authored comment, then supplies that bounded state and the subsequent
+  conversation when it reassesses the issue. It cannot label, close,
+  implement, open a pull request, or merge.
 - `disabled` installs no issue-triage workflow. Pull-request review cannot
   defer a finding to a new issue, and the GitHub App needs no Issues
   permission.
@@ -44,6 +46,11 @@ Automatic triage also lets a pull-request review defer at most one verified,
 out-of-scope finding to a new issue. Deferral creates the issue; incoming
 triage comments on a newly opened issue. They are separate actions governed by
 the same permission, and neither authorizes implementation.
+
+Pull-request review context includes a bounded set of exact-head source blobs
+and prior Rivet reviews and inline comments. Historical content is treated as
+untrusted memory: the current comparison and verified blob identity remain the
+authority for findings, duplicate suppression, and deferral.
 
 Enabling automatic triage requires GitHub App Issues: write. Existing App
 installations may require explicit approval from a GitHub administrator before

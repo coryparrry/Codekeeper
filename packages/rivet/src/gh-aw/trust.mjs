@@ -22,22 +22,22 @@ export const RIVET_MAINTENANCE_JOB_CONDITIONS_SHA256 =
 export const RIVET_MAINTENANCE_JOB_AUTHORITY_SHA256 =
   "74b5d1f0163c93c16b6a7a44aee902ba4f529433bdc0a08748cfad74184771dc";
 export const RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
-  claude: "08dca7997378d35b896194b1d1d3ecf9f6193c1669ebcd3971e6714be92a128c",
-  codex: "1834d1a2fe8029f3f8a4b8bb77b82b26a217036c4aa6eaeaf59c7f2936e2d14c",
-  copilot: "63ef3f3a40bc25241fb52a151afdb153a3082adb03898f364ca8a53c0a7d9aff",
-  gemini: "9562dd434a3b2abc654836f8a0c81c4280f3509fb086497fa0232c2bf4039fec",
+  claude: "3f1f72a4fdb62247c7ab81cb150ce5f7e0ed06d9d8e9703f57b7de84a4af0623",
+  codex: "484f7e0c35a557d6d7fbd566cefc114db7a0cb3908ffd069006ca4e9711895a9",
+  copilot: "44c4826cdc8d55ea5a5e0458b1bd80cf394c269ed7721a9fa4d5be667cf93d62",
+  gemini: "2f16442f63d2e955c085491513e0dc24c42a258bcaca181c9306faa938130311",
 });
 export const RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
-  claude: "eb10bbcb7d80d3430305b50135c78eda148a57e6fd4f0f62399b86aec141d16b",
-  codex: "88c22e70e72aa9a235ae2b3131df7679aa1f9ded1b8725247f25f708a3e5235e",
-  copilot: "106a91ffa6a5ef20721fdc4aaa4e58b2fbb10b250dc244470de538faaaf86129",
-  gemini: "0ddad1cfaeaafaf032f832f21dd2265ce768f9bfb2c2bca3ed8fbefb740151df",
+  claude: "1657997280ba81d1725737ff367e072170370eb7f68e4d9b08bb69fbd9980da3",
+  codex: "ca9cf1cdb4e9b3d1c93a2e445c05c20601e6520a2d8bbd64cc58ce6757c111d3",
+  copilot: "4f22d4bfc3cf356e78d4d8cf3adcfdcb51b2214aae78ffd3a94f2cea9a12c553",
+  gemini: "11a0fd1a832a6d0a844ccf915611e2ee4a0966b5b68abb373d2592d343ada201",
 });
 export const RIVET_ISSUE_TRIAGE_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
-  claude: "cd9df8fb70fd4966145f934340bf586c8aecc30824d8d1ebb7d0720b3d2f659f",
-  codex: "fabab4602abe657cedf4bc18ebdab9e713413a1fbbe5f4aacdc6673ff0bb2a8f",
-  copilot: "6da2df2f321284182c8b23fe94e4ba391c99aaf87ca475eda1c6c5375cf9c9c7",
-  gemini: "d560be5aa8b2b891ade531d96e4b9f78711d6af8697ddec598ac57c25376475e",
+  claude: "0d8b959038f7df23a0da29886fbc9347f6bb1a926381bc371edd511fc6b26d58",
+  codex: "41d8d4a870efc89b7e61f06700de5c209232dfc3a5b025ae9404a0b1d4f1b5f8",
+  copilot: "a5ea8018409d6c83d51a0057b8043b5b14818381f8f6f461c00980f2184c85b3",
+  gemini: "785fb126679555a36ae21852da28b0262e6c3261a77b3174d0333d0636e922c1",
 });
 
 function sameValues(left, right) {
@@ -521,14 +521,15 @@ export function assessIssueTriageTrust({
   authority,
   expectedEngine,
   expectedImports = [],
+  expectedLocalActions = [],
   expectedModel,
   expectedPublisherScript,
   expectedSecrets,
   expectedAuthoritySha256,
 }) {
   const violations = [];
-  if (!sameValues(authority.triggers, ["issues"])) {
-    violations.push("workflow must use only issues");
+  if (!sameValues(authority.triggers, ["issue_comment", "issues"])) {
+    violations.push("workflow must use only issues and issue_comment");
   }
   if (authority.metadata.strict !== true) {
     violations.push("compiler strict mode is required");
@@ -576,8 +577,8 @@ export function assessIssueTriageTrust({
   if (authority.unpinnedContainers.length > 0) {
     violations.push("all containers must use immutable digest pins");
   }
-  if (authority.localActions.length > 0) {
-    violations.push("local actions are not allowed");
+  if (!sameValues(authority.localActions, expectedLocalActions)) {
+    violations.push("local actions differ from the approved inventory");
   }
   if (authority.additionalRepositories.length > 0) {
     violations.push("additional repository checkouts are not allowed");

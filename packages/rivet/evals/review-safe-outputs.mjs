@@ -63,10 +63,17 @@ function validateManifest(manifest) {
   );
   invariant(
     Array.isArray(manifest.expected.comments) &&
-      Number.isSafeInteger(manifest.expected.createIssueCount) &&
-      manifest.expected.createIssueCount >= 0 &&
-      manifest.expected.createIssueCount <= 1,
-    "manifest.expected must contain comments and createIssueCount",
+      (manifest.expected.deferredIssue === null ||
+        (manifest.expected.deferredIssue &&
+          ["titleIncludes", "bodyIncludes", "sourceIncludes"].every(
+            (name) =>
+              Array.isArray(manifest.expected.deferredIssue[name]) &&
+              manifest.expected.deferredIssue[name].length > 0 &&
+              manifest.expected.deferredIssue[name].every(
+                (term) => typeof term === "string" && term.trim(),
+              ),
+          ))),
+    "manifest.expected must contain comments and deferredIssue evidence",
   );
   for (const [index, finding] of manifest.expected.comments.entries()) {
     invariant(
@@ -92,11 +99,41 @@ function validateManifest(manifest) {
     invariant(
       manifest.expected.submitReviewEvent === null &&
         manifest.expected.comments.length === 0 &&
-        manifest.expected.createIssueCount === 0,
+        manifest.expected.deferredIssue === null,
       `${manifest.expected.terminal} cannot expect mutations`,
     );
   }
   return manifest;
+}
+
+function includesEvidence(value, term) {
+  const body = value.toLowerCase();
+  const expected = term.toLowerCase();
+  let offset = -1;
+  while ((offset = body.indexOf(expected, offset + 1)) >= 0) {
+    if (!expected.trimEnd().endsWith(":")) return true;
+    const line = value.slice(offset + term.length).split(/\r?\n/u, 1)[0];
+    if (line.trim()) return true;
+  }
+  return false;
+}
+
+function deferredIssueMatches(expected, outputs) {
+  const issues = outputs.filter((item) => item.type === "create_issue");
+  if (expected === null) return issues.length === 0;
+  if (issues.length !== 1) return false;
+  const title =
+    typeof issues[0].title === "string" ? issues[0].title.toLowerCase() : "";
+  const body =
+    typeof issues[0].body === "string" ? issues[0].body.toLowerCase() : "";
+  return (
+    expected.titleIncludes.every((term) =>
+      title.includes(term.toLowerCase()),
+    ) &&
+    [...expected.bodyIncludes, ...expected.sourceIncludes].every((term) =>
+      includesEvidence(body, term),
+    )
+  );
 }
 
 function sha256(value) {
@@ -211,7 +248,7 @@ export function evaluateReviewRun(
           submits[0].body.includes(section),
         ) &&
         hasReadableVerification(submits[0].body)),
-    issueCount: count(outputs, "create_issue") === expected.createIssueCount,
+    deferredIssue: deferredIssueMatches(expected.deferredIssue, outputs),
     terminal:
       expected.terminal === "review"
         ? submits.length === 1 &&

@@ -55,12 +55,17 @@ maintenance workflow.
 ## Issue triage
 
 With `issues.triage` set to `automatic`, Rivet installs a workflow for newly
-opened issues. It may publish at most one App-authored triage comment; it does
-not label or close the issue, implement a fix, open a pull request, or merge.
+opened issues. It may publish one App-authored triage comment, remember the
+specific information it requested, and reassess the issue when the reporter or
+a repository collaborator replies. It does not label or close the issue,
+implement a fix, open a pull request, or merge.
 
-The same setting lets a pull-request review defer at most one verified,
-out-of-scope finding to a new issue. That is separate from triaging an incoming
-issue and does not authorize implementation. Set triage to `disabled` to
+Pull-request reviews also receive bounded prior Rivet reviews, comments, and
+exact-head source context so repeated findings can be suppressed only when the
+current change still supports that conclusion. The same setting lets a review
+defer at most one independently verified, out-of-scope finding to a new issue.
+That is separate from incoming issue triage and does not authorize
+implementation. Set triage to `disabled` to
 install neither issue workflow nor Issues permission. Enabling it requires the
 GitHub App to have Issues: write; an existing installation may need explicit
 approval from a GitHub administrator.

@@ -21,9 +21,11 @@ require a repository administrator to approve the changed App authority.
 
 ## Data sent to providers
 
-Review may include pull-request metadata and diffs. Issue triage may include the
-issue title and body. Maintenance inspects the default-branch snapshot. Repair
-uses the reviewed finding and the checked-out pull-request branch.
+Review may include pull-request metadata, diffs, bounded exact-head source, and
+prior Rivet reviews and inline comments. Issue triage may include the issue
+title, body, Rivet's previous triage state, and bounded follow-up comments.
+Maintenance inspects the default-branch snapshot. Repair uses the reviewed
+finding and the checked-out pull-request branch.
 
 Provider retention, training, regional processing, and contractual terms are
 controlled by the selected provider account. Do not enable Rivet where those
