@@ -93,10 +93,30 @@ async function buildBaselines({
 export async function buildIssueTriageUpgradeBaselines(options) {
   const baselines = await buildBaselines({
     ...options,
-    suffix: "previous-scalar-issue-triage",
+    suffix: "previous-array-issue-triage",
     includeIssueTriage: true,
-    issueTriageWorkflowVersion: "v0.1.13",
+    issueTriageWorkflowVersion: "v0.1.13-array",
   });
+  if (options.mode === "repair") {
+    baselines.push(
+      ...(await buildBaselines({
+        ...options,
+        mode: "review",
+        config: options.reviewConfig,
+        suffix: "previous-review-array-issue-triage",
+        includeIssueTriage: true,
+        issueTriageWorkflowVersion: "v0.1.13-array",
+      })),
+    );
+  }
+  baselines.push(
+    ...(await buildBaselines({
+      ...options,
+      suffix: "previous-scalar-issue-triage",
+      includeIssueTriage: true,
+      issueTriageWorkflowVersion: "v0.1.13",
+    })),
+  );
   if (options.mode === "repair") {
     baselines.push(
       ...(await buildBaselines({

@@ -8,7 +8,10 @@ import { gunzipSync } from "node:zlib";
 import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 import { installRepair, installReview } from "../src/install.mjs";
 import { matchesHistoricalManagedFile } from "../src/issue-triage-upgrade.mjs";
-import { renderRivetIssueTriageWorkflowV013 } from "../src/workflows/issue-triage.mjs";
+import {
+  renderRivetIssueTriageWorkflowV013,
+  renderRivetIssueTriageWorkflowV013Array,
+} from "../src/workflows/issue-triage.mjs";
 import { currentReviewLock } from "./review-lock-fixtures.mjs";
 
 const PACKAGE_ROOT = path.resolve(
@@ -18,6 +21,10 @@ const PACKAGE_ROOT = path.resolve(
 const V013_ISSUE_LOCK = path.join(
   PACKAGE_ROOT,
   "test/fixtures/v0.1.13/rivet-issue-triage.lock.yml.gz.b64",
+);
+const V013_ARRAY_ISSUE_LOCK = path.join(
+  PACKAGE_ROOT,
+  "test/fixtures/v0.1.13/rivet-issue-triage-array.lock.yml.gz.b64",
 );
 
 async function fixtureCompiler({ repositoryRoot, workflowId }) {
@@ -34,6 +41,8 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
         ? "test/fixtures/maintenance/rivet-maintenance-manual.lock.yml.gz.b64"
         : workflow.includes('allowed-repos: "${{ github.repository }}"')
           ? "test/fixtures/v0.1.13/rivet-issue-triage.lock.yml.gz.b64"
+          : workflow.includes("opened event with no useful response")
+            ? "test/fixtures/v0.1.13/rivet-issue-triage-array.lock.yml.gz.b64"
           : "test/fixtures/issue-triage/rivet-issue-triage.lock.yml.gz.b64";
     source = gunzipSync(
       Buffer.from(
@@ -54,6 +63,18 @@ async function writeScalarIssueGuard(repositoryRoot, configuration) {
     renderRivetIssueTriageWorkflowV013({ configuration }),
   );
   const encoded = await readFile(V013_ISSUE_LOCK, "utf8");
+  await writeFile(
+    path.join(repositoryRoot, ".github/workflows/rivet-issue-triage.lock.yml"),
+    gunzipSync(Buffer.from(encoded, "base64")),
+  );
+}
+
+async function writePreviousArrayIssueGuard(repositoryRoot, configuration) {
+  await writeFile(
+    path.join(repositoryRoot, ".github/workflows/rivet-issue-triage.md"),
+    renderRivetIssueTriageWorkflowV013Array({ configuration }),
+  );
+  const encoded = await readFile(V013_ARRAY_ISSUE_LOCK, "utf8");
   await writeFile(
     path.join(repositoryRoot, ".github/workflows/rivet-issue-triage.lock.yml"),
     gunzipSync(Buffer.from(encoded, "base64")),
@@ -145,6 +166,34 @@ test("upgrades the exact scalar issue guard in a repair installation", async (t)
   const result = await installRepair({
     repositoryRoot,
     configuration,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  assert.deepEqual(
+    result.files
+      .filter(({ status }) => status === "update")
+      .map(({ path: relativePath }) => relativePath),
+    [
+      ".github/workflows/rivet-issue-triage.lock.yml",
+      ".github/workflows/rivet-issue-triage.md",
+    ],
+  );
+});
+
+test("upgrades the exact array guard before missing-information comments", async (t) => {
+  const repositoryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "rivet-array-guard-upgrade-test-"),
+  );
+  t.after(() => rm(repositoryRoot, { recursive: true, force: true }));
+  await installReview({
+    repositoryRoot,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  await writePreviousArrayIssueGuard(repositoryRoot, DEFAULT_RIVET_CONFIG);
+
+  const result = await installReview({
+    repositoryRoot,
     compileWorkflow: fixtureCompiler,
     validateWorkflow: async () => {},
   });

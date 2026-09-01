@@ -4,6 +4,7 @@ import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 import {
   renderRivetIssueTriageWorkflow,
   renderRivetIssueTriageWorkflowV013,
+  renderRivetIssueTriageWorkflowV013Array,
   RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
   RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT,
   RIVET_ISSUE_TRIAGE_WORKFLOW_ID,
@@ -59,13 +60,17 @@ test("renders bounded incoming issue triage", () => {
     /missing_information:[\s\S]*previous_marker_comment_id:/,
   );
   assert.match(source, /For every follow-up, publish a new state/);
+  assert.match(
+    source,
+    /missing material reporter evidence is a useful response:[\s\S]*Call only `noop` when there is no material question/,
+  );
   assert.match(source, /issue_number: issueNumber/);
   assert.ok(
     RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT.split("\n").every((line) =>
       source.includes(line),
     ),
   );
-  assert.match(source, /call only `noop`/);
+  assert.match(source, /Call only `noop`/);
 
   assert.doesNotMatch(
     source,
@@ -80,6 +85,15 @@ test("freezes the scalar repository guard used before the gateway fix", () => {
     /allowed-repos: "\$\{\{ github\.repository \}\}"\n    min-integrity: none/,
   );
   assert.doesNotMatch(source, /allowed-repos:\n      -/);
+  assert.match(source, /opened event with no useful response/);
+  assert.doesNotMatch(source, /missing material reporter evidence/);
+});
+
+test("freezes the array guard before missing-information comments", () => {
+  const source = renderRivetIssueTriageWorkflowV013Array();
+  assert.match(source, /allowed-repos:\n      -/);
+  assert.match(source, /opened event with no useful response/);
+  assert.doesNotMatch(source, /missing material reporter evidence/);
 });
 
 test("projects the configured review model and requires automatic triage", () => {

@@ -21,6 +21,7 @@ import { knownCompilerDrift } from "../src/install.mjs";
 import {
   renderRivetIssueTriageWorkflow,
   renderRivetIssueTriageWorkflowV013,
+  renderRivetIssueTriageWorkflowV013Array,
 } from "../src/workflows/issue-triage.mjs";
 import { renderRivetMaintenanceWorkflow } from "../src/workflows/maintenance.mjs";
 import { renderRivetReviewWorkflow } from "../src/workflows/review.mjs";
@@ -81,6 +82,16 @@ export async function checkIssueTriageLocks({
     ["copilot", "copilot-review-model", "-copilot"],
     ["gemini", "gemini-review-model", "-gemini"],
   ].map(([engine, model, suffix]) => ({ engine, model, suffix }));
+  variants.push({
+    engine: "codex",
+    model: "gpt-5.6-luna",
+    name: "v0.1.13/rivet-issue-triage-array",
+    source: renderRivetIssueTriageWorkflowV013Array(),
+    fixturePath: path.join(
+      historicalFixtureRoot,
+      `${ISSUE_TRIAGE_WORKFLOW_ID}-array.lock.yml.gz.b64`,
+    ),
+  });
   variants.push({
     engine: "codex",
     model: "gpt-5.6-luna",
