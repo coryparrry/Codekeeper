@@ -18,6 +18,7 @@ import {
 } from "./workflows/repair.mjs";
 import {
   renderRivetReviewWorkflow,
+  renderRivetReviewWorkflowV0111,
   renderRivetReviewWorkflowV017,
   renderRivetReviewWorkflowV019,
   renderRivetReviewWorkflowV012,
@@ -105,16 +106,18 @@ export async function buildWorkflowFiles({
   files.set(
     `.github/workflows/${RIVET_REVIEW_WORKFLOW_ID}.md`,
     profiles
-      ? reviewWorkflowVersion === "v0.1.9"
-        ? renderRivetReviewWorkflowV019({ configuration: reviewConfig })
-        : reviewWorkflowVersion === "v0.1.5" ||
-            reviewWorkflowVersion === "v0.1.7"
-          ? renderRivetReviewWorkflowV017({ configuration: reviewConfig })
-          : renderRivetReviewWorkflow({
-              nativeImports: RIVET_REVIEW_NATIVE_IMPORTS,
-              configuration: reviewConfig,
-              includeReviewBudget,
-            })
+      ? reviewWorkflowVersion === "v0.1.11"
+        ? renderRivetReviewWorkflowV0111({ configuration: reviewConfig })
+        : reviewWorkflowVersion === "v0.1.9"
+          ? renderRivetReviewWorkflowV019({ configuration: reviewConfig })
+          : reviewWorkflowVersion === "v0.1.5" ||
+              reviewWorkflowVersion === "v0.1.7"
+            ? renderRivetReviewWorkflowV017({ configuration: reviewConfig })
+            : renderRivetReviewWorkflow({
+                nativeImports: RIVET_REVIEW_NATIVE_IMPORTS,
+                configuration: reviewConfig,
+                includeReviewBudget,
+              })
       : renderRivetReviewWorkflowV012({ configuration: reviewConfig }),
   );
   if (includeIssueTriage) {
