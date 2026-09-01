@@ -14,7 +14,7 @@ Rivet preserves the legacy reviewer's high-signal behavior as a small, explicit 
 
 ## Publication boundary
 
-Rivet exposes only the safe outputs needed by the configured review policy. Inline findings are capped by `review.maximumFindings`. The final review event is `COMMENT` unless `review.requestChanges` is enabled. Clean changes call `noop` and publish nothing. Incomplete comparisons call `report_incomplete` instead of guessing.
+Rivet exposes only the safe outputs needed by the configured review policy. Inline findings are capped by `review.maximumFindings`. Every complete comparison publishes a general review summary. The event is `COMMENT` unless `review.requestChanges` is enabled and the recommendation is `block`; clean and non-blocking reviews never request changes. Incomplete comparisons call `report_incomplete` instead of guessing.
 
 ## Evidence boundary
 

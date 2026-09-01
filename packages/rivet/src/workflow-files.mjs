@@ -19,6 +19,7 @@ import {
 import {
   renderRivetReviewWorkflow,
   renderRivetReviewWorkflowV0111,
+  renderRivetReviewWorkflowV0113,
   renderRivetReviewWorkflowV017,
   renderRivetReviewWorkflowV019,
   renderRivetReviewWorkflowV012,
@@ -108,6 +109,8 @@ export async function buildWorkflowFiles({
     profiles
       ? reviewWorkflowVersion === "v0.1.11"
         ? renderRivetReviewWorkflowV0111({ configuration: reviewConfig })
+        : reviewWorkflowVersion === "v0.1.13"
+          ? renderRivetReviewWorkflowV0113({ configuration: reviewConfig })
         : reviewWorkflowVersion === "v0.1.9"
           ? renderRivetReviewWorkflowV019({ configuration: reviewConfig })
           : reviewWorkflowVersion === "v0.1.5" ||

@@ -19,6 +19,14 @@ const OUTPUT_TYPES = new Set([
   "missing_data",
   "missing_tool",
 ]);
+const REVIEW_BODY_SECTIONS = [
+  "# Rivet review",
+  "## What this changes",
+  "## Merge readiness",
+  "## Verification",
+  "## Before merge",
+  "<summary><strong>Review details</strong></summary>",
+];
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -72,11 +80,6 @@ function validateManifest(manifest) {
         manifest.expected.submitReviewEvent,
       ),
       "review expects submitReviewEvent",
-    );
-    invariant(
-      manifest.expected.comments.length > 0 ||
-        manifest.expected.createIssueCount > 0,
-      "review expects at least one finding or deferred issue",
     );
   } else {
     invariant(
@@ -182,6 +185,13 @@ export function evaluateReviewRun(
         submitReceipts.length === 1 &&
         submitReceipts[0].metadata?.review_event ===
           expected.submitReviewEvent),
+    reviewBody:
+      expected.terminal !== "review" ||
+      (submits.length === 1 &&
+        typeof submits[0].body === "string" &&
+        REVIEW_BODY_SECTIONS.every((section) =>
+          submits[0].body.includes(section),
+        )),
     issueCount: count(outputs, "create_issue") === expected.createIssueCount,
     terminal:
       expected.terminal === "review"

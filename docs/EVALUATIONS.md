@@ -95,6 +95,8 @@ runs/
 agent error, then matches each
 expected inline comment by repository-relative path, exact line, and required
 case-insensitive body terms. Unmatched comments are false positives.
+Every complete review also requires the Rivet summary sections for the change,
+merge readiness, verification, before-merge work, and collapsed review details.
 `safe-output-items.jsonl` is publication evidence; every mutating output must
 have exactly one receipt of the same type.
 
@@ -127,9 +129,11 @@ record its exact SHA-256:
 }
 ```
 
-Set `terminal` to `noop` or `report_incomplete` only when that is the expected
-result; both require an empty comment list, a null review event, and zero issue
-creation.
+Use `terminal: "review"` for every complete comparison, including clean reviews
+with an empty comment list. `noop` remains available only for grading historical
+runs. Use `report_incomplete` when the comparison boundary is unavailable; both
+non-review outcomes require an empty comment list, a null review event, and zero
+issue creation.
 
 ## Run the evaluator
 
@@ -154,6 +158,8 @@ The command writes one JSON report to standard output and exits nonzero when a
 run has the wrong head, omits or changes the reviewer identity, misses an
 expected finding, produces a false positive, submits the wrong review event,
 or lacks a matching publication receipt.
+For review outcomes it also fails when the submitted body omits the required
+general-review structure.
 
 Keep live workflow evidence separate from this score: workflow URL, App
 identity, exact commit, job conclusions, and resulting GitHub review or issue.
