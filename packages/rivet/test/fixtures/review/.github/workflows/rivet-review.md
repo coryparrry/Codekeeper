@@ -10,7 +10,7 @@ permissions:
   pull-requests: read
 checkout: false
 engine: codex
-model: gpt-5.6-luna?effort=low
+model: gpt-5.6-luna
 max-turns: 3
 jobs:
   safe_outputs:

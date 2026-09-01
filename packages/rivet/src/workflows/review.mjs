@@ -36,10 +36,8 @@ export function nativeImportsFrontmatter(nativeImports) {
     .join("\n")}\n`;
 }
 
-function engineFrontmatter({ engine, model }, { lowReasoning }) {
-  const configuredModel =
-    engine === "codex" && lowReasoning ? `${model}?effort=low` : model;
-  return `engine: ${engine}\nmodel: ${configuredModel}\n`;
+function engineFrontmatter({ engine, model }) {
+  return `engine: ${engine}\nmodel: ${model}\n`;
 }
 
 function safeOutputsAppFrontmatter() {
@@ -103,7 +101,7 @@ on:
 ${includeReviewBudget ? "  needs: [review_context]\n" : ""}permissions:
   contents: read
   pull-requests: read
-${includeReviewBudget ? "checkout: false\n" : "checkout:\n  sparse-checkout: |\n    .github/rivet/actions/authority-receipt\n"}${engineFrontmatter(review, { lowReasoning: includeReviewBudget })}${includeReviewBudget ? "max-turns: 3\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : includeLegacyReviewBudget ? "max-turns: 6\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : ""}${nativeImportsFrontmatter(nativeImports)}safe-outputs:
+${includeReviewBudget ? "checkout: false\n" : "checkout:\n  sparse-checkout: |\n    .github/rivet/actions/authority-receipt\n"}${engineFrontmatter(review)}${includeReviewBudget ? "max-turns: 3\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : includeLegacyReviewBudget ? "max-turns: 6\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : ""}${nativeImportsFrontmatter(nativeImports)}safe-outputs:
 ${safeOutputsAppFrontmatter()}  report-failure-as-issue: false
   report-failed-jobs: false
   report-incomplete:

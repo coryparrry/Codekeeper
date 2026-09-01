@@ -628,8 +628,7 @@ export function assessPullRequestTargetTrust({
   if (!["automatic", "disabled"].includes(expectedIssueTriage)) {
     violations.push("expected issue triage mode must be automatic or disabled");
   }
-  const compiledModel =
-    expectedEngine === "codex" ? `${expectedModel}?effort=low` : expectedModel;
+  const compiledModel = expectedModel;
   if (!sameValues(authority.triggers, ["pull_request_target"])) {
     violations.push("workflow must use only pull_request_target");
   }
