@@ -55,7 +55,7 @@ Use this review-body structure:
 
 `## Merge readiness` — use exactly one status: `⛔ **Changes needed before merge**` for `block`, `⚠️ **Ready for maintainer review**` for `manual`, or `✅ **Ready to merge**` for `auto`. Follow it with one sentence explaining the decision.
 
-`## Verification` — include a compact `Check | Result | Evidence` table with rows for Findings, Tests, and Risk. Distinguish tests visible in the diff from tests actually run; this workflow does not run tests.
+`## Verification` — use exactly three compact labelled bullets: `- **Findings:**`, `- **Tests:**`, and `- **Risk:**`. Put each result and its evidence on the same line. Do not use a Markdown table. Distinguish tests visible in the diff from tests actually run; this workflow does not run tests.
 
 When the comparison supports a useful relationship among at least three components or a non-trivial control or state flow, add `## How this fits together` with a left-to-right `flowchart LR` Mermaid diagram. Use at most four nodes with plain-text labels grounded in the comparison. Never include Mermaid directives, clicks, links, URLs, or HTML. Omit the diagram when it would merely repeat the prose.
 

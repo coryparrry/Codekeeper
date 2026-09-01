@@ -22,16 +22,16 @@ export const RIVET_MAINTENANCE_JOB_CONDITIONS_SHA256 =
 export const RIVET_MAINTENANCE_JOB_AUTHORITY_SHA256 =
   "74b5d1f0163c93c16b6a7a44aee902ba4f529433bdc0a08748cfad74184771dc";
 export const RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
-  claude: "8eeaeb47c0ad3ac5945d142ee6b72b6415a8f16f73ce0767c61d0d75185dd460",
-  codex: "610016ee6c36d3ddc7bb3f4bba0062d21f7e763c645c2d294c09766efaae95c2",
-  copilot: "93662a3d807c5bcae40b6d2a5d7463ff102b1b1c83bdc5a0f758a0e2a91ec4c7",
-  gemini: "4d77615172d782dff68833cff4062051059fd497eb8df582058182083f3e5d49",
+  claude: "08dca7997378d35b896194b1d1d3ecf9f6193c1669ebcd3971e6714be92a128c",
+  codex: "1834d1a2fe8029f3f8a4b8bb77b82b26a217036c4aa6eaeaf59c7f2936e2d14c",
+  copilot: "63ef3f3a40bc25241fb52a151afdb153a3082adb03898f364ca8a53c0a7d9aff",
+  gemini: "9562dd434a3b2abc654836f8a0c81c4280f3509fb086497fa0232c2bf4039fec",
 });
 export const RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
-  claude: "e7c4fe357db7ee21ce5aa0f4bba5ec1828fff131c0d03e3f8d3d140b2fb8f29c",
-  codex: "c424176bc7aa71c62bc1e385ebcda0cb30fc5d8ca59de9f665bc466c7fe84d30",
-  copilot: "c8ce0cb3f8423c32570a79dea1cf60e86653f608e6ff7ae83fc38b660f9281e3",
-  gemini: "99c072a8501f6696b6468a3259f9bddcb42d122d4779045ff0b12a5fd35ebdd6",
+  claude: "eb10bbcb7d80d3430305b50135c78eda148a57e6fd4f0f62399b86aec141d16b",
+  codex: "88c22e70e72aa9a235ae2b3131df7679aa1f9ded1b8725247f25f708a3e5235e",
+  copilot: "106a91ffa6a5ef20721fdc4aaa4e58b2fbb10b250dc244470de538faaaf86129",
+  gemini: "0ddad1cfaeaafaf032f832f21dd2265ce768f9bfb2c2bca3ed8fbefb740151df",
 });
 export const RIVET_ISSUE_TRIAGE_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
   claude: "cd9df8fb70fd4966145f934340bf586c8aecc30824d8d1ebb7d0720b3d2f659f",

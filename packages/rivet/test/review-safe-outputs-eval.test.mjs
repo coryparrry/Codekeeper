@@ -54,9 +54,9 @@ The discount path now handles large values.
 
 ## Verification
 
-| Check | Result | Evidence |
-|---|---|---|
-| Findings | One | Inline review comment |
+- **Findings:** One — Inline review comment.
+- **Tests:** Not run — This review workflow does not execute tests.
+- **Risk:** Moderate — The supported finding blocks automatic readiness.
 
 ## Before merge
 
@@ -133,6 +133,17 @@ test("scores Rivet review outputs against prompt identity and receipts", () => {
   const eventMismatch = evaluateReviewRun(manifest(), disallowedEvent);
   assert.equal(eventMismatch.passed, false);
   assert.equal(eventMismatch.checks.reviewEvent, false);
+
+  const squeezedTable = reviewArtifacts();
+  squeezedTable.outputs.find(
+    (item) => item.type === "submit_pull_request_review",
+  ).body = reviewBody().replace(
+    "## Before merge",
+    "| Outcome | Supporting detail |\n| :--- | ---: |\n| One finding | Inline review comment |\n\n## Before merge",
+  );
+  const tableLayout = evaluateReviewRun(manifest(), squeezedTable);
+  assert.equal(tableLayout.passed, false);
+  assert.equal(tableLayout.checks.reviewBody, false);
 });
 
 test("scores noop and incomplete outcomes without publication receipts", () => {
