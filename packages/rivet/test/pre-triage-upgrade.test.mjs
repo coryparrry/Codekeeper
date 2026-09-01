@@ -51,6 +51,7 @@ const V012_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.2");
 const V013_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.3");
 const V015_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.5");
 const V017_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.7");
+const V019_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.9");
 const MAINTENANCE_FIXTURES = path.join(
   PACKAGE_ROOT,
   "test/fixtures/maintenance",
@@ -130,11 +131,15 @@ async function frozenV017ReviewLock(issueTriage = "automatic") {
   return gunzipSync(Buffer.from(encoded, "base64")).toString("utf8");
 }
 
-async function frozenV019ReviewLock(workflow) {
-  return (await currentReviewLock(PACKAGE_ROOT, workflow)).replaceAll(
-    "gpt-5.6-luna",
-    "gpt-5.6-luna?effort=low",
+async function frozenV019ReviewLock(issueTriage = "automatic") {
+  const encoded = await readFile(
+    path.join(
+      V019_FIXTURES,
+      `rivet-review${issueTriage === "automatic" ? "" : "-disabled"}.lock.yml.gz.b64`,
+    ),
+    "utf8",
   );
+  return gunzipSync(Buffer.from(encoded, "base64")).toString("utf8");
 }
 
 async function frozenMaintenanceLock(workflow) {
@@ -199,7 +204,7 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
         ? await frozenIssueTriageLock()
         : workflowId === "rivet-review" && workflow.includes(REVIEWER_PATH)
           ? workflow.includes("?effort=low")
-            ? await frozenV019ReviewLock(workflow)
+            ? await frozenV019ReviewLock(issueTriage)
             : workflow.includes("max-turns: 6")
               ? reviewExtension.includes("method `get_diff`")
                 ? await frozenV015ReviewLock()
@@ -325,7 +330,7 @@ async function writeProfiledV019Installation(repositoryRoot, configuration) {
   );
   await writeFile(
     path.join(repositoryRoot, ".github/workflows/rivet-review.lock.yml"),
-    await frozenV019ReviewLock(workflow),
+    await frozenV019ReviewLock(configuration.issues.triage),
   );
 }
 
@@ -346,6 +351,10 @@ test("freezes the released 0.1.9 review workflow source", async () => {
   assert.equal(
     renderRivetReviewWorkflowV019(),
     await readFile(V019_WORKFLOW_SOURCE, "utf8"),
+  );
+  assert.doesNotMatch(
+    await frozenV019ReviewLock(),
+    /does not select the GitHub review event/,
   );
 });
 

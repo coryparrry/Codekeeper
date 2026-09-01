@@ -92,6 +92,14 @@ test("scores Rivet review outputs against prompt identity and receipts", () => {
   assert.equal(unbound.passed, false);
   assert.equal(unbound.checks.head, false);
   assert.equal(unbound.checks.profileInPrompt, false);
+
+  const disallowedEvent = reviewArtifacts();
+  disallowedEvent.outputs.find(
+    (item) => item.type === "submit_pull_request_review",
+  ).event = "REQUEST_CHANGES";
+  const eventMismatch = evaluateReviewRun(manifest(), disallowedEvent);
+  assert.equal(eventMismatch.passed, false);
+  assert.equal(eventMismatch.checks.reviewEvent, false);
 });
 
 test("scores noop and incomplete outcomes without publication receipts", () => {
