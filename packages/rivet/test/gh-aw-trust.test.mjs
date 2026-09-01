@@ -14,6 +14,7 @@ import {
   RIVET_MAINTENANCE_JOB_CONDITIONS_SHA256,
   RIVET_ISSUE_TRIAGE_AUTHORITY_SHA256_BY_ENGINE,
   RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE,
+  RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE,
 } from "../src/gh-aw/trust.mjs";
 import { RIVET_ISSUE_TRIAGE_PUBLISH_SCRIPT } from "../src/workflows/issue-triage.mjs";
 
@@ -223,6 +224,18 @@ async function compiledAuthority() {
     ),
     "utf8",
   );
+  return { source, authority: inspectCompiledWorkflow(source) };
+}
+
+async function disabledCompiledAuthority() {
+  const encoded = await readFile(
+    path.join(
+      PACKAGE_ROOT,
+      "test/fixtures/review/rivet-review-disabled.lock.yml.gz.b64",
+    ),
+    "utf8",
+  );
+  const source = gunzipSync(Buffer.from(encoded, "base64")).toString("utf8");
   return { source, authority: inspectCompiledWorkflow(source) };
 }
 
@@ -494,6 +507,32 @@ test("accepts the self-contained base-branch Rivet review authority", async () =
     source,
     /permission-(?:actions|contents|deployments|discussions|packages|statuses): write/,
   );
+});
+
+test("binds disabled issue triage to its exact review authority", async () => {
+  const { source, authority } = await disabledCompiledAuthority();
+  assert.equal(
+    assessReview(authority, { expectedIssueTriage: "disabled" }).trusted,
+    true,
+  );
+  assert.deepEqual(assessReview(authority).violations, [
+    "review workflow differs from the approved inventory",
+  ]);
+  assert.deepEqual(
+    assessReview((await compiledAuthority()).authority, {
+      expectedIssueTriage: "disabled",
+    }).violations,
+    ["review workflow differs from the approved inventory"],
+  );
+  const unknownMode = assessReview(authority, {
+    expectedIssueTriage: "owner",
+    expectedReviewAuthoritySha256:
+      RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE.codex,
+  });
+  assert.equal(unknownMode.trusted, false);
+  assert.match(unknownMode.violations.join("; "), /issue triage mode/);
+  assert.doesNotMatch(source, /Tools: create_issue,/);
+  assert.doesNotMatch(source, /permission-issues: write/);
 });
 
 test("rejects PR-head prompt loading and mutable action authority", async () => {
@@ -789,14 +828,19 @@ test("binds the complete review graph and execution controls", async () => {
 });
 
 test("pins a complete review inventory for every supported engine", () => {
-  assert.deepEqual(Object.keys(RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE), [
-    "claude",
-    "codex",
-    "copilot",
-    "gemini",
-  ]);
-  for (const digest of Object.values(RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE)) {
-    assert.match(digest, /^[0-9a-f]{64}$/);
+  for (const inventory of [
+    RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE,
+    RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE,
+  ]) {
+    assert.deepEqual(Object.keys(inventory), [
+      "claude",
+      "codex",
+      "copilot",
+      "gemini",
+    ]);
+    for (const digest of Object.values(inventory)) {
+      assert.match(digest, /^[0-9a-f]{64}$/);
+    }
   }
 });
 

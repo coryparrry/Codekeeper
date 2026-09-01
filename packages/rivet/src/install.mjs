@@ -86,7 +86,7 @@ const MAINTENANCE_MANAGED_PATHS = Object.freeze([
 function digest(content) {
   return createHash("sha256").update(content).digest("hex");
 }
-function knownCompilerDrift(relativePath, current, planned) {
+export function knownCompilerDrift(relativePath, current, planned) {
   if (!relativePath.endsWith(".lock.yml")) return false;
   try {
     return isDeepStrictEqual(parseYaml(current), parseYaml(planned));
@@ -292,6 +292,8 @@ async function prepareInstallation({
       expectedImports: RIVET_REVIEW_NATIVE_IMPORTS,
       expectedLocalActions: REVIEW_LOCAL_ACTIONS,
       expectedModel: config.models.review.model,
+      expectedIssueTriage:
+        config.issues.triage === "automatic" ? "automatic" : "disabled",
     });
     if (!trust.trusted) {
       throw new Error(
