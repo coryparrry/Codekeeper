@@ -138,13 +138,19 @@ export function renderRivetReviewWorkflowV017({
   });
 }
 
-export function renderRivetReviewWorkflowV019({
+export function renderRivetReviewWorkflowV0111({
   configuration = DEFAULT_RIVET_CONFIG,
 } = {}) {
-  const workflow = renderRivetReviewWorkflow({
+  return renderRivetReviewWorkflow({
     configuration,
     includeReviewEventBoundary: false,
   });
+}
+
+export function renderRivetReviewWorkflowV019({
+  configuration = DEFAULT_RIVET_CONFIG,
+} = {}) {
+  const workflow = renderRivetReviewWorkflowV0111({ configuration });
   const { engine, model } = reviewWorkflowProjection(configuration);
   return engine === "codex"
     ? workflow.replace(`model: ${model}\n`, `model: ${model}?effort=low\n`)

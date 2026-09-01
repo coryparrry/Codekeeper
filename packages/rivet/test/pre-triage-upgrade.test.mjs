@@ -16,6 +16,7 @@ import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 import { installRepair, installReview } from "../src/install.mjs";
 import {
   renderRivetReviewWorkflow,
+  renderRivetReviewWorkflowV0111,
   renderRivetReviewWorkflowV017,
   renderRivetReviewWorkflowV019,
 } from "../src/workflows/review.mjs";
@@ -52,6 +53,7 @@ const V013_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.3");
 const V015_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.5");
 const V017_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.7");
 const V019_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.9");
+const V0111_FIXTURES = path.join(PACKAGE_ROOT, "test/fixtures/v0.1.11");
 const MAINTENANCE_FIXTURES = path.join(
   PACKAGE_ROOT,
   "test/fixtures/maintenance",
@@ -79,6 +81,14 @@ const V019_EXTENSION = path.join(
 const V019_WORKFLOW_SOURCE = path.join(
   PACKAGE_ROOT,
   "assets/upgrades/v0.1.9/rivet-review.md",
+);
+const V0111_EXTENSION = path.join(
+  PACKAGE_ROOT,
+  "assets/upgrades/v0.1.11/review-extension.md",
+);
+const V0111_WORKFLOW_SOURCE = path.join(
+  PACKAGE_ROOT,
+  "assets/upgrades/v0.1.11/rivet-review.md",
 );
 const V017_DISABLED_WORKFLOW_SOURCE = path.join(
   V017_FIXTURES,
@@ -135,6 +145,17 @@ async function frozenV019ReviewLock(issueTriage = "automatic") {
   const encoded = await readFile(
     path.join(
       V019_FIXTURES,
+      `rivet-review${issueTriage === "automatic" ? "" : "-disabled"}.lock.yml.gz.b64`,
+    ),
+    "utf8",
+  );
+  return gunzipSync(Buffer.from(encoded, "base64")).toString("utf8");
+}
+
+async function frozenV0111ReviewLock(issueTriage = "automatic") {
+  const encoded = await readFile(
+    path.join(
+      V0111_FIXTURES,
       `rivet-review${issueTriage === "automatic" ? "" : "-disabled"}.lock.yml.gz.b64`,
     ),
     "utf8",
@@ -213,7 +234,11 @@ async function fixtureCompiler({ repositoryRoot, workflowId }) {
                 ? reviewExtension.includes("method `get_diff`")
                   ? await frozenV015ReviewLock()
                   : reviewExtension.includes("Trusted bounded comparison")
-                    ? await currentReviewLock(PACKAGE_ROOT, workflow)
+                    ? workflow.includes(
+                        "does not select the GitHub review event",
+                      )
+                      ? await currentReviewLock(PACKAGE_ROOT, workflow)
+                      : await frozenV0111ReviewLock(issueTriage)
                     : await frozenV017ReviewLock(issueTriage)
                 : await frozenV013ReviewLock()
           : workflow.includes(FIXER_PATH)
@@ -334,6 +359,33 @@ async function writeProfiledV019Installation(repositoryRoot, configuration) {
   );
 }
 
+async function writeProfiledV0111Installation(
+  repositoryRoot,
+  configuration,
+  install = installRepair,
+) {
+  await install({
+    repositoryRoot,
+    configuration,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  await writeFile(
+    path.join(repositoryRoot, ".github/rivet/aw/review-extension.md"),
+    await readFile(V0111_EXTENSION, "utf8"),
+  );
+  await writeFile(
+    path.join(repositoryRoot, ".github/workflows/rivet-review.md"),
+    renderRivetReviewWorkflowV0111({
+      configuration: { ...configuration, repair: { authority: "never" } },
+    }),
+  );
+  await writeFile(
+    path.join(repositoryRoot, ".github/workflows/rivet-review.lock.yml"),
+    await frozenV0111ReviewLock(configuration.issues.triage),
+  );
+}
+
 test("freezes the released 0.1.7 review workflow sources", async () => {
   assert.equal(
     renderRivetReviewWorkflowV017(),
@@ -355,6 +407,13 @@ test("freezes the released 0.1.9 review workflow source", async () => {
   assert.doesNotMatch(
     await frozenV019ReviewLock(),
     /does not select the GitHub review event/,
+  );
+});
+
+test("freezes the released 0.1.11 review workflow source", async () => {
+  assert.equal(
+    renderRivetReviewWorkflowV0111(),
+    await readFile(V0111_WORKFLOW_SOURCE, "utf8"),
   );
 });
 
@@ -776,6 +835,81 @@ test("upgrades only an exact 0.1.9 profiled repair installation", async (t) => {
     await t.test(`rejects modified 0.1.9 ${relativePath}`, async () => {
       const modifiedRoot = await repository(t);
       await writeProfiledV019Installation(modifiedRoot, configuration);
+      const target = path.join(modifiedRoot, relativePath);
+      const modified = `${await readFile(target, "utf8")}modified\n`;
+      await writeFile(target, modified);
+      await assert.rejects(
+        installRepair({
+          repositoryRoot: modifiedRoot,
+          configuration,
+          dryRun: true,
+          compileWorkflow: fixtureCompiler,
+          validateWorkflow: async () => {},
+        }),
+        /refusing to overwrite/,
+      );
+      assert.equal(await readFile(target, "utf8"), modified);
+    });
+  }
+});
+
+test("upgrades only exact 0.1.11 profiled installations", async (t) => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.issues.triage = "disabled";
+  configuration.repair.authority = "owner";
+  const repositoryRoot = await repository(t);
+  await writeProfiledV0111Installation(repositoryRoot, configuration);
+
+  const result = await installRepair({
+    repositoryRoot,
+    configuration,
+    dryRun: true,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  assert.deepEqual(
+    result.files
+      .filter(({ status }) => status === "update")
+      .map(({ path: relativePath }) => relativePath),
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      ".github/workflows/rivet-review.md",
+    ],
+  );
+
+  const reviewConfiguration = structuredClone(DEFAULT_RIVET_CONFIG);
+  reviewConfiguration.issues.triage = "disabled";
+  const reviewRoot = await repository(t);
+  await writeProfiledV0111Installation(
+    reviewRoot,
+    reviewConfiguration,
+    installReview,
+  );
+  const reviewResult = await installReview({
+    repositoryRoot: reviewRoot,
+    configuration: reviewConfiguration,
+    dryRun: true,
+    compileWorkflow: fixtureCompiler,
+    validateWorkflow: async () => {},
+  });
+  assert.deepEqual(
+    reviewResult.files
+      .filter(({ status }) => status === "update")
+      .map(({ path: relativePath }) => relativePath),
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      ".github/workflows/rivet-review.md",
+    ],
+  );
+
+  for (const relativePath of [
+    ".github/rivet/aw/review-extension.md",
+    ".github/workflows/rivet-review.lock.yml",
+    ".github/workflows/rivet-review.md",
+  ]) {
+    await t.test(`rejects modified 0.1.11 ${relativePath}`, async () => {
+      const modifiedRoot = await repository(t);
+      await writeProfiledV0111Installation(modifiedRoot, configuration);
       const target = path.join(modifiedRoot, relativePath);
       const modified = `${await readFile(target, "utf8")}modified\n`;
       await writeFile(target, modified);
