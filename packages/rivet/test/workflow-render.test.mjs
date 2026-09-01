@@ -64,6 +64,11 @@ test("renders the checked-in Rivet review workflow source", async () => {
   );
   assert.match(fixture, /Publish no more than 8 inline findings/);
   assert.match(fixture, /submit_pull_request_review/);
+  assert.match(
+    fixture,
+    /recommendation is evidence only and does not select the GitHub review event/,
+  );
+  assert.match(fixture, /Use only `COMMENT`; `REQUEST_CHANGES` is forbidden/);
   assert.match(fixture, /Triage each supported finding before publication/);
   assert.match(fixture, /it does not authorize a repair or implementation/);
   assert.match(fixture, /call only `noop`/);
@@ -79,6 +84,8 @@ test("projects domain review controls into gh-aw frontmatter", () => {
   assert.match(source, /inline findings are disabled/);
   assert.match(source, /allowed-events: \[COMMENT, REQUEST_CHANGES\]/);
   assert.match(source, /event `REQUEST_CHANGES`/);
+  assert.match(source, /Use the configured `REQUEST_CHANGES` event/);
+  assert.doesNotMatch(source, /`REQUEST_CHANGES` is forbidden/);
 
   configuration.issues.triage = "disabled";
   const issueTriageDisabled = renderRivetReviewWorkflow({ configuration });
