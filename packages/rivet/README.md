@@ -62,7 +62,10 @@ implement a fix, open a pull request, or merge.
 
 Pull-request reviews also receive bounded prior Rivet reviews, comments, and
 exact-head source context so repeated findings can be suppressed only when the
-current change still supports that conclusion. The same setting lets a review
+current change still supports that conclusion. Each completed review also
+reconciles one status label (`changes required`, `review needed`, or
+`merge ready`) and the optional `needs tests` label without changing unrelated
+repository labels. The same setting lets a review
 defer at most one independently verified, out-of-scope finding to a new issue.
 That is separate from incoming issue triage and does not authorize
 implementation. Set triage to `disabled` to

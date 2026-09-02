@@ -8,6 +8,8 @@ import {
   renderRivetReviewWorkflowV0113,
   renderRivetReviewWorkflowV012,
   RIVET_REVIEW_NATIVE_IMPORTS,
+  RIVET_REVIEW_TAG_PENDING_SCRIPT,
+  RIVET_REVIEW_TAG_PUBLISH_SCRIPT,
   RIVET_REVIEW_WORKFLOW_ID,
 } from "../src/workflows/review.mjs";
 import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
@@ -38,10 +40,7 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /needs: \[review_context\]/);
   assert.match(fixture, /checkout: false/);
   assert.match(fixture, /inlined-imports: true/);
-  assert.match(
-    fixture,
-    /engine: codex\nmodel: gpt-5\.6-luna/,
-  );
+  assert.match(fixture, /engine: codex\nmodel: gpt-5\.6-luna/);
   assert.doesNotMatch(fixture, /\?effort=low|model_reasoning_effort/);
   assert.match(fixture, /max-turns: 3/);
   assert.match(fixture, /needs\.agent\.result == 'success'/);
@@ -58,6 +57,20 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(
     fixture,
     /create-issue:\n    title-prefix: "\[rivet\] "\n    max: 1\n    deduplicate-by-title: true/,
+  );
+  assert.match(fixture, /jobs:\n    publish-review-tags:/);
+  assert.match(fixture, /^  review_tags_pending:/m);
+  assert.match(
+    fixture,
+    /review_tags_pending:\n    needs: pre_activation\n    if: needs\.pre_activation\.outputs\.activated == 'true'/,
+  );
+  assert.match(fixture, /agent:\n    needs: \[review_tags_pending\]/);
+  assert.match(fixture, /permission-pull-requests: write/);
+  assert.match(fixture, /call `publish_review_tags` once/);
+  assert.ok(
+    RIVET_REVIEW_TAG_PUBLISH_SCRIPT.split("\n").every((line) =>
+      fixture.includes(line),
+    ),
   );
   assert.match(
     fixture,
@@ -85,12 +98,64 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.match(fixture, /## How this fits together/);
   assert.match(fixture, /flowchart LR/);
   assert.match(fixture, /## Before merge/);
-  assert.match(
-    fixture,
-    /<summary><strong>Review details<\/strong><\/summary>/,
-  );
+  assert.match(fixture, /<summary><strong>Review details<\/strong><\/summary>/);
   assert.doesNotMatch(fixture, /call only `noop`/);
   assert.doesNotMatch(fixture, /  add-comment:/);
+});
+
+test("marks a new pull request head as pending before review", async () => {
+  const compiled = await readFile(
+    path.join(
+      PACKAGE_ROOT,
+      "test/fixtures/review/.github/workflows/rivet-review.lock.yml",
+    ),
+    "utf8",
+  );
+  const pendingJob = compiled.slice(
+    compiled.indexOf("\n  review_tags_pending:"),
+    compiled.indexOf("\n  safe_outputs:"),
+  );
+  assert.doesNotMatch(pendingJob, /contains\(needs\.agent\.outputs\.output_types/);
+  const reset = new (Object.getPrototypeOf(async function () {}).constructor)(
+    "context",
+    "github",
+    RIVET_REVIEW_TAG_PENDING_SCRIPT,
+  );
+  const pull = {
+    id: 101,
+    number: 12,
+    state: "open",
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) },
+    labels: [
+      { name: "merge ready" },
+      { name: "needs tests" },
+      { name: "human-owned" },
+    ],
+  };
+  const context = {
+    eventName: "pull_request_target",
+    payload: { action: "synchronize", pull_request: structuredClone(pull) },
+    repo: { owner: "owner", repo: "repository" },
+  };
+  const github = {
+    rest: {
+      pulls: { get: async () => ({ data: pull }) },
+      issues: {
+        getLabel: async () => ({}),
+        addLabels: async ({ labels }) =>
+          pull.labels.push(...labels.map((name) => ({ name }))),
+        removeLabel: async ({ name }) => {
+          pull.labels = pull.labels.filter((label) => label.name !== name);
+        },
+      },
+    },
+  };
+  await reset(context, github);
+  assert.deepEqual(
+    pull.labels.map(({ name }) => name).sort(),
+    ["human-owned", "review needed"],
+  );
 });
 
 test("projects domain review controls into gh-aw frontmatter", () => {
@@ -166,11 +231,155 @@ test("freezes the 0.1.2 review source used for upgrades", async () => {
 });
 
 test("freezes the 0.1.13 review source used for upgrades", async () => {
+  const source = renderRivetReviewWorkflowV0113();
   assert.equal(
-    renderRivetReviewWorkflowV0113(),
+    source,
     await readFile(
       path.join(PACKAGE_ROOT, "assets/upgrades/v0.1.13/rivet-review.md"),
       "utf8",
     ),
   );
+  assert.doesNotMatch(source, /add-labels:/);
+  assert.doesNotMatch(source, /publish-review-tags/);
+});
+
+test("reconciles only managed tags on the triggering pull request", async () => {
+  const publish = new (Object.getPrototypeOf(async function () {}).constructor)(
+    "require",
+    "process",
+    "context",
+    "github",
+    RIVET_REVIEW_TAG_PUBLISH_SCRIPT,
+  );
+  const calls = { created: [], added: [], removed: [] };
+  const pull = {
+    id: 101,
+    number: 12,
+    state: "open",
+    base: { sha: "a".repeat(40) },
+    head: { sha: "b".repeat(40) },
+    labels: [{ name: "review needed" }, { name: "human-owned" }],
+  };
+  const context = {
+    eventName: "pull_request_target",
+    payload: { action: "synchronize", pull_request: structuredClone(pull) },
+    repo: { owner: "owner", repo: "repository" },
+  };
+  const output =
+    (recommendation = "auto") =>
+    () => ({
+      readFileSync: () =>
+        JSON.stringify({
+          items: [
+            {
+              type: "submit_pull_request_review",
+              body: "## Merge readiness\n\n✅ **Ready to merge**",
+            },
+            {
+              type: "publish_review_tags",
+              recommendation,
+              missing_test: "true",
+            },
+          ],
+          errors: [],
+        }),
+    });
+  const github = {
+    rest: {
+      pulls: { get: async () => ({ data: pull }) },
+      issues: {
+        getLabel: async ({ name }) => {
+          if (name === "merge ready")
+            throw Object.assign(new Error(), { status: 404 });
+          return {};
+        },
+        createLabel: async (label) => calls.created.push(label),
+        addLabels: async ({ labels }) => {
+          calls.added.push(...labels);
+          pull.labels.push(...labels.map((name) => ({ name })));
+        },
+        removeLabel: async ({ name }) => {
+          calls.removed.push(name);
+          pull.labels = pull.labels.filter((label) => label.name !== name);
+        },
+      },
+    },
+  };
+  await publish(
+    output(),
+    {
+      env: {
+        GH_AW_AGENT_OUTPUT: "/agent-output.json",
+        RIVET_SAFE_OUTPUTS_RESULT: "success",
+      },
+    },
+    context,
+    github,
+  );
+  assert.deepEqual(calls.added, ["merge ready", "needs tests"]);
+  assert.deepEqual(calls.removed, ["review needed"]);
+  assert.deepEqual(
+    calls.created.map(({ name }) => name),
+    ["merge ready"],
+  );
+  assert.ok(pull.labels.some(({ name }) => name === "human-owned"));
+  await assert.rejects(
+    publish(
+      output("block"),
+      {
+        env: {
+          GH_AW_AGENT_OUTPUT: "/agent-output.json",
+          RIVET_SAFE_OUTPUTS_RESULT: "success",
+        },
+      },
+      context,
+      github,
+    ),
+    /invalid bound tag output/,
+  );
+
+  pull.labels = [
+    { name: "merge ready" },
+    { name: "needs tests" },
+    { name: "human-owned" },
+  ];
+  await publish(
+    output(),
+    {
+      env: {
+        GH_AW_AGENT_OUTPUT: "/agent-output.json",
+        RIVET_SAFE_OUTPUTS_RESULT: "failure",
+      },
+    },
+    context,
+    github,
+  );
+  assert.deepEqual(
+    pull.labels.map(({ name }) => name).sort(),
+    ["human-owned", "review needed"],
+  );
+
+  pull.labels = [{ name: "changes required" }, { name: "human-owned" }];
+  pull.head.sha = context.payload.pull_request.head.sha;
+  calls.added.length = 0;
+  const removeLabel = github.rest.issues.removeLabel;
+  github.rest.issues.removeLabel = async (values) => {
+    await removeLabel(values);
+    pull.head.sha = "c".repeat(40);
+  };
+  await assert.rejects(
+    publish(
+      output(),
+      {
+        env: {
+          GH_AW_AGENT_OUTPUT: "/agent-output.json",
+          RIVET_SAFE_OUTPUTS_RESULT: "success",
+        },
+      },
+      context,
+      github,
+    ),
+    /invalid bound tag output/,
+  );
+  assert.deepEqual(calls.added, []);
 });

@@ -106,6 +106,7 @@ test("compiled review disables model-driven repository reads", async () => {
   assert.deepEqual(authority.jobConditions.activation.needs, [
     "pre_activation",
     "review_context",
+    "review_tags_pending",
   ]);
 });
 

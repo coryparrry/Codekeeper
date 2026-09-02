@@ -61,7 +61,7 @@ the new permission takes effect. `issues.implementation` must remain
 
 | Setting                  | Current behavior                                                            |
 | ------------------------ | --------------------------------------------------------------------------- |
-| `review.automatic`       | Runs review on eligible pull-request events.                                |
+| `review.automatic`       | Runs review and reconciles its managed labels on eligible pull requests.    |
 | `review.inlineFindings`  | Allows bounded inline review comments.                                      |
 | `review.requestChanges`  | Chooses comment-only or request-changes review.                             |
 | `review.maximumFindings` | Limits findings to an integer from 1 to 20.                                 |

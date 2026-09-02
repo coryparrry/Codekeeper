@@ -13,6 +13,228 @@ export const RIVET_REVIEW_NATIVE_IMPORTS = Object.freeze([
 export const RIVET_REVIEW_V012_NATIVE_IMPORTS = Object.freeze([
   ".github/rivet/aw/review-extension.md",
 ]);
+export const RIVET_REVIEW_TAG_PENDING_SCRIPT = `const eventPull = context.payload.pull_request;
+const invalid = () => {
+  throw new Error("Rivet review: invalid pending tag target");
+};
+if (
+  context.eventName !== "pull_request_target" ||
+  !["opened", "synchronize", "reopened", "ready_for_review"].includes(
+    context.payload.action,
+  ) ||
+  !Number.isSafeInteger(eventPull?.number) ||
+  eventPull.number < 1
+) invalid();
+const current = (pull) =>
+  pull?.id === eventPull.id &&
+  pull.number === eventPull.number &&
+  pull.state === "open" &&
+  pull.base?.sha === eventPull.base?.sha &&
+  pull.head?.sha === eventPull.head?.sha;
+const loadCurrent = async () => {
+  const pull = (
+    await github.rest.pulls.get({
+      ...context.repo,
+      pull_number: eventPull.number,
+    })
+  ).data;
+  if (!current(pull)) invalid();
+  return pull;
+};
+try {
+  await github.rest.issues.getLabel({ ...context.repo, name: "review needed" });
+} catch (error) {
+  if (error.status !== 404) throw error;
+  try {
+    await github.rest.issues.createLabel({
+      ...context.repo,
+      name: "review needed",
+      color: "FBCA04",
+      description: "Human review or judgment is required",
+    });
+  } catch (createError) {
+    if (createError.status !== 422) throw createError;
+  }
+}
+const managed = new Set([
+  "changes required",
+  "review needed",
+  "merge ready",
+  "needs tests",
+]);
+const pull = await loadCurrent();
+const existing = new Set(
+  (pull.labels ?? [])
+    .map((label) => (typeof label === "string" ? label : label?.name))
+    .filter(Boolean),
+);
+for (const name of managed) {
+  if (!existing.has(name) || name === "review needed") continue;
+  await loadCurrent();
+  try {
+    await github.rest.issues.removeLabel({
+      ...context.repo,
+      issue_number: eventPull.number,
+      name,
+    });
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+}
+if (!existing.has("review needed")) {
+  await loadCurrent();
+  await github.rest.issues.addLabels({
+    ...context.repo,
+    issue_number: eventPull.number,
+    labels: ["review needed"],
+  });
+}
+// ponytail: GitHub labels have no head-SHA CAS; per-PR concurrency plus the
+// next event's pending reset bounds the unavoidable write race.
+const finalPull = await loadCurrent();
+const finalManaged = (finalPull.labels ?? [])
+  .map((label) => (typeof label === "string" ? label : label?.name))
+  .filter((name) => managed.has(name))
+  .sort();
+if (JSON.stringify(finalManaged) !== JSON.stringify(["review needed"])) invalid();`;
+export const RIVET_REVIEW_TAG_PUBLISH_SCRIPT = `const fs = require("fs");
+let output;
+try {
+  output = JSON.parse(
+    fs.readFileSync(process.env.GH_AW_AGENT_OUTPUT, "utf8"),
+  );
+} catch {
+  output = { items: [], errors: ["agent output unavailable"] };
+}
+const item = output.items?.filter(
+  (candidate) => candidate?.type === "publish_review_tags",
+);
+const review = output.items?.filter(
+  (candidate) => candidate?.type === "submit_pull_request_review",
+);
+const invalid = () => {
+  throw new Error("Rivet review: invalid bound tag output");
+};
+const wellFormed =
+  process.env.RIVET_SAFE_OUTPUTS_RESULT === "success" &&
+  Array.isArray(item) &&
+  item.length === 1 &&
+  Array.isArray(review) &&
+  review.length === 1 &&
+  typeof review[0].body === "string" &&
+  output.errors?.length === 0 &&
+  JSON.stringify(Object.keys(item[0]).sort()) ===
+    JSON.stringify(["missing_test", "recommendation", "type"]) &&
+  ["block", "manual", "auto"].includes(item[0].recommendation) &&
+  ["true", "false"].includes(item[0].missing_test);
+const reviewStatuses = {
+  block: "⛔ **Changes needed before merge**",
+  manual: "⚠️ **Ready for maintainer review**",
+  auto: "✅ **Ready to merge**",
+};
+const publishable =
+  wellFormed &&
+  Object.values(reviewStatuses).filter((status) => review[0].body.includes(status))
+    .length === 1 &&
+  review[0].body.includes(reviewStatuses[item[0].recommendation]);
+const eventPull = context.payload.pull_request;
+if (
+  context.eventName !== "pull_request_target" ||
+  !["opened", "synchronize", "reopened", "ready_for_review"].includes(
+    context.payload.action,
+  ) ||
+  !Number.isSafeInteger(eventPull?.number) ||
+  eventPull.number < 1
+) invalid();
+const { data: livePull } = await github.rest.pulls.get({
+  ...context.repo,
+  pull_number: eventPull.number,
+});
+const current = (pull) =>
+  pull?.id === eventPull.id &&
+  pull.number === eventPull.number &&
+  pull.state === "open" &&
+  pull.base?.sha === eventPull.base?.sha &&
+  pull.head?.sha === eventPull.head?.sha;
+const loadCurrent = async () => {
+  const pull = (
+    await github.rest.pulls.get({
+      ...context.repo,
+      pull_number: eventPull.number,
+    })
+  ).data;
+  if (!current(pull)) invalid();
+  return pull;
+};
+if (!current(livePull)) invalid();
+const definitions = {
+  "changes required": ["B60205", "Verified changes are required before merge"],
+  "review needed": ["FBCA04", "Human review or judgment is required"],
+  "merge ready": ["0E8A16", "Meets the configured merge policy"],
+  "needs tests": ["D4C5F9", "Deterministic test coverage is missing"],
+};
+const status = {
+  block: "changes required",
+  manual: "review needed",
+  auto: "merge ready",
+}[publishable ? item[0].recommendation : "manual"];
+const desired = new Set([
+  status,
+  ...(publishable && item[0].missing_test === "true" ? ["needs tests"] : []),
+]);
+for (const name of desired) {
+  try {
+    await github.rest.issues.getLabel({ ...context.repo, name });
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    try {
+      await github.rest.issues.createLabel({
+        ...context.repo,
+        name,
+        color: definitions[name][0],
+        description: definitions[name][1],
+      });
+    } catch (createError) {
+      if (createError.status !== 422) throw createError;
+      await github.rest.issues.getLabel({ ...context.repo, name });
+    }
+  }
+}
+const mutationPull = await loadCurrent();
+const existing = new Set(
+  (mutationPull.labels ?? [])
+    .map((label) => (typeof label === "string" ? label : label?.name))
+    .filter(Boolean),
+);
+for (const name of Object.keys(definitions)) {
+  if (!existing.has(name) || desired.has(name)) continue;
+  await loadCurrent();
+  try {
+    await github.rest.issues.removeLabel({
+      ...context.repo,
+      issue_number: livePull.number,
+      name,
+    });
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+}
+const additions = [...desired].filter((name) => !existing.has(name));
+if (additions.length > 0) {
+  await loadCurrent();
+  await github.rest.issues.addLabels({
+    ...context.repo,
+    issue_number: livePull.number,
+    labels: additions,
+  });
+}
+const finalPull = await loadCurrent();
+const finalManaged = (finalPull.labels ?? [])
+  .map((label) => (typeof label === "string" ? label : label?.name))
+  .filter((name) => Object.hasOwn(definitions, name))
+  .sort();
+if (JSON.stringify(finalManaged) !== JSON.stringify([...desired].sort())) invalid();
+if (!publishable && process.env.RIVET_SAFE_OUTPUTS_RESULT === "success") invalid();`;
 const MANAGED_NATIVE_IMPORT =
   /^\.github\/rivet\/(?:agents\/[a-z0-9]+(?:-[a-z0-9]+)*\.md|aw\/[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*\.md)$/;
 
@@ -52,6 +274,71 @@ function inlineFindingsFrontmatter({ inlineFindings, maximumFindings }) {
 function issueTriageFrontmatter({ issueTriage }) {
   if (!issueTriage) return "";
   return `  create-issue:\n    title-prefix: "[rivet] "\n    max: 1\n    deduplicate-by-title: true\n`;
+}
+
+function pendingTaggingJobFrontmatter(enabled) {
+  if (!enabled) return "";
+  return `  review_tags_pending:
+    needs: pre_activation
+    if: needs.pre_activation.outputs.activated == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - id: review-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: \${{ vars.${RIVET_APP_CLIENT_ID_VARIABLE} }}
+          private-key: \${{ secrets.${RIVET_APP_PRIVATE_KEY_SECRET} }}
+          owner: \${{ github.repository_owner }}
+          repositories: \${{ github.event.repository.name }}
+          permission-pull-requests: write
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          github-token: \${{ steps.review-token.outputs.token }}
+          script: |
+${RIVET_REVIEW_TAG_PENDING_SCRIPT.split("\n")
+  .map((line) => `            ${line}`)
+  .join("\n")}
+`;
+}
+
+function autoTaggingFrontmatter(enabled) {
+  if (!enabled) return "";
+  return `  jobs:
+    publish-review-tags:
+      description: Reconcile Rivet-owned labels on only the triggering pull request
+      runs-on: ubuntu-latest
+      needs: safe_outputs
+      if: always()
+      permissions: {}
+      env:
+        RIVET_SAFE_OUTPUTS_RESULT: \${{ needs.safe_outputs.result }}
+      inputs:
+        recommendation:
+          description: "Exact review recommendation: block, manual, or auto"
+          required: true
+          type: string
+        missing_test:
+          description: Whether one concrete deterministic test is missing
+          required: true
+          type: string
+      steps:
+        - id: review-token
+          uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+          with:
+            app-id: \${{ vars.${RIVET_APP_CLIENT_ID_VARIABLE} }}
+            private-key: \${{ secrets.${RIVET_APP_PRIVATE_KEY_SECRET} }}
+            owner: \${{ github.repository_owner }}
+            repositories: \${{ github.event.repository.name }}
+            permission-pull-requests: write
+        - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+          with:
+            github-token: \${{ steps.review-token.outputs.token }}
+            script: |
+${RIVET_REVIEW_TAG_PUBLISH_SCRIPT.split("\n")
+  .map((line) => `              ${line}`)
+  .join("\n")}
+`;
 }
 
 function publicationContract({
@@ -118,6 +405,7 @@ export function renderRivetReviewWorkflow({
   includeReviewBudget = true,
   includeLegacyReviewBudget = false,
   includeGeneralReview = true,
+  includeAutoTagging = true,
 } = {}) {
   const review = reviewWorkflowProjection(configuration);
   const reviewEvents = review.requestChanges
@@ -132,12 +420,12 @@ on:
 ${includeReviewBudget ? "  needs: [review_context]\n" : ""}permissions:
   contents: read
   pull-requests: read
-${includeReviewBudget ? "checkout: false\n" : "checkout:\n  sparse-checkout: |\n    .github/rivet/actions/authority-receipt\n"}${engineFrontmatter(review)}${includeReviewBudget ? "max-turns: 3\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : includeLegacyReviewBudget ? "max-turns: 6\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : ""}${nativeImportsFrontmatter(nativeImports)}safe-outputs:
+${includeReviewBudget ? "checkout: false\n" : "checkout:\n  sparse-checkout: |\n    .github/rivet/actions/authority-receipt\n"}${engineFrontmatter(review)}${includeReviewBudget ? `max-turns: 3\njobs:\n${pendingTaggingJobFrontmatter(includeAutoTagging)}${includeAutoTagging ? "  agent:\n    needs: [review_tags_pending]\n" : ""}  safe_outputs:\n    if: needs.agent.result == 'success'\n` : includeLegacyReviewBudget ? "max-turns: 6\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : ""}${nativeImportsFrontmatter(nativeImports)}safe-outputs:
 ${safeOutputsAppFrontmatter()}  report-failure-as-issue: false
   report-failed-jobs: false
   report-incomplete:
     create-issue: false
-${inlineFindingsFrontmatter(review)}  submit-pull-request-review:
+${inlineFindingsFrontmatter(review)}${autoTaggingFrontmatter(includeAutoTagging)}  submit-pull-request-review:
     allowed-events: [${reviewEvents}]
 ${issueTriageFrontmatter(review)}---
 
@@ -151,7 +439,11 @@ ${publicationContract({
   includeDisabledIssueTriageNotice,
   includeReviewEventBoundary,
   includeGeneralReview,
-})}`;
+})}${
+    includeAutoTagging
+      ? "\nAfter choosing the recommendation, call `publish_review_tags` once with that exact `block`, `manual`, or `auto` value. Set `missing_test` to the string `true` only when the review identifies a concrete missing deterministic test; otherwise set it to `false`. Rivet binds the update to the triggering pull request and reconciles its managed labels.\n"
+      : ""
+  }`;
 }
 
 export function renderRivetReviewWorkflowV0113({
@@ -160,6 +452,7 @@ export function renderRivetReviewWorkflowV0113({
   return renderRivetReviewWorkflow({
     configuration,
     includeGeneralReview: false,
+    includeAutoTagging: false,
   });
 }
 
@@ -172,6 +465,7 @@ export function renderRivetReviewWorkflowV017({
     includeReviewBudget: false,
     includeLegacyReviewBudget: true,
     includeGeneralReview: false,
+    includeAutoTagging: false,
   });
 }
 
@@ -182,6 +476,7 @@ export function renderRivetReviewWorkflowV0111({
     configuration,
     includeReviewEventBoundary: false,
     includeGeneralReview: false,
+    includeAutoTagging: false,
   });
 }
 
@@ -205,5 +500,6 @@ export function renderRivetReviewWorkflowV012({
     includeReviewEventBoundary: false,
     includeReviewBudget: false,
     includeGeneralReview: false,
+    includeAutoTagging: false,
   });
 }

@@ -8,7 +8,7 @@ installing it.
 
 | Capability            | Default   | Authority                                                                                            |
 | --------------------- | --------- | ---------------------------------------------------------------------------------------------------- |
-| Pull-request review   | Automatic | App-authored review comments; deferred findings may create one issue when issue triage is enabled.   |
+| Pull-request review   | Automatic | App-authored review comments and managed status/test labels; deferred findings may create one issue when issue triage is enabled. |
 | Incoming issue triage | Automatic | One App-authored comment on a newly opened issue.                                                    |
 | Repair                | Optional  | An owner-authorized command may publish one validated repair commit to the same pull-request branch. |
 | Maintenance           | Disabled  | Manual or weekly report-only audit artifact; no App token or GitHub mutation.                        |

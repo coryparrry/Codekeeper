@@ -99,6 +99,11 @@ function reviewArtifacts() {
         body: reviewBody(),
       },
       {
+        type: "publish_review_tags",
+        recommendation: "manual",
+        missing_test: "false",
+      },
+      {
         type: "create_issue",
         title: "Deferred concern in discount policy",
         body: `Evidence: the exact comparison exposes an out-of-scope policy gap.\n\nAcceptance criteria: all callers reject negative totals.\n\nTest expectation: cover values above 100.\n\nSource PR: owner/repository#7 at ${HEAD}`,
@@ -110,6 +115,7 @@ function reviewArtifacts() {
         type: "submit_pull_request_review",
         metadata: { review_event: "COMMENT" },
       },
+      { type: "publish_review_tags" },
       { type: "create_issue" },
     ],
     errors: [],
@@ -120,6 +126,15 @@ test("scores Rivet review outputs against prompt identity and receipts", () => {
   const passing = evaluateReviewRun(manifest(), reviewArtifacts());
   assert.equal(passing.passed, true);
   assert.equal(passing.falsePositiveComments.length, 0);
+
+  const missingTags = reviewArtifacts();
+  missingTags.outputs = missingTags.outputs.filter(
+    (item) => item.type !== "publish_review_tags",
+  );
+  missingTags.receipts = missingTags.receipts.filter(
+    (item) => item.type !== "publish_review_tags",
+  );
+  assert.equal(evaluateReviewRun(manifest(), missingTags).checks.terminal, false);
 
   const extraComment = reviewArtifacts();
   extraComment.outputs.push({

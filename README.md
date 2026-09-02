@@ -17,7 +17,7 @@ and deployment gates independently required.
 
 | Capability                                   | Shipped behavior                                                                                                                                         |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pull-request review                          | Publishes bounded App-authored review output for eligible pull requests.                                                                                 |
+| Pull-request review                          | Publishes bounded App-authored review output and reconciles status and missing-test labels for eligible pull requests.                                   |
 | Issue triage                                 | Runs automatically with Issues write authority; issue implementation remains disabled.                                                                   |
 | Repair                                       | Disabled by default. A repository administrator must explicitly widen the App authority and install repair mode; an exact owner command starts a repair. |
 | Issue implementation, maintenance, and merge | Disabled in the shipped configuration. Rivet never merges a pull request.                                                                                |
