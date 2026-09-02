@@ -10,9 +10,11 @@ const HISTORICAL_MANAGED_FILE_DIGESTS = Object.freeze({
   ".github/rivet/actions/prepare-review-context/index.mjs": Object.freeze([
     "375aa15b58e9cb04db91a56977ef3646a8aabda7493511b45b9dcbaeb13e666e",
     "b90a18b6fc411e9f874b9f3a04324359da8eb9021e733b2ca9aa337a8fcd7766",
+    "0e310aacc5426f3ce4de0f21e0c3a704cd2f7c63485f4a4994f007e67b1366ec",
   ]),
   ".github/rivet/aw/review-extension.md": Object.freeze([
     "3629111bc1b10c64929714554a75a50e928dda3c916b60acb985c8f7b3ebe143",
+    "25e12a512ffaefb949aeb7ebc7923af6fb209c05d64b75192e7286869543b7d1",
   ]),
   ".github/workflows/rivet-review.lock.yml": Object.freeze([
     "b906670fbab37182a4d2af0ba59061a3d428479bd2f35636f42edc9fe7b965f1",
@@ -25,6 +27,14 @@ const HISTORICAL_MANAGED_FILE_DIGESTS = Object.freeze({
     "a2d77a423d8abe5002594d17e464f683ab15db122416f04a79cabf7cc45bca82",
     "945d02b11e579ab6bef681dd5ce81e9100ac45512c9624be8f20200bd89465b9",
     "3f6595c8f87cf96e595e26f47f13724201c72bac17cbfb0b95102e23023d61ab",
+    "14ff59291b091d3d949c147e7aa39030a4a8fb0f4682c37ebf52c78f4c5a59bb",
+    "f976e07ccaf551848a9e426608da54bb18367fbcda647f453b39d5e745ea8672",
+    "5af81b919c363900ba23936e154fbb1b7d4e57551c6a939c80545bcfad35fe85",
+    "8a35e89f841f6ad58d054ad8bcab1389dfc3f1150e61a5f5bb6f37d96130eec9",
+    "d5cd19bf40c56761cc20190b04add02d131c4abe3ca8481ae3ccc176a9aff7c4",
+    "6856015d99a66ac241e9f5600a8bf5f8c67ae53f18d424f48f89c61a8c8dffdc",
+    "df90ebc17e309862552507de83deb26cb1f56b40cab05d4b1831dbf25a21bc8e",
+    "f21719f73a77e48f8ee8fff5bbc55281c5486786868048319e0051045d3acfd0",
   ]),
 });
 const SUMMARY_REVIEW_EXTENSION = new URL(

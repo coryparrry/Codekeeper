@@ -83,6 +83,7 @@ function githubFetch({
   files = changedFiles(),
   reviews = [],
   comments = [],
+  conversationComments = [],
   responseHeaders = {},
 } = {}) {
   const contents = new Map([
@@ -97,6 +98,11 @@ function githubFetch({
       return new Response(JSON.stringify(reviews), {
         status: 200,
         headers: responseHeaders.reviews,
+      });
+    if (url.pathname.includes("/issues/") && url.pathname.endsWith("/comments"))
+      return new Response(JSON.stringify(conversationComments), {
+        status: 200,
+        headers: responseHeaders.conversationComments,
       });
     if (url.pathname.endsWith("/comments"))
       return new Response(JSON.stringify(comments), {
@@ -158,6 +164,7 @@ test("fetches and projects one exact pull request comparison", async () => {
       `https://api.github.com/repos/owner/repository/compare/${BASE_SHA}...${HEAD_SHA}?per_page=1&page=1`,
       `https://api.github.com/repos/owner/repository/git/blobs/${gitBlobSha(ONE_CONTENT)}`,
       `https://api.github.com/repos/owner/repository/git/blobs/${gitBlobSha(TWO_CONTENT)}`,
+      "https://api.github.com/repos/owner/repository/issues/7/comments?per_page=100&page=1",
       "https://api.github.com/repos/owner/repository/pulls/7/comments?per_page=100&page=1",
       "https://api.github.com/repos/owner/repository/pulls/7/reviews?per_page=100&page=1",
     ].sort(),
@@ -204,7 +211,12 @@ test("fetches and projects one exact pull request comparison", async () => {
         },
       ],
     },
-    priorReviewContext: { complete: true, reviews: [], comments: [] },
+    priorReviewContext: {
+      complete: true,
+      reviews: [],
+      comments: [],
+      conversationComments: [],
+    },
   });
 });
 
@@ -241,6 +253,14 @@ test("projects bounded prior review memory with exact commit identities", async 
         },
         { id: 100, pull_request_review_id: 99 },
       ],
+      conversationComments: [
+        {
+          id: 13,
+          user: { id: 202, login: "maintainer", type: "User" },
+          created_at: "2026-09-01T10:02:00Z",
+          body: "Track the verified precision concern separately.",
+        },
+      ],
     }),
   });
   assert.deepEqual(snapshot.priorReviewContext, {
@@ -271,13 +291,21 @@ test("projects bounded prior review memory with exact commit identities", async 
         body: "This finding is already reported.",
       },
     ],
+    conversationComments: [
+      {
+        id: 13,
+        author: { id: 202, login: "maintainer", type: "User" },
+        createdAt: "2026-09-01T10:02:00Z",
+        body: "Track the verified precision concern separately.",
+      },
+    ],
   });
 });
 
 test("keeps a valid comparison when optional context is invalid or paginated", async () => {
   const fetchImpl = githubFetch({
     responseHeaders: {
-      reviews: {
+      conversationComments: {
         link: '<https://api.github.com/reviews?page=2>; rel="next"',
       },
     },
@@ -308,6 +336,7 @@ test("keeps a valid comparison when optional context is invalid or paginated", a
     reason: "prior review history requires pagination",
     reviews: [],
     comments: [],
+    conversationComments: [],
   });
 
   const budgeted = await createReviewContext({

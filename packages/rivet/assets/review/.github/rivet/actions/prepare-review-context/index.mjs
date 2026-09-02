@@ -392,6 +392,20 @@ function projectReviewComment(comment, index) {
   };
 }
 
+function projectConversationComment(comment, index) {
+  const label = `conversation comment ${index + 1}`;
+  if (!comment || typeof comment !== "object" || Array.isArray(comment))
+    fail(`${label} is invalid`);
+  if (!Number.isSafeInteger(comment.id) || comment.id < 1)
+    fail(`${label} identity is invalid`);
+  return {
+    id: comment.id,
+    author: authorIdentity(comment, label),
+    createdAt: timestamp(comment.created_at, label),
+    body: bodyText(comment.body, label),
+  };
+}
+
 function hasNextPage(headers) {
   return /(?:^|,)\s*<[^>]+>;\s*rel="next"(?:\s*;|\s*(?:,|$))/u.test(
     headers?.get?.("link") ?? "",
@@ -409,44 +423,71 @@ async function createPriorReviewContext({
   maxBytes,
 }) {
   const common = { per_page: 100, page: 1 };
-  const [reviewsResult, commentsResult] = await Promise.all([
-    optionalJson(
-      requestUrl(
-        apiBase,
-        `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls/${pullNumber}/reviews`,
-        common,
+  const [reviewsResult, commentsResult, conversationCommentsResult] =
+    await Promise.all([
+      optionalJson(
+        requestUrl(
+          apiBase,
+          `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls/${pullNumber}/reviews`,
+          common,
+        ),
+        token,
+        fetchImpl,
+        maxResponseBytes,
+        "GitHub prior reviews",
       ),
-      token,
-      fetchImpl,
-      maxResponseBytes,
-      "GitHub prior reviews",
-    ),
-    optionalJson(
-      requestUrl(
-        apiBase,
-        `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls/${pullNumber}/comments`,
-        common,
+      optionalJson(
+        requestUrl(
+          apiBase,
+          `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls/${pullNumber}/comments`,
+          common,
+        ),
+        token,
+        fetchImpl,
+        maxResponseBytes,
+        "GitHub prior review comments",
       ),
-      token,
-      fetchImpl,
-      maxResponseBytes,
-      "GitHub prior review comments",
-    ),
-  ]);
-  const error = reviewsResult.error ?? commentsResult.error;
-  if (error) return nestedIncomplete(error, { reviews: [], comments: [] });
-  if (hasNextPage(reviewsResult.headers) || hasNextPage(commentsResult.headers))
+      optionalJson(
+        requestUrl(
+          apiBase,
+          `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/issues/${pullNumber}/comments`,
+          common,
+        ),
+        token,
+        fetchImpl,
+        maxResponseBytes,
+        "GitHub prior pull request conversation comments",
+      ),
+    ]);
+  const error =
+    reviewsResult.error ??
+    commentsResult.error ??
+    conversationCommentsResult.error;
+  if (error)
+    return nestedIncomplete(error, {
+      reviews: [],
+      comments: [],
+      conversationComments: [],
+    });
+  if (
+    hasNextPage(reviewsResult.headers) ||
+    hasNextPage(commentsResult.headers) ||
+    hasNextPage(conversationCommentsResult.headers)
+  )
     return nestedIncomplete("prior review history requires pagination", {
       reviews: [],
       comments: [],
+      conversationComments: [],
     });
   if (
     !Array.isArray(reviewsResult.value) ||
-    !Array.isArray(commentsResult.value)
+    !Array.isArray(commentsResult.value) ||
+    !Array.isArray(conversationCommentsResult.value)
   )
     return nestedIncomplete("GitHub prior review history is invalid", {
       reviews: [],
       comments: [],
+      conversationComments: [],
     });
   try {
     const publishedReviews = reviewsResult.value.filter(
@@ -463,6 +504,9 @@ async function createPriorReviewContext({
           publishedReviewIds.has(comment?.pull_request_review_id),
         )
         .map(projectReviewComment),
+      conversationComments: conversationCommentsResult.value.map(
+        projectConversationComment,
+      ),
     };
     return serializedBytes(memory) > maxBytes
       ? nestedIncomplete(
@@ -470,6 +514,7 @@ async function createPriorReviewContext({
           {
             reviews: [],
             comments: [],
+            conversationComments: [],
           },
         )
       : Object.freeze(memory);
@@ -477,6 +522,7 @@ async function createPriorReviewContext({
     return nestedIncomplete("GitHub prior review history is invalid", {
       reviews: [],
       comments: [],
+      conversationComments: [],
     });
   }
 }
@@ -598,7 +644,7 @@ export async function createReviewContext({
   if (serializedBytes(snapshot) > maxAggregateBytes) {
     snapshot.priorReviewContext = nestedIncomplete(
       `combined context exceeds the ${maxAggregateBytes}-byte budget`,
-      { reviews: [], comments: [] },
+      { reviews: [], comments: [], conversationComments: [] },
     );
   }
   if (serializedBytes(snapshot) > maxAggregateBytes) {
