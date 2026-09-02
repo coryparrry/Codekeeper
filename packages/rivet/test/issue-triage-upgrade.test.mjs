@@ -209,13 +209,30 @@ test("upgrades the exact array guard before missing-information comments", async
 });
 
 test("accepts only frozen historical managed-file digests", () => {
-  assert.equal(
-    matchesHistoricalManagedFile(
+  for (const [relativePath, sha256] of [
+    [
       ".github/rivet/actions/prepare-review-context/index.mjs",
       "375aa15b58e9cb04db91a56977ef3646a8aabda7493511b45b9dcbaeb13e666e",
-    ),
-    true,
-  );
+    ],
+    [
+      ".github/rivet/actions/prepare-review-context/index.mjs",
+      "b90a18b6fc411e9f874b9f3a04324359da8eb9021e733b2ca9aa337a8fcd7766",
+    ],
+    [
+      ".github/rivet/aw/review-extension.md",
+      "3629111bc1b10c64929714554a75a50e928dda3c916b60acb985c8f7b3ebe143",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      "ef6334e8b5052b31c97ae73e29bb36454d5604c9f297fd7ca4b042772a20ee9a",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      "ff8a5f19bb6d046ea29b0e1c4d546a0c7ffadf2868f98bade178a3177080bad7",
+    ],
+  ]) {
+    assert.equal(matchesHistoricalManagedFile(relativePath, sha256), true);
+  }
   assert.equal(
     matchesHistoricalManagedFile(
       ".github/workflows/rivet-review.lock.yml",
