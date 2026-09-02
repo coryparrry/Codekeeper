@@ -224,11 +224,43 @@ test("accepts only frozen historical managed-file digests", () => {
     ],
     [
       ".github/workflows/rivet-review.lock.yml",
+      "b906670fbab37182a4d2af0ba59061a3d428479bd2f35636f42edc9fe7b965f1",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
       "ef6334e8b5052b31c97ae73e29bb36454d5604c9f297fd7ca4b042772a20ee9a",
     ],
     [
       ".github/workflows/rivet-review.lock.yml",
+      "e63cc7d069968d1fab8c898a53b678b2dd0706419d77280c3e53c7259cb5d8f0",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      "e84aa2b95ba285a8061732e5c2dd02d6f597e25b07b17c38cbdaf7979ae931f6",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      "50f232fc428504c79d7467cf1ccf492610870100622cb7f56a2a93c4dc1986c2",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      "b923c73eeea1f2f8cafc6b31e73a36748aa65fe4f18938607834679b62caa25c",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
       "ff8a5f19bb6d046ea29b0e1c4d546a0c7ffadf2868f98bade178a3177080bad7",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      "a2d77a423d8abe5002594d17e464f683ab15db122416f04a79cabf7cc45bca82",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      "945d02b11e579ab6bef681dd5ce81e9100ac45512c9624be8f20200bd89465b9",
+    ],
+    [
+      ".github/workflows/rivet-review.lock.yml",
+      "3f6595c8f87cf96e595e26f47f13724201c72bac17cbfb0b95102e23023d61ab",
     ],
   ]) {
     assert.equal(matchesHistoricalManagedFile(relativePath, sha256), true);
