@@ -83,6 +83,7 @@ function githubFetch({
   files = changedFiles(),
   reviews = [],
   comments = [],
+  conversationComments = [],
   responseHeaders = {},
 } = {}) {
   const contents = new Map([
@@ -97,6 +98,11 @@ function githubFetch({
       return new Response(JSON.stringify(reviews), {
         status: 200,
         headers: responseHeaders.reviews,
+      });
+    if (url.pathname.includes("/issues/") && url.pathname.endsWith("/comments"))
+      return new Response(JSON.stringify(conversationComments), {
+        status: 200,
+        headers: responseHeaders.conversationComments,
       });
     if (url.pathname.endsWith("/comments"))
       return new Response(JSON.stringify(comments), {
@@ -158,6 +164,7 @@ test("fetches and projects one exact pull request comparison", async () => {
       `https://api.github.com/repos/owner/repository/compare/${BASE_SHA}...${HEAD_SHA}?per_page=1&page=1`,
       `https://api.github.com/repos/owner/repository/git/blobs/${gitBlobSha(ONE_CONTENT)}`,
       `https://api.github.com/repos/owner/repository/git/blobs/${gitBlobSha(TWO_CONTENT)}`,
+      "https://api.github.com/repos/owner/repository/issues/7/comments?per_page=100&page=1",
       "https://api.github.com/repos/owner/repository/pulls/7/comments?per_page=100&page=1",
       "https://api.github.com/repos/owner/repository/pulls/7/reviews?per_page=100&page=1",
     ].sort(),
@@ -204,7 +211,12 @@ test("fetches and projects one exact pull request comparison", async () => {
         },
       ],
     },
-    priorReviewContext: { complete: true, reviews: [], comments: [] },
+    priorReviewContext: {
+      complete: true,
+      reviews: [],
+      comments: [],
+      conversationComments: [],
+    },
   });
 });
 
@@ -241,6 +253,14 @@ test("projects bounded prior review memory with exact commit identities", async 
         },
         { id: 100, pull_request_review_id: 99 },
       ],
+      conversationComments: [
+        {
+          id: 13,
+          user: { id: 202, login: "maintainer", type: "User" },
+          created_at: "2026-09-01T10:02:00Z",
+          body: "Track the verified precision concern separately.",
+        },
+      ],
     }),
   });
   assert.deepEqual(snapshot.priorReviewContext, {
@@ -271,13 +291,21 @@ test("projects bounded prior review memory with exact commit identities", async 
         body: "This finding is already reported.",
       },
     ],
+    conversationComments: [
+      {
+        id: 13,
+        author: { id: 202, login: "maintainer", type: "User" },
+        createdAt: "2026-09-01T10:02:00Z",
+        body: "Track the verified precision concern separately.",
+      },
+    ],
   });
 });
 
 test("keeps a valid comparison when optional context is invalid or paginated", async () => {
   const fetchImpl = githubFetch({
     responseHeaders: {
-      reviews: {
+      conversationComments: {
         link: '<https://api.github.com/reviews?page=2>; rel="next"',
       },
     },
@@ -308,6 +336,7 @@ test("keeps a valid comparison when optional context is invalid or paginated", a
     reason: "prior review history requires pagination",
     reviews: [],
     comments: [],
+    conversationComments: [],
   });
 
   const budgeted = await createReviewContext({
@@ -324,6 +353,62 @@ test("keeps a valid comparison when optional context is invalid or paginated", a
     Buffer.byteLength(JSON.stringify(budgeted.repositoryContext), "utf8") <=
       220,
   );
+});
+
+test("fits one exact managed-source blob without evicting review memory", async () => {
+  const content = "x".repeat(22 * 1024);
+  const priorReviewBody = "r".repeat(11 * 1024);
+  const sha = gitBlobSha(content);
+  const snapshot = await createReviewContext({
+    event: event(1),
+    expectedRepository: "owner/repository",
+    token: "secret-token",
+    fetchImpl: async (url) => {
+      if (url.pathname.includes("/compare/")) {
+        return new Response(
+          JSON.stringify(
+            comparison([
+              {
+                filename: ".github/rivet/actions/context/index.mjs",
+                sha,
+                status: "modified",
+                additions: 1,
+                deletions: 1,
+                changes: 2,
+                patch: "p".repeat(31 * 1024),
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      if (url.pathname.includes("/git/blobs/"))
+        return new Response(JSON.stringify(blob(content)), { status: 200 });
+      if (url.pathname.endsWith("/reviews")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: 11,
+              user: { id: 101, login: "rivet[bot]", type: "Bot" },
+              state: "COMMENTED",
+              commit_id: HEAD_SHA,
+              submitted_at: "2026-09-01T10:00:00Z",
+              body: priorReviewBody,
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      return new Response("[]", { status: 200 });
+    },
+  });
+  assert.equal(snapshot.repositoryContext.complete, true);
+  assert.equal(snapshot.repositoryContext.files[0].content, content);
+  assert.equal(snapshot.priorReviewContext.complete, true);
+  assert.equal(snapshot.priorReviewContext.reviews[0].body, priorReviewBody);
+  const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+  assert.ok(snapshotBytes > 64 * 1024);
+  assert.ok(snapshotBytes <= 72 * 1024);
 });
 
 test("requires patches for changed files except source-backed locks", async () => {
