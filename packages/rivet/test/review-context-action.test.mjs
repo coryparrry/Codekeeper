@@ -326,6 +326,62 @@ test("keeps a valid comparison when optional context is invalid or paginated", a
   );
 });
 
+test("fits one exact managed-source blob without evicting review memory", async () => {
+  const content = "x".repeat(22 * 1024);
+  const priorReviewBody = "r".repeat(11 * 1024);
+  const sha = gitBlobSha(content);
+  const snapshot = await createReviewContext({
+    event: event(1),
+    expectedRepository: "owner/repository",
+    token: "secret-token",
+    fetchImpl: async (url) => {
+      if (url.pathname.includes("/compare/")) {
+        return new Response(
+          JSON.stringify(
+            comparison([
+              {
+                filename: ".github/rivet/actions/context/index.mjs",
+                sha,
+                status: "modified",
+                additions: 1,
+                deletions: 1,
+                changes: 2,
+                patch: "p".repeat(31 * 1024),
+              },
+            ]),
+          ),
+          { status: 200 },
+        );
+      }
+      if (url.pathname.includes("/git/blobs/"))
+        return new Response(JSON.stringify(blob(content)), { status: 200 });
+      if (url.pathname.endsWith("/reviews")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: 11,
+              user: { id: 101, login: "rivet[bot]", type: "Bot" },
+              state: "COMMENTED",
+              commit_id: HEAD_SHA,
+              submitted_at: "2026-09-01T10:00:00Z",
+              body: priorReviewBody,
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      return new Response("[]", { status: 200 });
+    },
+  });
+  assert.equal(snapshot.repositoryContext.complete, true);
+  assert.equal(snapshot.repositoryContext.files[0].content, content);
+  assert.equal(snapshot.priorReviewContext.complete, true);
+  assert.equal(snapshot.priorReviewContext.reviews[0].body, priorReviewBody);
+  const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+  assert.ok(snapshotBytes > 64 * 1024);
+  assert.ok(snapshotBytes <= 72 * 1024);
+});
+
 test("requires patches for changed files except source-backed locks", async () => {
   const incomplete = await createReviewContext({
     event: event(1),

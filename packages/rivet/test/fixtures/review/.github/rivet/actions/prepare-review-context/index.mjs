@@ -10,9 +10,9 @@ const MAX_FILES = 50;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_BYTES = 32 * 1024;
 const MAX_REPOSITORY_CONTEXT_FILES = 6;
-const MAX_REPOSITORY_CONTEXT_BYTES = 12 * 1024;
+const MAX_REPOSITORY_CONTEXT_BYTES = 24 * 1024;
 const MAX_PRIOR_REVIEW_BYTES = 12 * 1024;
-const MAX_AGGREGATE_BYTES = 64 * 1024;
+const MAX_AGGREGATE_BYTES = 72 * 1024;
 
 function fail(message) {
   throw new Error(`Rivet review context: ${message}`);
