@@ -34,10 +34,10 @@ export const RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
   gemini: "11a0fd1a832a6d0a844ccf915611e2ee4a0966b5b68abb373d2592d343ada201",
 });
 export const RIVET_ISSUE_TRIAGE_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
-  claude: "a21906bcc1caf7275288f14527eeea25bd2e5e04b19703795942c1e0bb707282",
-  codex: "312e5a386599d4076bdcbaf75767b8505adfad7c03f0f31508f33d39dcaa6663",
-  copilot: "c721efb9884ee4651238b69c64a78ecf146905838796a74adb6689b05f3fd362",
-  gemini: "740e7807ec0397efdc4b1a518d5330fe58ba6aec1a6761f0e2e7ed06131ce117",
+  claude: "f1ac491b665080316eb9ae1c0b9762b58d39e416c09677dd28a6e54d5ccf5ea4",
+  codex: "9fbb8d8e217a3dae414e85208674a68421494111d2d21425ee7ad8f89a76c011",
+  copilot: "ee0dc306c0fbf944d077f1637edee60d1fe30d989db0a75da961d23aa4015ffb",
+  gemini: "4a55ecdcb1d007d048e7816d1209c91bbc20fe4e1358fe6b77484454fa813238",
 });
 
 function sameValues(left, right) {

@@ -317,12 +317,19 @@ The previous App-owned triage state and frozen conversation are durable memory e
 
 When a concise triage response would help the author or maintainers, call \`publish_triage_comment\` once with verified duplicate links, missing evidence, or concrete next steps. Pass \`missing_information\` as a JSON array string containing at most eight unresolved material questions. Pass the snapshot's exact \`previousMarkerCommentId\` as a decimal string. For every follow-up, publish a new state even when the array is empty so the old awaiting-information state cannot remain live. Rivet revalidates the live issue, trigger, and latest App-owned marker before binding publication to the triggering issue. Do not promise implementation.
 
-For an opened event with no useful response, call only \`noop\` with a concise reason. If required evidence is unavailable, call \`report_incomplete\` with the exact missing boundary instead of guessing.
+For an opened event, missing material reporter evidence is a useful response: call \`publish_triage_comment\`, not \`noop\` or \`report_incomplete\`, and ask only the unresolved material questions. Call only \`noop\` when there is no material question, verified duplicate, or concrete next step to communicate. If required workflow evidence is unavailable, call \`report_incomplete\` with the exact missing boundary instead of guessing.
 `;
 }
 
-export function renderRivetIssueTriageWorkflowV013(options = {}) {
+export function renderRivetIssueTriageWorkflowV013Array(options = {}) {
   return renderRivetIssueTriageWorkflow(options).replace(
+    "For an opened event, missing material reporter evidence is a useful response: call `publish_triage_comment`, not `noop` or `report_incomplete`, and ask only the unresolved material questions. Call only `noop` when there is no material question, verified duplicate, or concrete next step to communicate. If required workflow evidence is unavailable, call `report_incomplete` with the exact missing boundary instead of guessing.",
+    "For an opened event with no useful response, call only `noop` with a concise reason. If required evidence is unavailable, call `report_incomplete` with the exact missing boundary instead of guessing.",
+  );
+}
+
+export function renderRivetIssueTriageWorkflowV013(options = {}) {
+  return renderRivetIssueTriageWorkflowV013Array(options).replace(
     '    allowed-repos:\n      - "${{ github.repository }}"',
     '    allowed-repos: "${{ github.repository }}"',
   );

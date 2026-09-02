@@ -156,10 +156,15 @@ test("rejects stale issue-triage locks from the pinned compiler", async () => {
         gzipSync("checked-in\n").toString("base64"),
       );
     }
-    await writeFile(
-      path.join(historicalFixtureRoot, "rivet-issue-triage.lock.yml.gz.b64"),
-      gzipSync("checked-in\n").toString("base64"),
-    );
+    for (const suffix of ["", "-array"]) {
+      await writeFile(
+        path.join(
+          historicalFixtureRoot,
+          `rivet-issue-triage${suffix}.lock.yml.gz.b64`,
+        ),
+        gzipSync("checked-in\n").toString("base64"),
+      );
+    }
     const options = {
       fixtureRoot,
       historicalFixtureRoot,
@@ -199,16 +204,24 @@ test("rejects stale issue-triage locks from the pinned compiler", async () => {
         ),
       );
     }
-    await writeFile(
-      path.join(historicalFixtureRoot, "rivet-issue-triage.lock.yml.gz.b64"),
-      gzipSync("# prior compiler formatting\nregenerated\n").toString("base64"),
-    );
+    for (const suffix of ["", "-array"]) {
+      await writeFile(
+        path.join(
+          historicalFixtureRoot,
+          `rivet-issue-triage${suffix}.lock.yml.gz.b64`,
+        ),
+        gzipSync("# prior compiler formatting\nregenerated\n").toString(
+          "base64",
+        ),
+      );
+    }
     compiledSources.length = 0;
     await checkIssueTriageLocks(options);
     assert.deepEqual(
       compiledSources.map((source) => source.match(/^engine: (\w+)$/m)?.[1]),
-      ["codex", "claude", "copilot", "gemini", "codex"],
+      ["codex", "claude", "copilot", "gemini", "codex", "codex"],
     );
+    assert.match(compiledSources.at(-2), /allowed-repos:\n      -/);
     assert.match(
       compiledSources.at(-1),
       /allowed-repos: "\$\{\{ github\.repository \}\}"/,

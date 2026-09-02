@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   renderRivetIssueTriageWorkflow,
   renderRivetIssueTriageWorkflowV013,
+  renderRivetIssueTriageWorkflowV013Array,
   RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS,
   RIVET_ISSUE_TRIAGE_WORKFLOW_ID,
 } from "./workflows/issue-triage.mjs";
@@ -145,7 +146,9 @@ export async function buildWorkflowFiles({
       `.github/workflows/${RIVET_ISSUE_TRIAGE_WORKFLOW_ID}.md`,
       issueTriageWorkflowVersion === "v0.1.13"
         ? renderRivetIssueTriageWorkflowV013({ configuration: config })
-        : renderRivetIssueTriageWorkflow({ configuration: config }),
+        : issueTriageWorkflowVersion === "v0.1.13-array"
+          ? renderRivetIssueTriageWorkflowV013Array({ configuration: config })
+          : renderRivetIssueTriageWorkflow({ configuration: config }),
     );
   }
   if (includeMaintenance) {
