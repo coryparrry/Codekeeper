@@ -526,6 +526,24 @@ async function prepareInstallation({
       }
     }
     if (requiresUpgrade) {
+      const beforeAutoTagging = await buildWorkflowFiles({
+        stagingRoot: path.join(stagingRoot, "before-auto-tagging"),
+        mode,
+        config,
+        reviewConfig,
+        validation,
+        binaryPath,
+        compileWorkflow,
+        validateWorkflow,
+        env,
+        profiles: true,
+        includeIssueTriage: config.issues.triage === "automatic",
+        includeMaintenance: config.maintenance.mode !== "disabled",
+        includeAutoTagging: false,
+      });
+      completeInstallationFiles(beforeAutoTagging, { mode, config });
+      baselines.push(beforeAutoTagging);
+
       for (const { version, url } of PROFILED_REVIEW_EXTENSIONS) {
         const reviewExtension = await readFile(url, "utf8");
         const profiled = await buildWorkflowFiles({
