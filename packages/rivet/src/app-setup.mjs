@@ -2,6 +2,8 @@ import { createPrivateKey, createSign } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { open } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import {
   repairAppAuthority,
   reviewAppAuthority,
@@ -40,10 +42,15 @@ export async function readPrivateKeyFile(privateKeyPath) {
   if (typeof privateKeyPath !== "string" || !privateKeyPath) {
     throw new Error("Rivet App setup: private-key file is required");
   }
+  const keyPath =
+    privateKeyPath.startsWith("~/") ||
+    (path.sep === "\\" && privateKeyPath.startsWith("~\\"))
+      ? path.join(os.homedir(), privateKeyPath.slice(2))
+      : privateKeyPath;
   let handle;
   try {
     handle = await open(
-      privateKeyPath,
+      keyPath,
       fsConstants.O_RDONLY |
         (fsConstants.O_NOFOLLOW ?? 0) |
         (fsConstants.O_NONBLOCK ?? 0),

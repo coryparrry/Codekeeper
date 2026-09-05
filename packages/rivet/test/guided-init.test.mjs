@@ -4,6 +4,7 @@ import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 import { runGuidedInit } from "../src/guided-init.mjs";
 
 const ROOT = "/work/example";
@@ -38,6 +39,7 @@ function prompt({
 }
 
 function runner({
+  repositoryRoot = ROOT,
   ownerType = "User",
   existingSecrets = [],
   status = "",
@@ -53,7 +55,7 @@ function runner({
       args[0] === "rev-parse" &&
       args[1] === "--show-toplevel"
     ) {
-      return ROOT;
+      return repositoryRoot;
     }
     if (command === "git" && args[0] === "status") return currentStatus;
     if (command === "git" && args[0] === "remote") {
@@ -175,6 +177,8 @@ test("guides the ordered review-only setup without exposing credentials", async 
   );
   assert.match(stdout.read(), /Create the Rivet GitHub App:/);
   assert.match(stdout.read(), /Created verified draft setup pull request:/);
+  assert.match(stdout.read(), /review the draft pull request and its checks/);
+  assert.match(stdout.read(), /mark it ready for review and merge it/);
   const secretCommand = fakeRunner.calls.find(
     ({ command, args }) =>
       command === "gh" && args[0] === "secret" && args[1] === "set",
@@ -197,6 +201,171 @@ test("guides the ordered review-only setup without exposing credentials", async 
   );
   assert.doesNotMatch(JSON.stringify(result), /rivet\.pem/);
   assert.doesNotMatch(JSON.stringify(result), new RegExp(CLIENT_ID));
+});
+
+test("loads configuration from the resolved repository root when invoked below it", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rivet-guided-config-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const nested = path.join(root, "packages/example/src");
+  await mkdir(path.join(root, ".github"), { recursive: true });
+  await mkdir(nested, { recursive: true });
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.review.maximumFindings = 3;
+  await writeFile(
+    path.join(root, ".github/rivet.json"),
+    JSON.stringify(configuration),
+  );
+  const fakeRunner = runner({ repositoryRoot: root });
+  let preparedConfiguration;
+
+  const result = await runGuidedInit({
+    cwd: nested,
+    runner: fakeRunner.run,
+    prompt: prompt({ confirmations: [false] }),
+    stdout: output().stream,
+    openUrl: async () => {},
+    ...dependencies({
+      prepareReviewInstallationImpl: async (options) => {
+        preparedConfiguration = options.configuration;
+        return {
+          files: [
+            {
+              path: ".github/workflows/rivet-review.lock.yml",
+              status: "update",
+            },
+          ],
+        };
+      },
+    }),
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.deepEqual(preparedConfiguration, configuration);
+  assert.equal(fakeRunner.calls[0].options.cwd, nested);
+  assert.equal(
+    fakeRunner.calls.slice(1).every(({ options }) => options.cwd === root),
+    true,
+  );
+});
+
+test("honors an explicit guided configuration without reading the repository file", async () => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.review.maximumFindings = 4;
+  let preparedConfiguration;
+
+  await runGuidedInit({
+    configuration,
+    readRivetConfigurationImpl: async () => {
+      throw new Error("must not read installed configuration");
+    },
+    runner: runner().run,
+    prompt: prompt({ confirmations: [false] }),
+    stdout: output().stream,
+    openUrl: async () => {},
+    ...dependencies({
+      prepareReviewInstallationImpl: async (options) => {
+        preparedConfiguration = options.configuration;
+        return {
+          files: [
+            {
+              path: ".github/workflows/rivet-review.lock.yml",
+              status: "update",
+            },
+          ],
+        };
+      },
+    }),
+  });
+
+  assert.equal(preparedConfiguration, configuration);
+});
+
+test("directs an existing repair installation to the explicit repair setup", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rivet-guided-repair-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const nested = path.join(root, "src");
+  await mkdir(path.join(root, ".github"), { recursive: true });
+  await mkdir(nested);
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.repair.authority = "owner";
+  await writeFile(
+    path.join(root, ".github/rivet.json"),
+    JSON.stringify(configuration),
+  );
+  const fakeRunner = runner({ repositoryRoot: root });
+  let prepared = false;
+
+  await assert.rejects(
+    runGuidedInit({
+      cwd: nested,
+      runner: fakeRunner.run,
+      prompt: prompt(),
+      stdout: output().stream,
+      ...dependencies({
+        prepareReviewInstallationImpl: async () => {
+          prepared = true;
+        },
+      }),
+    }),
+    /rivet init --repair --setup-pr/,
+  );
+
+  assert.equal(prepared, false);
+  assert.deepEqual(
+    fakeRunner.calls.map(({ command, args }) => [command, ...args]),
+    [["git", "rev-parse", "--show-toplevel"]],
+  );
+});
+
+test("reports guided phases on TTY stderr and forwards installer progress", async () => {
+  const stderr = output();
+  stderr.stream.isTTY = true;
+  const result = await runGuidedInit({
+    runner: runner().run,
+    prompt: prompt({ confirmations: [false] }),
+    stdout: output().stream,
+    stderr: stderr.stream,
+    openUrl: async () => {},
+    ...dependencies({
+      prepareReviewInstallationImpl: async (options) => {
+        options.onProgress("Preparing Rivet installation");
+        options.onProgress("Checking existing Rivet installation");
+        return {
+          files: [
+            {
+              path: ".github/workflows/rivet-review.lock.yml",
+              status: "create",
+            },
+          ],
+        };
+      },
+    }),
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.match(stderr.read(), /^Rivet: Resolving the Git repository/m);
+  assert.match(stderr.read(), /Rivet: Checking repository prerequisites/);
+  assert.match(
+    stderr.read(),
+    /Rivet: Compiling and checking the review workflows/,
+  );
+  assert.match(stderr.read(), /Rivet: Preparing Rivet installation/);
+  assert.match(stderr.read(), /Rivet: Checking existing Rivet installation/);
+});
+
+test("keeps guided progress silent when stderr is not a TTY", async () => {
+  const stderr = output();
+  const result = await runGuidedInit({
+    runner: runner().run,
+    prompt: prompt({ confirmations: [false] }),
+    stdout: output().stream,
+    stderr: stderr.stream,
+    openUrl: async () => {},
+    ...dependencies(),
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(stderr.read(), "");
 });
 
 test("prints an organization registration URL when opening the browser fails", async () => {

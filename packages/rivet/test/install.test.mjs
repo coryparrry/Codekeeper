@@ -816,7 +816,7 @@ test("refuses a repository path that does not exist", async (t) => {
   const repositoryRoot = await repository(t);
   await assert.rejects(
     installReview({ repositoryRoot: path.join(repositoryRoot, "missing") }),
-    { code: "ENOENT" },
+    /repository root does not exist/,
   );
 });
 test("upgrades an exact review installation to owner-authorized repair", async (t) => {
@@ -960,7 +960,7 @@ test("refuses files changed after the repair plan is prepared", async (t) => {
     { code: "ENOENT" },
   );
 });
-test("normalizes semantic-only compiler lock drift during upgrade", async (t) => {
+test("preserves semantic-only compiler lock drift during upgrade", async (t) => {
   const repositoryRoot = await repository(t);
   await installReview({
     repositoryRoot,
@@ -976,10 +976,8 @@ test("normalizes semantic-only compiler lock drift during upgrade", async (t) =>
     ({ path: filePath }) =>
       filePath === ".github/workflows/rivet-repair.lock.yml",
   );
-  await writeFile(
-    path.join(repositoryRoot, repairLock.path),
-    `# prior compiler formatting\n${repairLock.content}`,
-  );
+  const existingContent = `# prior compiler formatting\n${repairLock.content}`;
+  await writeFile(path.join(repositoryRoot, repairLock.path), existingContent);
   const result = await installRepair({
     repositoryRoot,
     compileWorkflow: fixtureCompiler,
@@ -988,10 +986,10 @@ test("normalizes semantic-only compiler lock drift during upgrade", async (t) =>
   assert.equal(
     result.files.find(({ path: filePath }) => filePath === repairLock.path)
       .status,
-    "update",
+    "unchanged",
   );
   assert.equal(
     await readFile(path.join(repositoryRoot, repairLock.path), "utf8"),
-    repairLock.content,
+    existingContent,
   );
 });

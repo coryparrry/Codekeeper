@@ -1,10 +1,9 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   reviewAppAuthority,
   reviewAppRegistrationUrl,
 } from "./app-authority.mjs";
-import { DEFAULT_RIVET_CONFIG, validateRivetConfig } from "./config.mjs";
+import { DEFAULT_RIVET_CONFIG } from "./config.mjs";
 import { installRepair, installReview } from "./install.mjs";
 import {
   createRepairSetupPullRequest,
@@ -16,6 +15,7 @@ import {
   verifyReviewApp,
 } from "./app-setup.mjs";
 import { runGuidedInit } from "./guided-init.mjs";
+import { readRivetConfiguration } from "./repository-config.mjs";
 
 export const USAGE = `Rivet repository maintenance
 
@@ -51,24 +51,6 @@ Run rivet init --help for this help. The guided setup does not configure repair 
 
 function usage() {
   return USAGE;
-}
-
-async function existingConfiguration(repositoryRoot) {
-  const configPath = path.join(repositoryRoot, ".github/rivet.json");
-  let content;
-  try {
-    content = await readFile(configPath, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") return undefined;
-    throw error;
-  }
-  try {
-    return validateRivetConfig(JSON.parse(content));
-  } catch (error) {
-    throw new Error(
-      `Rivet: invalid configuration at ${configPath}: ${error.message}`,
-    );
-  }
 }
 
 function parseAppCredentials(args, { allowRepair = false } = {}) {
@@ -239,12 +221,10 @@ export async function runCli(
   }
   if (command !== "init") throw new Error(`Rivet: unknown command\n${usage()}`);
   if (args.length === 0) {
-    const configuration = await existingConfiguration(cwd);
     return runGuidedInitImpl({
       cwd,
       env: environment,
       stdio: { stdin, stdout, stderr },
-      ...(configuration ? { configuration } : {}),
     });
   }
   const options = parseInit(args);
@@ -259,7 +239,7 @@ export async function runCli(
     cwd,
     installationOptions.repositoryRoot ?? ".",
   );
-  const existing = await existingConfiguration(
+  const existing = await readRivetConfiguration(
     installationOptions.repositoryRoot,
   );
   if (existing || issues || maintenance) {
@@ -268,6 +248,10 @@ export async function runCli(
     if (maintenance) configuration.maintenance.mode = maintenance;
     if (mode === "repair") configuration.repair.authority = "owner";
     installationOptions.configuration = configuration;
+  }
+  if (stderr?.isTTY) {
+    installationOptions.onProgress = (message) =>
+      stderr.write(`Rivet: ${message}...\n`);
   }
   const result = setupPullRequest
     ? await (mode === "repair"
