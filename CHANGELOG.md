@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Rivet
+
+- Restore automatic review status and missing-test labels while preserving human
+  labels and requiring successful current-head review publication.
+- Preserve existing configuration and custom finding limits during CLI refreshes
+  and supported review-to-repair upgrades.
+- Load guided configuration from the Git root, support home-relative PEM paths,
+  and show interactive progress plus clear setup-PR activation guidance.
+- Preserve semantically unchanged workflow locks and avoid historical compilation
+  for comment-only compiler differences.
+- Replace retired Codekeeper setup and validation instructions with the current
+  Rivet workflow.
+
+The versioned entries below record historical Codekeeper releases. These Rivet
+changes are unreleased until a versioned Rivet publication includes them.
+
 ## [0.5.3](https://github.com/coryparrry/Codekeeper/compare/codekeeper-v0.5.2...codekeeper-v0.5.3) (2026-08-25)
 
 
@@ -223,7 +239,7 @@
 
 All notable released changes will be recorded here.
 
-## Unreleased
+## Historical unreleased Codekeeper notes
 
 ### Added
 
@@ -235,5 +251,5 @@ All notable released changes will be recorded here.
 - Installation documentation now distinguishes local source evaluation from a
   public npm release.
 
-There are no public package release notes yet. A versioned entry is added only
-after its release and publication evidence are available.
+A versioned Rivet entry is added only after its release and publication evidence
+are available.

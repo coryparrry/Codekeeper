@@ -6,26 +6,35 @@ installing it.
 
 ## Authority
 
-| Capability            | Default   | Authority                                                                                            |
-| --------------------- | --------- | ---------------------------------------------------------------------------------------------------- |
-| Pull-request review   | Automatic | App-authored review comments and managed status/test labels; deferred findings may create one issue when issue triage is enabled. |
-| Incoming issue triage | Automatic | One App-authored comment on a newly opened issue.                                                    |
-| Repair                | Optional  | An owner-authorized command may publish one validated repair commit to the same pull-request branch. |
-| Maintenance           | Disabled  | Manual or weekly report-only audit artifact; no App token or GitHub mutation.                        |
-| Issue implementation  | Disabled  | Unsupported.                                                                                         |
-| Automatic merge       | Disabled  | Unsupported.                                                                                         |
+| Capability            | Default   | Authority                                                                                                                                                                                                                      |
+| --------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Pull-request review   | Automatic | App-authored review comments and four managed labels: `changes required`, `review needed`, `merge ready`, and `needs tests`. Other labels are preserved. A deferred finding may create one issue when issue triage is enabled. |
+| Incoming issue triage | Automatic | One bound App-authored comment per eligible issue opening or follow-up.                                                                                                                                                        |
+| Repair                | Optional  | An owner-authorized command may publish one validated repair commit to the same pull-request branch.                                                                                                                           |
+| Maintenance           | Disabled  | Manual or weekly report-only audit artifact; no App token or GitHub mutation.                                                                                                                                                  |
+| Issue implementation  | Disabled  | Unsupported.                                                                                                                                                                                                                   |
+| Automatic merge       | Disabled  | Unsupported.                                                                                                                                                                                                                   |
 
-The installer shows the requested App permissions before any GitHub App setup.
+Bare `rivet init` is the guided review-only path. It checks a clean checkout at
+the exact default-branch head, shows the requested App permissions, creates and
+verifies a repository-selected GitHub App, stores the App key and model key as
+encrypted GitHub Actions secrets, and creates a verified draft setup pull
+request. The user reviews, marks ready, and merges that pull request to activate
+Rivet.
+
 Rivet cannot grant a missing permission. Expanding an existing installation may
 require a repository administrator to approve the changed App authority.
+Repair is a separate explicit installation mode and widens the App's Contents
+permission from read to write.
 
 ## Data sent to providers
 
 Review may include pull-request metadata, diffs, bounded exact-head source, and
 prior Rivet reviews and inline comments. Issue triage may include the issue
-title, body, Rivet's previous triage state, and bounded follow-up comments.
-Maintenance inspects the default-branch snapshot. Repair uses the reviewed
-finding and the checked-out pull-request branch.
+title, body, labels, Rivet's previous triage state, and bounded follow-up
+comments. Maintenance inspects the exact default-branch snapshot and produces a
+report artifact. Repair uses the reviewed finding and the checked-out
+pull-request branch.
 
 Provider retention, training, regional processing, and contractual terms are
 controlled by the selected provider account. Do not enable Rivet where those

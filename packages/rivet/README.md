@@ -7,18 +7,19 @@ need to install `gh-aw`.
 
 ## Quick start
 
-From the root of the GitHub repository you want to configure:
+From any directory inside a clean GitHub repository checkout whose `HEAD`
+matches the fetched remote default branch:
 
 ```bash
 npx @coryparry/rivet init
 ```
 
-The guided installer detects the repository, walks you through the unavoidable
-GitHub App and model-key steps, verifies the exact review authority, and creates
-a draft setup pull request. It never merges. App creation and installation
-remain human-controlled GitHub.com operations; Rivet does not bypass 2FA or
-print provider-secret values or put them in command arguments, and it keeps no
-local copy.
+The guided installer resolves the repository root, opens the GitHub App
+registration and installation pages, and pauses for you to complete those
+GitHub.com steps. It configures and verifies the App for the target repository
+in selected-repository mode, configures model access, and creates a verified draft setup pull
+request. Review it, mark it ready, and merge it through your normal controls to
+activate Rivet. Rivet never merges it.
 
 ## Requirements
 
@@ -30,12 +31,20 @@ local copy.
   organization authority
 - Access to a `CODEX_API_KEY` or `OPENAI_API_KEY` provider credential
 
-The model secret is required for reviews. Guided init uses an existing Actions
-secret or asks the GitHub CLI to create one; manual setups can use
-`gh secret set`. Rivet never prints the value or puts it in command arguments,
-and it keeps no local copy. An exported value is read only to pass it to
-`gh secret set` over standard input. Review starts with least authority. Repair
-is a separate, explicit App authority upgrade.
+The default review App authority is Contents read, Metadata read, Pull requests
+write, and Issues write for automatic issue triage, with webhooks disabled.
+Guided init reuses an existing Actions model secret, accepts an exported
+`CODEX_API_KEY` or `OPENAI_API_KEY`, or asks for it through a secure prompt. New
+secret values and the App PEM go to `gh secret set` over standard input; Rivet
+does not print them, put them in command arguments, or keep local copies.
+Private-key paths may begin with `~/`.
+
+On an existing review-only installation, the same command preserves customized
+configuration and upgrades recognized historical Rivet-managed workflows. An
+already-current installation stops with a
+`review-only installation is already up to date` error and creates no pull
+request. An existing repair installation instead directs you to
+`npx @coryparry/rivet init --repair --setup-pr`.
 
 ## Maintenance reports
 
@@ -90,7 +99,9 @@ npx @coryparry/rivet app-verify --repository OWNER/REPOSITORY \
 For explicit modes, use `init --review-only` or `init --repair`. Add
 `--dry-run` to preview, `--setup-pr` to create a verified draft setup PR, or
 omit both to write directly to the existing checkout. Repair requires the
-separate authority upgrade and `app-verify --repair` first.
+separate authority upgrade and `app-verify --repair` first. Explicit init keeps
+standard output as JSON, reports progress to TTY standard error, and emits no
+progress text to non-TTY standard error.
 
 ## License
 

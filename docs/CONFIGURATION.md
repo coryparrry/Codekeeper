@@ -11,6 +11,24 @@ The default policy enables automatic pull-request review and incoming issue
 triage. Maintenance, repair, issue implementation, and merge remain disabled by
 default.
 
+## Refreshing an installation
+
+Bare `rivet init` resolves the repository root when run from any directory
+inside the checkout. Explicit modes use the current directory unless
+`--repository` supplies the root. Both paths read an existing
+`.github/rivet.json` from the selected root before rendering workflows. Flags
+such as `--issues` and `--maintenance` update only the named setting; custom
+model choices, review limits, and all other valid settings are preserved.
+Explicit `--repair` likewise preserves the existing policy while changing
+`repair.authority` to `owner`.
+
+Guided review setup refuses to silently downgrade an existing repair
+installation. Refresh that installation with `rivet init --repair --setup-pr`.
+The installer accepts only current managed output or a supported frozen prior
+baseline, and it refuses to overwrite an adopter edit. Semantically equivalent
+compiled YAML locks keep their existing bytes, so compiler comments or
+formatting alone do not create setup-PR churn.
+
 ## Maintenance reports
 
 Enable a report manually or weekly when installing:
@@ -44,8 +62,9 @@ workflow through the same verified installation path.
 
 Automatic triage also lets a pull-request review defer at most one verified,
 out-of-scope finding to a new issue. Deferral creates the issue; incoming
-triage comments on a newly opened issue. They are separate actions governed by
-the same permission, and neither authorizes implementation.
+triage publishes one state for a newly opened issue and a new state after each
+authorized follow-up. They are separate actions governed by the same
+permission, and neither authorizes implementation.
 
 Pull-request review context includes a bounded set of exact-head source blobs
 and prior Rivet reviews and inline comments. Historical content is treated as
@@ -59,17 +78,25 @@ the new permission takes effect. `issues.implementation` must remain
 
 ## Other controls
 
-| Setting                  | Current behavior                                                            |
-| ------------------------ | --------------------------------------------------------------------------- |
-| `review.automatic`       | Runs review and reconciles its managed labels on eligible pull requests.    |
-| `review.inlineFindings`  | Allows bounded inline review comments.                                      |
-| `review.requestChanges`  | Chooses comment-only or request-changes review.                             |
-| `review.maximumFindings` | Limits findings to an integer from 1 to 20.                                 |
-| `repair.authority`       | `never` by default; `owner` requires the separate repair authority upgrade. |
-| `maintenance.mode`       | `disabled`, `manual`, or weekly `scheduled`; report-only in enabled modes.  |
-| `merge.authority`        | Must remain `never`.                                                        |
+| Setting                  | Current behavior                                                              |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `review.automatic`       | Runs review and reconciles its four managed labels on eligible pull requests. |
+| `review.inlineFindings`  | Allows bounded inline review comments.                                        |
+| `review.requestChanges`  | Chooses comment-only or request-changes review.                               |
+| `review.maximumFindings` | Limits findings to an integer from 1 to 20.                                   |
+| `repair.authority`       | `never` by default; `owner` requires the separate repair authority upgrade.   |
+| `maintenance.mode`       | `disabled`, `manual`, or weekly `scheduled`; report-only in enabled modes.    |
+| `merge.authority`        | Must remain `never`.                                                          |
 
 The `models.review` engine, model, and effort are also used for incoming issue
 triage. The current default is Codex with `gpt-5.6-luna` and `default` effort.
+After context preparation, an eligible review clears stale Rivet status and
+test labels and applies `review needed`, including when no review snapshot is
+available. After successful current-head review publication, Rivet replaces
+that pending state with one of
+`changes required`, `review needed`, or `merge ready`, plus `needs tests` only
+for a concrete missing deterministic test. All other repository labels are
+left unchanged.
+
 See [schema v4](RIVET_SCHEMA_V4.md) for the complete JSON shape and
 [GitHub App authority](RIVET_GITHUB_APP_AUTHORITY.md) for permissions.

@@ -97,6 +97,9 @@ expected inline comment by repository-relative path, exact line, and required
 case-insensitive body terms. Unmatched comments are false positives.
 Every complete review also requires the Rivet summary sections for the change,
 merge readiness, verification, before-merge work, and collapsed review details.
+It must contain exactly one `publish_review_tags` item alongside the single
+submitted review. Historical `noop` and incomplete outcomes must contain no tag
+item.
 `safe-output-items.jsonl` is publication evidence; every mutating output must
 have exactly one receipt of the same type.
 
@@ -157,7 +160,7 @@ npx --package=@coryparry/rivet rivet-review-eval \
 The command writes one JSON report to standard output and exits nonzero when a
 run has the wrong head, omits or changes the reviewer identity, misses an
 expected finding, produces a false positive, submits the wrong review event,
-or lacks a matching publication receipt.
+omits the required tag decision, or lacks a matching publication receipt.
 For review outcomes it also fails when the submitted body omits the required
 general-review structure.
 

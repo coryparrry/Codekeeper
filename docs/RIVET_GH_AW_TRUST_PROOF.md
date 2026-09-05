@@ -61,6 +61,8 @@ The compiled trust receipt fails unless all of these remain true:
 6. Every action uses a full commit SHA.
 7. No additional repository is checked out.
 8. Every checkout has no explicit repository, ref, or path and persists no credentials.
+9. The job, condition, permission, environment, script, runner, container, and
+   concurrency inventory matches the approved review authority.
 
 The main workflow keeps final control of its trigger, permissions, disabled
 agent checkout, and Safe Output limits. The native fixture exercises an
@@ -68,12 +70,34 @@ upstream-only feature (`engine.mcp.tool-timeout: 4m`) and contributes prompt
 content. The generated lock contains both the resulting 240-second timeout and
 the imported instructions without adding a Rivet schema field.
 
+The review authority comparison normalizes only supported product choices.
+For `review.maximumFindings`, it normalizes the matching Safe Output limit,
+prompt text, tool metadata, handler configuration, and generated script before
+checking the approved authority digest. The compiled limit must still be an
+integer from 1 to 20 and must exactly equal the configuration requested by the
+installer. A different requested count or any other code, job, permission,
+condition, or script change fails the trust check.
+
+Automatic tagging has two narrow App-authenticated jobs. After context
+preparation, the pending job runs for an eligible event before model analysis
+and leaves only `review needed` from Rivet's four managed labels, including
+when no review snapshot is available.
+The final job may select `changes required`, `review needed`, or `merge ready`,
+and may add `needs tests`, only after successful review publication with a
+structured tag decision that agrees with the review body's single
+merge-readiness status.
+Both jobs recheck the event pull request's identity, open state, base SHA, and
+head SHA around their writes, preserve unrelated labels, and verify the final
+managed set.
+
 ## Evidence
 
 The package tests inspect the real compiler output and include adversarial
 variants for a PR-head checkout, runtime prompt loading, a movable action ref,
-and an unapproved import. The real pinned compiler also passes strict compile
-and JSON validation for the fixture.
+an unapproved import, a mismatched custom finding limit, injected compiled
+code, stale pull-request state, failed publication, and label-set drift. The
+real pinned compiler also passes strict compile and JSON validation for the
+fixture.
 
 Still required before installation or production claims:
 
