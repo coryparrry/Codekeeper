@@ -63,7 +63,10 @@ stdout as JSON. The App, workflows, provider credentials, and Actions usage
 belong to the adopter repository; no separate hosted Rivet service is required.
 
 These docs describe the current source. Changes reach `npx @coryparry/rivet`
-through a versioned npm release, not by merging the source PR alone.
+through a versioned npm release. Release Please opens or updates a version-bump
+PR after source changes merge to `main`. Merging that release PR creates the
+matching tag and triggers npm publication. See the
+[release delivery guide](docs/RELEASE_READINESS.md).
 
 See [INSTALL.md](INSTALL.md) for the complete guided, verification, and repair
 flow.

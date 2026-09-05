@@ -153,4 +153,77 @@ test("uses a protected tag workflow with OIDC trusted publishing", async () => {
   assert.equal(publishStep?.env, undefined);
   assert(!workflowSource.includes("NODE_AUTH_TOKEN"));
   assert(!workflowSource.includes("NPM_PUBLISH_TOKEN"));
+  assert(
+    publish.steps.some(
+      (step) => step.run === "bash scripts/release-source.sh --verify",
+    ),
+  );
+});
+
+test("release preparation targets the published Rivet component and version", async () => {
+  const root = new URL("../../../", import.meta.url);
+  const config = JSON.parse(
+    await readFile(new URL("release-please-config.json", root), "utf8"),
+  );
+  const manifest = JSON.parse(
+    await readFile(new URL(".release-please-manifest.json", root), "utf8"),
+  );
+  const pkg = await readPackage();
+  assert.deepEqual(Object.keys(config.packages), ["packages/rivet"]);
+  const component = config.packages["packages/rivet"];
+  assert.equal(component["release-type"], "node");
+  assert.equal(component["package-name"], pkg.name);
+  assert.equal(manifest["packages/rivet"], pkg.version);
+  assert.equal(component["include-component-in-tag"], true);
+  assert.equal(component["include-v-in-tag"], true);
+  assert.equal(
+    `${component.component}${component["tag-separator"]}v${pkg.version}`,
+    tagForVersion(pkg.version),
+  );
+  assert.equal(component["changelog-path"], "/CHANGELOG.md");
+});
+
+test("release PRs trigger checks and publish tags through the dedicated token", async () => {
+  const source = await readFile(
+    new URL(
+      "../../../.github/workflows/rivet-release-please.yml",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const workflow = parse(source);
+  assert.deepEqual(workflow.on.push.branches, ["main"]);
+  assert.deepEqual(Object.keys(workflow.on).sort(), [
+    "push",
+    "workflow_dispatch",
+  ]);
+  const job = workflow.jobs["release-please"];
+  assert.equal(job.if, "github.ref == 'refs/heads/main'");
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  const release = job.steps.find((step) => step.id === "release-please");
+  assert.match(
+    release.uses,
+    /^googleapis\/release-please-action@[a-f0-9]{40}$/,
+  );
+  assert.equal(release.with.token, "${{ secrets.RELEASE_PLEASE_TOKEN }}");
+  assert.equal(release.with["target-branch"], "main");
+  assert.equal(release.with["skip-github-release"], undefined);
+  const scripts = job.steps.filter((step) => step.run);
+  assert(
+    scripts.every(
+      (step) =>
+        step.if === "steps.release-please.outputs.prs_created == 'true'",
+    ),
+  );
+  assert(
+    scripts.some((step) =>
+      step.run.includes("node scripts/refresh-release-manifest.mjs"),
+    ),
+  );
+  const push = scripts.find((step) => step.run.includes("git push"));
+  assert.match(
+    push.run,
+    /git push origin HEAD:refs\/heads\/release-please--branches--main--components--rivet/,
+  );
+  assert(!source.includes("npm publish"));
 });

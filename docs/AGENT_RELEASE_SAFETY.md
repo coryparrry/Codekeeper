@@ -44,9 +44,10 @@ Then:
    rebind the review to the new state.
 
 A release requires a clean checkout. The legacy Codekeeper package-stage and
-candidate-pack paths are retired. Current releases use the protected
-`rivet-vX.Y.Z` workflow to publish `@coryparry/rivet` through npm OIDC trusted
-publishing.
+candidate-pack paths are retired. Release Please prepares the version, lockfile,
+changelog, and source manifest in a reviewed release PR. Merging that PR creates
+the matching tag. Current releases use the protected `rivet-vX.Y.Z` workflow to
+publish `@coryparry/rivet` through npm OIDC trusted publishing.
 
 ## 2. The coupled release graph
 

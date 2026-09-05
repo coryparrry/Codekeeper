@@ -35,6 +35,8 @@ jobs:
         run: |
           git fetch --no-tags origin "$DEFAULT_BRANCH"
           git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"
+      - name: Verify exact source manifest
+        run: bash scripts/release-source.sh --verify
       - name: Install Rivet
         working-directory: packages/rivet
         run: npm ci --ignore-scripts --no-audit --no-fund
