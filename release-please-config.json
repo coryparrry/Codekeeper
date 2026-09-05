@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    "packages/rivet": {
+      "release-type": "node",
+      "component": "rivet",
+      "package-name": "@coryparry/rivet",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "tag-separator": "-",
+      "changelog-path": "/CHANGELOG.md",
+      "pull-request-title-pattern": "chore(release): prepare Rivet ${version}",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true
+    }
+  }
+}
