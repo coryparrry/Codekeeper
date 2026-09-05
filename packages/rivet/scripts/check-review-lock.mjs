@@ -268,6 +268,8 @@ export async function checkReviewLock({
 } = {}) {
   const disabledConfiguration = structuredClone(DEFAULT_RIVET_CONFIG);
   disabledConfiguration.issues.triage = "disabled";
+  const limitedConfiguration = structuredClone(DEFAULT_RIVET_CONFIG);
+  limitedConfiguration.review.maximumFindings = 3;
   const variants = [
     {
       name: "rivet-review.lock.yml",
@@ -283,6 +285,22 @@ export async function checkReviewLock({
           Buffer.from(
             await readFile(
               path.join(fixtureRoot, "rivet-review-disabled.lock.yml.gz.b64"),
+              "utf8",
+            ),
+            "base64",
+          ),
+        ),
+    },
+    {
+      name: "rivet-review-max3.lock.yml",
+      source: renderRivetReviewWorkflow({
+        configuration: limitedConfiguration,
+      }),
+      readFixture: async () =>
+        gunzipSync(
+          Buffer.from(
+            await readFile(
+              path.join(fixtureRoot, "rivet-review-max3.lock.yml.gz.b64"),
               "utf8",
             ),
             "base64",

@@ -12,7 +12,6 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { parse as parseYaml } from "yaml";
 import { repairAppAuthority, reviewAppAuthority } from "./app-authority.mjs";
 import {
   DEFAULT_RIVET_CONFIG,
@@ -27,6 +26,7 @@ import {
   assessPullRequestTargetTrust,
 } from "./gh-aw/trust.mjs";
 import { completeInstallationFiles } from "./installation-receipt.mjs";
+import { buildTaggingUpgradeBaselines } from "./tagging-upgrade.mjs";
 import {
   buildIssueTriageUpgradeBaselines,
   matchesHistoricalManagedFile,
@@ -56,6 +56,11 @@ import {
   REPAIR_ASSET_PATHS,
   REVIEW_CONTEXT_ASSET_PATHS,
 } from "./workflow-files.mjs";
+import {
+  knownCompilerDrift,
+  matchesWorkflowBaseline,
+} from "./workflow-compatibility.mjs";
+export { knownCompilerDrift } from "./workflow-compatibility.mjs";
 const [ISSUE_TRIAGER_IMPORT] = RIVET_ISSUE_TRIAGE_NATIVE_IMPORTS;
 const [FIXER_IMPORT] = RIVET_REPAIR_NATIVE_IMPORTS;
 const REVIEW_LOCAL_ACTIONS = Object.freeze([
@@ -87,22 +92,6 @@ const MAINTENANCE_MANAGED_PATHS = Object.freeze([
 function digest(content) {
   return createHash("sha256").update(content).digest("hex");
 }
-export function knownCompilerDrift(relativePath, current, planned) {
-  if (!relativePath.endsWith(".lock.yml")) return false;
-  try {
-    return isDeepStrictEqual(parseYaml(current), parseYaml(planned));
-  } catch {
-    return false;
-  }
-}
-function matchesBaseline(relativePath, current, baseline) {
-  const planned = baseline.get(relativePath);
-  return (
-    planned === current ||
-    (planned !== undefined &&
-      knownCompilerDrift(relativePath, current, planned))
-  );
-}
 async function assertPlanStillApplies(plan) {
   for (const file of plan.files) {
     const current = await existingFile(
@@ -114,8 +103,11 @@ async function assertPlanStillApplies(plan) {
     }
   }
 }
-export async function applyInstallation(plan) {
+export async function applyInstallation(plan, { onProgress } = {}) {
   await assertPlanStillApplies(plan);
+  if (plan.files.some(({ status }) => status !== "unchanged")) {
+    onProgress?.("Writing Rivet installation");
+  }
   for (const file of plan.files) {
     if (file.status === "unchanged") continue;
     const destination = path.join(plan.repositoryRoot, file.path);
@@ -184,6 +176,18 @@ function withoutReviewContext(files) {
   }
   return previous;
 }
+function reviewOnlyBaseline(files, config) {
+  const reviewFiles = new Map(
+    [...files].filter(
+      ([relativePath]) =>
+        !REPAIR_ASSET_PATHS.includes(relativePath) &&
+        relativePath !== FIXER_IMPORT &&
+        !relativePath.includes(`/${RIVET_REPAIR_WORKFLOW_ID}.`),
+    ),
+  );
+  reviewFiles.delete(".github/rivet/installation.json");
+  return completeInstallationFiles(reviewFiles, { mode: "review", config });
+}
 async function buildMaintenanceVariant({
   stagingRoot,
   mode,
@@ -219,14 +223,21 @@ async function prepareInstallation({
   compileWorkflow = compileGhAwWorkflow,
   validateWorkflow = validateGhAwWorkflow,
   env,
+  onProgress,
 } = {}) {
+  onProgress?.("Preparing Rivet installation");
   const root = path.resolve(repositoryRoot ?? process.cwd());
   const config = validateRivetConfig(configuration);
   const reviewConfig = reviewConfiguration(mode, config);
   const productAuthority = productAuthoritySummary(config);
   const githubApp =
     mode === "repair" ? repairAppAuthority(config) : reviewAppAuthority(config);
-  const rootMetadata = await lstat(root);
+  const rootMetadata = await lstat(root).catch((error) => {
+    if (error?.code === "ENOENT") {
+      throw new Error("Rivet installer: repository root does not exist");
+    }
+    throw error;
+  });
   if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
     throw new Error("Rivet installer: repository root must be a directory");
   }
@@ -257,6 +268,7 @@ async function prepareInstallation({
       expectedImports: RIVET_REVIEW_NATIVE_IMPORTS,
       expectedLocalActions: REVIEW_LOCAL_ACTIONS,
       expectedModel: config.models.review.model,
+      expectedMaximumFindings: config.review.maximumFindings,
       expectedIssueTriage:
         config.issues.triage === "automatic" ? "automatic" : "disabled",
     });
@@ -309,6 +321,7 @@ async function prepareInstallation({
       }
     }
     completeInstallationFiles(files, { mode, config });
+    onProgress?.("Checking existing Rivet installation");
     const baselines = [];
     let maintenanceDeletionFiles = null;
     const existingFiles = new Map(
@@ -322,7 +335,12 @@ async function prepareInstallation({
     const requiresUpgrade = [...files].some(
       ([relativePath, content]) =>
         existingFiles.get(relativePath) !== null &&
-        existingFiles.get(relativePath) !== content,
+        existingFiles.get(relativePath) !== content &&
+        !knownCompilerDrift(
+          relativePath,
+          existingFiles.get(relativePath),
+          content,
+        ),
     );
     if (config.maintenance.mode === "disabled") {
       const existingMaintenanceFiles = new Map(
@@ -460,19 +478,7 @@ async function prepareInstallation({
     }
     let reviewBaseline = null;
     if (requiresUpgrade && mode === "repair") {
-      reviewBaseline = new Map(
-        [...files].filter(
-          ([relativePath]) =>
-            !REPAIR_ASSET_PATHS.includes(relativePath) &&
-            relativePath !== FIXER_IMPORT &&
-            !relativePath.includes(`/${RIVET_REPAIR_WORKFLOW_ID}.`),
-        ),
-      );
-      reviewBaseline.delete(".github/rivet/installation.json");
-      completeInstallationFiles(reviewBaseline, {
-        mode: "review",
-        config: reviewConfig,
-      });
+      reviewBaseline = reviewOnlyBaseline(files, reviewConfig);
       baselines.push(reviewBaseline);
     }
     if (requiresUpgrade && config.issues.triage === "automatic") {
@@ -526,6 +532,24 @@ async function prepareInstallation({
       }
     }
     if (requiresUpgrade) {
+      const taggingBaselines = await buildTaggingUpgradeBaselines({
+        stagingRoot,
+        mode,
+        config,
+        reviewConfig,
+        validation,
+        binaryPath,
+        compileWorkflow,
+        validateWorkflow,
+        env,
+      });
+      for (const previousTagging of taggingBaselines) {
+        baselines.push(previousTagging);
+        if (mode === "repair") {
+          baselines.push(reviewOnlyBaseline(previousTagging, reviewConfig));
+        }
+      }
+
       for (const { version, url } of PROFILED_REVIEW_EXTENSIONS) {
         const reviewExtension = await readFile(url, "utf8");
         const profiled = await buildWorkflowFiles({
@@ -672,7 +696,7 @@ async function prepareInstallation({
           current === content ||
           knownCompilerDrift(relativePath, current, content) ||
           matchesHistoricalManagedFile(relativePath, digest(current)) ||
-          matchesBaseline(relativePath, current, baseline)
+          matchesWorkflowBaseline(relativePath, current, baseline)
         );
       }),
     );
@@ -686,24 +710,28 @@ async function prepareInstallation({
         (knownCompilerDrift(relativePath, current, content) ||
           matchesHistoricalManagedFile(relativePath, digest(current)) ||
           compatibleBaselines.some((baseline) =>
-            matchesBaseline(relativePath, current, baseline),
+            matchesWorkflowBaseline(relativePath, current, baseline),
           ));
       if (current !== null && current !== content && !canUpgrade) {
         throw new Error(
           `Rivet installer: refusing to overwrite ${relativePath}`,
         );
       }
+      const unchanged =
+        current === content ||
+        (current !== null &&
+          knownCompilerDrift(relativePath, current, content));
+      const plannedContent = unchanged ? current : content;
       plannedFiles.push({
         path: relativePath,
-        status:
-          current === content
-            ? "unchanged"
-            : current === null
-              ? "create"
-              : "update",
+        status: unchanged
+          ? "unchanged"
+          : current === null
+            ? "create"
+            : "update",
         previousSha256: current === null ? null : digest(current),
-        sha256: digest(content),
-        content,
+        sha256: digest(plannedContent),
+        content: plannedContent,
       });
     }
     if (maintenanceDeletionFiles) {
@@ -749,7 +777,7 @@ export function prepareRepairInstallation(options = {}) {
 }
 async function install(prepare, options) {
   const plan = await prepare(options);
-  if (!options.dryRun) await applyInstallation(plan);
+  if (!options.dryRun) await applyInstallation(plan, options);
   return Object.freeze({
     repositoryRoot: plan.repositoryRoot,
     mode: plan.mode,

@@ -15,9 +15,9 @@ and deployment gates independently required.
 
 ## Current capability
 
-| Capability                                   | Shipped behavior                                                                                                                                         |
+| Capability                                   | Default behavior                                                                                                                                         |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pull-request review                          | Publishes bounded App-authored review output for eligible pull requests.                                                                                 |
+| Pull-request review                          | Publishes bounded App-authored review output and reconciles status and missing-test labels for eligible pull requests.                                   |
 | Issue triage                                 | Runs automatically with Issues write authority; issue implementation remains disabled.                                                                   |
 | Repair                                       | Disabled by default. A repository administrator must explicitly widen the App authority and install repair mode; an exact owner command starts a repair. |
 | Issue implementation, maintenance, and merge | Disabled in the shipped configuration. Rivet never merges a pull request.                                                                                |
@@ -34,25 +34,36 @@ and deployment gates independently required.
 
 ## Quick start
 
-From the root of the repository you want to configure, run:
+From a clean checkout of the repository you want to configure, run:
 
 ```bash
 npx @coryparry/rivet init
 ```
 
-The guided installer detects the checkout, walks you through the unavoidable
-GitHub App and model-key human steps, verifies the exact review authority, and
-creates a draft setup pull request. App creation and installation remain
-human-controlled GitHub.com operations. Rivet never bypasses 2FA or merges the
-setup pull request. It never prints provider-secret values or puts them in
-command arguments, and it keeps no local copy.
+The checkout must match the fetched remote default branch. Guided init resolves
+its Git root, so invoking it from a subdirectory still loads the repository's
+settings. The flow is:
 
-Guided init uses an existing Actions secret or asks the GitHub CLI to create
-one; manual setups can use `gh secret set`. One of `CODEX_API_KEY` or
-`OPENAI_API_KEY` is required for reviews. Rivet never prints the value or puts
-it in command arguments, and it keeps no local copy. An exported value is read
-only to pass it to `gh secret set` over standard input. Review starts with least
-authority. Repair is a separate, explicit App authority upgrade.
+1. Check the checkout, GitHub access, and pinned workflow compiler.
+2. Open GitHub's App registration page with review-only permissions. Complete
+   GitHub authentication, generate a private key, and install the App only on
+   the selected repository.
+3. Enter the App client ID and PEM file path; `~/Downloads/...` paths work.
+   Rivet verifies the App and stores its credentials in repository Actions
+   secrets and variables.
+4. Use an existing `CODEX_API_KEY` or `OPENAI_API_KEY` Actions secret, pass an
+   exported credential over stdin to `gh secret set`, or enter it securely
+   when prompted. Rivet does not print the value, put it in command arguments,
+   or keep a local copy.
+5. Review the verified draft setup PR, mark it ready, and merge it to activate
+   the workflows. Rivet does not merge it for you.
+
+Progress appears on interactive stderr. Explicit commands keep their result on
+stdout as JSON. The App, workflows, provider credentials, and Actions usage
+belong to the adopter repository; no separate hosted Rivet service is required.
+
+These docs describe the current source. Changes reach `npx @coryparry/rivet`
+through a versioned npm release, not by merging the source PR alone.
 
 See [INSTALL.md](INSTALL.md) for the complete guided, verification, and repair
 flow.
@@ -83,8 +94,9 @@ only the App's Contents permission and passing `app-verify --repair` first.
 - **Least authority first.** Review-only uses Contents read authority; repair
   requires a separate, verified Contents write upgrade.
 - **Fail-closed installation.** Rivet refuses adopter-owned file collisions,
-  stale plans, unsafe checkout state, compiler drift, and unexpected App
-  authority.
+  stale plans, unsafe checkout state, behavior-changing workflow drift, and
+  unexpected App authority. Semantically identical compiled locks retain their
+  existing bytes.
 - **Pinned compiler.** Managed workflows are compiled with a checksum-verified
   `gh-aw` binary and retain its trust-boundary checks.
 
@@ -93,14 +105,33 @@ Read the [GitHub App authority guide](docs/RIVET_GITHUB_APP_AUTHORITY.md),
 [repair qualification](docs/RIVET_REPAIR_QUALIFICATION.md) for the exact
 boundaries.
 
-## Installation behavior
+## Review status and existing installations
 
-Bare `rivet init` starts the guided review-only setup and creates a verified
-draft pull request. For explicit modes, `--dry-run` writes nothing to the
-repository checkout, while `--setup-pr` requires a clean checkout at the
-fetched remote default branch. Direct writes are available only through an
-explicit mode without either option. Rivet creates no repository when the path
-is wrong.
+Eligible review events apply `review needed`. Successful publication reconciles
+that to `changes required`, `review needed`, or `merge ready`, with `needs tests`
+when warranted.
+Rivet preserves human-owned labels. These labels report Rivet's assessment;
+they do not replace required tests, approvals, or merge rules.
+
+Guided init is for review-only setup. To refresh an existing installation, run
+an explicit mode from the repository root:
+
+```bash
+npx @coryparry/rivet init --review-only --setup-pr
+# For an existing owner-authorized repair installation:
+npx @coryparry/rivet init --repair --setup-pr
+```
+
+Explicit init preserves validated settings in `.github/rivet.json` while applying
+requested overrides. It recognizes supported prior installations and refuses
+unrecognized edits. Compiler-comment differences do not cause lock-file updates
+or unnecessary historical recompilation. An up-to-date setup reports that the
+installation is already current, exits with status 1, and creates no PR.
+
+Use `--dry-run` to preview without changing repository files. Both guided setup
+and `--setup-pr` require a clean checkout at the fetched remote default branch.
+Explicit mode without either option writes directly to the existing checkout.
+Rivet does not create a repository when the path is missing.
 
 ## Develop from source
 

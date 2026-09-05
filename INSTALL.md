@@ -1,19 +1,19 @@
 # Install Rivet in a GitHub.com repository
 
-Rivet is installed from npm and run from the repository checkout you want to
-configure. The normal path is one guided command:
+Rivet is installed from npm and run anywhere inside the repository checkout you
+want to configure. Start from a clean checkout whose `HEAD` matches the fetched
+remote default branch:
 
 ```bash
-cd /path/to/repository
+cd /path/to/repository/or/a/nested/directory
 npx @coryparry/rivet init
 ```
 
-The guided installer detects the checkout, walks you through the unavoidable
-GitHub App creation/installation and model-key steps, verifies the exact
-review authority, and creates a draft setup pull request. It never merges.
-App creation and installation remain human-controlled GitHub.com operations;
-Rivet does not bypass 2FA. It never prints provider-secret values or puts them
-in command arguments, and it keeps no local copy.
+The guided installer resolves the Git repository root, opens the private GitHub
+App registration page, and pauses for you to create and install the App on
+GitHub.com. It then configures the repository credentials, verifies the exact
+App and selected repository, configures model access, and creates a verified
+draft setup pull request. Rivet never merges that pull request.
 
 ## Requirements
 
@@ -22,36 +22,60 @@ in command arguments, and it keeps no local copy.
   [GitHub CLI](https://cli.github.com/).
 - Repository administration permission. An organization-owned App also needs
   organization authority.
+- A clean checkout at the fetched remote default-branch commit.
 - Access to a `CODEX_API_KEY` or `OPENAI_API_KEY` provider credential.
 
-The model secret is required for reviews. Guided init uses an existing Actions
-secret or asks the GitHub CLI to create one; manual setups can use
-`gh secret set`. Rivet never prints the value or puts it in command arguments,
-and it keeps no local copy. An exported value is read only to pass it to
-`gh secret set` over standard input. Review starts with least authority. Repair
-remains a separate, explicit authority upgrade.
+The model secret is required for reviews. Guided init reuses an existing Actions
+secret, accepts an exported provider key, or asks for the value through a secure
+prompt. It sends a new value only to `gh secret set` over standard input. Rivet
+never prints the value, puts it in command arguments, or keeps a local copy.
+Review starts with least authority. Repair remains a separate, explicit
+authority upgrade.
 
 ## What the guided installer does
 
 Rivet guides the human-controlled setup in this order:
 
-1. Detects and validates the current GitHub repository checkout.
-2. Provides the minimum review-only GitHub App authority and the GitHub.com
-   steps needed to create and install that App.
-3. Prompts for the remaining setup information, passes any model secret to
-   `gh secret set` over standard input, and verifies the App's effective
-   authority. The value is never printed or put in command arguments, and
-   Rivet keeps no local copy.
-4. Compiles and validates the managed workflows and creates a verified draft
+1. Resolves the repository root even when invoked from a nested directory, then
+   validates the clean checkout, GitHub.com origin, administrator access, and
+   exact remote default-branch commit.
+2. Compiles and checks the planned managed workflows before changing the
+   repository or its settings.
+3. Opens a private, webhook-free GitHub App registration page with the default
+   review permissions: Contents read, Metadata read, Pull requests write, and
+   Issues write for automatic issue triage. You create the App and download its
+   private-key PEM on GitHub.com.
+4. Authenticates the PEM, saves `RIVET_APP_CLIENT_ID` and
+   `RIVET_APP_BOT_LOGIN` as repository variables, and sends the key to the
+   `RIVET_APP_PRIVATE_KEY` repository secret over standard input.
+5. Opens the App installation page for you to select only this repository, then
+   verifies that repository selection, identity, permissions, events, variables,
+   and secret metadata.
+6. Reuses an existing model secret or securely stores the selected
+   `CODEX_API_KEY` or `OPENAI_API_KEY`, then creates and verifies the draft
    `rivet/setup-review` pull request.
 
-Review the draft pull request and merge it through your repository's normal
-controls. Rivet never merges it automatically.
+Review the draft pull request and its checks. Mark it ready for review and merge
+it through your repository's normal controls to activate Rivet.
+
+On an existing review-only installation, bare `init` loads the installed
+configuration from the resolved repository root and preserves its settings,
+including customized review limits and model choices. It can upgrade recognized
+historical Rivet-managed workflow versions while rejecting locally edited
+managed files. If the installation is already current, it stops with a
+`review-only installation is already up to date` error and creates no setup pull
+request. If repair is already enabled, it directs you to:
+
+```bash
+npx @coryparry/rivet init --repair --setup-pr
+```
 
 ## Advanced/manual setup
 
 Use these lower-level commands for explicit planning, recovery, or automation.
 They are not required for the normal guided install.
+Explicit `init` does not search parent directories for the Git root, so run it
+from the repository root or pass `--repository /path/to/repository`.
 
 ### Plan, configure, and verify the App
 
@@ -77,9 +101,12 @@ npx @coryparry/rivet app-configure \
 ```
 
 Rivet authenticates the key before changing repository metadata and sends the
-private key to `gh secret set` over standard input. Manual `app-configure` does
-not handle the model-provider secret. Verify the App's live identity and
-least-privilege scope after installing it:
+private key to `gh secret set` over standard input. Absolute paths and paths
+beginning with `~/` are supported. The reader accepts only a bounded regular
+file, refuses symlinks where the platform supports that check, detects a key
+that changes while being read, and validates the key before use. Manual
+`app-configure` does not handle the model-provider secret. Verify the App's live
+identity and least-privilege scope after installing it:
 
 ```bash
 npx @coryparry/rivet app-verify \
@@ -126,6 +153,10 @@ npx @coryparry/rivet init --review-only --setup-pr
 Rivet commits only managed paths, pushes the exact commit, opens a draft pull
 request, and verifies its base, head, commit, draft state, and URL. Use
 `--setup-branch <name>` to choose another unused branch.
+
+Explicit init writes machine-readable JSON to standard output. When standard
+error is a TTY it reports progress there; non-TTY runs remain quiet on standard
+error.
 
 For direct installation into the existing checkout, omit both `--dry-run` and
 `--setup-pr`:

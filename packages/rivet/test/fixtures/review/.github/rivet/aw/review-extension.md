@@ -26,6 +26,7 @@ jobs:
           workflow-ref: ${{ github.workflow_ref }}
           workflow-sha: ${{ github.workflow_sha }}
       - id: snapshot
+        continue-on-error: true
         uses: ./.github/rivet/actions/prepare-review-context
         env:
           GITHUB_API_URL: ${{ github.api_url }}

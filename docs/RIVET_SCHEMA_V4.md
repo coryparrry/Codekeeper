@@ -33,6 +33,13 @@ The installer converts these controls into a product-authority summary before
 rendering. The compiled workflow is then inspected separately and must remain
 within that declared authority.
 
+`review.automatic` includes Rivet's fixed review-state labels. An eligible run
+first applies `review needed`. Successful review publication then selects one
+of `changes required`, `review needed`, or `merge ready`, with `needs tests`
+only for a concrete missing deterministic test. These names and transitions are
+product behavior rather than additional schema fields, and labels outside this
+managed set are preserved.
+
 ## Engine projection
 
 | Engine  | Model                   | Effort         |
@@ -47,6 +54,12 @@ them, but the pinned gh-aw v0.86.2 renderer rejects them. Its engine arguments
 are also applied to threat detection and can produce an invalid detection
 command, so Rivet does not silently approximate this setting.
 
+`review.maximumFindings` accepts integers from 1 to 20. The trust inspection
+allows the compiler output to vary at the exact prompt, tool metadata, Safe
+Output, handler, and generated-script occurrences of that requested limit. The
+compiled limit must equal the configuration value; all other compiled
+authority remains digest-bound to the approved workflow shape.
+
 Rivet does not recreate provider SDKs or expose arbitrary engine configuration.
 Advanced upstream features remain native gh-aw imports until Rivet promotes a
 stable product-level control.
@@ -55,9 +68,10 @@ stable product-level control.
 
 `issues.triage` may be `automatic` or `disabled` for an installation.
 Automatic mode has two separate bounded effects: it installs a workflow that
-may add at most one App-authored comment to a newly opened issue, and it lets a
-pull-request review defer at most one verified, out-of-scope finding to a new
-issue. Neither path implements the issue.
+may add one App-authored state to a newly opened issue and a new state after an
+authorized reporter or collaborator follow-up, and it lets a pull-request
+review defer at most one verified, out-of-scope finding to a new issue. Neither
+path implements the issue.
 
 Disabled mode installs no issue-triage workflow, disables review deferral, and
 requires no GitHub App Issues permission. Enabling automatic triage requires
@@ -71,9 +85,9 @@ Maintenance report runs are manual or weekly, use the repository-auditor
 identity, and emit only a validated JSON artifact plus receipt. They do not
 create an issue, pull request, comment, commit, label, or merge and require no
 GitHub App permission. Incoming issue triage and pull-request deferral remain
-separate capabilities: triage comments on newly opened issues, while deferral
-creates an issue for a verified out-of-scope pull-request finding. Neither
-authorizes implementation.
+separate capabilities: triage publishes bounded states for newly opened issues
+and authorized follow-ups, while deferral creates an issue for a verified
+out-of-scope pull-request finding. Neither authorizes implementation.
 
 Schema v4 can represent a future owner-authorized issue implementation mode;
 the current installer rejects it. Repair is a separate explicit authority

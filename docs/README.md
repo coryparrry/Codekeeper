@@ -1,10 +1,10 @@
 # Rivet documentation
 
-The product is migrating to Rivet. The migration authority and delivery gates
-are defined in [RIVET_GH_AW_MIGRATION.md](RIVET_GH_AW_MIGRATION.md), with the
-legacy comparison checkpoint in
-[RIVET_LEGACY_BASELINE.md](RIVET_LEGACY_BASELINE.md). The compiler-boundary
-self-review result is recorded in
+Rivet is the active package and workflow system. Its architecture, configuration,
+and delivery gates are documented here. The completed gh-aw migration decisions
+remain in [RIVET_GH_AW_MIGRATION.md](RIVET_GH_AW_MIGRATION.md), with the legacy
+comparison checkpoint in [RIVET_LEGACY_BASELINE.md](RIVET_LEGACY_BASELINE.md).
+The compiler-boundary self-review result is recorded in
 [RIVET_GH_AW_TRUST_PROOF.md](RIVET_GH_AW_TRUST_PROOF.md).
 
 | Document                                                   | Type        | Purpose                                                                                                       |
@@ -21,7 +21,6 @@ self-review result is recorded in
 | [Validation](../VALIDATION.md)                             | How-to      | Validate source and release inputs.                                                                           |
 | [Support](../SUPPORT.md)                                   | Reference   | Get help, report bugs, or report security concerns.                                                           |
 
-Start with installation for local evaluation, then review configuration and
-authority before enabling any workflow. Use the Rivet migration documentation
-for current delivery boundaries; the legacy Codekeeper release process is
-retired.
+Start with installation for local evaluation, then review configuration,
+architecture, and authority before enabling any workflow. The legacy
+Codekeeper release process is retired.

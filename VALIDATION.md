@@ -1,99 +1,142 @@
-# Validation
+# Rivet validation
 
-For agent edits, classify the touched paths and run the boundary-specific gates in
-[docs/AGENT_RELEASE_SAFETY.md](docs/AGENT_RELEASE_SAFETY.md) before treating this
-checklist as complete.
+Validation follows the current `packages/rivet` CLI and managed GitHub Agentic
+Workflows. The retired `tools/codekeeper`, `packages/codekeeper`, and offline
+`acceptance` commands are not current verification gates.
 
-Run these checks before publishing a source release or changing reusable workflows:
+A source test proves only its boundary. Use
+[agent release safety](docs/AGENT_RELEASE_SAFETY.md) to identify the downstream
+package, installed-workflow, App, and publication checks affected by a change.
+
+## Local checks
+
+Use Node.js 22 or newer and the npm version pinned in `package.json`:
 
 ```bash
 npm install --global npm@12.0.2 --ignore-scripts --no-audit --no-fund
-npm ci --ignore-scripts --no-audit --no-fund && npm run check
-cd tools/codekeeper && npm ci --ignore-scripts --no-audit --no-fund
-node src/cli.mjs check-config --config ../../.github/codekeeper.json
+npm ci --ignore-scripts --no-audit --no-fund
 npm run check
-cd ../../packages/codekeeper && npm ci --ignore-scripts --no-audit --no-fund && npm run check
-cd ../../acceptance && npm run check
 ```
 
-The root `packageManager` and self-test workflow pin the same npm release. The
-legacy Codekeeper package staging and publication path is retired; current Rivet
-delivery qualification is defined in [Rivet migration authority](docs/RIVET_GH_AW_MIGRATION.md).
-
-The maintainer `npm run check` also verifies the complete source-release inventory and fails unless [`MANIFEST.sha256`](MANIFEST.sha256) exactly covers every tracked file except itself. The runtime check regenerates the production tooling inventory in memory and fails unless [`tools/codekeeper/tooling-manifest.json`](tools/codekeeper/tooling-manifest.json) exactly matches it. Reusable workflows acquire and reverify the exact package by version, SRI, manifest digest, and source commit; they deliberately do not embed a second tooling-manifest digest. The installer suite covers the strict repository-artifact catalog, copied Markdown rendering and digest checks, generated assets, fixed agent-profile paths, preflight failures, secret boundaries, Git recovery, the terminal flow, and the packed entrypoint. The catalog tests must prove additions, prior-target renames, release-owned retirements, duplicate rejection, destination confinement, and optional activation without adding another reconciliation path. The acceptance suite remains offline and uses only its deterministic fixture.
-
-## Decision-quality evaluation
-
-The deterministic fixture gate exercises the production prompt builders, packaged profile defaults and adopter overrides, schemas, and provider adapter with a fake provider. It makes no network or paid-provider calls and writes neither provider outputs nor credentials:
+The root check runs the Rivet package tests, lint and formatting, governance
+contracts, module-size and import-cycle checks, and source-manifest verification.
+For a targeted change, start with its relevant test, then run the affected gates:
 
 ```bash
-cd tools/codekeeper && npm run eval:offline
+node --test packages/rivet/test/cli.test.mjs packages/rivet/test/guided-init.test.mjs
+npm run rivet:check
+npm run architecture:check
+npm run governance:check
 ```
 
-The live gate is explicit and is not part of `npm run check`. A mixed run requires both `OPENAI_API_KEY` and `DEEPSEEK_API_KEY`; an OpenAI-preset run requires `OPENAI_API_KEY`. Under the default tracing policy it also requires a distinct `CODEKEEPER_TRACE_API_KEY`. The runner resolves keys per configured provider before any provider call, never prints or writes them, and reports only scenario, preset, model, attempt, safe execution stage, and pass/fail; do not redirect its output or provide secrets through command-line arguments:
+Installer coverage includes configuration preservation, nested-directory guided
+setup, safe App-key reads, exact App authority, dry runs, stale plans, file
+collisions, trusted historical upgrades, custom finding limits, draft setup-PR
+verification, and preservation of semantically unchanged compiled locks.
+
+For workflow or compiler changes, also run:
 
 ```bash
-cd tools/codekeeper && npm run eval:live -- --preset mixed --repeat 3
-cd tools/codekeeper && npm run eval:live -- --preset openai --repeat 3
+npm --prefix packages/rivet run review-lock:check
 ```
 
-For release-relevant response evaluation, repeat a complete GitHub review against one immutable pull-request head, retain each sealed result, and grade the runs with the answer key kept outside the adopter repository:
+Use the pinned compiler, YAML parsing, and actionlint on the relevant workflow
+surface. A parsed workflow or passing source test alone does not prove a live
+GitHub run. CI runs package checks on pinned Node 22 and 24 versions and checks
+GitHub Actions workflows with actionlint.
+
+## Source and package integrity
+
+Finish source changes and commit them without `MANIFEST.sha256`. From that clean
+source commit, regenerate the compatibility manifest with its owning script:
 
 ```bash
-cd tools/codekeeper
-npm run eval:live-review -- \
-  --manifest /secure/local/answer-key.json \
-  --runs-directory /secure/local/runs \
-  --json-output /secure/local/report.json \
-  --markdown-output /secure/local/report.md
-```
-
-See [evaluating Codekeeper reviews](docs/EVALUATIONS.md) for fixture design, repeat strategy, artifact layout, metrics, and the boundary between an intentional blocking gate failure and an infrastructure failure.
-
-For an authorized OpenAI issue-triage release decision, run the same OpenAI matrix with one candidate at a time and select the first all-pass result deliberately. These commands are evaluation overrides only; they do not change the shipped policy:
-
-```bash
-cd tools/codekeeper && npm run eval:live -- --preset openai --openai-issue terra-medium --repeat 3
-cd tools/codekeeper && npm run eval:live -- --preset openai --openai-issue terra-high --repeat 3
-cd tools/codekeeper && npm run eval:live -- --preset openai --openai-issue sol-high --repeat 3
-```
-
-Passing an offline or live decision gate proves only the bounded fixture assertions. It does not authorize GitHub mutations, repairs, model changes, or a release.
-
-## Source-release integrity
-
-Run the release command only from a clean checkout at the immutable commit to publish. It creates a deterministic `git archive` from tracked Git content, unpacks it for verification, checks the full manifest and file inventory, and prints the archive SHA-256. Choose an output directory outside this checkout:
-
-```bash
-git status --short
-mkdir -p ../codekeeper-release-artifacts
-bash scripts/release-source.sh --output ../codekeeper-release-artifacts
-```
-
-An empty `git status --short` is required. The command refuses a dirty checkout and never copies working-tree-only files, so `.git`, `node_modules`, `.claude`, `__MACOSX`, profiler output, and macOS metadata cannot enter the archive. To validate the same integrity gate without retaining an archive:
-
-```bash
+node scripts/refresh-release-manifest.mjs
 bash scripts/release-source.sh --verify
 ```
 
-`MANIFEST.sha256` intentionally covers every tracked file except itself. When a tracked file changes, regenerate the manifest in the authorized release update, then run the command again. The repository workflow runs this check for every tracked-file pull request and push.
+The refresh script commits only the manifest. Never hand-edit hashes. If tracked
+content changes afterward, repeat the sequence and record the final passing SHA.
+The verifier archives tracked Git content and checks both hashes and inventory;
+working-tree-only files and credentials cannot enter that source archive.
 
-This proves only the source archive. It does not prove that a GitHub release has been created, staged, made visible, or that a caller pins the intended commit; verify those GitHub-side facts separately.
+Before a release, validate the package tag against the actual package version,
+then pack and install the exact candidate in a clean consumer:
 
-The repository workflow runs the maintainer suite, the installer suite on the pinned Node 22 and 24 LTS releases, the offline acceptance-harness suite, Actionlint, and YAML parsing for every tracked-file pull request and push.
+```bash
+cd packages/rivet
+npm ci --ignore-scripts --no-audit --no-fund
+npm run check
+npm run release:check -- --tag "rivet-v<package-version>"
+npm run pack:check
+```
 
-The tests cover provider selection, trusted default-branch profile loading, fixed paths, byte freezing, profile provenance and drift rejection, separate tracing credentials, contract-invalid agent retry, bounded automatic issue triage and issue implementation, configured-owner commands, policy and label ownership, live maintenance repair, dry runs, bounded prompt context, artifact sealing, patch limits, fresh-checkout verification, current PR identity, App-owned markers, same-PR non-force updates without a create-pull-request fallback, auto-merge eligibility, reusable-workflow contracts, and source-release manifest integrity. Regenerate and verify `MANIFEST.sha256` when release files change.
+Replace `<package-version>` with `packages/rivet/package.json`'s version. Retain
+the npm pack receipt, version, SHA-512 integrity, source commit, and installed
+consumer evidence. A local pack does not prove npm publication; follow the
+[release delivery guide](docs/RELEASE_READINESS.md) for that separate boundary.
 
-These local checks do not prove an adopter installation. Before enabling writes, confirm the installer metadata pins the final source checkpoint that implements optional profile overrides and same-PR repair; an older embedded pin does not acquire those behaviors from a newer tarball. Then prove the following in a private disposable adopter repository:
+## Fresh installation acceptance
 
-1. Install with every `.github/codekeeper/agents/*.md` path absent, merge to the default branch, and run `codekeeper verify` from a clean checkout. Confirm its installed-file, setting-name, App-scope, exact-package, and credential-free runtime checks pass. If App proof is unavailable to the current GitHub token, treat the result as unproven rather than passed.
-2. Run `codekeeper verify --controlled`; confirm the maintenance dry run uses packaged profile provenance. This proves model execution and sealing, but not App token minting or publication.
-3. With `audit.repair.enabled=true`, run live maintenance and verify that only one allowed, validated patch can reach publication.
-4. Create one agent profile override through a normal pull request. Show that the unmerged branch does not affect a run, then show that a later run records and uses the merged default-branch profile digest while the other roles still use packaged defaults.
-5. Open a controlled same-repository pull request targeting the default branch. Confirm the review caller is evaluated from its default-branch `pull_request_target` definition, never checks out or executes PR code, and proves App-authored publication before its gate is made required.
-6. Post a comment whose complete body is `/codekeeper fix` as a configured owner. Verify the App advances the existing pull request's head with a non-force commit, does not open another pull request, and refuses a stale or moved head.
-7. Open a separate controlled issue. Verify trusted triage marks it ready and automatically starts at most one bounded, unmerged repair pull request when issue implementation is on.
+Use a disposable GitHub.com repository with no previous Rivet files. Keep it
+private by default, or use an explicitly approved public repository containing
+only nonsensitive test content when public-runner acceptance is needed.
 
-Record workflow-run, issue, pull-request, review, and App-owned commit URLs as evidence. Restore `CODEKEEPER_ENABLED=false` after proof. Forks, merge queues, non-default PR targets, and GitHub Enterprise Server are outside the supported surface.
+1. Start from a clean checkout matching the remote default branch. Run the exact
+   packed candidate's guided command, for example
+   `node /absolute/path/to/installed/rivet/bin/rivet.mjs init`, not an update
+   command or fixture adapter.
+2. Complete GitHub App registration and authentication, download its PEM, and
+   install it only on the selected repository. Review-only requires Contents
+   read, Metadata read, Pull requests write, and Issues write when automatic
+   triage is enabled. Webhooks and unrelated permissions remain disabled.
+3. Let the CLI configure and verify the App. Supply the provider credential
+   through the supported environment or secure prompt, never command arguments,
+   committed files, or public logs. Verify secret names without exposing values.
+4. Confirm every planned managed file is new and the CLI creates a verified
+   draft setup PR containing only those files. Review and merge that PR to
+   activate the test installation; the CLI itself never merges.
+5. Open a controlled same-repository PR against the default branch. Verify the
+   public or private Actions run, actual model execution, App-authored review
+   bound to the exact head, and managed status-label reconciliation.
+6. Record the candidate SHA and integrity, setup PR, installed default-branch
+   commit, smoke-test head, workflow run, and review. Keep pending, defective,
+   fixed-head, stale-head, and repair scenarios separate from a basic smoke test.
 
-The local suite does not export live traces. In an adopter run, provide the OpenAI trace-export key and keep sensitive tracing off unless the evaluation explicitly needs prompts and responses. Confirm the trace appears in OpenAI **Logs > Traces**. Do not map a model-provider key to the trace-export credential.
+For an update test, install a supported prior version first, retain customized
+settings, and use the appropriate explicit `init --review-only` or `init --repair`
+mode. Verify settings are preserved and compiler-comment-only differences do not
+rewrite lock files. An update pass is not fresh-install evidence.
+
+Repair needs its own authority upgrade and live proof. Follow
+[repair qualification](docs/RIVET_REPAIR_QUALIFICATION.md). A green review run
+does not establish repair readiness or authorize automatic merging.
+
+## Recorded fresh-install proof
+
+On 2026-09-05, the packed source candidate
+`75ce0bb96e9351f1bc1f2c0e0e1a9990e8d1e27e` completed the fresh guided flow in an
+explicitly approved public test repository. It created all 15 managed files in
+[setup PR #1](https://github.com/coryparrry/rivet-fresh-install-test/pull/1), merged
+as installed commit `d36921ba01c4256d9a1c062bf669029470c0bce1`.
+
+[Smoke-test PR #2](https://github.com/coryparrry/rivet-fresh-install-test/pull/2)
+received an App-authored review for head
+`cec07c1120a5ee45f2f4c2b6d92812ff24003598` and the `merge ready` label.
+[All nine workflow jobs passed](https://github.com/coryparrry/rivet-fresh-install-test/actions/runs/33977208536),
+including model execution and publication. The CLI was restarted once to supply
+the approved provider credential through its environment; installer output was
+not replaced with hand-written fixture files.
+
+This proves that candidate's fresh review-only path. It does not prove a later
+package publication, every review scenario, or owner-authorized repair.
+
+## Evaluation and evidence gaps
+
+Use [Rivet evaluations](docs/EVALUATIONS.md) for repeated immutable-head review
+and audit grading. Keep answer keys outside the adopter repository. Evaluation
+success does not authorize additional GitHub mutations or a release.
+
+Unavailable runners, billing, credentials, networks, or model services are
+infrastructure gaps, not product passes. Report the affected command or run,
+exact candidate, and boundary that remains unverified.

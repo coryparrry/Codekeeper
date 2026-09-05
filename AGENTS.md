@@ -2,16 +2,16 @@
 
 ## Project Structure & Module Organization
 
-Codekeeper is a Node.js 22+ ES-module repository. `tools/codekeeper/` contains the provider-configurable maintainer runtime, policies, evaluation harness, and runtime tests. `packages/codekeeper/` contains the distributable installer CLI, embedded workflow assets, and installer tests. Reusable GitHub workflows live in `.github/workflows/`; adopter-facing caller templates live in `examples/workflows/`. `acceptance/` is the offline end-to-end harness. Architecture, configuration, validation, and security guidance live in `docs/`, `VALIDATION.md`, and `SECURITY.md`.
+Rivet is a Node.js 22+ ES-module repository. `packages/rivet/src/` contains the installer, guided CLI, App authority checks, workflow renderers, and pinned compiler integration. Managed workflow assets live in `packages/rivet/assets/`; package tests and evaluation commands live in `packages/rivet/test/` and `packages/rivet/evals/`. Repository CI and publication workflows live in `.github/workflows/`. Architecture, configuration, validation, and security guidance live in `docs/`, `VALIDATION.md`, and `SECURITY.md`. The old Codekeeper runtime, installer, and acceptance trees are retired.
 
 ## Build, Test, and Development Commands
 
-- `npm ci && npm run check` — install root tooling, then run ESLint and Prettier checks.
-- `node tools/codekeeper/src/cli.mjs check-config` — validate repository policy and configuration.
-- `cd tools/codekeeper && npm ci && npm run check` — syntax-check the runtime, verify its generated tooling manifest, and run runtime tests.
-- `cd packages/codekeeper && npm ci && npm run check` — validate the installer package and test its CLI/assets.
-- `cd acceptance && npm run check` — run the deterministic offline acceptance fixture.
-- `bash scripts/release-source.sh --verify` — verify tracked-file inventory and `MANIFEST.sha256` before release work.
+- `npm ci --ignore-scripts --no-audit --no-fund && npm run check` — install root tooling and run package, lint, formatting, governance, architecture, and source-manifest checks.
+- `npm run rivet:check` — install Rivet's dependencies and run its syntax and package tests.
+- `npm --prefix packages/rivet run review-lock:check` — reproduce and validate managed workflows with the pinned compiler.
+- `npm run architecture:check` — check module boundaries and local import cycles.
+- `npm run governance:check` — validate checked-in repository governance and its tests.
+- `bash scripts/release-source.sh --verify` — verify the tracked-file inventory and `MANIFEST.sha256` from a clean commit.
 
 ## Coding Style & Naming Conventions
 
@@ -19,7 +19,7 @@ Use two-space indentation, double quotes, trailing commas, and `.mjs` ES modules
 
 ## Testing Guidelines
 
-Tests use `node:test` with strict assertions and live beside each subsystem under `test/*.test.mjs`. Name tests after observable behavior, including failure, stale-state, timeout, and trust-boundary cases. Run the narrow suite while developing, then every affected package check. Runtime or workflow changes must keep `tools/codekeeper/tooling-manifest.json`, embedded assets, workflow pins, and release integrity synchronized.
+Tests use `node:test` with strict assertions and live beside each subsystem under `test/*.test.mjs`. Name tests after observable behavior, including failure, stale-state, timeout, and trust-boundary cases. Run the narrow suite while developing, then every affected package check. Runtime or workflow changes must keep managed assets, pinned compiler receipts, compiled workflow fixtures, and release integrity synchronized.
 
 ## Commit & Pull Request Guidelines
 
@@ -45,8 +45,8 @@ verify the exact checkpoint before publication.
 
 Treat hashes, manifests, and package source commits as dependent outputs, never as values to guess or update early.
 
-1. Finish the source change first. If runtime payload files changed, run `node tools/codekeeper/scripts/generate-tooling-manifest.mjs --write`, then its `--check` form, before committing the source change.
-2. Run the affected tests and commit all source changes except the root manifest. Do not commit generated `packages/codekeeper/assets/metadata.json` or copied caller workflows; they are produced at pack time.
+1. Finish the source change first. If workflow sources or compiler integration changed, reproduce and validate the affected compiled workflows with `npm --prefix packages/rivet run review-lock:check` and the boundary-specific checks in the release-safety contract.
+2. Run the affected tests and commit all source changes except the root manifest. Do not add retired Codekeeper metadata or hand-edit compiler receipts, hashes, or source pins.
 3. From that clean commit, run `node scripts/refresh-release-manifest.mjs`. It computes and commits only `MANIFEST.sha256`, which is compatibility-only for remaining source-pinned installations; never hand-edit that file. If any tracked file changes afterward, repeat this final step.
 4. Verify the final clean commit with `bash scripts/release-source.sh --verify` and report the exact commit SHA that passed.
 
@@ -54,4 +54,4 @@ Never record a future, unmerged, or self-referential commit. Do not hand-edit a 
 
 ## Generic Product Boundary
 
-Keep this repository generic and adopter-safe. Do not commit organization-specific runner labels, billing settings, repository names, fixture credentials, user identities, or other deployment-local values to product workflows, examples, policies, or tests. Put concrete CI runner choices in repository or organization settings behind a generic variable with a portable default. Put live acceptance-only configuration in the private acceptance repository. Any exception requires explicit product-level justification and a contract test proving it is not personal configuration.
+Keep this repository generic and adopter-safe. Do not commit organization-specific runner labels, billing settings, repository names, fixture credentials, user identities, or other deployment-local values to product workflows, examples, policies, or tests. Put concrete CI runner choices in repository or organization settings behind a generic variable with a portable default. Put live acceptance-only configuration in an approved disposable acceptance repository. Public acceptance requires explicit authorization and nonsensitive fixture content. Any exception requires explicit product-level justification and a contract test proving it is not personal configuration.

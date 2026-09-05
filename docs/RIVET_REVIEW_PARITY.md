@@ -16,6 +16,25 @@ Rivet preserves the legacy reviewer's high-signal behavior as a small, explicit 
 
 Rivet exposes only the safe outputs needed by the configured review policy. Inline findings are capped by `review.maximumFindings`. Every complete comparison publishes a general review summary. The event is `COMMENT` unless `review.requestChanges` is enabled and the recommendation is `block`; clean and non-blocking reviews never request changes. Incomplete comparisons call `report_incomplete` instead of guessing.
 
+Every complete review also emits exactly one structured tag decision whose
+recommendation agrees with the single merge-readiness status in the review
+body. A concrete missing deterministic test is carried separately from that
+recommendation.
+
+## Label boundary
+
+After context preparation, an eligible event reconciles the managed set to
+`review needed`, even when no review snapshot is available. Only successful
+current-head review publication may replace that pending state with
+`changes required` for `block`, `review needed` for `manual`, or `merge ready`
+for `auto`. `needs tests` is present only when that successfully published
+review identifies a concrete missing deterministic test.
+
+Rivet mutates only those four label names. Before every label mutation it
+rechecks the event pull request's identity, open state, base SHA, and head SHA,
+then verifies the final managed set. Unrelated repository labels remain
+untouched.
+
 ## Evidence boundary
 
-The fixture and compiler checks prove that this contract reaches the generated workflow and that its output authority matches the configuration. They do not prove model-quality non-inferiority. That requires controlled legacy and Rivet review runs over the same frozen pull request cases, followed by live proof that the GitHub App authored the Rivet output.
+The fixture and compiler checks prove that this contract reaches the generated workflow and that its output authority, configured finding limit, and label jobs match the configuration. They do not prove model-quality non-inferiority or live label mutation. That requires controlled legacy and Rivet review runs over the same frozen pull request cases, followed by live proof that the GitHub App authored the Rivet review and resulting managed labels.

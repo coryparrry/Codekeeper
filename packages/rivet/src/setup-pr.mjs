@@ -110,9 +110,11 @@ async function createSetupPullRequest({
   run = runCommand,
   prepare,
   preparedPlan,
+  onProgress,
   ...installOptions
 } = {}) {
-  const plan = preparedPlan ?? (await prepare(installOptions));
+  const plan =
+    preparedPlan ?? (await prepare({ ...installOptions, onProgress }));
   if (plan.mode !== mode) {
     throw new Error(`Rivet installer: expected a ${mode} installation plan`);
   }
@@ -123,6 +125,7 @@ async function createSetupPullRequest({
   if (paths.length === 0) {
     throw new Error(`Rivet installer: ${plan.mode} installation is up to date`);
   }
+  onProgress?.("Creating Rivet setup pull request");
 
   await run("git", ["check-ref-format", "--branch", branch], { cwd });
   const status = await run(
@@ -183,7 +186,7 @@ async function createSetupPullRequest({
   }
 
   await run("git", ["switch", "-c", branch, base], { cwd });
-  await applyInstallation(plan);
+  await applyInstallation(plan, { onProgress });
   await run("git", ["add", "--", ...paths], { cwd });
   assertExactPaths(
     await run("git", ["diff", "--cached", "--name-only", "-z"], { cwd }),

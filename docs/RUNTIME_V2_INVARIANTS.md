@@ -1,4 +1,10 @@
-# Runtime v2 invariants
+# Historical Runtime v2 invariants
+
+> **Historical design record.** This document preserves the baseline for the
+> pre-Rivet Runtime v2 refactor. It does not describe the active Rivet package,
+> installer, or workflow topology. See [Architecture](ARCHITECTURE.md) for the
+> current design and [Agent change and release safety](AGENT_RELEASE_SAFETY.md)
+> for current verification requirements.
 
 This document records the baseline contract for the first Runtime v2 change.
 PR 1 adds measurement and contract coverage only. It does not change a

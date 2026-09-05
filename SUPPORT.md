@@ -3,7 +3,7 @@
 ## Questions and usage help
 
 Use GitHub Issues for reproducible bugs and feature proposals. Include the
-Codekeeper source or package version, GitHub host, workflow name, event type,
+Rivet package version or source commit, GitHub host, workflow name, event type,
 sanitised logs, and the expected versus observed result. Never include secrets,
 private keys, tokens, or unredacted repository content.
 

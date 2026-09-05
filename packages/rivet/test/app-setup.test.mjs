@@ -108,6 +108,24 @@ test("reads only bounded regular private keys", async (t) => {
   );
 });
 
+test("expands home-relative key paths while preserving safe file checks", async (t) => {
+  const { root, privateKeyBytes, privateKeyPath } = await keyFixture(t);
+  const homeRelative = (file) => `~/${path.relative(os.homedir(), file)}`;
+  const loaded = await readPrivateKeyFile(homeRelative(privateKeyPath));
+  assert.equal(digest(loaded), digest(privateKeyBytes));
+  loaded.fill(0);
+  const linked = path.join(root, "linked.pem");
+  await symlink(privateKeyPath, linked);
+  await assert.rejects(
+    readPrivateKeyFile(homeRelative(linked)),
+    /could not be read safely/,
+  );
+  await assert.rejects(
+    readPrivateKeyFile(homeRelative(root)),
+    /bounded regular file/,
+  );
+});
+
 test("configures Rivet credentials without putting the private key in arguments", async (t) => {
   const { privateKeyBytes, privateKeyPath } = await keyFixture(t);
   const calls = [];

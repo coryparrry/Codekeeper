@@ -10,6 +10,7 @@ const DIGEST = /^[0-9a-f]{64}$/i;
 const MUTATIONS = [
   "create_pull_request_review_comment",
   "submit_pull_request_review",
+  "publish_review_tags",
   "create_issue",
 ];
 const OUTPUT_TYPES = new Set([
@@ -252,14 +253,17 @@ export function evaluateReviewRun(
     terminal:
       expected.terminal === "review"
         ? submits.length === 1 &&
+          count(outputs, "publish_review_tags") === 1 &&
           count(outputs, "noop") === 0 &&
           incompleteCount(outputs) === 0
         : expected.terminal === "noop"
           ? count(outputs, "noop") === 1 &&
             submits.length === 0 &&
+            count(outputs, "publish_review_tags") === 0 &&
             incompleteCount(outputs) === 0
           : incompleteCount(outputs) === 1 &&
             submits.length === 0 &&
+            count(outputs, "publish_review_tags") === 0 &&
             count(outputs, "noop") === 0,
     receipts: MUTATIONS.every(
       (type) => count(outputs, type) === count(receipts, type),

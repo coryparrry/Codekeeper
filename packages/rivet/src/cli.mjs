@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   reviewAppAuthority,
   reviewAppRegistrationUrl,
@@ -14,6 +15,7 @@ import {
   verifyReviewApp,
 } from "./app-setup.mjs";
 import { runGuidedInit } from "./guided-init.mjs";
+import { readRivetConfiguration } from "./repository-config.mjs";
 
 export const USAGE = `Rivet repository maintenance
 
@@ -233,12 +235,23 @@ export async function runCli(
     maintenance,
     ...installationOptions
   } = options;
-  if (issues || maintenance) {
-    const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  installationOptions.repositoryRoot = path.resolve(
+    cwd,
+    installationOptions.repositoryRoot ?? ".",
+  );
+  const existing = await readRivetConfiguration(
+    installationOptions.repositoryRoot,
+  );
+  if (existing || issues || maintenance) {
+    const configuration = existing ?? structuredClone(DEFAULT_RIVET_CONFIG);
     if (issues) configuration.issues.triage = issues;
     if (maintenance) configuration.maintenance.mode = maintenance;
     if (mode === "repair") configuration.repair.authority = "owner";
     installationOptions.configuration = configuration;
+  }
+  if (stderr?.isTTY) {
+    installationOptions.onProgress = (message) =>
+      stderr.write(`Rivet: ${message}...\n`);
   }
   const result = setupPullRequest
     ? await (mode === "repair"

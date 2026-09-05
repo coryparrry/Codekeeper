@@ -30,9 +30,7 @@ const LOCAL_ACTIONS = [
   "./.github/rivet/actions/authority-receipt",
   "./.github/rivet/actions/prepare-review-context",
 ];
-const ISSUE_LOCAL_ACTIONS = [
-  "./.github/rivet/actions/prepare-issue-context",
-];
+const ISSUE_LOCAL_ACTIONS = ["./.github/rivet/actions/prepare-issue-context"];
 const MAINTENANCE_LOCAL_ACTION = "./.github/rivet/actions/validate-audit";
 test("rejects maintenance mutation authority and non-default checkouts", async () => {
   const compiled = await maintenanceFixtureAuthority("scheduled");
@@ -515,6 +513,78 @@ test("accepts the self-contained base-branch Rivet review authority", async () =
     source,
     /permission-(?:actions|contents|deployments|discussions|packages|statuses): write/,
   );
+});
+
+test("trusts a genuinely compiled custom finding limit without widening authority", async () => {
+  const source = gunzipSync(
+    Buffer.from(
+      await readFile(
+        path.join(
+          PACKAGE_ROOT,
+          "test/fixtures/review/rivet-review-max3.lock.yml.gz.b64",
+        ),
+        "utf8",
+      ),
+      "base64",
+    ),
+  ).toString("utf8");
+  const authority = inspectCompiledWorkflow(source);
+  assert.equal(
+    assessReview(authority, { expectedMaximumFindings: 3 }).trusted,
+    true,
+  );
+  assert.equal(
+    assessReview(authority, { expectedMaximumFindings: 8 }).trusted,
+    false,
+  );
+  const mutations = [
+    [
+      "excessive limit",
+      (copy) => {
+        copy.safeOutputConfig.create_pull_request_review_comment.max = 21;
+      },
+    ],
+    [
+      "unbound prompt limit",
+      (copy) => {
+        const action = copy.actions.find(
+          ({ env }) => env?.GH_AW_PROMPT_CONTENT_0001,
+        );
+        action.env.GH_AW_PROMPT_CONTENT_0001 =
+          action.env.GH_AW_PROMPT_CONTENT_0001.replace("(max:3)", "(max:9)");
+      },
+    ],
+    [
+      "extra shell execution",
+      (copy) => {
+        copy.scripts.find(
+          ({ run }) =>
+            run.includes("GH_AW_SAFE_OUTPUTS_CONFIG_") &&
+            run.includes('"max":3'),
+        ).run += "echo injected\n";
+      },
+    ],
+    [
+      "expanded inline side",
+      (copy) => {
+        const script = copy.scripts.find(
+          ({ run }) =>
+            run.includes("GH_AW_SAFE_OUTPUTS_CONFIG_") &&
+            run.includes('"max":3'),
+        );
+        script.run = script.run.replace('"side":"RIGHT"', '"side":"LEFT"');
+      },
+    ],
+  ];
+  for (const [label, mutate] of mutations) {
+    const copy = structuredClone(authority);
+    mutate(copy);
+    assert.equal(
+      assessReview(copy, { expectedMaximumFindings: 3 }).trusted,
+      false,
+      label,
+    );
+  }
 });
 
 test("binds disabled issue triage to its exact review authority", async () => {

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { runCli } from "../src/cli.mjs";
+import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 
 function output() {
   let value = "";
@@ -9,6 +13,86 @@ function output() {
     read: () => value,
   };
 }
+
+async function configuredRepository(t, configuration) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rivet-cli-config-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, ".github"));
+  await writeFile(
+    path.join(root, ".github/rivet.json"),
+    typeof configuration === "string"
+      ? configuration
+      : JSON.stringify(configuration),
+  );
+  return root;
+}
+
+test("preserves installed settings while applying explicit setup-PR overrides", async (t) => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.models.review.model = "custom-model";
+  configuration.review.maximumFindings = 3;
+  const root = await configuredRepository(t, configuration);
+  let received;
+  await runCli(
+    [
+      "init",
+      "--repair",
+      "--issues",
+      "disabled",
+      "--maintenance",
+      "manual",
+      "--setup-pr",
+    ],
+    {
+      cwd: root,
+      stdout: output().stream,
+      createRepairSetupPullRequestImpl: async (options) => {
+        received = options;
+        return {};
+      },
+    },
+  );
+  assert.deepEqual(received.configuration, {
+    ...configuration,
+    repair: { authority: "owner" },
+    issues: { ...configuration.issues, triage: "disabled" },
+    maintenance: { mode: "manual" },
+  });
+  assert.equal(received.repositoryRoot, root);
+});
+
+test("bare init defers configuration loading until guided setup resolves the repository", async () => {
+  let received;
+  await runCli(["init"], {
+    cwd: "/repo/nested/source",
+    runGuidedInitImpl: async (options) => {
+      received = options;
+    },
+  });
+  assert.equal(received.cwd, "/repo/nested/source");
+  assert.equal(received.configuration, undefined);
+});
+
+test("rejects malformed or invalid installed configuration before installation", async (t) => {
+  for (const configuration of [
+    "{",
+    { ...DEFAULT_RIVET_CONFIG, schemaVersion: 999 },
+  ]) {
+    const root = await configuredRepository(t, configuration);
+    let calls = 0;
+    await assert.rejects(
+      runCli(["init", "--review-only", "--dry-run"], {
+        cwd: root,
+        stdout: output().stream,
+        installReviewImpl: async () => {
+          calls += 1;
+        },
+      }),
+      /invalid configuration at .*rivet\.json/,
+    );
+    assert.equal(calls, 0);
+  }
+});
 
 test("routes bare init to the guided review-only setup", async () => {
   const stdout = output();
@@ -75,6 +159,49 @@ test("runs an explicit review-only dry-run", async () => {
   assert.deepEqual(options, { repositoryRoot: "/repo", dryRun: true });
   assert.equal(result, expected);
   assert.deepEqual(JSON.parse(stdout.read()), expected);
+});
+
+test("routes explicit init progress to TTY stderr while keeping stdout as JSON", async () => {
+  const stdout = output();
+  const stderr = output();
+  stderr.stream.isTTY = true;
+  const expected = { mode: "review", files: [] };
+
+  await runCli(
+    ["init", "--review-only", "--repository", "/repo", "--dry-run"],
+    {
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+      installReviewImpl: async (options) => {
+        options.onProgress("Preparing Rivet installation");
+        options.onProgress("Checking existing Rivet installation");
+        return expected;
+      },
+    },
+  );
+
+  assert.deepEqual(JSON.parse(stdout.read()), expected);
+  assert.equal(
+    stderr.read(),
+    "Rivet: Preparing Rivet installation...\n" +
+      "Rivet: Checking existing Rivet installation...\n",
+  );
+});
+
+test("does not add progress output or callback for non-TTY explicit init", async () => {
+  const stderr = output();
+  let received;
+  await runCli(["init", "--review-only", "--dry-run"], {
+    stdout: output().stream,
+    stderr: stderr.stream,
+    installReviewImpl: async (options) => {
+      received = options;
+      return { mode: "review", files: [] };
+    },
+  });
+
+  assert.equal(received.onProgress, undefined);
+  assert.equal(stderr.read(), "");
 });
 
 test("enables report-only maintenance through explicit init", async () => {

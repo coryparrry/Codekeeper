@@ -128,12 +128,14 @@ test("accepts only exact github.com origin identities", () => {
 test("creates a verified draft setup pull request without merging", async (t) => {
   const { root, remote } = await repository(t);
   const calls = [];
+  const progress = [];
   const result = await createReviewSetupPullRequest({
     repositoryRoot: root,
     branch: "rivet/setup-test",
     compileWorkflow: fixtureCompiler,
     validateWorkflow: async () => {},
     run: runner(calls),
+    onProgress: (message) => progress.push(message),
   });
 
   assert.equal(result.repository, "acme/example");
@@ -144,6 +146,12 @@ test("creates a verified draft setup pull request without merging", async (t) =>
     result.pullRequestUrl,
     "https://github.com/acme/example/pull/17",
   );
+  assert.deepEqual(progress, [
+    "Preparing Rivet installation",
+    "Checking existing Rivet installation",
+    "Creating Rivet setup pull request",
+    "Writing Rivet installation",
+  ]);
   assert.equal(
     await git(root, ["branch", "--show-current"]),
     "rivet/setup-test",

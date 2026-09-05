@@ -7,6 +7,7 @@ import {
   reviewAppRegistrationUrl,
 } from "./app-authority.mjs";
 import { prepareReviewInstallation } from "./install.mjs";
+import { readRivetConfiguration } from "./repository-config.mjs";
 import {
   createReviewSetupPullRequest,
   repositoryFromGitHubOrigin,
@@ -225,8 +226,7 @@ async function resolveOriginRepository({ runner, repositoryRoot, env }) {
   }
 }
 
-async function preflight({ runner, cwd, env }) {
-  const repositoryRoot = await resolveRepositoryRoot({ runner, cwd, env });
+async function preflight({ runner, repositoryRoot, env }) {
   const status = await runner(
     "git",
     ["status", "--porcelain=v1", "--untracked-files=all"],
@@ -544,7 +544,8 @@ export async function runGuidedInit(options = {}) {
     createReviewSetupPullRequestImpl = createReviewSetupPullRequest,
     prepareReviewInstallationImpl = prepareReviewInstallation,
     secretInput,
-    configuration,
+    configuration: explicitConfiguration,
+    readRivetConfigurationImpl = readRivetConfiguration,
   } = options;
   const stdio =
     options.stdio ??
@@ -557,6 +558,11 @@ export async function runGuidedInit(options = {}) {
     options.env ?? options.environment ?? process.env;
   const env = sanitizedEnvironment(credentialEnvironment);
   const stdout = stdio.stdout;
+  const onProgress =
+    options.onProgress ??
+    (stdio.stderr?.isTTY
+      ? (message) => stdio.stderr.write(`Rivet: ${message}...\n`)
+      : undefined);
   let prompt = injectedPrompt;
   if (!prompt) {
     if (!stdio.stdin?.isTTY) {
@@ -575,15 +581,32 @@ export async function runGuidedInit(options = {}) {
     );
   }
 
-  const preflightResult = await preflight({
+  onProgress?.("Resolving the Git repository");
+  const resolvedRepositoryRoot = await resolveRepositoryRoot({
     runner,
     cwd: repositoryRoot ?? cwd,
     env,
   });
+  const configuration =
+    explicitConfiguration ??
+    (await readRivetConfigurationImpl(resolvedRepositoryRoot));
+  if (configuration?.repair?.authority === "owner") {
+    throw new Error(
+      "Rivet init: this repository uses repair mode; update it with rivet init --repair --setup-pr",
+    );
+  }
+  onProgress?.("Checking repository prerequisites");
+  const preflightResult = await preflight({
+    runner,
+    repositoryRoot: resolvedRepositoryRoot,
+    env,
+  });
+  onProgress?.("Compiling and checking the review workflows");
   const preparedPlan = await prepareReviewInstallationImpl({
     repositoryRoot: preflightResult.repositoryRoot,
     configuration,
     env,
+    onProgress,
   });
   if (!preparedPlan.files.some(({ status }) => status !== "unchanged")) {
     throw new Error(
@@ -628,6 +651,7 @@ export async function runGuidedInit(options = {}) {
     "GitHub App private-key PEM path",
   );
   await assertPreflightStillCurrent({ runner, preflightResult, env });
+  onProgress?.("Configuring the review GitHub App");
   const app = await configureReviewAppImpl({
     repository: preflightResult.repository,
     clientId,
@@ -662,6 +686,7 @@ export async function runGuidedInit(options = {}) {
     write(stdout, result.guidance);
     return result;
   }
+  onProgress?.("Verifying the review GitHub App installation");
   const verifiedApp = await verifyReviewAppImpl({
     repository: preflightResult.repository,
     clientId,
@@ -702,6 +727,7 @@ export async function runGuidedInit(options = {}) {
   }
   await assertPreflightStillCurrent({ runner, preflightResult, env });
   if (!modelSecretAlreadyConfigured) {
+    onProgress?.("Saving the model credential");
     await setModelSecret({
       runner,
       repository: preflightResult.repository,
@@ -720,6 +746,7 @@ export async function runGuidedInit(options = {}) {
     repositoryRoot: preflightResult.repositoryRoot,
     configuration,
     preparedPlan,
+    onProgress,
     run: (command, args, runOptions = {}) =>
       runner(command, args, { env, ...runOptions }),
   });
@@ -749,6 +776,10 @@ export async function runGuidedInit(options = {}) {
   write(
     stdout,
     `Created verified draft setup pull request: ${result.setupPullRequest.pullRequestUrl}`,
+  );
+  write(
+    stdout,
+    "Next: review the draft pull request and its checks. When it is ready, mark it ready for review and merge it to activate Rivet.",
   );
   return result;
 }

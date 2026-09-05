@@ -3,32 +3,31 @@
 This roadmap describes priorities, not promised dates or compatibility
 commitments.
 
-## Next: product hardening
+## Next: adoption proof and review coverage
 
-- Preserve human-owned repository labels and namespace labels Codekeeper can
-  remove.
-- Include bounded issue conversation context and rerun triage when a reporter
-  or maintainer supplies missing information.
-- Keep maintenance quiet by default: manual/report-first, then explicit
-  schedule, issue-publication, and repair decisions.
-- Keep privileged jobs on isolated GitHub-hosted ephemeral runners.
-- Require deterministic repository validation before code-changing automation.
-- Present actual authority and automatic behavior before installation changes.
-
-## Then: adoption evidence and broader review
-
-- Add a safe read-only strategy for fork, stacked, draft, and merge-queue
-  review rather than treating them as mutation-eligible by default.
+- Prove the complete automatic review-label lifecycle in a controlled adopter,
+  including pending, blocking, missing-test, manual-review, and merge-ready
+  states while preserving every human-owned label.
+- Add a safe read-only strategy for fork, stacked, draft, and merge-queue review
+  instead of treating those pull requests as mutation-eligible.
 - Publish versioned evaluation reports with stronger root-cause and
   reproduction scoring.
-- Complete external package provenance and a post-publish canary before public
-  npm installation guidance.
+- Retain exact package-provenance and post-publish adopter canaries for every
+  release.
+
+## Then: explicit advanced controls
+
+- Add a guided repair-authority upgrade after the review-only guided setup is
+  proven across adopters.
 - Add explicit provider-data controls and predictable execution-budget
   controls.
+- Expand maintenance only when a report-first adopter use case proves the added
+  authority is necessary.
 
 ## Ongoing
 
-- Keep trust boundaries and policy schemas auditable.
+- Keep trust boundaries, policy schemas, historical upgrade inputs, and managed
+  label ownership auditable.
 - Reduce repeated workflow work without hiding permissions or credential
   mapping.
 - Improve contributor documentation and real adopter examples as evidence is
