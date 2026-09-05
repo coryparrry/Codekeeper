@@ -406,8 +406,11 @@ export function renderRivetReviewWorkflow({
   includeLegacyReviewBudget = false,
   includeGeneralReview = true,
   includeAutoTagging = true,
+  includeFailureSafePendingTags = true,
 } = {}) {
   const review = reviewWorkflowProjection(configuration);
+  const failureSafePendingTags =
+    includeAutoTagging && includeFailureSafePendingTags;
   const reviewEvents = review.requestChanges
     ? "COMMENT, REQUEST_CHANGES"
     : "COMMENT";
@@ -420,7 +423,7 @@ on:
 ${includeReviewBudget ? "  needs: [review_context]\n" : ""}permissions:
   contents: read
   pull-requests: read
-${includeReviewBudget ? "checkout: false\n" : "checkout:\n  sparse-checkout: |\n    .github/rivet/actions/authority-receipt\n"}${engineFrontmatter(review)}${includeReviewBudget ? `max-turns: 3\njobs:\n${pendingTaggingJobFrontmatter(includeAutoTagging)}${includeAutoTagging ? "  agent:\n    needs: [review_tags_pending]\n" : ""}  safe_outputs:\n    if: needs.agent.result == 'success'\n` : includeLegacyReviewBudget ? "max-turns: 6\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : ""}${nativeImportsFrontmatter(nativeImports)}safe-outputs:
+${includeReviewBudget ? "checkout: false\n" : "checkout:\n  sparse-checkout: |\n    .github/rivet/actions/authority-receipt\n"}${engineFrontmatter(review)}${includeReviewBudget ? `max-turns: 3\njobs:\n${pendingTaggingJobFrontmatter(includeAutoTagging)}${includeAutoTagging ? `  agent:\n    needs: [review_tags_pending]\n${failureSafePendingTags ? "    if: needs.review_context.outputs.snapshot != ''\n" : ""}` : ""}  safe_outputs:\n    if: needs.agent.result == 'success'\n` : includeLegacyReviewBudget ? "max-turns: 6\njobs:\n  safe_outputs:\n    if: needs.agent.result == 'success'\n" : ""}${nativeImportsFrontmatter(nativeImports)}safe-outputs:
 ${safeOutputsAppFrontmatter()}  report-failure-as-issue: false
   report-failed-jobs: false
   report-incomplete:

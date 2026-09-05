@@ -99,6 +99,7 @@ export async function buildWorkflowFiles({
   includeMaintenance,
   includeReviewBudget = profiles,
   includeAutoTagging = true,
+  includeFailureSafePendingTags = true,
   reviewExtension,
   reviewWorkflowVersion,
   issueTriageWorkflowVersion,
@@ -130,6 +131,7 @@ export async function buildWorkflowFiles({
                   configuration: reviewConfig,
                   includeReviewBudget,
                   includeAutoTagging,
+                  includeFailureSafePendingTags,
                 })
       : renderRivetReviewWorkflowV012({ configuration: reviewConfig }),
   );

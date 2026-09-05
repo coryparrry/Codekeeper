@@ -117,7 +117,6 @@ jobs:
             if (JSON.stringify(finalManaged) !== JSON.stringify(["review needed"])) invalid();
   agent:
     needs: [review_tags_pending]
-    if: needs.review_context.outputs.snapshot != ''
   safe_outputs:
     if: needs.agent.result == 'success'
 inlined-imports: true

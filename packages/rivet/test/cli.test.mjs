@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { runCli } from "../src/cli.mjs";
+import { DEFAULT_RIVET_CONFIG } from "../src/config.mjs";
 
 function output() {
   let value = "";
@@ -9,6 +13,88 @@ function output() {
     read: () => value,
   };
 }
+
+async function configuredRepository(t, configuration) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rivet-cli-config-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, ".github"));
+  await writeFile(
+    path.join(root, ".github/rivet.json"),
+    typeof configuration === "string"
+      ? configuration
+      : JSON.stringify(configuration),
+  );
+  return root;
+}
+
+test("preserves installed settings while applying explicit setup-PR overrides", async (t) => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.models.review.model = "custom-model";
+  configuration.review.maximumFindings = 3;
+  const root = await configuredRepository(t, configuration);
+  let received;
+  await runCli(
+    [
+      "init",
+      "--repair",
+      "--issues",
+      "disabled",
+      "--maintenance",
+      "manual",
+      "--setup-pr",
+    ],
+    {
+      cwd: root,
+      stdout: output().stream,
+      createRepairSetupPullRequestImpl: async (options) => {
+        received = options;
+        return {};
+      },
+    },
+  );
+  assert.deepEqual(received.configuration, {
+    ...configuration,
+    repair: { authority: "owner" },
+    issues: { ...configuration.issues, triage: "disabled" },
+    maintenance: { mode: "manual" },
+  });
+  assert.equal(received.repositoryRoot, root);
+});
+
+test("guided setup receives the existing configuration", async (t) => {
+  const configuration = structuredClone(DEFAULT_RIVET_CONFIG);
+  configuration.review.maximumFindings = 3;
+  const root = await configuredRepository(t, configuration);
+  let received;
+  await runCli(["init"], {
+    cwd: root,
+    runGuidedInitImpl: async (options) => {
+      received = options;
+    },
+  });
+  assert.deepEqual(received.configuration, configuration);
+});
+
+test("rejects malformed or invalid installed configuration before installation", async (t) => {
+  for (const configuration of [
+    "{",
+    { ...DEFAULT_RIVET_CONFIG, schemaVersion: 999 },
+  ]) {
+    const root = await configuredRepository(t, configuration);
+    let calls = 0;
+    await assert.rejects(
+      runCli(["init", "--review-only", "--dry-run"], {
+        cwd: root,
+        stdout: output().stream,
+        installReviewImpl: async () => {
+          calls += 1;
+        },
+      }),
+      /invalid configuration at .*rivet\.json/,
+    );
+    assert.equal(calls, 0);
+  }
+});
 
 test("routes bare init to the guided review-only setup", async () => {
   const stdout = output();

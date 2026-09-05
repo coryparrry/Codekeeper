@@ -27,6 +27,7 @@ import {
   assessPullRequestTargetTrust,
 } from "./gh-aw/trust.mjs";
 import { completeInstallationFiles } from "./installation-receipt.mjs";
+import { buildTaggingUpgradeBaselines } from "./tagging-upgrade.mjs";
 import {
   buildIssueTriageUpgradeBaselines,
   matchesHistoricalManagedFile,
@@ -183,6 +184,18 @@ function withoutReviewContext(files) {
     previous.delete(relativePath);
   }
   return previous;
+}
+function reviewOnlyBaseline(files, config) {
+  const reviewFiles = new Map(
+    [...files].filter(
+      ([relativePath]) =>
+        !REPAIR_ASSET_PATHS.includes(relativePath) &&
+        relativePath !== FIXER_IMPORT &&
+        !relativePath.includes(`/${RIVET_REPAIR_WORKFLOW_ID}.`),
+    ),
+  );
+  reviewFiles.delete(".github/rivet/installation.json");
+  return completeInstallationFiles(reviewFiles, { mode: "review", config });
 }
 async function buildMaintenanceVariant({
   stagingRoot,
@@ -460,19 +473,7 @@ async function prepareInstallation({
     }
     let reviewBaseline = null;
     if (requiresUpgrade && mode === "repair") {
-      reviewBaseline = new Map(
-        [...files].filter(
-          ([relativePath]) =>
-            !REPAIR_ASSET_PATHS.includes(relativePath) &&
-            relativePath !== FIXER_IMPORT &&
-            !relativePath.includes(`/${RIVET_REPAIR_WORKFLOW_ID}.`),
-        ),
-      );
-      reviewBaseline.delete(".github/rivet/installation.json");
-      completeInstallationFiles(reviewBaseline, {
-        mode: "review",
-        config: reviewConfig,
-      });
+      reviewBaseline = reviewOnlyBaseline(files, reviewConfig);
       baselines.push(reviewBaseline);
     }
     if (requiresUpgrade && config.issues.triage === "automatic") {
@@ -526,8 +527,8 @@ async function prepareInstallation({
       }
     }
     if (requiresUpgrade) {
-      const beforeAutoTagging = await buildWorkflowFiles({
-        stagingRoot: path.join(stagingRoot, "before-auto-tagging"),
+      const taggingBaselines = await buildTaggingUpgradeBaselines({
+        stagingRoot,
         mode,
         config,
         reviewConfig,
@@ -536,13 +537,13 @@ async function prepareInstallation({
         compileWorkflow,
         validateWorkflow,
         env,
-        profiles: true,
-        includeIssueTriage: config.issues.triage === "automatic",
-        includeMaintenance: config.maintenance.mode !== "disabled",
-        includeAutoTagging: false,
       });
-      completeInstallationFiles(beforeAutoTagging, { mode, config });
-      baselines.push(beforeAutoTagging);
+      for (const previousTagging of taggingBaselines) {
+        baselines.push(previousTagging);
+        if (mode === "repair") {
+          baselines.push(reviewOnlyBaseline(previousTagging, reviewConfig));
+        }
+      }
 
       for (const { version, url } of PROFILED_REVIEW_EXTENSIONS) {
         const reviewExtension = await readFile(url, "utf8");

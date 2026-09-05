@@ -3,12 +3,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
+import { runPrepareReviewContextAction } from "../assets/review/.github/rivet/actions/prepare-review-context/index.mjs";
 import {
   renderRivetReviewWorkflow,
   renderRivetReviewWorkflowV0113,
   renderRivetReviewWorkflowV012,
   RIVET_REVIEW_NATIVE_IMPORTS,
-  RIVET_REVIEW_TAG_PENDING_SCRIPT,
   RIVET_REVIEW_TAG_PUBLISH_SCRIPT,
   RIVET_REVIEW_WORKFLOW_ID,
 } from "../src/workflows/review.mjs";
@@ -103,7 +104,7 @@ test("renders the checked-in Rivet review workflow source", async () => {
   assert.doesNotMatch(fixture, /  add-comment:/);
 });
 
-test("marks a new pull request head as pending before review", async () => {
+test("resets a stale ready label even when the new comparison exceeds its budget", async () => {
   const compiled = await readFile(
     path.join(
       PACKAGE_ROOT,
@@ -111,20 +112,57 @@ test("marks a new pull request head as pending before review", async () => {
     ),
     "utf8",
   );
+  const { jobs } = parse(compiled);
+  const ancestors = (job) => {
+    const direct = [jobs[job].needs ?? []].flat();
+    return [...new Set(direct.flatMap((need) => [need, ...ancestors(need)]))];
+  };
+  assert.equal(
+    jobs.review_context.steps.find((step) => step.id === "snapshot")[
+      "continue-on-error"
+    ],
+    true,
+  );
+  assert.match(jobs.agent.if, /needs\.review_context\.outputs\.snapshot != ''/);
+  assert.match(
+    compiled,
+    /GH_AW_NEEDS_REVIEW_CONTEXT_OUTPUTS_SNAPSHOT: \$\{\{ needs\.review_context\.outputs\.snapshot \}\}/,
+  );
+  assert.match(
+    compiled,
+    /GH_AW_NEEDS_REVIEW_CONTEXT_OUTPUTS_SNAPSHOT: process\.env\.GH_AW_NEEDS_REVIEW_CONTEXT_OUTPUTS_SNAPSHOT/,
+  );
+  assert.ok(ancestors("review_tags_pending").includes("pre_activation"));
+  assert.equal(
+    jobs.review_tags_pending.if,
+    "needs.pre_activation.outputs.activated == 'true'",
+  );
+  assert.ok(ancestors("agent").includes("review_context"));
+  assert.ok(ancestors("agent").includes("review_tags_pending"));
+  assert.match(jobs.agent.if, /needs\.activation/);
+  assert.match(
+    jobs.publish_review_tags.if,
+    /needs\.agent\.result != 'skipped'/,
+  );
   const pendingJob = compiled.slice(
     compiled.indexOf("\n  review_tags_pending:"),
     compiled.indexOf("\n  safe_outputs:"),
   );
-  assert.doesNotMatch(pendingJob, /contains\(needs\.agent\.outputs\.output_types/);
+  assert.doesNotMatch(
+    pendingJob,
+    /contains\(needs\.agent\.outputs\.output_types/,
+  );
   const reset = new (Object.getPrototypeOf(async function () {}).constructor)(
     "context",
     "github",
-    RIVET_REVIEW_TAG_PENDING_SCRIPT,
+    jobs.review_tags_pending.steps.find((step) => step.with?.script)?.with
+      .script,
   );
   const pull = {
     id: 101,
     number: 12,
     state: "open",
+    changed_files: 51,
     base: { sha: "a".repeat(40) },
     head: { sha: "b".repeat(40) },
     labels: [
@@ -135,7 +173,11 @@ test("marks a new pull request head as pending before review", async () => {
   };
   const context = {
     eventName: "pull_request_target",
-    payload: { action: "synchronize", pull_request: structuredClone(pull) },
+    payload: {
+      action: "synchronize",
+      repository: { full_name: "owner/repository" },
+      pull_request: structuredClone(pull),
+    },
     repo: { owner: "owner", repo: "repository" },
   };
   const github = {
@@ -151,11 +193,28 @@ test("marks a new pull request head as pending before review", async () => {
       },
     },
   };
-  await reset(context, github);
-  assert.deepEqual(
-    pull.labels.map(({ name }) => name).sort(),
-    ["human-owned", "review needed"],
+  await assert.rejects(
+    runPrepareReviewContextAction({
+      env: {
+        GITHUB_EVENT_PATH: "/event.json",
+        GITHUB_OUTPUT: "/output",
+        GITHUB_REPOSITORY: "owner/repository",
+        GITHUB_TOKEN: "test-token",
+      },
+      statImpl: async () => ({ isFile: () => true, size: 100 }),
+      readFileImpl: async () => JSON.stringify(context.payload),
+      appendFileImpl: async () =>
+        assert.fail("incomplete context cannot publish"),
+      fetchImpl: async () =>
+        assert.fail("oversized comparison needs no API call"),
+    }),
+    /comparison exceeds the 50-file review budget/,
   );
+  await reset(context, github);
+  assert.deepEqual(pull.labels.map(({ name }) => name).sort(), [
+    "human-owned",
+    "review needed",
+  ]);
 });
 
 test("projects domain review controls into gh-aw frontmatter", () => {
@@ -354,10 +413,10 @@ test("reconciles only managed tags on the triggering pull request", async () => 
     context,
     github,
   );
-  assert.deepEqual(
-    pull.labels.map(({ name }) => name).sort(),
-    ["human-owned", "review needed"],
-  );
+  assert.deepEqual(pull.labels.map(({ name }) => name).sort(), [
+    "human-owned",
+    "review needed",
+  ]);
 
   pull.labels = [{ name: "changes required" }, { name: "human-owned" }];
   pull.head.sha = context.payload.pull_request.head.sha;
