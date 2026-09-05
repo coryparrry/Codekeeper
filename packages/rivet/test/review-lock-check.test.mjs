@@ -67,6 +67,18 @@ test("rejects a stale review lock and removes its temporary repository", async (
       path.join(fixtureRoot, "rivet-review-disabled.lock.yml.gz.b64"),
       gzipSync("# prior compiler formatting\nregenerated\n").toString("base64"),
     );
+    await writeFile(
+      path.join(fixtureRoot, "rivet-review-max3.lock.yml.gz.b64"),
+      gzipSync("stale maximum\n").toString("base64"),
+    );
+    await assert.rejects(
+      checkReviewLock(options),
+      /rivet-review-max3\.lock\.yml fixture does not match/,
+    );
+    await writeFile(
+      path.join(fixtureRoot, "rivet-review-max3.lock.yml.gz.b64"),
+      gzipSync("regenerated\n").toString("base64"),
+    );
     await checkReviewLock(options);
     assert.equal(validated, true);
     assert.deepEqual(await readdir(temporaryParent), []);

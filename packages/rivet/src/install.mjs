@@ -270,6 +270,7 @@ async function prepareInstallation({
       expectedImports: RIVET_REVIEW_NATIVE_IMPORTS,
       expectedLocalActions: REVIEW_LOCAL_ACTIONS,
       expectedModel: config.models.review.model,
+      expectedMaximumFindings: config.review.maximumFindings,
       expectedIssueTriage:
         config.issues.triage === "automatic" ? "automatic" : "disabled",
     });

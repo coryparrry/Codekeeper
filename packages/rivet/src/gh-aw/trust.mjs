@@ -22,16 +22,16 @@ export const RIVET_MAINTENANCE_JOB_CONDITIONS_SHA256 =
 export const RIVET_MAINTENANCE_JOB_AUTHORITY_SHA256 =
   "74b5d1f0163c93c16b6a7a44aee902ba4f529433bdc0a08748cfad74184771dc";
 export const RIVET_REVIEW_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
-  claude: "ded327801ea4d3fed88097f5be98cba6f909ca76c221a8d7584d3635f8a35513",
-  codex: "aaa4fcdf83be07e28a17c9a7e224cdd1011f7d27b89f9b39363c9a580eeb5950",
-  copilot: "751e0275bededfdc2f944a6865456bb81149c419a52c379c442bafd9fe7a69c9",
-  gemini: "b4907cb48c03ae60fa065c87e2ff4b0e9d5debbf40b0742945cc745ed6d4bf45",
+  claude: "09a020e0935fceeb809c9b5619ee660a527213f926acf366c2361021595db792",
+  codex: "b442d91c52397a7d1cbadae346db179a6c9bb6e1bff307844279fca9bae30f82",
+  copilot: "e1eda4a6db3a586fe2af89a86b7a8413aeae8e3f0d60452405b7133afa064c2b",
+  gemini: "f7739ac26323f272fc5e9a1db17e0e977ae90301f3cf7f34041082578707061b",
 });
 export const RIVET_REVIEW_DISABLED_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
-  claude: "72f162b4c4eac607afbc2cf8c6454634c8734abd9f28ab110248305bd596a1e9",
-  codex: "64aae4de32eec7c86f624b3a640b1bf9588851c6208933fbcdaf3e1d1aea3d70",
-  copilot: "5017dae024c0e0ff3bb81c6bec2d1d4984d988635adba22dfd589e4b3ef32ed3",
-  gemini: "daf0b1e8f1ed7636cdb548a48e6cf7afac10893051f49c56c5b6906c315bdcd0",
+  claude: "5bc77107bb6e0b18eef966189140ab9f9e94bdccb410a84009f1e72fe57d3726",
+  codex: "629b26686268fa707926344c05dd98efa7f49a1185cae9106bbf524da8d9bbe7",
+  copilot: "8250057d4203c0cbe194914d55e7469b365863c3cd22d7378a2a95d631d1ddea",
+  gemini: "01f44089b2cd660e68ca7c0b90584d35c2b2d9a56712e9e8b052ad53a0e27c2e",
 });
 export const RIVET_ISSUE_TRIAGE_AUTHORITY_SHA256_BY_ENGINE = Object.freeze({
   claude: "f1ac491b665080316eb9ae1c0b9762b58d39e416c09677dd28a6e54d5ccf5ea4",
@@ -127,6 +127,57 @@ function normalizedSafeOutputConfig(config) {
   return JSON.stringify(normalized);
 }
 
+function reviewInlineLimit(authority) {
+  const maximum =
+    authority.safeOutputConfig?.create_pull_request_review_comment?.max;
+  return Number.isInteger(maximum) && maximum >= 1 && maximum <= 20
+    ? maximum
+    : null;
+}
+
+function normalizeReviewText(name, value, authority) {
+  const maximum = reviewInlineLimit(authority);
+  if (maximum === null || typeof value !== "string") return value;
+  if (name.startsWith("GH_AW_PROMPT_CONTENT_")) {
+    return value
+      .replaceAll(
+        `create_pull_request_review_comment(max:${maximum})`,
+        "create_pull_request_review_comment(max:8)",
+      )
+      .replaceAll(
+        `Publish no more than ${maximum} inline findings.`,
+        "Publish no more than 8 inline findings.",
+      );
+  }
+  if (name === "GH_AW_TOOLS_META_JSON") {
+    return value.replaceAll(
+      `Maximum ${maximum} review comment(s) can be created.`,
+      "Maximum 8 review comment(s) can be created.",
+    );
+  }
+  return value;
+}
+
+function normalizeReviewScript(run, authority) {
+  const maximum = reviewInlineLimit(authority);
+  if (maximum === null || typeof run !== "string") return run;
+  return run.replace(
+    /'(GH_AW_SAFE_OUTPUTS_CONFIG_[0-9a-f]{16}_EOF)'\n([^\n]+)\n\1\n/g,
+    (original, delimiter, source) => {
+      let config;
+      try {
+        config = JSON.parse(source);
+      } catch {
+        return original;
+      }
+      if (config?.create_pull_request_review_comment?.max !== maximum)
+        return original;
+      config.create_pull_request_review_comment.max = 8;
+      return `'GH_AW_SAFE_OUTPUTS_CONFIG_NORMALIZED_EOF'\n${JSON.stringify(config)}\nGH_AW_SAFE_OUTPUTS_CONFIG_NORMALIZED_EOF\n`;
+    },
+  );
+}
+
 function normalizeReviewEnv(env, authority) {
   const model = authority.metadata?.agent_model;
   const config = authority.safeOutputConfig
@@ -139,7 +190,7 @@ function normalizeReviewEnv(env, authority) {
         ? "<MODEL>"
         : name === "GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG" && value === config
           ? normalizedSafeOutputConfig(authority.safeOutputConfig)
-          : value,
+          : normalizeReviewText(name, value, authority),
     ]),
   );
 }
@@ -190,6 +241,7 @@ function reviewAuthorityInventory(authority) {
     permissions: authority.permissions ?? {},
     scripts: (authority.scripts ?? []).map((script) => ({
       ...script,
+      run: normalizeReviewScript(script.run, authority),
       env: normalizeReviewEnv(script.env, authority),
     })),
     triggerConfig: authority.triggerConfig ?? {},
@@ -623,6 +675,7 @@ export function assessPullRequestTargetTrust({
   expectedLocalActions = [],
   expectedModel,
   expectedIssueTriage = "automatic",
+  expectedMaximumFindings = 8,
   expectedReviewAuthoritySha256,
 }) {
   const violations = [];
@@ -676,7 +729,9 @@ export function assessPullRequestTargetTrust({
     !reviewAuthoritySha256 ||
     digest(reviewAuthorityInventory(authority)) !== reviewAuthoritySha256 ||
     !reviewWriteAuthorityIsNarrow(authority) ||
-    !reviewSafeOutputsAreBounded(authority, expectedIssueTriage)
+    !reviewSafeOutputsAreBounded(authority, expectedIssueTriage) ||
+    (authority.safeOutputConfig?.create_pull_request_review_comment &&
+      reviewInlineLimit(authority) !== expectedMaximumFindings)
   ) {
     violations.push("review workflow differs from the approved inventory");
   }
